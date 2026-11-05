@@ -61,7 +61,7 @@ object SampleCatalog {
             unitEn = "1L Bottle",
             stockCount = 18,
             minStockThreshold = 8,
-            accentHex = 0xFF2D6A4F
+            accentHex = 0xFF1D4E89
         ),
         Product(
             id = "p_zaatar_jenin",
@@ -75,7 +75,7 @@ object SampleCatalog {
             unitEn = "500g Pack",
             stockCount = 24,
             minStockThreshold = 10,
-            accentHex = 0xFF588157
+            accentHex = 0xFF285E61
         ),
         Product(
             id = "p_nabulsi_cheese",
@@ -103,7 +103,7 @@ object SampleCatalog {
             unitEn = "800g Jar",
             stockCount = 15,
             minStockThreshold = 5,
-            accentHex = 0xFFC67D38
+            accentHex = 0xFF334155
         ),
         Product(
             id = "p_jebrini_milk",
@@ -145,7 +145,7 @@ object SampleCatalog {
             unitEn = "250g Bag",
             stockCount = 30,
             minStockThreshold = 10,
-            accentHex = 0xFF6F4E37
+            accentHex = 0xFF334155
         ),
         Product(
             id = "p_freekeh_jenin",
@@ -159,7 +159,7 @@ object SampleCatalog {
             unitEn = "1kg Bag",
             stockCount = 14,
             minStockThreshold = 6,
-            accentHex = 0xFF3A5A40
+            accentHex = 0xFF285E61
         ),
         Product(
             id = "p_maftoul_baladi",
@@ -173,7 +173,7 @@ object SampleCatalog {
             unitEn = "1kg Pack",
             stockCount = 12,
             minStockThreshold = 5,
-            accentHex = 0xFFB86B28
+            accentHex = 0xFF1D4E89
         ),
         Product(
             id = "p_halva_pistachio",
@@ -187,7 +187,7 @@ object SampleCatalog {
             unitEn = "500g Box",
             stockCount = 11,
             minStockThreshold = 5,
-            accentHex = 0xFF9C6644
+            accentHex = 0xFF334155
         ),
         Product(
             id = "p_medjool_dates",
@@ -201,7 +201,7 @@ object SampleCatalog {
             unitEn = "1kg Box",
             stockCount = 4,
             minStockThreshold = 6,
-            accentHex = 0xFF7F4F24
+            accentHex = 0xFF475569
         ),
         Product(
             id = "p_ghazaleen_tea",
@@ -215,7 +215,7 @@ object SampleCatalog {
             unitEn = "400g Pack",
             stockCount = 20,
             minStockThreshold = 8,
-            accentHex = 0xFF9B2226
+            accentHex = 0xFF1D4E89
         ),
         Product(
             id = "p_rice_medium",
@@ -229,7 +229,7 @@ object SampleCatalog {
             unitEn = "5kg Sack",
             stockCount = 3,
             minStockThreshold = 5,
-            accentHex = 0xFF52796F
+            accentHex = 0xFF285E61
         ),
         Product(
             id = "p_nabulsi_soap",
@@ -243,7 +243,7 @@ object SampleCatalog {
             unitEn = "140g Bar",
             stockCount = 40,
             minStockThreshold = 12,
-            accentHex = 0xFF6B705C
+            accentHex = 0xFF475569
         ),
         Product(
             id = "p_jericho_water",
@@ -285,7 +285,7 @@ object SampleCatalog {
             unitEn = "600g Jar",
             stockCount = 0,
             minStockThreshold = 4,
-            accentHex = 0xFF8D5B4C
+            accentHex = 0xFF334155
         ),
         Product(
             id = "p_roasting_service",
@@ -299,7 +299,7 @@ object SampleCatalog {
             unitEn = "Service Line",
             stockCount = 0,
             minStockThreshold = 0,
-            accentHex = 0xFF6F4E37,
+            accentHex = 0xFF1D4E89,
             isStockTracked = false
         )
     )

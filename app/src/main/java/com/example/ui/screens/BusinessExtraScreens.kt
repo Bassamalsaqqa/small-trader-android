@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -124,12 +125,13 @@ fun ExpensesScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .testTag("expenses_screen")
     ) {
         // Summary & Primary Action Strip
         Surface(
             color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 1.dp,
+            tonalElevation = 0.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -478,7 +480,7 @@ fun ExpensesScreen(
                                     fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.Bold
                                 ),
-                                color = financial.debit
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
@@ -732,6 +734,7 @@ fun FinancialReportsScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .testTag("financial_reports_screen"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -836,7 +839,7 @@ fun FinancialReportsScreen(
                         label = lang.tr("دفعات نقدية للموردين من الصندوق اليوم", "Today's Supplier Cash Payments"),
                         value = "- ${WesternFormatters.formatIls(state.shiftSupplierDisbursementsIls)}",
                         valueColor = if (state.shiftSupplierDisbursementsIls > 0.0) {
-                            financial.debit
+                            MaterialTheme.colorScheme.onSurface
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         }
@@ -846,7 +849,7 @@ fun FinancialReportsScreen(
                         label = lang.tr("مصاريف ونثريات مدفوعة من الصندوق اليوم", "Today's Cash Expenses Paid"),
                         value = "- ${WesternFormatters.formatIls(state.shiftExpensesIls)}",
                         valueColor = if (state.shiftExpensesIls > 0.0) {
-                            financial.debit
+                            MaterialTheme.colorScheme.onSurface
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         }
@@ -1068,6 +1071,7 @@ fun UserProfileScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .testTag("user_profile_screen"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -1400,6 +1404,7 @@ fun BusinessSettingsScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .testTag("business_settings_screen"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)

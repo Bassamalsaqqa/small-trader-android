@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -120,12 +121,13 @@ fun SuppliersScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .testTag("suppliers_screen")
     ) {
         // Sticky Summary, Search & Balance Filter Header
         Surface(
-            color = MaterialTheme.colorScheme.background,
-            tonalElevation = 1.dp,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 0.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -427,9 +429,14 @@ private fun SupplierDirectoryRow(
     val isPayableOwed = supplier.balanceOwedIls > 0.005
     val isStoreAdvance = supplier.balanceOwedIls < -0.005
 
-    val balanceColor = when {
-        isPayableOwed -> TraderTheme.financial.debit
-        isStoreAdvance -> TraderTheme.financial.income
+    val amountColor = when {
+        isPayableOwed || isStoreAdvance -> MaterialTheme.colorScheme.onSurface
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    val statusTextColor = when {
+        isPayableOwed -> TraderTheme.financial.onDebitContainer
+        isStoreAdvance -> TraderTheme.financial.onIncomeContainer
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
@@ -516,7 +523,7 @@ private fun SupplierDirectoryRow(
                         fontFamily = MonoFontFamily,
                         fontWeight = FontWeight.Bold
                     ),
-                    color = balanceColor
+                    color = amountColor
                 )
                 Surface(
                     shape = RoundedCornerShape(6.dp),
@@ -525,7 +532,7 @@ private fun SupplierDirectoryRow(
                     Text(
                         text = statusLabel,
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = balanceColor,
+                        color = statusTextColor,
                         modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                     )
                 }
@@ -566,6 +573,7 @@ fun SupplierDetailScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .testTag("supplier_detail_screen")
     ) {
         LazyColumn(

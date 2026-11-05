@@ -746,7 +746,7 @@ class TraderViewModel(
             unitEn = "Quick Line",
             stockCount = 0, // Zero invented stock
             minStockThreshold = 0,
-            accentHex = 0xFFB86B28,
+            accentHex = 0xFF1D4E89,
             isStockTracked = false // Permissible non-stock line
         )
         repository.addCustomProduct(customProduct)

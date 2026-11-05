@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -111,12 +112,13 @@ fun ProductsCatalogScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .testTag("products_catalog_screen")
     ) {
         // Sticky Search, Category Browsing (all categories) & Stock Status Filter Header
         Surface(
-            color = MaterialTheme.colorScheme.background,
-            tonalElevation = 1.dp,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 0.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -342,8 +344,8 @@ private fun CatalogDirectoryRow(
 
     val stockBadgeTextColor = when {
         !product.isStockTracked -> MaterialTheme.colorScheme.onSurfaceVariant
-        isOutOfStock -> TraderTheme.financial.debit
-        isLowStock -> TraderTheme.financial.warning
+        isOutOfStock -> TraderTheme.financial.onDebitContainer
+        isLowStock -> TraderTheme.financial.onWarningContainer
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
@@ -480,6 +482,7 @@ fun ProductDetailScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .testTag("product_detail_screen")
     ) {
         LazyColumn(

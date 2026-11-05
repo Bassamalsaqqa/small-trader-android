@@ -1513,7 +1513,48 @@ class ExampleUnitTest {
         viewModel.selectPaperWidth(58)
         assertEquals(58, viewModel.uiState.value.receiptPaperWidthMm)
     }
+
+    // =========================================================================
+    // 31. Visual Identity & Light/Dark Theme Hierarchy Verification
+    // =========================================================================
+
+    @Test
+    fun visualIdentity_lightAndDarkThemeTokens_haveGradedSurfacesAndNoPinkDebit() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+
+        // 1. Default theme is Light (isDarkTheme = false)
+        assertFalse("App starts in crisp Light theme by default", viewModel.uiState.value.isDarkTheme)
+
+        // 2. Dark surfaces are properly graded (Background < Surface < SurfaceVariant) and not pitch black
+        val darkBgR = com.example.ui.theme.CanvasBackgroundDark.red
+        val darkSurfaceR = com.example.ui.theme.CardSurfaceDark.red
+        val darkVariantR = com.example.ui.theme.SurfaceVariantDark.red
+        assertTrue("Dark canvas is comfortable slate, not near-black", darkBgR > 0.08f)
+        assertTrue("Dark card surface is elevated above dark canvas", darkSurfaceR > darkBgR)
+        assertTrue("Dark surfaceVariant is elevated above dark card surface", darkVariantR > darkSurfaceR)
+
+        // 3. Dark debit color is warm vermilion (green > blue), never pastel pink
+        val darkDebit = com.example.ui.theme.DarkFinancialColors.debit
+        assertTrue("Dark debit has warm vermilion balance (green > blue, not pink)", darkDebit.green > darkDebit.blue)
+
+        // 4. Theme toggle works across Home, New Sale, Customers, and Financial Reports
+        for (screen in listOf(
+            TraderScreen.HOME,
+            TraderScreen.NEW_SALE,
+            TraderScreen.CUSTOMERS,
+            TraderScreen.FINANCIAL_REPORTS
+        )) {
+            viewModel.navigateTo(screen)
+            assertEquals(screen, viewModel.uiState.value.currentScreen)
+            viewModel.toggleTheme()
+            assertTrue(viewModel.uiState.value.isDarkTheme)
+            viewModel.toggleTheme()
+            assertFalse(viewModel.uiState.value.isDarkTheme)
+        }
+    }
 }
+
 
 
 

@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.content.Intent
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -116,6 +117,7 @@ fun ReceiptScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .testTag("receipt_screen")
     ) {
         Column(
@@ -1021,12 +1023,13 @@ fun InvoicesHistoryScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .testTag("invoices_history_screen")
     ) {
         // Sticky Search, Status Filters & Summary Header
         Surface(
-            color = MaterialTheme.colorScheme.background,
-            tonalElevation = 1.dp,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 0.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(

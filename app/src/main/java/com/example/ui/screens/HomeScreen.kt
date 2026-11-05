@@ -554,7 +554,7 @@ private fun OwnerFinancialPulseCard(
                     text = WesternFormatters.formatIls(state.drawerTotalCashIls),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
-                    color = financial.income
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
 
@@ -627,7 +627,7 @@ private fun OwnerFinancialPulseCard(
                         text = WesternFormatters.formatIls(state.totalCustomerDebtsIls),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = if (state.totalCustomerDebtsIls > 0.009) financial.debit else MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = if (lang == AppLanguage.AR) {
@@ -636,7 +636,7 @@ private fun OwnerFinancialPulseCard(
                             "${WesternFormatters.formatInt(debtorCustomersCount)} open"
                         },
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (state.totalCustomerDebtsIls > 0.009) financial.debit else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
@@ -665,7 +665,7 @@ private fun OwnerFinancialPulseCard(
                         text = WesternFormatters.formatIls(state.totalSupplierPayablesIls),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = if (state.totalSupplierPayablesIls > 0.009) financial.warning else MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = if (lang == AppLanguage.AR) {
@@ -731,7 +731,7 @@ private fun CashierShiftPulseCard(
                     text = WesternFormatters.formatIls(state.drawerTotalCashIls),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
-                    color = financial.income
+                    color = MaterialTheme.colorScheme.primary
                 )
                 Text(
                     text = if (lang == AppLanguage.AR) {
@@ -1246,7 +1246,7 @@ fun RecentInvoiceCard(
     val (statusText, statusColor, statusBg) = when {
         invoice.isPaidInFull -> Triple(
             lang.tr("مدفوع نقداً", "Paid Cash"),
-            financial.income,
+            financial.onIncomeContainer,
             financial.incomeContainer
         )
         isPartial -> Triple(
@@ -1254,7 +1254,7 @@ fun RecentInvoiceCard(
                 "جزئي • متبقي ${WesternFormatters.formatIls(invoice.remainingDebitIls)}",
                 "Partial • Due ${WesternFormatters.formatIls(invoice.remainingDebitIls)}"
             ),
-            financial.warning,
+            financial.onWarningContainer,
             financial.warningContainer
         )
         else -> Triple(
@@ -1262,7 +1262,7 @@ fun RecentInvoiceCard(
                 "ذمة آجلة • متبقي ${WesternFormatters.formatIls(invoice.remainingDebitIls)}",
                 "On Credit • Due ${WesternFormatters.formatIls(invoice.remainingDebitIls)}"
             ),
-            financial.debit,
+            financial.onDebitContainer,
             financial.debitContainer
         )
     }
@@ -1294,11 +1294,7 @@ fun RecentInvoiceCard(
         ),
         border = BorderStroke(
             width = 1.dp,
-            color = if (!invoice.isPaidInFull) {
-                financial.debit.copy(alpha = 0.4f)
-            } else {
-                MaterialTheme.colorScheme.outlineVariant
-            }
+            color = MaterialTheme.colorScheme.outlineVariant
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
