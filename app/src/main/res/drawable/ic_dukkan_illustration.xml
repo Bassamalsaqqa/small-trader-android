@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="140dp"
+    android:viewportWidth="320"
+    android:viewportHeight="140">
+    <!-- Warm soft arch background -->
+    <path
+        android:fillColor="#163E2E"
+        android:pathData="M0,0 L320,0 L320,140 L0,140 Z" />
+    <path
+        android:fillColor="#1F513D"
+        android:pathData="M20,140 C20,65 85,20 160,20 C235,20 300,65 300,140 Z" />
+    <!-- Subtle geometric Palestinian tile motif border at top -->
+    <path
+        android:fillColor="#29664E"
+        android:pathData="M0,8 L320,8 L320,12 L0,12 Z" />
+    <!-- Storefront Awning Stripes -->
+    <path
+        android:fillColor="#D48C46"
+        android:pathData="M56,28 L264,28 L274,50 L46,50 Z" />
+    <path
+        android:fillColor="#FAF6EE"
+        android:pathData="M82,28 L108,28 L110,50 L78,50 Z M146,28 L174,28 L174,50 L146,50 Z M212,28 L238,28 L242,50 L210,50 Z" />
+    <!-- Olive oil bottle on shelf -->
+    <path
+        android:fillColor="#8AB17D"
+        android:pathData="M82,78 L98,78 L102,90 L102,118 L78,118 L78,90 Z" />
+    <path
+        android:fillColor="#E9C46A"
+        android:pathData="M86,68 L94,68 L94,78 L86,78 Z" />
+    <!-- Spice & Za'atar jars -->
+    <path
+        android:fillColor="#FAF6EE"
+        android:pathData="M114,88 L134,88 L134,118 L114,118 Z" />
+    <path
+        android:fillColor="#D48C46"
+        android:pathData="M112,83 L136,83 L136,88 L112,88 Z" />
+    <path
+        android:fillColor="#588157"
+        android:pathData="M117,95 L131,95 L131,114 L117,114 Z" />
+    <!-- POS Terminal & Thermal Receipt on Counter -->
+    <path
+        android:fillColor="#2B2D42"
+        android:pathData="M196,82 L248,82 L254,118 L190,118 Z" />
+    <path
+        android:fillColor="#FAF6EE"
+        android:pathData="M208,60 L236,60 L236,86 L208,86 Z" />
+    <path
+        android:fillColor="#1E4D3B"
+        android:pathData="M213,67 L231,67 L231,70 L213,70 Z M213,74 L226,74 L226,77 L213,77 Z" />
+    <!-- Countertop -->
+    <path
+        android:fillColor="#C67D38"
+        android:pathData="M36,118 L284,118 L292,132 L28,132 Z" />
+</vector>

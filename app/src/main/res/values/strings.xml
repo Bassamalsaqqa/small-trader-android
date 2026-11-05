@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">Small Trader</string>
+    <string name="app_title_ar">التاجر الصغير</string>
+    <string name="app_title_en">Small Trader</string>
+    <string name="shop_subtitle_ar">سوبرماركت ومحمصة الزيتونة • نابلس</string>
+    <string name="shop_subtitle_en">Al-Zaytouna Market &amp; Roastery • Nablus</string>
+    <string name="nav_home_ar">الرئيسية</string>
+    <string name="nav_home_en">Home</string>
+    <string name="nav_sale_ar">بيع جديد</string>
+    <string name="nav_sale_en">New Sale</string>
+    <string name="nav_invoices_ar">الفواتير</string>
+    <string name="nav_invoices_en">Invoices</string>
+    <string name="action_scan_barcode_ar">مسح باركود</string>
+    <string name="action_scan_barcode_en">Scan Barcode</string>
+    <string name="action_printer_ar">طابعة البلوتوث</string>
+    <string name="action_printer_en">Bluetooth Printer</string>
+    <string name="action_language_toggle">Toggle Language AR/EN</string>
+</resources>

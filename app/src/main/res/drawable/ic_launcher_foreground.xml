@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Storefront awning and receipt motif inside 66dp safe zone (21..87) -->
+    <!-- Receipt paper base -->
+    <path
+        android:fillColor="#FAF6EE"
+        android:pathData="M34,36 L74,36 L74,76 L69,72 L64,76 L59,72 L54,76 L49,72 L44,76 L39,72 L34,76 Z" />
+    <!-- Storefront awning top in warm terracotta gold -->
+    <path
+        android:fillColor="#D48C46"
+        android:pathData="M30,28 L78,28 L82,38 C82,41.3 79.3,44 76,44 C72.7,44 70,41.3 70,38 C70,41.3 67.3,44 64,44 C60.7,44 58,41.3 58,38 C58,41.3 55.3,44 52,44 C48.7,44 46,41.3 46,38 C46,41.3 43.3,44 40,44 C36.7,44 34,41.3 34,38 L30,28 Z" />
+    <!-- Receipt lines -->
+    <path
+        android:fillColor="#1E4D3B"
+        android:pathData="M42,50 L66,50 L66,54 L42,54 Z M42,58 L58,58 L58,62 L42,62 Z" />
+    <path
+        android:fillColor="#D48C46"
+        android:pathData="M60,57 A3,3 0 1,1 66,57 A3,3 0 1,1 60,57 Z" />
+</vector>
