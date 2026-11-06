@@ -580,13 +580,17 @@ fun CustomerDetailScreen(
     onOpenPaymentDialog: () -> Unit,
     onStartSaleForCustomer: (Customer) -> Unit,
     onOpenInvoice: ((InvoiceRecord) -> Unit)? = null,
-    onDismissFeedback: (() -> Unit)? = null
+    onDismissFeedback: (() -> Unit)? = null,
+    onUpdateCustomer: ((customerId: String, name: String, phone: String, address: String, creditLimitIls: Double) -> Unit)? = null,
+    onFormatStatementText: ((String) -> String)? = null
 ) {
     val lang = state.language
     val customer = state.selectedCustomerForDetail ?: return
     val transactions = remember(state.customerTransactions, customer.id) {
         state.customerTransactions.filter { it.customerId == customer.id }
     }
+    var isEditCustomerOpen by remember(customer.id) { mutableStateOf(false) }
+    var isStatementPreviewOpen by remember(customer.id) { mutableStateOf(false) }
 
     val isDebtor = customer.balanceIls > 0.005
     val isAdvance = customer.balanceIls < -0.005
@@ -877,6 +881,41 @@ fun CustomerDetailScreen(
                                 )
                             }
                         }
+
+                        // Secondary Actions: Edit Customer & Share/Print Statement
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (onUpdateCustomer != null) {
+                                OutlinedButton(
+                                    onClick = { isEditCustomerOpen = true },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp)
+                                        .testTag("edit_customer_button")
+                                ) {
+                                    Text(
+                                        text = lang.tr("تعديل البيانات وسقف الدين", "Edit Info & Limit"),
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                                    )
+                                }
+                            }
+                            OutlinedButton(
+                                onClick = { isStatementPreviewOpen = true },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                                    .testTag("share_customer_statement_button")
+                            ) {
+                                Text(
+                                    text = lang.tr("مشاركة / طباعة كشف الحساب", "Share / Print Statement"),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -939,6 +978,206 @@ fun CustomerDetailScreen(
             }
         }
     }
+
+    if (isEditCustomerOpen && onUpdateCustomer != null) {
+        EditCustomerDialog(
+            customer = customer,
+            lang = lang,
+            onDismiss = { isEditCustomerOpen = false },
+            onConfirmUpdate = { name, phone, address, creditLimitIls ->
+                onUpdateCustomer(customer.id, name, phone, address, creditLimitIls)
+                isEditCustomerOpen = false
+            }
+        )
+    }
+
+    if (isStatementPreviewOpen) {
+        val statementText = onFormatStatementText?.invoke(customer.id) ?: buildString {
+            appendLine("${lang.tr("كشف حساب الزبون:", "Customer Statement:")} ${customer.name(lang)}")
+            appendLine("${lang.tr("الرصيد الحالي:", "Current Balance:")} ${WesternFormatters.formatIls(customer.balanceIls)}")
+        }
+        CustomerStatementShareDialog(
+            customer = customer,
+            statementText = statementText,
+            lang = lang,
+            onDismiss = { isStatementPreviewOpen = false }
+        )
+    }
+}
+
+@Composable
+private fun EditCustomerDialog(
+    customer: Customer,
+    lang: AppLanguage,
+    onDismiss: () -> Unit,
+    onConfirmUpdate: (name: String, phone: String, address: String, creditLimitIls: Double) -> Unit
+) {
+    var nameText by remember(customer.id) { mutableStateOf(customer.nameAr) }
+    var phoneText by remember(customer.id) { mutableStateOf(customer.phone) }
+    var addressText by remember(customer.id) { mutableStateOf(customer.addressAr) }
+    var limitText by remember(customer.id) {
+        mutableStateOf(WesternFormatters.formatNumber(customer.creditLimitIls).removeSuffix(".00"))
+    }
+
+    val parsedLimit = limitText.toDoubleOrNull() ?: customer.creditLimitIls
+    val canSave = nameText.trim().length >= 2 && parsedLimit >= 0.0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Text(
+                text = lang.tr("تعديل بيانات الزبون وسقف الائتمان", "Edit Customer & Credit Limit"),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = nameText,
+                    onValueChange = { nameText = it },
+                    label = { Text(lang.tr("اسم الزبون أو المنشأة *", "Customer Name *")) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("edit_customer_name_input")
+                )
+                OutlinedTextField(
+                    value = phoneText,
+                    onValueChange = { phoneText = WesternFormatters.sanitizeWesternDigits(it) },
+                    label = { Text(lang.tr("رقم الجوال", "Phone Number")) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("edit_customer_phone_input")
+                )
+                OutlinedTextField(
+                    value = addressText,
+                    onValueChange = { addressText = it },
+                    label = { Text(lang.tr("العنوان / المنطقة", "Neighborhood / Address")) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("edit_customer_address_input")
+                )
+                OutlinedTextField(
+                    value = limitText,
+                    onValueChange = {
+                        limitText = WesternFormatters.sanitizeWesternDigits(it)
+                            .filter { ch -> ch.isDigit() || ch == '.' }
+                    },
+                    label = { Text(lang.tr("سقف الدين المسموح (₪)", "Credit Limit (₪)")) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("edit_customer_limit_input")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (canSave) {
+                        onConfirmUpdate(nameText.trim(), phoneText.trim(), addressText.trim(), parsedLimit)
+                    }
+                },
+                enabled = canSave,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.testTag("confirm_edit_customer_button")
+            ) {
+                Text(lang.tr("حفظ التعديلات", "Save Changes"))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(lang.tr("إلغاء", "Cancel"))
+            }
+        }
+    )
+}
+
+@Composable
+private fun CustomerStatementShareDialog(
+    customer: Customer,
+    statementText: String,
+    lang: AppLanguage,
+    onDismiss: () -> Unit
+) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Text(
+                text = lang.tr("مشاركة وطباعة كشف حساب الزبون", "Share & Print Customer Statement"),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = lang.tr(
+                        "نص كشف الحساب جاهز للنسخ والمشاركة عبر واتساب أو الطباعة الحرارية المحاكاة:",
+                        "Statement text ready to copy/share via WhatsApp or simulated thermal print:"
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = statementText,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .testTag("customer_statement_preview_text")
+                    )
+                }
+                if (copied) {
+                    Text(
+                        text = lang.tr("تم نسخ كشف حساب ${customer.name(lang)} للحافظة", "Statement copied to clipboard"),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = TraderTheme.financial.income
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(statementText))
+                    copied = true
+                },
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.testTag("copy_customer_statement_button")
+            ) {
+                Text(lang.tr("نسخ الكشف للمشاركة", "Copy Statement"))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(lang.tr("إغلاق", "Close"))
+            }
+        }
+    )
 }
 
 @Composable

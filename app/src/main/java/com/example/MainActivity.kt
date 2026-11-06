@@ -173,7 +173,11 @@ fun SmallTraderApp(
                                 onAssignCustomer = traderViewModel::assignCustomerToSale,
                                 onProceedToCashPayment = {
                                     traderViewModel.navigateTo(TraderScreen.CASH_PAYMENT)
-                                }
+                                },
+                                onSaveDraft = { traderViewModel.saveCurrentBasketAsDraft() },
+                                onResumeDraft = traderViewModel::resumeSaleDraft,
+                                onDeleteDraft = traderViewModel::deleteSaleDraft,
+                                onFormatQuotation = traderViewModel::formatQuotationShareText
                             )
                         }
 
@@ -242,7 +246,24 @@ fun SmallTraderApp(
                                     traderViewModel.addProductToBasket(prod, 1)
                                     traderViewModel.navigateTo(TraderScreen.NEW_SALE)
                                 },
-                                onQuickRestock = { prod -> traderViewModel.restockProduct(prod.id, 10) }
+                                onQuickRestock = { prod -> traderViewModel.restockProduct(prod.id, 10) },
+                                onSaveProduct = { pid, nameAr, cat, unitAr, barcode, price, cost, minThreshold, initialStock, warehouse, lot, expiry, isWeighted ->
+                                    traderViewModel.saveProduct(
+                                        productId = pid,
+                                        nameAr = nameAr,
+                                        category = cat,
+                                        unitAr = unitAr,
+                                        barcode = barcode,
+                                        priceIls = price,
+                                        costIls = cost,
+                                        minStockThreshold = minThreshold,
+                                        initialStock = initialStock,
+                                        warehouseAr = warehouse,
+                                        lotBatchCode = lot,
+                                        expiryDate = expiry,
+                                        isWeightedDisplayOnly = isWeighted
+                                    )
+                                }
                             )
                         }
 
@@ -260,7 +281,24 @@ fun SmallTraderApp(
                                     traderViewModel.addProductToBasket(prod, 1)
                                     traderViewModel.navigateTo(TraderScreen.NEW_SALE)
                                 },
-                                onDismissFeedback = traderViewModel::dismissInventoryFeedback
+                                onDismissFeedback = traderViewModel::dismissInventoryFeedback,
+                                onSaveProduct = { pid, nameAr, cat, unitAr, barcode, price, cost, minThreshold, initialStock, warehouse, lot, expiry, isWeighted ->
+                                    traderViewModel.saveProduct(
+                                        productId = pid,
+                                        nameAr = nameAr,
+                                        category = cat,
+                                        unitAr = unitAr,
+                                        barcode = barcode,
+                                        priceIls = price,
+                                        costIls = cost,
+                                        minStockThreshold = minThreshold,
+                                        initialStock = initialStock,
+                                        warehouseAr = warehouse,
+                                        lotBatchCode = lot,
+                                        expiryDate = expiry,
+                                        isWeightedDisplayOnly = isWeighted
+                                    )
+                                }
                             )
                         }
 
@@ -290,7 +328,15 @@ fun SmallTraderApp(
                                     traderViewModel.navigateTo(TraderScreen.NEW_SALE)
                                 },
                                 onOpenInvoice = { inv -> traderViewModel.openInvoiceReceipt(inv) },
-                                onDismissFeedback = traderViewModel::dismissCustomerFeedback
+                                onDismissFeedback = traderViewModel::dismissCustomerFeedback,
+                                onUpdateCustomer = { cid, name, phone, addr, limit ->
+                                    traderViewModel.updateCustomer(cid, name, phone, addr, limit)
+                                },
+                                onFormatStatementText = { cid ->
+                                    state.customers.firstOrNull { it.id == cid }?.let {
+                                        traderViewModel.formatCustomerStatementText(it)
+                                    } ?: ""
+                                }
                             )
                         }
 
@@ -299,7 +345,8 @@ fun SmallTraderApp(
                                 state = state,
                                 onSupplierClick = traderViewModel::selectSupplierForDetail,
                                 onOpenReceivePurchaseDialog = { traderViewModel.openReceivePurchaseDialog(true) },
-                                onDismissFeedback = traderViewModel::dismissSupplierFeedback
+                                onDismissFeedback = traderViewModel::dismissSupplierFeedback,
+                                onSaveSupplier = traderViewModel::saveSupplier
                             )
                         }
 
@@ -309,7 +356,9 @@ fun SmallTraderApp(
                                 onBack = { traderViewModel.navigateBack() },
                                 onPaySupplier = { sup, amount -> traderViewModel.paySupplierAmount(sup.id, amount) },
                                 onOpenReceivePurchaseDialog = { traderViewModel.openReceivePurchaseDialog(true) },
-                                onDismissFeedback = traderViewModel::dismissSupplierFeedback
+                                onDismissFeedback = traderViewModel::dismissSupplierFeedback,
+                                onSaveSupplier = traderViewModel::saveSupplier,
+                                onConfirmGoodsReceipt = traderViewModel::confirmPhysicalGoodsReceipt
                             )
                         }
 
@@ -323,7 +372,10 @@ fun SmallTraderApp(
 
                         TraderScreen.FINANCIAL_REPORTS -> {
                             FinancialReportsScreen(
-                                state = state
+                                state = state,
+                                onUpdateOpeningCash = traderViewModel::updateStartingDrawerCash,
+                                onUpdateCountedCashText = traderViewModel::updateCountedPhysicalCashText,
+                                onToggleShiftClose = traderViewModel::toggleShiftClosePreview
                             )
                         }
 

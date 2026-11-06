@@ -86,10 +86,14 @@ fun ProductsCatalogScreen(
     onCategorySelect: (ProductCategory) -> Unit,
     onProductClick: (Product) -> Unit,
     onAddProductToSale: (Product) -> Unit = {},
-    onQuickRestock: (Product) -> Unit = {}
+    onQuickRestock: (Product) -> Unit = {},
+    onSaveProduct: ((productId: String?, nameAr: String, category: ProductCategory, unitAr: String, barcode: String, priceIls: Double, costIls: Double, minStockThreshold: Int, initialStock: Int, warehouseAr: String, lotBatchCode: String, expiryDate: String?, isWeightedDisplayOnly: Boolean) -> Unit)? = null
 ) {
     val lang = state.language
+    val canManageInventory = state.currentSession.canManageInventory()
     var stockFilter by remember { mutableStateOf(CatalogStockFilter.ALL) }
+    var isCreateProductOpen by remember { mutableStateOf(false) }
+    var isStockTransferPreviewOpen by remember { mutableStateOf(false) }
 
     val lowOrOutCount = remember(state.products) {
         state.products.count { it.isStockTracked && it.isLowStock }
@@ -130,6 +134,48 @@ fun ProductsCatalogScreen(
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // Action Row: + New Product (Owner/Manager) & Warehouse / Lot / Stock Count Preview
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (canManageInventory && onSaveProduct != null) {
+                        Button(
+                            onClick = { isCreateProductOpen = true },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("add_product_button")
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = lang.tr("تعريف صنف جديد", "New Product"),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = { isStockTransferPreviewOpen = true },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                            .testTag("open_stock_transfer_preview_button")
+                    ) {
+                        Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = lang.tr("المستودعات والجرد والصلاحية", "Warehouses, Counts & Expiry"),
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
                 // Search by product name, unit, or barcode
                 OutlinedTextField(
                     value = state.searchQuery,
@@ -314,6 +360,26 @@ fun ProductsCatalogScreen(
             }
         }
     }
+
+    if (isCreateProductOpen && onSaveProduct != null) {
+        ProductEditorDialog(
+            initialProduct = null,
+            lang = lang,
+            onDismiss = { isCreateProductOpen = false },
+            onConfirmSave = { pid, nameAr, cat, unitAr, barcode, price, cost, minThreshold, initialStock, warehouse, lot, expiry, isWeighted ->
+                onSaveProduct(pid, nameAr, cat, unitAr, barcode, price, cost, minThreshold, initialStock, warehouse, lot, expiry, isWeighted)
+                isCreateProductOpen = false
+            }
+        )
+    }
+
+    if (isStockTransferPreviewOpen) {
+        StockCountTransferPreviewDialog(
+            products = state.products,
+            lang = lang,
+            onDismiss = { isStockTransferPreviewOpen = false }
+        )
+    }
 }
 
 @Composable
@@ -457,7 +523,8 @@ fun ProductDetailScreen(
     onUpdatePrice: (productId: String, newPrice: Double) -> Unit,
     onAdjustStock: (productId: String, delta: Int, reason: String) -> Unit,
     onAddToBasket: (Product) -> Unit = {},
-    onDismissFeedback: (() -> Unit)? = null
+    onDismissFeedback: (() -> Unit)? = null,
+    onSaveProduct: ((productId: String?, nameAr: String, category: ProductCategory, unitAr: String, barcode: String, priceIls: Double, costIls: Double, minStockThreshold: Int, initialStock: Int, warehouseAr: String, lotBatchCode: String, expiryDate: String?, isWeightedDisplayOnly: Boolean) -> Unit)? = null
 ) {
     val lang = state.language
     val product = state.selectedProductForDetail ?: return
@@ -468,6 +535,7 @@ fun ProductDetailScreen(
 
     var isEditPriceOpen by remember(product.id) { mutableStateOf(false) }
     var isAdjustStockOpen by remember(product.id) { mutableStateOf(false) }
+    var isEditProductOpen by remember(product.id) { mutableStateOf(false) }
 
     val feedbackMessage = lang.tr(
         state.lastInventoryActionMessageAr ?: "",
@@ -622,26 +690,55 @@ fun ProductDetailScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
 
-                        // Unit & Barcode Row
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "${lang.tr("الوحدة / العبوة:", "Unit / Pack:")} ${product.unit(lang)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        // Unit, Barcode, Warehouse & Lot/Expiry Row
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Text(
-                                    text = product.barcode,
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        fontFamily = MonoFontFamily,
-                                        fontWeight = FontWeight.SemiBold
-                                    ),
+                                    text = "${lang.tr("الوحدة / العبوة:", "Unit / Pack:")} ${product.unit(lang)}",
+                                    style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                    Text(
+                                        text = product.barcode,
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontFamily = MonoFontFamily,
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            if (product.isStockTracked) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "${lang.tr("الموقع:", "Warehouse:")} ${product.warehouse(lang)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = buildString {
+                                            append("${lang.tr("تشغيلة:", "Lot:")} ${product.lotBatchCode}")
+                                            if (!product.expiryDate.isNullOrBlank()) {
+                                                append(" • ${lang.tr("صلاحية:", "Exp:")} ${product.expiryDate}")
+                                            }
+                                            if (product.isWeightedDisplayOnly) {
+                                                append(" • ${lang.tr("صنف وزني", "Weighted")}")
+                                            }
+                                        },
+                                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFontFamily),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
 
@@ -820,6 +917,21 @@ fun ProductDetailScreen(
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(lang.tr("تسوية وتعديل المخزون", "Adjust Stock"))
                                     }
+                                }
+                            }
+
+                            if (onSaveProduct != null) {
+                                OutlinedButton(
+                                    onClick = { isEditProductOpen = true },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                        .testTag("edit_product_button")
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(lang.tr("تعديل بيانات الصنف، الباركود والمستودع", "Edit Product Details, Barcode & Warehouse"))
                                 }
                             }
                         }
@@ -1145,6 +1257,398 @@ fun ProductDetailScreen(
             }
         )
     }
+
+    if (isEditProductOpen && onSaveProduct != null) {
+        ProductEditorDialog(
+            initialProduct = product,
+            lang = lang,
+            onDismiss = { isEditProductOpen = false },
+            onConfirmSave = { pid, nameAr, cat, unitAr, barcode, price, cost, minStock, stock, warehouseAr, lotBatch, expiry, weighted ->
+                onSaveProduct(pid, nameAr, cat, unitAr, barcode, price, cost, minStock, stock, warehouseAr, lotBatch, expiry, weighted)
+                isEditProductOpen = false
+            }
+        )
+    }
+}
+
+@Composable
+internal fun ProductEditorDialog(
+    initialProduct: Product?,
+    lang: AppLanguage,
+    onDismiss: () -> Unit,
+    onConfirmSave: (
+        productId: String?,
+        nameAr: String,
+        category: ProductCategory,
+        unitAr: String,
+        barcode: String,
+        priceIls: Double,
+        costIls: Double,
+        minStockThreshold: Int,
+        initialStock: Int,
+        warehouseAr: String,
+        lotBatchCode: String,
+        expiryDate: String?,
+        isWeightedDisplayOnly: Boolean
+    ) -> Unit
+) {
+    val isEditing = initialProduct != null
+    var nameAr by remember(initialProduct) { mutableStateOf(initialProduct?.nameAr ?: "") }
+    var selectedCategory by remember(initialProduct) {
+        mutableStateOf(initialProduct?.category ?: ProductCategory.PANTRY)
+    }
+    var unitAr by remember(initialProduct) { mutableStateOf(initialProduct?.unitAr ?: "حبة") }
+    var priceText by remember(initialProduct) {
+        mutableStateOf(initialProduct?.priceIls?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "")
+    }
+    var costText by remember(initialProduct) {
+        mutableStateOf(initialProduct?.costIls?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "")
+    }
+    var stockText by remember(initialProduct) {
+        mutableStateOf(initialProduct?.stockCount?.toString() ?: "10")
+    }
+    var minStockText by remember(initialProduct) {
+        mutableStateOf(initialProduct?.minStockThreshold?.toString() ?: "4")
+    }
+    var barcodeText by remember(initialProduct) {
+        mutableStateOf(initialProduct?.barcode ?: "7290009988")
+    }
+    var warehouseAr by remember(initialProduct) {
+        mutableStateOf(initialProduct?.warehouseAr ?: "رف المعرض الأمامي - A1")
+    }
+    var lotBatchText by remember(initialProduct) {
+        mutableStateOf(initialProduct?.lotBatchCode ?: "")
+    }
+    var expiryText by remember(initialProduct) {
+        mutableStateOf(initialProduct?.expiryDate ?: "")
+    }
+    var isWeightedDisplayOnly by remember(initialProduct) {
+        mutableStateOf(initialProduct?.isWeightedDisplayOnly ?: false)
+    }
+
+    val parsedPrice = priceText.toDoubleOrNull() ?: 0.0
+    val parsedCost = costText.toDoubleOrNull() ?: (parsedPrice * 0.75)
+    val parsedStock = stockText.toIntOrNull() ?: 0
+    val parsedMinStock = minStockText.toIntOrNull() ?: 3
+    val canSubmit = nameAr.trim().length >= 2 && parsedPrice > 0.0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = if (isEditing) {
+                    lang.tr("تعديل بطاقة الصنف والمستودع", "Edit Product & Warehouse Card")
+                } else {
+                    lang.tr("تعريف صنف جديد بالمخزون", "Create New Catalog Product")
+                },
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = nameAr,
+                    onValueChange = { nameAr = it },
+                    label = { Text(lang.tr("اسم الصنف بالعربية *", "Arabic Product Name *")) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("product_editor_name_input")
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = priceText,
+                        onValueChange = {
+                            priceText = WesternFormatters.sanitizeWesternDigits(it)
+                                .filter { ch -> ch.isDigit() || ch == '.' }
+                        },
+                        label = { Text(lang.tr("سعر البيع (₪) *", "Sale Price (₪) *")) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("product_editor_price_input")
+                    )
+                    OutlinedTextField(
+                        value = costText,
+                        onValueChange = {
+                            costText = WesternFormatters.sanitizeWesternDigits(it)
+                                .filter { ch -> ch.isDigit() || ch == '.' }
+                        },
+                        label = { Text(lang.tr("سعر التكلفة (₪)", "Unit Cost (₪)")) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("product_editor_cost_input")
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = unitAr,
+                        onValueChange = { unitAr = it },
+                        label = { Text(lang.tr("الوحدة (كغم / كيس / علبة)", "Unit (Ar)")) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("product_editor_unit_input")
+                    )
+                    if (!isEditing) {
+                        OutlinedTextField(
+                            value = stockText,
+                            onValueChange = {
+                                stockText = WesternFormatters.sanitizeWesternDigits(it).filter { ch -> ch.isDigit() }
+                            },
+                            label = { Text(lang.tr("رصيد افتتاحي", "Opening Stock")) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("product_editor_stock_input")
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = minStockText,
+                            onValueChange = {
+                                minStockText = WesternFormatters.sanitizeWesternDigits(it).filter { ch -> ch.isDigit() }
+                            },
+                            label = { Text(lang.tr("حد التنبيه الأدنى", "Min Alert Stock")) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("product_editor_min_stock_input")
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = barcodeText,
+                        onValueChange = { barcodeText = WesternFormatters.sanitizeWesternDigits(it) },
+                        label = { Text(lang.tr("الباركود / SKU", "Barcode / SKU")) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("product_editor_barcode_input")
+                    )
+                    OutlinedTextField(
+                        value = warehouseAr,
+                        onValueChange = { warehouseAr = it },
+                        label = { Text(lang.tr("المستودع / الرف", "Warehouse / Shelf")) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("product_editor_warehouse_input")
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = lotBatchText,
+                        onValueChange = { lotBatchText = it },
+                        label = { Text(lang.tr("رقم التشغيلة (Lot)", "Lot / Batch")) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("product_editor_lot_input")
+                    )
+                    OutlinedTextField(
+                        value = expiryText,
+                        onValueChange = { expiryText = WesternFormatters.sanitizeWesternDigits(it) },
+                        label = { Text(lang.tr("تاريخ الصلاحية (YYYY-MM)", "Expiry Date")) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("product_editor_expiry_input")
+                    )
+                }
+
+                // Weighted / Fractional goods toggle (display-only honesty)
+                FilterChip(
+                    selected = isWeightedDisplayOnly,
+                    onClick = { isWeightedDisplayOnly = !isWeightedDisplayOnly },
+                    label = {
+                        Text(
+                            lang.tr(
+                                "صنف موزون بالجرام / كسور الكيلو (معاينة عرض فقط بدون ترحيل كسري وهمي)",
+                                "Weighted / Fractional Item (Display preview only — integer stock ledger)"
+                            ),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    },
+                    modifier = Modifier.testTag("product_editor_weighted_chip")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (canSubmit) {
+                        onConfirmSave(
+                            initialProduct?.id,
+                            nameAr.trim(),
+                            selectedCategory,
+                            unitAr.trim().ifBlank { "حبة" },
+                            barcodeText.trim(),
+                            parsedPrice,
+                            parsedCost,
+                            parsedMinStock,
+                            parsedStock,
+                            warehouseAr.trim(),
+                            lotBatchText.trim(),
+                            expiryText.trim().ifBlank { null },
+                            isWeightedDisplayOnly
+                        )
+                    }
+                },
+                enabled = canSubmit,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.testTag("confirm_save_product_button")
+            ) {
+                Text(lang.tr("حفظ بطاقة الصنف", "Save Product"))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(lang.tr("إلغاء", "Cancel"))
+            }
+        }
+    )
+}
+
+@Composable
+private fun StockCountTransferPreviewDialog(
+    products: List<Product>,
+    lang: AppLanguage,
+    onDismiss: () -> Unit
+) {
+    val expiryTracked = remember(products) { products.filter { !it.expiryDate.isNullOrBlank() } }
+    val weightedItems = remember(products) { products.filter { it.isWeightedDisplayOnly } }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = lang.tr(
+                    "معاينة المستودعات، التحويل المخزني، والتشغيلات (Lot/Expiry)",
+                    "Warehouses, Stock Transfers & Lot/Expiry Preview"
+                ),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = TraderTheme.financial.warningContainer.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, TraderTheme.financial.warning.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = lang.tr(
+                            "معاينة نموذجية (Shallow Preview): التعديل الفردي لحركة الصنف يعمل فعلياً من شاشة الصنف، بينما جلسات الجرد الجماعي والتحويل بين المستودعات مرتبطة مستقبلاً بنواة Laravel /api/v1.",
+                            "Shallow Preview: Single-item stock adjustment is live in Product Detail, whereas bulk count sessions and inter-warehouse transfers connect to Laravel /api/v1 in backend integration."
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+
+                Text(
+                    text = lang.tr("المستودعات ومواقع التخزين المعرّفة:", "Configured Storage Locations:"),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
+                Text(
+                    text = lang.tr(
+                        "• المستودع الرئيسي الخلفي (جملة وكراتين)\n• رف المعرض الأمامي - A1 / B2 (بيع مباشر)\n• ثلاجة الألبان والمبردات - C1\n• ركن المحمصة والبهارات (أصناف موزونة)",
+                        "• Main Backroom Warehouse (Bulk)\n• Front Aisle - A1 / B2 (Direct POS)\n• Dairy Chiller - C1\n• Roastery & Spices Corner (Weighted goods)"
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                HorizontalDivider()
+
+                Text(
+                    text = lang.tr(
+                        "أصناف بتشغيلة وتاريخ صلاحية (${WesternFormatters.formatInt(expiryTracked.size)} صنف):",
+                        "Lot & Expiry Tracked Items (${WesternFormatters.formatInt(expiryTracked.size)}):"
+                    ),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
+                expiryTracked.take(4).forEach { item ->
+                    Text(
+                        text = "• ${item.name(lang)} — Lot: ${item.lotBatchCode} • ${lang.tr("صلاحية:", "Exp:")} ${item.expiryDate}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                if (weightedItems.isNotEmpty()) {
+                    HorizontalDivider()
+                    Text(
+                        text = lang.tr(
+                            "أصناف موزونة بالجرام/الكيلو (${WesternFormatters.formatInt(weightedItems.size)} صنف — عرض مرجعي):",
+                            "Weighted Goods (${WesternFormatters.formatInt(weightedItems.size)} — display reference):"
+                        ),
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                    )
+                    weightedItems.forEach { item ->
+                        Text(
+                            text = "• ${item.name(lang)} (${WesternFormatters.formatIls(item.priceIls)} / ${item.unit(lang)}) — 0.250 kg = ${WesternFormatters.formatIls(item.priceIls * 0.25)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.testTag("close_stock_transfer_preview_button")
+            ) {
+                Text(lang.tr("إغلاق المعاينة", "Close Preview"))
+            }
+        }
+    )
 }
 
 @Composable
@@ -1201,3 +1705,4 @@ private fun StockMovementRow(
         }
     }
 }
+

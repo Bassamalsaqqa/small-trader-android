@@ -8,6 +8,7 @@ import com.example.model.ExpenseCategory
 import com.example.model.ExpenseEntry
 import com.example.model.InvoiceRecord
 import com.example.model.Product
+import com.example.model.ProductCategory
 import com.example.model.PurchaseBill
 import com.example.model.StockMovement
 import com.example.model.Supplier
@@ -40,6 +41,24 @@ interface TraderRepository {
     fun adjustProductStock(productId: String, adjustment: Int, reason: String, operator: UserSession): Result<StockMovement>
     fun getStockMovements(): List<StockMovement>
     fun addCustomProduct(product: Product): Result<Product>
+    fun saveProduct(
+        productId: String?,
+        nameAr: String,
+        nameEn: String,
+        category: ProductCategory,
+        unitAr: String,
+        unitEn: String,
+        barcode: String,
+        priceIls: Double,
+        costIls: Double,
+        minStockThreshold: Int,
+        initialStock: Int,
+        warehouseAr: String,
+        lotBatchCode: String,
+        expiryDate: String?,
+        isWeightedDisplayOnly: Boolean,
+        operator: UserSession
+    ): Result<Product>
 
     // Sales & Invoices
     fun getInvoices(): List<InvoiceRecord>
@@ -49,13 +68,16 @@ interface TraderRepository {
     fun getCustomers(): List<Customer>
     fun getCustomerTransactions(): List<CustomerTransaction>
     fun recordCustomerPayment(customerId: String, amountIls: Double, note: String, paymentId: String = ""): Result<CustomerTransaction>
-    fun createCustomer(name: String, phone: String, address: String): Result<Customer>
+    fun createCustomer(name: String, phone: String, address: String, creditLimitIls: Double = 1000.0): Result<Customer>
+    fun updateCustomer(customerId: String, name: String, phone: String, address: String, creditLimitIls: Double): Result<Customer>
 
     // Suppliers & Disbursements
     fun getSuppliers(): List<Supplier>
     fun getPurchaseBills(): List<PurchaseBill>
     fun getSupplierPayments(): List<SupplierPayment>
+    fun saveSupplier(supplierId: String?, name: String, company: String, phone: String, operator: UserSession): Result<Supplier>
     fun recordPurchaseBill(supplierId: String, itemsSummary: String, totalIls: Double, paidNowIls: Double, operator: UserSession): Result<PurchaseBill>
+    fun confirmPhysicalGoodsReceipt(billId: String, productId: String, receivedQty: Int, batchNote: String, operator: UserSession): Result<StockMovement>
     fun recordSupplierPayment(supplierId: String, amountIls: Double, note: String, operator: UserSession): Result<SupplierPayment>
 
     // Expenses
@@ -105,6 +127,117 @@ class OfflineDemoTraderRepository : TraderRepository {
         }
         products.add(0, product)
         return Result.success(product)
+    }
+
+    override fun saveProduct(
+        productId: String?,
+        nameAr: String,
+        nameEn: String,
+        category: ProductCategory,
+        unitAr: String,
+        unitEn: String,
+        barcode: String,
+        priceIls: Double,
+        costIls: Double,
+        minStockThreshold: Int,
+        initialStock: Int,
+        warehouseAr: String,
+        lotBatchCode: String,
+        expiryDate: String?,
+        isWeightedDisplayOnly: Boolean,
+        operator: UserSession
+    ): Result<Product> {
+        if (!operator.canManageInventory()) {
+            return Result.failure(SecurityException("غير مصرح: إضافة أو تعديل الأصناف متاح للمالك والمدير فقط | Permission denied: Product catalog editing requires Owner or Manager"))
+        }
+        val cleanAr = nameAr.trim()
+        val cleanEn = nameEn.trim().ifEmpty { cleanAr }
+        if (cleanAr.isEmpty()) {
+            return Result.failure(IllegalArgumentException("اسم الصنف مطلوب | Product name cannot be empty."))
+        }
+        if (priceIls <= 0.0) {
+            return Result.failure(IllegalArgumentException("سعر البيع يجب أن يكون أكبر من صفر | Selling price must be greater than zero."))
+        }
+        if (costIls < 0.0) {
+            return Result.failure(IllegalArgumentException("سعر التكلفة لا يمكن أن يكون سالباً | Cost price cannot be negative."))
+        }
+        if (minStockThreshold < 0 || initialStock < 0) {
+            return Result.failure(IllegalArgumentException("الكميات لا يمكن أن تكون سالبة | Stock thresholds cannot be negative."))
+        }
+
+        val exactPrice = BigDecimal(priceIls.toString()).setScale(2, RoundingMode.HALF_UP).toDouble()
+        val exactCost = BigDecimal(costIls.toString()).setScale(2, RoundingMode.HALF_UP).toDouble()
+        val cleanUnitAr = unitAr.trim().ifEmpty { "قطعة" }
+        val cleanUnitEn = unitEn.trim().ifEmpty { cleanUnitAr }
+        val cleanWarehouse = warehouseAr.trim().ifEmpty { "المستودع الرئيسي - نابلس" }
+        val cleanLot = lotBatchCode.trim().ifEmpty { "LOT-2026-A" }
+        val cleanExpiry = expiryDate?.trim()?.takeIf { it.isNotEmpty() }
+
+        if (productId != null) {
+            val idx = products.indexOfFirst { it.id == productId }
+            if (idx == -1) return Result.failure(NoSuchElementException("Product not found: $productId"))
+            val existing = products[idx]
+            val cleanBarcode = barcode.trim().ifEmpty { existing.barcode }
+            val updated = existing.copy(
+                nameAr = cleanAr,
+                nameEn = cleanEn,
+                category = if (category == ProductCategory.ALL) existing.category else category,
+                unitAr = cleanUnitAr,
+                unitEn = cleanUnitEn,
+                barcode = cleanBarcode,
+                priceIls = exactPrice,
+                costIls = exactCost,
+                minStockThreshold = minStockThreshold,
+                warehouseAr = cleanWarehouse,
+                warehouseEn = cleanWarehouse,
+                lotBatchCode = cleanLot,
+                expiryDate = cleanExpiry,
+                isWeightedDisplayOnly = isWeightedDisplayOnly
+            )
+            products[idx] = updated
+            return Result.success(updated)
+        } else {
+            val newId = "p_${System.currentTimeMillis()}"
+            val generatedBarcode = barcode.trim().ifEmpty {
+                "625100" + (1002000 + products.size).toString()
+            }
+            val created = Product(
+                id = newId,
+                nameAr = cleanAr,
+                nameEn = cleanEn,
+                category = if (category == ProductCategory.ALL) ProductCategory.PANTRY else category,
+                barcode = generatedBarcode,
+                priceIls = exactPrice,
+                costIls = exactCost,
+                unitAr = cleanUnitAr,
+                unitEn = cleanUnitEn,
+                stockCount = initialStock,
+                minStockThreshold = minStockThreshold,
+                accentHex = 0xFF1D4E89,
+                isStockTracked = true,
+                warehouseAr = cleanWarehouse,
+                warehouseEn = cleanWarehouse,
+                lotBatchCode = cleanLot,
+                expiryDate = cleanExpiry,
+                isWeightedDisplayOnly = isWeightedDisplayOnly
+            )
+            products.add(0, created)
+            if (initialStock > 0) {
+                stockMovements.add(
+                    0,
+                    StockMovement(
+                        id = "sm_init_${System.currentTimeMillis()}",
+                        productId = created.id,
+                        date = WesternFormatters.currentTimestamp(),
+                        delta = initialStock,
+                        reasonAr = "رصيد افتتاحي عند تعريف الصنف ($cleanLot)",
+                        reasonEn = "Opening stock on product creation ($cleanLot)",
+                        resultingStock = initialStock
+                    )
+                )
+            }
+            return Result.success(created)
+        }
     }
 
     override fun updateProductPrice(productId: String, newPriceIls: Double, operator: UserSession): Result<Unit> {
@@ -382,8 +515,11 @@ class OfflineDemoTraderRepository : TraderRepository {
         return Result.success(tx)
     }
 
-    override fun createCustomer(name: String, phone: String, address: String): Result<Customer> {
+    override fun createCustomer(name: String, phone: String, address: String, creditLimitIls: Double): Result<Customer> {
         if (name.isBlank()) return Result.failure(IllegalArgumentException("Customer name cannot be empty."))
+        val safeLimit = if (creditLimitIls > 0.0) {
+            BigDecimal(creditLimitIls.toString()).setScale(2, RoundingMode.HALF_UP).toDouble()
+        } else 1000.0
         val newCust = Customer(
             id = "cust_${System.currentTimeMillis()}",
             nameAr = name.trim(),
@@ -392,16 +528,85 @@ class OfflineDemoTraderRepository : TraderRepository {
             addressAr = address.trim().ifEmpty { "نابلس" },
             addressEn = address.trim().ifEmpty { "Nablus" },
             balanceIls = 0.0,
-            creditLimitIls = 1000.0,
+            creditLimitIls = safeLimit,
             totalPurchasesIls = 0.0
         )
         customers.add(0, newCust)
         return Result.success(newCust)
     }
 
+    override fun updateCustomer(
+        customerId: String,
+        name: String,
+        phone: String,
+        address: String,
+        creditLimitIls: Double
+    ): Result<Customer> {
+        if (name.isBlank()) return Result.failure(IllegalArgumentException("Customer name cannot be empty."))
+        if (creditLimitIls < 0.0) return Result.failure(IllegalArgumentException("Credit limit cannot be negative."))
+        val idx = customers.indexOfFirst { it.id == customerId }
+        if (idx == -1) return Result.failure(NoSuchElementException("Customer not found: $customerId"))
+        val existing = customers[idx]
+        val exactLimit = BigDecimal(creditLimitIls.toString()).setScale(2, RoundingMode.HALF_UP).toDouble()
+        val updated = existing.copy(
+            nameAr = name.trim(),
+            nameEn = name.trim(),
+            phone = phone.trim().ifEmpty { existing.phone },
+            addressAr = address.trim().ifEmpty { existing.addressAr },
+            addressEn = address.trim().ifEmpty { existing.addressEn },
+            creditLimitIls = exactLimit
+        )
+        customers[idx] = updated
+        return Result.success(updated)
+    }
+
     override fun getSuppliers(): List<Supplier> = suppliers.toList()
     override fun getPurchaseBills(): List<PurchaseBill> = purchaseBills.toList()
     override fun getSupplierPayments(): List<SupplierPayment> = supplierPayments.toList()
+
+    override fun saveSupplier(
+        supplierId: String?,
+        name: String,
+        company: String,
+        phone: String,
+        operator: UserSession
+    ): Result<Supplier> {
+        if (!operator.canManageSuppliers()) {
+            return Result.failure(SecurityException("غير مصرح: إدارة بيانات الموردين متاحة للمالك والمدير فقط | Permission denied: Supplier management requires Owner or Manager"))
+        }
+        val cleanName = name.trim()
+        if (cleanName.isEmpty()) {
+            return Result.failure(IllegalArgumentException("اسم المورد مطلوب | Supplier name cannot be empty."))
+        }
+        val cleanCompany = company.trim().ifEmpty { cleanName }
+        val cleanPhone = phone.trim().ifEmpty { "09-2300000" }
+
+        if (supplierId != null) {
+            val idx = suppliers.indexOfFirst { it.id == supplierId }
+            if (idx == -1) return Result.failure(NoSuchElementException("Supplier not found: $supplierId"))
+            val updated = suppliers[idx].copy(
+                nameAr = cleanName,
+                nameEn = cleanName,
+                companyAr = cleanCompany,
+                companyEn = cleanCompany,
+                phone = cleanPhone
+            )
+            suppliers[idx] = updated
+            return Result.success(updated)
+        } else {
+            val created = Supplier(
+                id = "sup_${System.currentTimeMillis()}",
+                nameAr = cleanName,
+                nameEn = cleanName,
+                companyAr = cleanCompany,
+                companyEn = cleanCompany,
+                phone = cleanPhone,
+                balanceOwedIls = 0.0
+            )
+            suppliers.add(0, created)
+            return Result.success(created)
+        }
+    }
 
     override fun recordPurchaseBill(
         supplierId: String,
@@ -453,6 +658,51 @@ class OfflineDemoTraderRepository : TraderRepository {
         suppliers[idx] = currentSup.copy(balanceOwedIls = newBalance)
         purchaseBills.add(0, bill)
         return Result.success(bill)
+    }
+
+    override fun confirmPhysicalGoodsReceipt(
+        billId: String,
+        productId: String,
+        receivedQty: Int,
+        batchNote: String,
+        operator: UserSession
+    ): Result<StockMovement> {
+        if (!operator.canManageInventory()) {
+            return Result.failure(SecurityException("غير مصرح: استلام البضاعة المخزني متاح للمالك والمدير فقط | Permission denied: Goods receiving requires Owner or Manager"))
+        }
+        if (receivedQty <= 0) {
+            return Result.failure(IllegalArgumentException("الكمية المستلمة يجب أن تكون أكبر من صفر | Received quantity must be greater than zero."))
+        }
+        val prodIdx = products.indexOfFirst { it.id == productId }
+        if (prodIdx == -1) return Result.failure(NoSuchElementException("Product not found: $productId"))
+        val prod = products[prodIdx]
+        if (!prod.isStockTracked) {
+            return Result.failure(IllegalStateException("لا يمكن تسجيل استلام مخزني لصنف غير خاضع للجرد | Cannot receive physical stock for a non-tracked item"))
+        }
+
+        val billIdx = purchaseBills.indexOfFirst { it.id == billId }
+        val billCode = if (billIdx >= 0) {
+            val bill = purchaseBills[billIdx]
+            purchaseBills[billIdx] = bill.copy(isReceived = true)
+            WesternFormatters.formatBillCode(bill.billNumber)
+        } else {
+            "GRN"
+        }
+
+        val newStock = prod.stockCount + receivedQty
+        products[prodIdx] = prod.copy(stockCount = newStock)
+        val noteSuffix = batchNote.trim().takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: ""
+        val movement = StockMovement(
+            id = "sm_grn_${System.currentTimeMillis()}",
+            productId = productId,
+            date = WesternFormatters.currentTimestamp(),
+            delta = receivedQty,
+            reasonAr = "سند استلام بضاعة مخزني $billCode$noteSuffix",
+            reasonEn = "Physical Goods Receipt Note $billCode$noteSuffix",
+            resultingStock = newStock
+        )
+        stockMovements.add(0, movement)
+        return Result.success(movement)
     }
 
     override fun recordSupplierPayment(

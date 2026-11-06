@@ -84,12 +84,14 @@ fun SuppliersScreen(
     state: TraderUiState,
     onSupplierClick: (Supplier) -> Unit,
     onOpenReceivePurchaseDialog: () -> Unit,
-    onDismissFeedback: (() -> Unit)? = null
+    onDismissFeedback: (() -> Unit)? = null,
+    onSaveSupplier: ((supplierId: String?, name: String, company: String, phone: String) -> Unit)? = null
 ) {
     val lang = state.language
     val canManageSuppliers = state.currentSession.canManageSuppliers()
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(SupplierBalanceFilter.ALL) }
+    var isAddSupplierOpen by remember { mutableStateOf(false) }
 
     val payablesCount = remember(state.suppliers) { state.suppliers.count { it.balanceOwedIls > 0.005 } }
     val advancesCount = remember(state.suppliers) { state.suppliers.count { it.balanceOwedIls < -0.005 } }
@@ -139,7 +141,7 @@ fun SuppliersScreen(
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Payables vs Prepayments Summary Strip + New Financial Bill CTA
+                // Payables vs Prepayments Summary Strip + New Financial Bill & New Supplier CTAs
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -188,18 +190,33 @@ fun SuppliersScreen(
                     }
 
                     if (canManageSuppliers) {
-                        Button(
-                            onClick = onOpenReceivePurchaseDialog,
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                            modifier = Modifier.testTag("record_purchase_bill_button")
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = lang.tr("فاتورة شراء", "New Bill"),
-                                style = MaterialTheme.typography.labelLarge
-                            )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (onSaveSupplier != null) {
+                                OutlinedButton(
+                                    onClick = { isAddSupplierOpen = true },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                                    modifier = Modifier.testTag("add_supplier_button")
+                                ) {
+                                    Text(
+                                        text = lang.tr("+ مورد", "+ Vendor"),
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
+                            Button(
+                                onClick = onOpenReceivePurchaseDialog,
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                modifier = Modifier.testTag("record_purchase_bill_button")
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = lang.tr("فاتورة شراء", "New Bill"),
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
                         }
                     }
                 }
@@ -419,6 +436,18 @@ fun SuppliersScreen(
             }
         }
     }
+
+    if (isAddSupplierOpen && onSaveSupplier != null) {
+        SupplierEditorDialog(
+            initialSupplier = null,
+            lang = lang,
+            onDismiss = { isAddSupplierOpen = false },
+            onConfirmSave = { sid, name, company, phone ->
+                onSaveSupplier(sid, name, company, phone)
+                isAddSupplierOpen = false
+            }
+        )
+    }
 }
 
 @Composable
@@ -547,7 +576,9 @@ fun SupplierDetailScreen(
     onBack: () -> Unit,
     onPaySupplier: (Supplier, Double) -> Unit,
     onOpenReceivePurchaseDialog: () -> Unit,
-    onDismissFeedback: (() -> Unit)? = null
+    onDismissFeedback: (() -> Unit)? = null,
+    onSaveSupplier: ((supplierId: String?, name: String, company: String, phone: String) -> Unit)? = null,
+    onConfirmGoodsReceipt: ((billId: String, productId: String, receivedQty: Int, batchNote: String) -> Unit)? = null
 ) {
     val lang = state.language
     val supplier = state.selectedSupplierForDetail ?: return
@@ -561,6 +592,9 @@ fun SupplierDetailScreen(
     }
 
     var isPayDialogOpen by remember(supplier.id) { mutableStateOf(false) }
+    var isEditSupplierOpen by remember(supplier.id) { mutableStateOf(false) }
+    var isPurchaseReturnPreviewOpen by remember(supplier.id) { mutableStateOf(false) }
+    var activeBillForGrn by remember(supplier.id) { mutableStateOf<PurchaseBill?>(null) }
 
     val isPayableOwed = supplier.balanceOwedIls > 0.005
     val isStoreAdvance = supplier.balanceOwedIls < -0.005
@@ -825,6 +859,39 @@ fun SupplierDetailScreen(
                                     )
                                 }
                             }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (onSaveSupplier != null) {
+                                    OutlinedButton(
+                                        onClick = { isEditSupplierOpen = true },
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp)
+                                            .testTag("edit_supplier_button")
+                                    ) {
+                                        Text(
+                                            text = lang.tr("تعديل بيانات المورد", "Edit Supplier"),
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                                        )
+                                    }
+                                }
+                                OutlinedButton(
+                                    onClick = { isPurchaseReturnPreviewOpen = true },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp)
+                                        .testTag("open_purchase_return_preview_button")
+                                ) {
+                                    Text(
+                                        text = lang.tr("معاينة مرتجع مشتريات", "Purchase Return Preview"),
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                                    )
+                                }
+                            }
                         } else {
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
@@ -869,7 +936,7 @@ fun SupplierDetailScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = lang.tr("فواتير المشتريات المالية", "Financial Purchase Bills"),
+                            text = lang.tr("فواتير المشتريات المالية مقابل استلام المخزن", "Financial Purchase Bills vs. Physical GRN"),
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -884,8 +951,8 @@ fun SupplierDetailScreen(
                     }
                     Text(
                         text = lang.tr(
-                            "توثق هذه الفواتير التزامات المورد والمدفوعات النقدية. تزويد كميات الأصناف يتم بشكل مستقل من شاشة الأصناف والمخزون.",
-                            "These bills record financial payables and cash paid. Itemized shelf quantities are updated separately in Inventory."
+                            "الفاتورة المالية تثبت التزام المورد والدفعة النقدية فقط؛ بينما (سند استلام بضاعة مخزني - GRN) يضيف الكميات فعلياً لبطاقة الصنف بعد الفحص.",
+                            "Financial bills record supplier payables and cash paid; Physical Goods Receipt (GRN) adds inspected quantities to product stock."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -911,10 +978,50 @@ fun SupplierDetailScreen(
                 }
             } else {
                 items(bills, key = { it.id }) { bill ->
-                    PurchaseBillRow(bill = bill, lang = lang)
+                    PurchaseBillRow(
+                        bill = bill,
+                        lang = lang,
+                        canReceiveStock = canManageSuppliers && onConfirmGoodsReceipt != null,
+                        onOpenReceiveGoodsDialog = { activeBillForGrn = bill }
+                    )
                 }
             }
         }
+    }
+
+    if (isEditSupplierOpen && onSaveSupplier != null) {
+        SupplierEditorDialog(
+            initialSupplier = supplier,
+            lang = lang,
+            onDismiss = { isEditSupplierOpen = false },
+            onConfirmSave = { sid, name, company, phone ->
+                onSaveSupplier(sid, name, company, phone)
+                isEditSupplierOpen = false
+            }
+        )
+    }
+
+    if (isPurchaseReturnPreviewOpen) {
+        PurchaseReturnPreviewDialog(
+            supplier = supplier,
+            bills = bills,
+            lang = lang,
+            onDismiss = { isPurchaseReturnPreviewOpen = false }
+        )
+    }
+
+    if (activeBillForGrn != null && onConfirmGoodsReceipt != null) {
+        val bill = activeBillForGrn!!
+        PhysicalGoodsReceiptDialog(
+            bill = bill,
+            products = state.products,
+            lang = lang,
+            onDismiss = { activeBillForGrn = null },
+            onConfirmGrn = { productId, receivedQty, batchNote ->
+                onConfirmGoodsReceipt(bill.id, productId, receivedQty, batchNote)
+                activeBillForGrn = null
+            }
+        )
     }
 
     // Supplier Disbursement Dialog
@@ -1120,7 +1227,9 @@ private fun SupplierPaymentRow(
 @Composable
 private fun PurchaseBillRow(
     bill: PurchaseBill,
-    lang: AppLanguage
+    lang: AppLanguage,
+    canReceiveStock: Boolean = false,
+    onOpenReceiveGoodsDialog: (() -> Unit)? = null
 ) {
     Card(
         shape = RoundedCornerShape(10.dp),
@@ -1154,20 +1263,20 @@ private fun PurchaseBillRow(
                     Surface(
                         shape = RoundedCornerShape(6.dp),
                         color = if (bill.isReceived) {
-                            MaterialTheme.colorScheme.surfaceVariant
+                            TraderTheme.financial.incomeContainer
                         } else {
                             TraderTheme.financial.warningContainer
                         }
                     ) {
                         Text(
                             text = if (bill.isReceived) {
-                                lang.tr("قيد مالي • بضاعة مجرودة سابقاً", "Financial bill • Previously audited")
+                                lang.tr("تم استلام البضاعة بالمخزن (GRN)", "Goods Received in Stock (GRN)")
                             } else {
-                                lang.tr("قيد مالي فقط • بدون إضافة مخزون آلي", "Financial payable only • Stock unchanged")
+                                lang.tr("قيد مالي فقط • بانتظار استلام مخزني", "Financial bill only • Pending GRN")
                             },
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                             color = if (bill.isReceived) {
-                                MaterialTheme.colorScheme.onSurfaceVariant
+                                TraderTheme.financial.income
                             } else {
                                 TraderTheme.financial.warning
                             },
@@ -1214,8 +1323,299 @@ private fun PurchaseBillRow(
                     color = if (bill.remainingPayableIls > 0.005) TraderTheme.financial.debit else TraderTheme.financial.income
                 )
             }
+
+            if (!bill.isReceived && canReceiveStock && onOpenReceiveGoodsDialog != null) {
+                OutlinedButton(
+                    onClick = onOpenReceiveGoodsDialog,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 42.dp)
+                        .testTag("confirm_grn_${bill.id}")
+                ) {
+                    Text(
+                        text = lang.tr(
+                            "تأكيد استلام بضاعة مخزني وإضافة الكمية للمخزون (GRN)",
+                            "Confirm Physical Goods Receipt into Stock (GRN)"
+                        ),
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun SupplierEditorDialog(
+    initialSupplier: Supplier?,
+    lang: AppLanguage,
+    onDismiss: () -> Unit,
+    onConfirmSave: (supplierId: String?, name: String, company: String, phone: String) -> Unit
+) {
+    val isEditing = initialSupplier != null
+    var nameText by remember(initialSupplier) { mutableStateOf(initialSupplier?.nameAr ?: "") }
+    var companyText by remember(initialSupplier) { mutableStateOf(initialSupplier?.companyAr ?: "") }
+    var phoneText by remember(initialSupplier) { mutableStateOf(initialSupplier?.phone ?: "") }
+
+    val canSave = nameText.trim().length >= 2
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Text(
+                text = if (isEditing) {
+                    lang.tr("تعديل بيانات المورد", "Edit Supplier Info")
+                } else {
+                    lang.tr("إضافة مورد جديد", "Add New Supplier")
+                },
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = nameText,
+                    onValueChange = { nameText = it },
+                    label = { Text(lang.tr("اسم المورد / المندوب *", "Supplier / Agent Name *")) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("supplier_editor_name_input")
+                )
+                OutlinedTextField(
+                    value = companyText,
+                    onValueChange = { companyText = it },
+                    label = { Text(lang.tr("الشركة أو المستودع", "Company / Distributor")) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("supplier_editor_company_input")
+                )
+                OutlinedTextField(
+                    value = phoneText,
+                    onValueChange = { phoneText = WesternFormatters.sanitizeWesternDigits(it) },
+                    label = { Text(lang.tr("رقم الجوال / الهاتف", "Phone Number")) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("supplier_editor_phone_input")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (canSave) {
+                        onConfirmSave(initialSupplier?.id, nameText.trim(), companyText.trim(), phoneText.trim())
+                    }
+                },
+                enabled = canSave,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.testTag("confirm_save_supplier_button")
+            ) {
+                Text(lang.tr("حفظ المورد", "Save Supplier"))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(lang.tr("إلغاء", "Cancel"))
+            }
+        }
+    )
+}
+
+@Composable
+private fun PhysicalGoodsReceiptDialog(
+    bill: PurchaseBill,
+    products: List<com.example.model.Product>,
+    lang: AppLanguage,
+    onDismiss: () -> Unit,
+    onConfirmGrn: (productId: String, receivedQty: Int, batchNote: String) -> Unit
+) {
+    val stockProducts = remember(products) { products.filter { it.isStockTracked } }
+    var selectedProductId by remember(stockProducts) {
+        mutableStateOf(stockProducts.firstOrNull()?.id ?: "")
+    }
+    var qtyText by remember { mutableStateOf("12") }
+    var batchNote by remember {
+        mutableStateOf("استلام مخزني مطابق للفاتورة ${WesternFormatters.formatBillCode(bill.billNumber)}")
+    }
+    val parsedQty = qtyText.toIntOrNull() ?: 0
+    val selectedProduct = stockProducts.firstOrNull { it.id == selectedProductId }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Text(
+                text = lang.tr(
+                    "سند استلام بضاعة مخزني (GRN) • ${WesternFormatters.formatBillCode(bill.billNumber)}",
+                    "Physical Goods Receipt (GRN) • ${WesternFormatters.formatBillCode(bill.billNumber)}"
+                ),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = TraderTheme.financial.incomeContainer.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = lang.tr(
+                            "يفصل هذا السند بين الفاتورة المالية واستلام المخزن: سيُعلّم الفاتورة كمستلمة ويضيف الكمية الفعلية لرصيد الصنف المختار دون تغيير ذمة المورد المالية.",
+                            "Separates financial bill from physical receiving: Marks bill received and adds inspected quantity to the selected product's stock without altering supplier payable."
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(8.dp)
+                    )
+                }
+
+                Text(
+                    text = lang.tr("اختر الصنف المستلم لإضافته للمخزون:", "Select Received Catalog Product:"),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(stockProducts.take(6), key = { it.id }) { prod ->
+                        FilterChip(
+                            selected = selectedProductId == prod.id,
+                            onClick = { selectedProductId = prod.id },
+                            label = { Text(prod.name(lang), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            modifier = Modifier.testTag("grn_product_chip_${prod.id}")
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = qtyText,
+                    onValueChange = { qtyText = WesternFormatters.sanitizeWesternDigits(it).filter { ch -> ch.isDigit() } },
+                    label = { Text(lang.tr("الكمية الفعلية المستلمة بالمخزن", "Received Quantity")) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("grn_qty_input")
+                )
+
+                OutlinedTextField(
+                    value = batchNote,
+                    onValueChange = { batchNote = it },
+                    label = { Text(lang.tr("ملاحظة الفحص / رقم التشغيلة", "Inspection / Batch Note")) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("grn_note_input")
+                )
+
+                if (selectedProduct != null && parsedQty > 0) {
+                    Text(
+                        text = lang.tr(
+                            "رصيد (${selectedProduct.name(lang)}) سيرتفع من ${WesternFormatters.formatInt(selectedProduct.stockCount)} إلى ${WesternFormatters.formatInt(selectedProduct.stockCount + parsedQty)} ${selectedProduct.unit(lang)}",
+                            "${selectedProduct.name(lang)} stock will increase from ${WesternFormatters.formatInt(selectedProduct.stockCount)} to ${WesternFormatters.formatInt(selectedProduct.stockCount + parsedQty)}"
+                        ),
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = TraderTheme.financial.income
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (selectedProductId.isNotBlank() && parsedQty > 0) {
+                        onConfirmGrn(selectedProductId, parsedQty, batchNote.trim())
+                    }
+                },
+                enabled = selectedProductId.isNotBlank() && parsedQty > 0,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.testTag("confirm_grn_submit_button")
+            ) {
+                Text(lang.tr("تثبيت الاستلام المخزني", "Confirm Goods Receipt"))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(lang.tr("إلغاء", "Cancel"))
+            }
+        }
+    )
+}
+
+@Composable
+private fun PurchaseReturnPreviewDialog(
+    supplier: Supplier,
+    bills: List<PurchaseBill>,
+    lang: AppLanguage,
+    onDismiss: () -> Unit
+) {
+    val latestBill = bills.firstOrNull()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Text(
+                text = lang.tr("معاينة مرتجع مشتريات للمورد (Purchase Return)", "Supplier Purchase Return Preview"),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = TraderTheme.financial.warningContainer.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = lang.tr(
+                            "معاينة نموذجية (Shallow Preview): إرجاع بضاعة تالفة أو قريبة الانتهاء للمورد (${supplier.name(lang)}) يخصم الكمية من المستودع ويصدر إشعار مدين يخفض التزام المورد عبر Laravel /api/v1.",
+                            "Shallow Preview: Returning damaged/expiring goods to (${supplier.name(lang)}) deducts stock and issues a supplier debit note via Laravel /api/v1."
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+                if (latestBill != null) {
+                    Text(
+                        text = lang.tr(
+                            "مثال تطبيقي على الفاتورة ${WesternFormatters.formatBillCode(latestBill.billNumber)} (${latestBill.itemsSummary}):\n• إرجاع 2 كرتونة تالفة بتكلفة 120.00 ₪\n• الأثر المالي: خفض ذمة المورد من ${WesternFormatters.formatIls(supplier.balanceOwedIls)} إلى ${WesternFormatters.formatIls((supplier.balanceOwedIls - 120.0).coerceAtLeast(0.0))}",
+                            "Sample return against ${WesternFormatters.formatBillCode(latestBill.billNumber)}:\n• Return 2 damaged cartons (120.00 ₪)\n• Financial impact: Reduces payable owed from ${WesternFormatters.formatIls(supplier.balanceOwedIls)} to ${WesternFormatters.formatIls((supplier.balanceOwedIls - 120.0).coerceAtLeast(0.0))}"
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.testTag("close_purchase_return_preview_button")
+            ) {
+                Text(lang.tr("إغلاق المعاينة", "Close Preview"))
+            }
+        }
+    )
 }
 
 @Composable

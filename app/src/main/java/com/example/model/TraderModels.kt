@@ -99,10 +99,16 @@ data class Product(
     val stockCount: Int,
     val minStockThreshold: Int = 8,
     val accentHex: Long,
-    val isStockTracked: Boolean = true // False for custom quick items / non-stock service lines
+    val isStockTracked: Boolean = true, // False for custom quick items / non-stock service lines
+    val warehouseAr: String = "المستودع الرئيسي - نابلس",
+    val warehouseEn: String = "Main Warehouse - Nablus",
+    val lotBatchCode: String = "LOT-2026-A",
+    val expiryDate: String? = null,
+    val isWeightedDisplayOnly: Boolean = false
 ) {
     fun name(lang: AppLanguage): String = lang.tr(nameAr, nameEn)
     fun unit(lang: AppLanguage): String = lang.tr(unitAr, unitEn)
+    fun warehouse(lang: AppLanguage): String = lang.tr(warehouseAr, warehouseEn)
     val isLowStock: Boolean
         get() = isStockTracked && stockCount <= minStockThreshold
 }
@@ -118,12 +124,38 @@ data class BasketItem(
             .toDouble()
 }
 
+data class SaleDraft(
+    val id: String,
+    val titleAr: String,
+    val titleEn: String,
+    val timestamp: String,
+    val items: List<BasketItem>,
+    val customerId: String? = null,
+    val customerNote: String = "",
+    val discountPreset: DiscountPreset = DiscountPreset.NONE,
+    val customDiscountText: String = "",
+    val subtotalIls: Double = items.sumOf { it.lineTotal },
+    val netTotalIls: Double = items.sumOf { it.lineTotal }
+) {
+    fun title(lang: AppLanguage): String = lang.tr(titleAr, titleEn)
+    val totalQuantity: Int
+        get() = items.sumOf { it.quantity }
+}
+
 enum class DiscountPreset(val labelAr: String, val labelEn: String) {
     NONE("بدون خصم", "No Discount"),
     PERCENT_5("خصم 5%", "5% Off"),
     PERCENT_10("خصم 10%", "10% Off"),
     ROUND_DOWN("جبر الكسر", "Round Down"),
     CUSTOM_ILS("خصم ثابت ₪", "Fixed ₪")
+}
+
+enum class InvoicePaymentStatus(val labelAr: String, val labelEn: String) {
+    PAID_CASH("مسددة نقداً", "Paid Cash"),
+    PARTIAL("سداد جزئي", "Partial"),
+    ON_CREDIT("آجلة بالذمة", "On Credit");
+
+    fun label(lang: AppLanguage): String = lang.tr(labelAr, labelEn)
 }
 
 data class InvoiceRecord(
@@ -146,6 +178,13 @@ data class InvoiceRecord(
 ) {
     val totalQuantity: Int
         get() = items.sumOf { it.quantity }
+
+    val paymentStatus: InvoicePaymentStatus
+        get() = when {
+            isPaidInFull || remainingDebitIls <= 0.005 -> InvoicePaymentStatus.PAID_CASH
+            cashReceivedIls > 0.005 -> InvoicePaymentStatus.PARTIAL
+            else -> InvoicePaymentStatus.ON_CREDIT
+        }
 }
 
 data class Customer(

@@ -101,10 +101,15 @@ fun InvoiceReviewScreen(
     onUpdateCustomDiscount: (String) -> Unit,
     onUpdateCustomerNote: (String) -> Unit,
     onAssignCustomer: (Customer?) -> Unit,
-    onProceedToCashPayment: () -> Unit
+    onProceedToCashPayment: () -> Unit,
+    onSaveDraft: (() -> Unit)? = null,
+    onResumeDraft: ((String) -> Unit)? = null,
+    onDeleteDraft: ((String) -> Unit)? = null,
+    onFormatQuotation: (() -> String)? = null
 ) {
     val lang = state.language
     var isCustomerPickerOpen by rememberSaveable { mutableStateOf(false) }
+    var isQuotationDialogOpen by rememberSaveable { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -115,7 +120,10 @@ fun InvoiceReviewScreen(
         if (state.basket.isEmpty()) {
             EmptyReviewBasketState(
                 lang = lang,
+                savedDrafts = state.savedDrafts,
                 onReturnToCatalog = onAddMoreItems,
+                onResumeDraft = onResumeDraft,
+                onDeleteDraft = onDeleteDraft,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -128,6 +136,18 @@ fun InvoiceReviewScreen(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                // 0. Saved Sale Drafts (Hold / Resume) + Save Draft & Quotation Bar
+                item {
+                    DraftsAndQuotationBar(
+                        savedDrafts = state.savedDrafts,
+                        lang = lang,
+                        onSaveDraft = onSaveDraft,
+                        onOpenQuotation = { isQuotationDialogOpen = true },
+                        onResumeDraft = onResumeDraft,
+                        onDeleteDraft = onDeleteDraft
+                    )
+                }
+
                 // 1. Editable Invoice Line Items Ledger
                 item {
                     EditableInvoiceLinesSection(
@@ -192,12 +212,24 @@ fun InvoiceReviewScreen(
             }
         )
     }
+
+    if (isQuotationDialogOpen) {
+        QuotationPreviewDialog(
+            state = state,
+            quotationText = onFormatQuotation?.invoke() ?: "",
+            lang = lang,
+            onDismiss = { isQuotationDialogOpen = false }
+        )
+    }
 }
 
 @Composable
 private fun EmptyReviewBasketState(
     lang: AppLanguage,
+    savedDrafts: List<com.example.model.SaleDraft>,
     onReturnToCatalog: () -> Unit,
+    onResumeDraft: ((String) -> Unit)? = null,
+    onDeleteDraft: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -249,8 +281,248 @@ private fun EmptyReviewBasketState(
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(lang.tr("العودة لاختيار الأصناف", "Return to Products"))
             }
+
+            if (savedDrafts.isNotEmpty() && onResumeDraft != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                SavedSaleDraftsCard(
+                    savedDrafts = savedDrafts,
+                    lang = lang,
+                    onResumeDraft = onResumeDraft,
+                    onDeleteDraft = onDeleteDraft
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun DraftsAndQuotationBar(
+    savedDrafts: List<com.example.model.SaleDraft>,
+    lang: AppLanguage,
+    onSaveDraft: (() -> Unit)?,
+    onOpenQuotation: () -> Unit,
+    onResumeDraft: ((String) -> Unit)?,
+    onDeleteDraft: ((String) -> Unit)?
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (onSaveDraft != null) {
+                OutlinedButton(
+                    onClick = onSaveDraft,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag("save_draft_button")
+                ) {
+                    Text(
+                        text = lang.tr("حفظ كمسودة بيع", "Save as Draft"),
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                }
+            }
+            OutlinedButton(
+                onClick = onOpenQuotation,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp)
+                    .testTag("open_quotation_preview_button")
+            ) {
+                Text(
+                    text = lang.tr("عرض سعر (Quotation)", "Price Quotation"),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+                )
+            }
+        }
+
+        if (savedDrafts.isNotEmpty() && onResumeDraft != null) {
+            SavedSaleDraftsCard(
+                savedDrafts = savedDrafts,
+                lang = lang,
+                onResumeDraft = onResumeDraft,
+                onDeleteDraft = onDeleteDraft
+            )
+        }
+    }
+}
+
+@Composable
+private fun SavedSaleDraftsCard(
+    savedDrafts: List<com.example.model.SaleDraft>,
+    lang: AppLanguage,
+    onResumeDraft: (String) -> Unit,
+    onDeleteDraft: ((String) -> Unit)?
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("saved_sale_drafts_card")
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = lang.tr(
+                    "مسودات بيع معلقة (${WesternFormatters.formatInt(savedDrafts.size)}) — لا تخصم من المخزون حتى اعتمادها",
+                    "Held Sale Drafts (${WesternFormatters.formatInt(savedDrafts.size)}) — Not posted to stock/cash yet"
+                ),
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            savedDrafts.forEach { draft ->
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = draft.title(lang),
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${WesternFormatters.formatInt(draft.totalQuantity)} ${lang.tr("وحدة", "units")} • ${WesternFormatters.formatIls(draft.netTotalIls)} • ${draft.timestamp}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FilledTonalButton(
+                                onClick = { onResumeDraft(draft.id) },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier
+                                    .heightIn(min = 40.dp)
+                                    .testTag("resume_draft_${draft.id}")
+                            ) {
+                                Text(
+                                    text = lang.tr("استئناف", "Resume"),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
+                            if (onDeleteDraft != null) {
+                                IconButton(
+                                    onClick = { onDeleteDraft(draft.id) },
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .testTag("delete_draft_${draft.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeleteOutline,
+                                        contentDescription = lang.tr("حذف المسودة", "Delete draft"),
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuotationPreviewDialog(
+    state: TraderUiState,
+    quotationText: String,
+    lang: AppLanguage,
+    onDismiss: () -> Unit
+) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var copiedFeedback by rememberSaveable { mutableStateOf(false) }
+    val displayDoc = quotationText.ifBlank {
+        buildString {
+            appendLine(lang.tr("عرض سعر مرجعي (غير مرحّل)", "Price Quotation (Non-Posting)"))
+            appendLine("${lang.tr("الصافي التقديري:", "Estimated Net Total:")} ${WesternFormatters.formatIls(state.basketNetTotalIls)}")
+        }
+    }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = lang.tr("معاينة عرض سعر للزبون (Quotation)", "Customer Price Quotation Preview"),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = TraderTheme.financial.warningContainer.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = lang.tr(
+                            "وثيقة تسعير فقط: لا تخصم من المخزون ولا تسجل نقداً أو ذمة على الزبون حتى يتم اعتماد الفاتورة.",
+                            "Non-posting quotation: Does not deduct inventory or record cash/debt until confirmed as a sale."
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(8.dp)
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = displayDoc,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .testTag("quotation_preview_text")
+                    )
+                }
+                if (copiedFeedback) {
+                    Text(
+                        text = lang.tr("تم نسخ نص عرض السعر للحافظة", "Quotation copied to clipboard"),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = TraderTheme.financial.income
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(displayDoc))
+                    copiedFeedback = true
+                },
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.testTag("copy_quotation_button")
+            ) {
+                Text(lang.tr("نسخ عرض السعر", "Copy Quotation"))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(lang.tr("إغلاق", "Close"))
+            }
+        }
+    )
 }
 
 /**

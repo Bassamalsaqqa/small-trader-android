@@ -1567,7 +1567,293 @@ class ExampleUnitTest {
             assertFalse(viewModel.uiState.value.isDarkTheme)
         }
     }
+
+    // =========================================================================
+    // 32. Interactive Demo: Product Creation, Editing & Warehouse/Batch/Weighted Metadata
+    // =========================================================================
+
+    @Test
+    fun interactiveProductCreationAndEditing_persistsWarehouseLotExpiryAndWeightedDisplay_respectsRoleGate() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+
+        // 1. Seeded weighted item (za'atar / frekeh) carries warehouse, lot/expiry, and isWeightedDisplayOnly
+        val zaatar = viewModel.uiState.value.products.first { it.id == "p_zaatar_jenin" }
+        assertTrue(zaatar.isWeightedDisplayOnly)
+        assertTrue(zaatar.warehouseAr.isNotEmpty())
+        assertTrue(zaatar.lotBatchCode.isNotEmpty())
+        assertFalse(zaatar.expiryDate.isNullOrEmpty())
+
+        // 2. Create a new catalog product with warehouse, lot/batch, expiry, and weighted display flag
+        val initialCount = viewModel.uiState.value.products.size
+        val created = viewModel.saveProduct(
+            productId = null,
+            nameAr = "حلاوة طحينية نابلسية فاخرة",
+            nameEn = "Premium Nabulsi Halva",
+            category = ProductCategory.PANTRY,
+            barcode = "6251090009911",
+            priceIls = 26.00,
+            costIls = 19.50,
+            unitAr = "علبة 700 غم",
+            unitEn = "700g Tub",
+            initialStock = 14,
+            minStockThreshold = 4,
+            warehouseAr = "رف الحلويات والمكسرات - صالة البيع",
+            lotBatchCode = "LOT-HLV-2611",
+            expiryDate = "2027-09-30",
+            isWeightedDisplayOnly = false
+        )
+        assertTrue(created)
+        assertEquals(initialCount + 1, viewModel.uiState.value.products.size)
+        val halva = viewModel.uiState.value.products.first { it.barcode == "6251090009911" }
+        assertEquals(26.00, halva.priceIls, 0.001)
+        assertEquals("LOT-HLV-2611", halva.lotBatchCode)
+        assertEquals("2027-09-30", halva.expiryDate)
+
+        // 3. Edit the existing product's price, unit, warehouse, and weighted display flag
+        viewModel.selectProductForDetail(halva)
+        val updated = viewModel.saveProduct(
+            productId = halva.id,
+            nameAr = "حلاوة طحينية نابلسية بالمكسرات",
+            nameEn = "Nabulsi Halva with Pistachio",
+            category = ProductCategory.PANTRY,
+            barcode = halva.barcode,
+            priceIls = 28.50,
+            costIls = 21.00,
+            unitAr = "كغم موزون",
+            unitEn = "Weighted kg",
+            initialStock = halva.stockCount, // Stock count preserved; adjusted via stock movements
+            minStockThreshold = 5,
+            warehouseAr = "ركن الأجبان والحلاوة الموزونة",
+            lotBatchCode = "LOT-HLV-2612",
+            expiryDate = "2027-10-15",
+            isWeightedDisplayOnly = true
+        )
+        assertTrue(updated)
+        val refreshedDetail = checkNotNull(viewModel.uiState.value.selectedProductForDetail)
+        assertEquals(28.50, refreshedDetail.priceIls, 0.001)
+        assertEquals("LOT-HLV-2612", refreshedDetail.lotBatchCode)
+        assertTrue(refreshedDetail.isWeightedDisplayOnly)
+
+        // 4. Cashier role cannot create or edit catalog definitions
+        val cashier = SampleCatalog.demoStaff.first { it.role == UserRole.CASHIER }
+        viewModel.switchUserSession(cashier)
+        assertFalse(
+            "Cashier must be blocked from editing catalog definitions",
+            viewModel.saveProduct(
+                productId = halva.id,
+                nameAr = "تعديل غير مصرح",
+                nameEn = "Unauthorized Edit",
+                category = ProductCategory.PANTRY,
+                barcode = halva.barcode,
+                priceIls = 5.00,
+                costIls = 1.00,
+                unitAr = "قطعة",
+                unitEn = "Item",
+                initialStock = 99,
+                minStockThreshold = 1,
+                warehouseAr = "",
+                lotBatchCode = "",
+                expiryDate = null,
+                isWeightedDisplayOnly = false
+            )
+        )
+    }
+
+    // =========================================================================
+    // 33. Interactive Demo: Sales Drafts & Quotation Without Mutating Stock or Drawer
+    // =========================================================================
+
+    @Test
+    fun salesDraftsAndQuotations_saveResumeDeleteAndFormat_neverMutateInventoryOrDrawerCash() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+
+        val oliveOil = viewModel.uiState.value.products.first { it.id == "p_olive_oil" } // 38.00
+        val initialOliveOilStock = oliveOil.stockCount
+        val initialDrawerCash = viewModel.uiState.value.drawerTotalCashIls
+        val initialDraftsCount = viewModel.uiState.value.savedDrafts.size
+        assertTrue("Seeded draft_101 is available out of the box", initialDraftsCount >= 1)
+
+        // 1. Build a basket with customer & discount, format a quotation, and save as draft
+        val customer = viewModel.uiState.value.customers.first { it.id == "cust_02" }
+        viewModel.addProductToBasket(oliveOil, 2) // 76.00
+        viewModel.assignCustomerToSale(customer)
+        viewModel.selectDiscountPreset(DiscountPreset.ROUND_DOWN) // 76 -> 75.00 (discount 1.00)
+        viewModel.updateCustomerNote("عرض سعر ومذكرة تسليم صباحاً")
+
+        val quoteText = viewModel.formatQuotationShareText()
+        assertTrue("Quotation contains non-posting notice", quoteText.contains("عرض سعر") || quoteText.contains("Quotation"))
+        assertTrue("Quotation contains net amount 75.00", quoteText.contains("75.00"))
+
+        // Save current basket as draft: clears active basket and stores draft
+        assertTrue(viewModel.saveCurrentBasketAsDraft("طلبية أم سامر الصباحية"))
+        assertEquals(0, viewModel.uiState.value.basketItemCount)
+        assertEquals(initialDraftsCount + 1, viewModel.uiState.value.savedDrafts.size)
+
+        // Critical invariant: saving a draft or generating a quote NEVER deducts stock or changes drawer cash
+        assertEquals(initialOliveOilStock, viewModel.uiState.value.products.first { it.id == oliveOil.id }.stockCount)
+        assertEquals(initialDrawerCash, viewModel.uiState.value.drawerTotalCashIls, 0.001)
+
+        // 2. Resume the saved draft back into the active basket
+        val newlySavedDraft = viewModel.uiState.value.savedDrafts.first()
+        assertTrue(viewModel.resumeSaleDraft(newlySavedDraft.id))
+        assertEquals(2, viewModel.uiState.value.basketItemCount)
+        assertEquals(75.00, viewModel.uiState.value.basketNetTotalIls, 0.001)
+        assertEquals(customer.id, viewModel.uiState.value.selectedCustomer?.id)
+        assertEquals(initialDraftsCount, viewModel.uiState.value.savedDrafts.size)
+    }
+
+    // =========================================================================
+    // 34. Interactive Demo: Three-State Invoice Payment Status (Paid Cash, Partial, On Credit)
+    // =========================================================================
+
+    @Test
+    fun invoicePaymentStatus_distinguishesPaidCashPartialAndFullCredit() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+
+        val invoices = viewModel.uiState.value.invoices
+        val paidCash = invoices.first { it.invoiceNumber == 1042 }
+        val partial = invoices.first { it.invoiceNumber == 1036 }
+        val fullCredit = invoices.first { it.invoiceNumber == 1034 }
+
+        // Paid Cash (#1042): remainingDebitIls == 0
+        assertEquals(com.example.model.InvoicePaymentStatus.PAID_CASH, paidCash.paymentStatus)
+        assertTrue(paidCash.isPaidInFull)
+        assertEquals(0.0, paidCash.remainingDebitIls, 0.001)
+
+        // Partial (#1036): cashReceivedIls = 58.00, remainingDebitIls = 100.00, netTotalIls = 158.00
+        assertEquals(com.example.model.InvoicePaymentStatus.PARTIAL, partial.paymentStatus)
+        assertFalse(partial.isPaidInFull)
+        assertEquals(58.00, partial.cashReceivedIls, 0.001)
+        assertEquals(100.00, partial.remainingDebitIls, 0.001)
+
+        // On Credit (#1034): cashReceivedIls = 0.00, remainingDebitIls = 185.00
+        assertEquals(com.example.model.InvoicePaymentStatus.ON_CREDIT, fullCredit.paymentStatus)
+        assertFalse(fullCredit.isPaidInFull)
+        assertEquals(0.0, fullCredit.cashReceivedIls, 0.001)
+        assertEquals(185.00, fullCredit.remainingDebitIls, 0.001)
+    }
+
+    // =========================================================================
+    // 35. Interactive Demo: Customer/Supplier Editing & Physical GRN vs Financial Bill
+    // =========================================================================
+
+    @Test
+    fun customerAndSupplierEditing_andPhysicalGoodsReceiptGrn_preserveFinancialAndStockSeparation() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+
+        // 1. Edit customer profile and credit limit without mutating customer debt balance
+        val cust1 = viewModel.uiState.value.customers.first { it.id == "cust_01" }
+        val initialDebt = cust1.balanceIls
+        viewModel.selectCustomerForDetail(cust1)
+        assertTrue(
+            viewModel.updateCustomer(
+                customerId = cust1.id,
+                name = "أبو طارق الكرمي - سوبرماركت الهدى",
+                phone = "0599-112299",
+                address = "طولكرم - دوار شويكة",
+                creditLimitIls = 1800.00
+            )
+        )
+        val updatedCust1 = checkNotNull(viewModel.uiState.value.selectedCustomerForDetail)
+        assertEquals("أبو طارق الكرمي - سوبرماركت الهدى", updatedCust1.nameAr)
+        assertEquals(1800.00, updatedCust1.creditLimitIls, 0.001)
+        assertEquals("Editing customer profile must preserve exact debt balance", initialDebt, updatedCust1.balanceIls, 0.001)
+
+        val statementText = viewModel.formatCustomerStatementText(updatedCust1)
+        assertTrue(statementText.contains("185.00"))
+
+        // 2. Create/edit supplier
+        val initialSupCount = viewModel.uiState.value.suppliers.size
+        assertTrue(
+            viewModel.saveSupplier(
+                supplierId = null,
+                name = "شركة سنابل الجنوب للحبوب",
+                company = "سنابل الجنوب للتجارة والتوزيع",
+                phone = "0598-445566"
+            )
+        )
+        assertEquals(initialSupCount + 1, viewModel.uiState.value.suppliers.size)
+
+        // 3. Confirm physical Goods Receipt Note (GRN) on pending bill pb_03 (#BILL-303)
+        // Verifies that physical GRN increases product stock and records a StockMovement,
+        // without changing the supplier's financial payable balance!
+        val pendingBill = viewModel.uiState.value.purchaseBills.first { it.id == "pb_03" }
+        assertFalse("Bill #303 starts pending warehouse receipt", pendingBill.isReceived)
+
+        val sup3 = viewModel.uiState.value.suppliers.first { it.id == pendingBill.supplierId }
+        val supplierPayableBeforeGrn = sup3.balanceOwedIls
+        val rice = viewModel.uiState.value.products.first { it.id == "p_rice_medium" }
+        val riceStockBeforeGrn = rice.stockCount
+        val movementsBeforeGrn = viewModel.uiState.value.stockMovements.size
+
+        assertTrue(
+            viewModel.confirmPhysicalGoodsReceipt(
+                billId = pendingBill.id,
+                productId = rice.id,
+                receivedQty = 12,
+                batchNote = "LOT-RICE-GRN303"
+            )
+        )
+
+        val billAfterGrn = viewModel.uiState.value.purchaseBills.first { it.id == "pb_03" }
+        assertTrue("Bill #303 is now marked physically received", billAfterGrn.isReceived)
+        assertEquals(riceStockBeforeGrn + 12, viewModel.uiState.value.products.first { it.id == rice.id }.stockCount)
+        assertEquals(movementsBeforeGrn + 1, viewModel.uiState.value.stockMovements.size)
+        assertEquals(
+            "Physical GRN must NOT alter supplier financial payable balance",
+            supplierPayableBeforeGrn,
+            viewModel.uiState.value.suppliers.first { it.id == sup3.id }.balanceOwedIls,
+            0.001
+        )
+    }
+
+    // =========================================================================
+    // 36. Interactive Demo: Shift Opening Float, Expected Book Cash vs Physical Count Variance
+    // =========================================================================
+
+    @Test
+    fun shiftReconciliation_separatesExpectedBookCashFromCountedPhysicalCashAndCalculatesVariance() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+
+        // Initial expected book cash: 350.00 opening + 196.00 sales - 60.00 expenses = 486.00 ILS
+        assertEquals(350.00, viewModel.uiState.value.startingDrawerCashIls, 0.001)
+        assertEquals(486.00, viewModel.uiState.value.expectedBookCashIls, 0.001)
+        assertEquals(null, viewModel.uiState.value.countedPhysicalCashIls)
+        assertEquals(null, viewModel.uiState.value.shiftCashVarianceIls)
+
+        // 1. Update shift opening float to 400.00 -> Expected book cash becomes 536.00 ILS
+        assertTrue(viewModel.updateStartingDrawerCash(400.00))
+        assertEquals(400.00, viewModel.uiState.value.startingDrawerCashIls, 0.001)
+        assertEquals(536.00, viewModel.uiState.value.expectedBookCashIls, 0.001)
+
+        // 2. Merchant physically counts 526.00 ILS in the drawer -> -10.00 ILS shortage variance
+        // Expected book cash remains 536.00 ILS (never conflated with counted physical cash!)
+        viewModel.updateCountedPhysicalCashText("526.00")
+        assertEquals(536.00, viewModel.uiState.value.expectedBookCashIls, 0.001)
+        assertEquals(526.00, checkNotNull(viewModel.uiState.value.countedPhysicalCashIls), 0.001)
+        assertEquals(-10.00, checkNotNull(viewModel.uiState.value.shiftCashVarianceIls), 0.001)
+
+        // 3. Merchant finds a 20 ILS note (546.00 ILS counted) -> +10.00 ILS overage variance
+        viewModel.updateCountedPhysicalCashText("546.00")
+        assertEquals(536.00, viewModel.uiState.value.expectedBookCashIls, 0.001)
+        assertEquals(546.00, checkNotNull(viewModel.uiState.value.countedPhysicalCashIls), 0.001)
+        assertEquals(10.00, checkNotNull(viewModel.uiState.value.shiftCashVarianceIls), 0.001)
+
+        // 4. Toggle shift closing preview and reopen
+        assertFalse(viewModel.uiState.value.isShiftClosedPreview)
+        viewModel.toggleShiftClosePreview(true)
+        assertTrue(viewModel.uiState.value.isShiftClosedPreview)
+        assertNotNull(viewModel.uiState.value.shiftClosedTimestamp)
+        viewModel.toggleShiftClosePreview(false)
+        assertFalse(viewModel.uiState.value.isShiftClosedPreview)
+    }
 }
+
 
 
 

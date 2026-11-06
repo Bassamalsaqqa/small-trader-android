@@ -19,6 +19,7 @@ import com.example.model.PrinterStatus
 import com.example.model.Product
 import com.example.model.ProductCategory
 import com.example.model.PurchaseBill
+import com.example.model.SaleDraft
 import com.example.model.StockMovement
 import com.example.model.Supplier
 import com.example.model.SupplierPayment
@@ -59,8 +60,9 @@ data class TraderUiState(
     val lastInventoryActionMessageEn: String? = null,
     val isInventoryActionError: Boolean = false,
 
-    // Active Basket & POS
+    // Active Basket, Saved Drafts & POS
     val basket: List<BasketItem> = emptyList(),
+    val savedDrafts: List<SaleDraft> = SampleCatalog.initialSaleDrafts(SampleCatalog.initialProducts),
     val discountPreset: DiscountPreset = DiscountPreset.NONE,
     val customDiscountText: String = "",
     val customerNote: String = "",
@@ -70,7 +72,7 @@ data class TraderUiState(
     val checkoutErrorAr: String? = null,
     val checkoutErrorEn: String? = null,
 
-    // Invoices & Accounting
+    // Invoices, Cash Shift & Accounting
     val invoices: List<InvoiceRecord> = emptyList(),
     val activeReceipt: InvoiceRecord? = null,
     val isNewlyCompletedSale: Boolean = false,
@@ -78,6 +80,9 @@ data class TraderUiState(
     val receiptCopyCount: Int = 0,
     val lastSharedReceiptText: String? = null,
     val startingDrawerCashIls: Double = 350.00,
+    val countedPhysicalCashText: String = "",
+    val isShiftClosedPreview: Boolean = false,
+    val shiftClosedTimestamp: String? = null,
 
     // Customers & Balances
     val customers: List<Customer> = emptyList(),
@@ -324,6 +329,26 @@ data class TraderUiState(
             val exp = BigDecimal(shiftExpensesIls.toString())
             return starting.add(salesCash).add(collections).subtract(disbursements).subtract(exp)
                 .setScale(2, RoundingMode.HALF_UP).toDouble()
+        }
+
+    val expectedBookCashIls: Double
+        get() = drawerTotalCashIls
+
+    val countedPhysicalCashIls: Double?
+        get() {
+            val sanitized = WesternFormatters.sanitizeWesternDigits(countedPhysicalCashText.trim())
+            if (sanitized.isEmpty()) return null
+            val parsed = sanitized.toDoubleOrNull() ?: return null
+            return BigDecimal(parsed.toString()).setScale(2, RoundingMode.HALF_UP).toDouble()
+        }
+
+    val shiftCashVarianceIls: Double?
+        get() {
+            val counted = countedPhysicalCashIls ?: return null
+            return BigDecimal(counted.toString())
+                .subtract(BigDecimal(expectedBookCashIls.toString()))
+                .setScale(2, RoundingMode.HALF_UP)
+                .toDouble()
         }
 
     val drawerCashSalesIls: Double get() = shiftCashSalesIls
@@ -1642,6 +1667,366 @@ class TraderViewModel(
             }
         }
         return text
+    }
+
+    // =========================================================================
+    // Interactive Demo Extensions: Product CRUD, Drafts, Quotations, GRN & Shift
+    // =========================================================================
+
+    fun saveProduct(
+        productId: String?,
+        nameAr: String,
+        nameEn: String = nameAr,
+        category: ProductCategory = ProductCategory.PANTRY,
+        unitAr: String = "قطعة",
+        unitEn: String = unitAr,
+        barcode: String = "",
+        priceIls: Double,
+        costIls: Double = 0.0,
+        minStockThreshold: Int = 5,
+        initialStock: Int = 0,
+        warehouseAr: String = "المستودع الرئيسي - نابلس",
+        lotBatchCode: String = "LOT-2026-A",
+        expiryDate: String? = null,
+        isWeightedDisplayOnly: Boolean = false
+    ): Boolean {
+        val session = _uiState.value.currentSession
+        val result = repository.saveProduct(
+            productId = productId,
+            nameAr = nameAr,
+            nameEn = nameEn,
+            category = category,
+            unitAr = unitAr,
+            unitEn = unitEn,
+            barcode = barcode,
+            priceIls = priceIls,
+            costIls = costIls,
+            minStockThreshold = minStockThreshold,
+            initialStock = initialStock,
+            warehouseAr = warehouseAr,
+            lotBatchCode = lotBatchCode,
+            expiryDate = expiryDate,
+            isWeightedDisplayOnly = isWeightedDisplayOnly,
+            operator = session
+        )
+        return if (result.isSuccess) {
+            val saved = result.getOrNull()
+            syncFromRepository()
+            _uiState.update { state ->
+                val actionAr = if (productId == null) "تمت إضافة الصنف «${saved?.nameAr}» إلى الكتالوج" else "تم حفظ تعديلات الصنف «${saved?.nameAr}»"
+                val actionEn = if (productId == null) "Added product \"${saved?.nameEn}\" to catalog" else "Saved changes for \"${saved?.nameEn}\""
+                state.copy(
+                    selectedProductForDetail = saved ?: state.selectedProductForDetail,
+                    lastInventoryActionMessageAr = actionAr,
+                    lastInventoryActionMessageEn = actionEn,
+                    isInventoryActionError = false
+                )
+            }
+            true
+        } else {
+            val rawErr = result.exceptionOrNull()?.message ?: "Product save failed"
+            val parts = rawErr.split(" | ", limit = 2)
+            val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+            val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+            _uiState.update {
+                it.copy(
+                    lastInventoryActionMessageAr = errAr,
+                    lastInventoryActionMessageEn = errEn,
+                    isInventoryActionError = true
+                )
+            }
+            showBanner(errAr, errEn, isError = true)
+            false
+        }
+    }
+
+    fun saveCurrentBasketAsDraft(customTitle: String = ""): Boolean {
+        val state = _uiState.value
+        if (state.basket.isEmpty()) return false
+        val linkedCust = state.selectedCustomer
+        val fallbackAr = linkedCust?.let { "مسودة: ${it.nameAr}" }
+            ?: state.customerNote.trim().takeIf { it.isNotEmpty() }?.let { "مسودة: $it" }
+            ?: "مسودة بيع (${WesternFormatters.formatInt(state.basketItemCount)} وحدات)"
+        val fallbackEn = linkedCust?.let { "Draft: ${it.nameEn}" }
+            ?: state.customerNote.trim().takeIf { it.isNotEmpty() }?.let { "Draft: $it" }
+            ?: "Sale Draft (${WesternFormatters.formatInt(state.basketItemCount)} units)"
+        val cleanTitle = customTitle.trim()
+        val draft = SaleDraft(
+            id = "draft_${System.currentTimeMillis()}",
+            titleAr = cleanTitle.ifEmpty { fallbackAr },
+            titleEn = cleanTitle.ifEmpty { fallbackEn },
+            timestamp = WesternFormatters.currentTimestamp(),
+            items = state.basket,
+            customerId = state.selectedCustomerId,
+            customerNote = state.customerNote,
+            discountPreset = state.discountPreset,
+            customDiscountText = state.customDiscountText,
+            subtotalIls = state.basketSubtotalIls,
+            netTotalIls = state.basketNetTotalIls
+        )
+        _uiState.update { current ->
+            current.copy(
+                savedDrafts = listOf(draft) + current.savedDrafts,
+                basket = emptyList(),
+                discountPreset = DiscountPreset.NONE,
+                customDiscountText = "",
+                customerNote = "",
+                selectedCustomerId = null,
+                cashInputText = "",
+                checkoutErrorAr = null,
+                checkoutErrorEn = null
+            )
+        }
+        showBanner(
+            ar = "تم حفظ السلة كمسودة بيع: ${draft.titleAr}",
+            en = "Saved basket as sale draft: ${draft.titleEn}",
+            isError = false
+        )
+        return true
+    }
+
+    fun resumeSaleDraft(draftId: String): Boolean {
+        val state = _uiState.value
+        val draft = state.savedDrafts.firstOrNull { it.id == draftId } ?: return false
+        val restoredItems = draft.items.mapNotNull { item ->
+            val freshProd = state.products.firstOrNull { it.id == item.product.id } ?: item.product
+            if (freshProd.isStockTracked) {
+                val allowedQty = item.quantity.coerceAtMost(freshProd.stockCount)
+                if (allowedQty > 0) BasketItem(freshProd, allowedQty) else null
+            } else {
+                BasketItem(freshProd, item.quantity)
+            }
+        }
+        if (restoredItems.isEmpty()) {
+            showBanner(
+                ar = "تعذر استئناف المسودة لعدم توفر مخزون للأصناف المحفوظة",
+                en = "Cannot resume draft: saved items are currently out of stock",
+                isError = true
+            )
+            return false
+        }
+        _uiState.update { current ->
+            current.copy(
+                basket = restoredItems,
+                savedDrafts = current.savedDrafts.filterNot { it.id == draftId },
+                selectedCustomerId = draft.customerId,
+                customerNote = draft.customerNote,
+                discountPreset = draft.discountPreset,
+                customDiscountText = draft.customDiscountText,
+                cashInputText = "",
+                checkoutErrorAr = null,
+                checkoutErrorEn = null
+            )
+        }
+        showBanner(
+            ar = "تم استئناف المسودة: ${draft.titleAr}",
+            en = "Resumed sale draft: ${draft.titleEn}",
+            isError = false
+        )
+        return true
+    }
+
+    fun deleteSaleDraft(draftId: String) {
+        _uiState.update { current ->
+            current.copy(savedDrafts = current.savedDrafts.filterNot { it.id == draftId })
+        }
+    }
+
+    fun formatQuotationShareText(): String {
+        val state = _uiState.value
+        if (state.basket.isEmpty()) return ""
+        val lang = state.language
+        val b = state.businessInfo
+        val custName = state.selectedCustomer?.name(lang)
+            ?: state.customerNote.trim().takeIf { it.isNotEmpty() }
+            ?: lang.tr("زبون كريم", "Valued Customer")
+        val sb = StringBuilder()
+        sb.appendLine(b.name(lang))
+        sb.appendLine("${b.city(lang)} • ${b.phone}")
+        sb.appendLine("--------------------------------")
+        sb.appendLine(lang.tr("عرض سعر تجاري (وثيقة غير مرحلة محاسبياً)", "Price Quotation (Non-Posting Commercial Document)"))
+        sb.appendLine("${lang.tr("التاريخ", "Date")}: ${WesternFormatters.currentTimestamp()}")
+        sb.appendLine("${lang.tr("موجه إلى", "Prepared for")}: $custName")
+        sb.appendLine("--------------------------------")
+        state.basket.forEachIndexed { idx, item ->
+            sb.appendLine(
+                "${idx + 1}. ${item.product.name(lang)} (${WesternFormatters.formatInt(item.quantity)} × ${WesternFormatters.formatIls(item.product.priceIls)}) = ${WesternFormatters.formatIls(item.lineTotal)}"
+            )
+        }
+        sb.appendLine("--------------------------------")
+        if (state.calculatedDiscountIls > 0.005) {
+            sb.appendLine("${lang.tr("المجموع الفرعي", "Subtotal")}: ${WesternFormatters.formatIls(state.basketSubtotalIls)}")
+            sb.appendLine("${lang.tr("الخصم المقترح", "Proposed Discount")}: -${WesternFormatters.formatIls(state.calculatedDiscountIls)}")
+        }
+        sb.appendLine("${lang.tr("الصافي الإجمالي لعرض السعر", "Quoted Net Total")}: ${WesternFormatters.formatIls(state.basketNetTotalIls)}")
+        sb.appendLine(lang.tr("* ملاحظة: عرض السعر لا يخصم من المخزون ولا يقيد ذمة مالية حتى اعتماد البيع.", "* Note: This quotation does not deduct stock or post financial debt until confirmed as a sale."))
+        return sb.toString().trim()
+    }
+
+    fun updateCustomer(
+        customerId: String,
+        name: String,
+        phone: String,
+        address: String,
+        creditLimitIls: Double = 1000.0
+    ): Boolean {
+        val result = repository.updateCustomer(customerId, name, phone, address, creditLimitIls)
+        return if (result.isSuccess) {
+            val updated = result.getOrNull()
+            syncFromRepository()
+            _uiState.update { state ->
+                state.copy(
+                    selectedCustomerForDetail = updated ?: state.selectedCustomerForDetail,
+                    lastCustomerPaymentMessageAr = "تم تحديث بيانات الزبون «${updated?.nameAr}» وسقف الائتمان (${WesternFormatters.formatIls(creditLimitIls)})",
+                    lastCustomerPaymentMessageEn = "Updated customer \"${updated?.nameEn}\" and credit limit (${WesternFormatters.formatIls(creditLimitIls)})"
+                )
+            }
+            true
+        } else {
+            val err = result.exceptionOrNull()?.message ?: "Customer update failed"
+            showBanner(err, err, isError = true)
+            false
+        }
+    }
+
+    fun formatCustomerStatementText(customer: Customer): String {
+        val state = _uiState.value
+        val lang = state.language
+        val b = state.businessInfo
+        val txs = state.customerTransactions.filter { it.customerId == customer.id }
+        val sb = StringBuilder()
+        sb.appendLine(b.name(lang))
+        sb.appendLine("${b.city(lang)} • ${b.phone}")
+        sb.appendLine("--------------------------------")
+        sb.appendLine(lang.tr("كشف حساب زبون تفصيلي", "Customer Account Statement"))
+        sb.appendLine("${lang.tr("الزبون", "Customer")}: ${customer.name(lang)} (${customer.phone})")
+        sb.appendLine("${lang.tr("تاريخ الكشف", "Statement Date")}: ${WesternFormatters.currentTimestamp()}")
+        val balStr = when {
+            customer.balanceIls > 0.005 -> lang.tr("ذمة مستحقة للمتجر: ${WesternFormatters.formatIls(customer.balanceIls)}", "Balance Due to Store: ${WesternFormatters.formatIls(customer.balanceIls)}")
+            customer.balanceIls < -0.005 -> lang.tr("رصيد مقدم للزبون: ${WesternFormatters.formatIls(-customer.balanceIls)}", "Customer Advance Credit: ${WesternFormatters.formatIls(-customer.balanceIls)}")
+            else -> lang.tr("الحساب خالص (0.00 ₪)", "Settled Account (0.00 ₪)")
+        }
+        sb.appendLine("${lang.tr("الرصيد الحالي", "Current Balance")}: $balStr")
+        sb.appendLine("${lang.tr("سقف الائتمان", "Credit Limit")}: ${WesternFormatters.formatIls(customer.creditLimitIls)}")
+        sb.appendLine("--------------------------------")
+        txs.take(10).forEach { tx ->
+            val mov = if (tx.debitIls > 0 && tx.creditIls == 0.0) {
+                "+${WesternFormatters.formatIls(tx.debitIls)}"
+            } else if (tx.creditIls > 0 && tx.debitIls == 0.0) {
+                "-${WesternFormatters.formatIls(tx.creditIls)}"
+            } else {
+                WesternFormatters.formatIls(tx.debitIls)
+            }
+            sb.appendLine("${tx.date} | ${tx.type(lang)} | $mov | ${lang.tr("الرصيد", "Bal")}: ${WesternFormatters.formatIls(tx.runningBalanceIls)}")
+        }
+        return sb.toString().trim()
+    }
+
+    fun saveSupplier(
+        supplierId: String?,
+        name: String,
+        company: String,
+        phone: String
+    ): Boolean {
+        val session = _uiState.value.currentSession
+        val result = repository.saveSupplier(supplierId, name, company, phone, session)
+        return if (result.isSuccess) {
+            val saved = result.getOrNull()
+            syncFromRepository()
+            _uiState.update { state ->
+                val msgAr = if (supplierId == null) "تمت إضافة المورد «${saved?.nameAr}»" else "تم تحديث بيانات المورد «${saved?.nameAr}»"
+                val msgEn = if (supplierId == null) "Added supplier \"${saved?.nameEn}\"" else "Updated supplier \"${saved?.nameEn}\""
+                state.copy(
+                    selectedSupplierForDetail = saved ?: state.selectedSupplierForDetail,
+                    lastSupplierActionMessageAr = msgAr,
+                    lastSupplierActionMessageEn = msgEn,
+                    isSupplierActionError = false
+                )
+            }
+            true
+        } else {
+            val rawErr = result.exceptionOrNull()?.message ?: "Supplier save failed"
+            val parts = rawErr.split(" | ", limit = 2)
+            val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+            val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+            _uiState.update {
+                it.copy(
+                    lastSupplierActionMessageAr = errAr,
+                    lastSupplierActionMessageEn = errEn,
+                    isSupplierActionError = true
+                )
+            }
+            showBanner(errAr, errEn, isError = true)
+            false
+        }
+    }
+
+    fun confirmPhysicalGoodsReceipt(
+        billId: String,
+        productId: String,
+        receivedQty: Int,
+        batchNote: String = ""
+    ): Boolean {
+        val session = _uiState.value.currentSession
+        val result = repository.confirmPhysicalGoodsReceipt(billId, productId, receivedQty, batchNote, session)
+        return if (result.isSuccess) {
+            val movement = result.getOrNull()
+            syncFromRepository()
+            val prod = _uiState.value.products.firstOrNull { it.id == productId }
+            _uiState.update { state ->
+                state.copy(
+                    lastSupplierActionMessageAr = "تم اعتماد سند الاستلام المخزني (+${WesternFormatters.formatInt(receivedQty)} من «${prod?.nameAr ?: ""}») — المخزون الحالي: ${WesternFormatters.formatInt(movement?.resultingStock ?: 0)}",
+                    lastSupplierActionMessageEn = "Physical Goods Receipt confirmed (+${WesternFormatters.formatInt(receivedQty)} of \"${prod?.nameEn ?: ""}\") — Stock: ${WesternFormatters.formatInt(movement?.resultingStock ?: 0)}",
+                    isSupplierActionError = false
+                )
+            }
+            true
+        } else {
+            val rawErr = result.exceptionOrNull()?.message ?: "Goods receipt rejected"
+            val parts = rawErr.split(" | ", limit = 2)
+            val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+            val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+            _uiState.update {
+                it.copy(
+                    lastSupplierActionMessageAr = errAr,
+                    lastSupplierActionMessageEn = errEn,
+                    isSupplierActionError = true
+                )
+            }
+            showBanner(errAr, errEn, isError = true)
+            false
+        }
+    }
+
+    fun updateStartingDrawerCash(openingIls: Double): Boolean {
+        val session = _uiState.value.currentSession
+        if (!session.canViewReports()) return false
+        if (openingIls < 0.0) return false
+        val exactOpening = BigDecimal(openingIls.toString()).setScale(2, RoundingMode.HALF_UP).toDouble()
+        _uiState.update {
+            it.copy(
+                startingDrawerCashIls = exactOpening,
+                isShiftClosedPreview = false,
+                shiftClosedTimestamp = null
+            )
+        }
+        return true
+    }
+
+    fun updateCountedPhysicalCashText(rawInput: String) {
+        val sanitized = WesternFormatters.sanitizeWesternDigits(rawInput)
+        _uiState.update {
+            it.copy(countedPhysicalCashText = sanitized)
+        }
+    }
+
+    fun toggleShiftClosePreview(closed: Boolean) {
+        _uiState.update {
+            it.copy(
+                isShiftClosedPreview = closed,
+                shiftClosedTimestamp = if (closed) WesternFormatters.currentTimestamp() else null
+            )
+        }
     }
 
     private fun showBanner(ar: String, en: String, isError: Boolean = false) {

@@ -11,6 +11,7 @@ import com.example.model.InvoiceRecord
 import com.example.model.Product
 import com.example.model.ProductCategory
 import com.example.model.PurchaseBill
+import com.example.model.SaleDraft
 import com.example.model.StockMovement
 import com.example.model.Supplier
 import com.example.model.UserRole
@@ -61,7 +62,9 @@ object SampleCatalog {
             unitEn = "1L Bottle",
             stockCount = 18,
             minStockThreshold = 8,
-            accentHex = 0xFF1D4E89
+            accentHex = 0xFF1D4E89,
+            lotBatchCode = "JIFNA-2026-10",
+            expiryDate = "2028-10-30"
         ),
         Product(
             id = "p_zaatar_jenin",
@@ -71,11 +74,16 @@ object SampleCatalog {
             barcode = "6251001001021",
             priceIls = 16.50,
             costIls = 11.50,
-            unitAr = "كيس 500 غم",
-            unitEn = "500g Pack",
+            unitAr = "كيس 500 غم (وزني)",
+            unitEn = "500g Pack (Weighted)",
             stockCount = 24,
             minStockThreshold = 10,
-            accentHex = 0xFF285E61
+            accentHex = 0xFF285E61,
+            warehouseAr = "قسم المحمصة والتعبئة - نابلس",
+            warehouseEn = "Roastery & Packing Section - Nablus",
+            lotBatchCode = "JENIN-Z26",
+            expiryDate = "2027-06-15",
+            isWeightedDisplayOnly = true
         ),
         Product(
             id = "p_nabulsi_cheese",
@@ -85,11 +93,16 @@ object SampleCatalog {
             barcode = "6251001001038",
             priceIls = 32.00,
             costIls = 24.00,
-            unitAr = "عبوة 1 كغم",
-            unitEn = "1kg Tub",
+            unitAr = "عبوة 1 كغم (وزني)",
+            unitEn = "1kg Tub (Weighted)",
             stockCount = 9,
             minStockThreshold = 6,
-            accentHex = 0xFF3E5A68
+            accentHex = 0xFF3E5A68,
+            warehouseAr = "ثلاجة الألبان المركزية #1",
+            warehouseEn = "Central Dairy Chiller #1",
+            lotBatchCode = "NBL-CH-44",
+            expiryDate = "2027-03-01",
+            isWeightedDisplayOnly = true
         ),
         Product(
             id = "p_tahini_nablus",
@@ -103,7 +116,9 @@ object SampleCatalog {
             unitEn = "800g Jar",
             stockCount = 15,
             minStockThreshold = 5,
-            accentHex = 0xFF334155
+            accentHex = 0xFF334155,
+            lotBatchCode = "TAH-2026-09",
+            expiryDate = "2027-09-30"
         ),
         Product(
             id = "p_jebrini_milk",
@@ -117,7 +132,11 @@ object SampleCatalog {
             unitEn = "1L Carton",
             stockCount = 5,
             minStockThreshold = 8,
-            accentHex = 0xFF2B5876
+            accentHex = 0xFF2B5876,
+            warehouseAr = "ثلاجة العرض الأمامية",
+            warehouseEn = "Front Display Chiller",
+            lotBatchCode = "JBR-1104",
+            expiryDate = "2026-11-14"
         ),
         Product(
             id = "p_labaneh_baladi",
@@ -131,7 +150,11 @@ object SampleCatalog {
             unitEn = "500g Tub",
             stockCount = 7,
             minStockThreshold = 6,
-            accentHex = 0xFF457B9D
+            accentHex = 0xFF457B9D,
+            warehouseAr = "ثلاجة العرض الأمامية",
+            warehouseEn = "Front Display Chiller",
+            lotBatchCode = "LAB-1102",
+            expiryDate = "2026-11-25"
         ),
         Product(
             id = "p_arabic_coffee",
@@ -484,7 +507,7 @@ object SampleCatalog {
             totalIls = 850.00,
             paidIls = 0.00,
             itemsSummary = "قهوة عربية بالهيل وزعتر بلدي جنين",
-            isReceived = true
+            isReceived = false
         )
     )
 
@@ -580,6 +603,27 @@ object SampleCatalog {
         )
     )
 
+    fun initialSaleDrafts(products: List<Product>): List<SaleDraft> {
+        val byId = products.associateBy { it.id }
+        val draftItems = listOfNotNull(
+            byId["p_olive_oil"]?.let { BasketItem(it, 2) },
+            byId["p_tahini_nablus"]?.let { BasketItem(it, 1) }
+        )
+        return listOf(
+            SaleDraft(
+                id = "draft_101",
+                titleAr = "مسودة طلبية مطعم الياسمين التراثي",
+                titleEn = "Al-Yasmeen Restaurant Order Draft",
+                timestamp = "${WesternFormatters.currentDate()} 08:40",
+                items = draftItems,
+                customerId = "cust_04",
+                customerNote = "تجهيز للاستلام ظهراً",
+                subtotalIls = 98.00,
+                netTotalIls = 98.00
+            )
+        )
+    }
+
     fun initialInvoices(products: List<Product>): List<InvoiceRecord> {
         val byId = products.associateBy { it.id }
         val inv1Items = listOfNotNull(
@@ -602,6 +646,10 @@ object SampleCatalog {
             byId["p_nabulsi_cheese"]?.let { BasketItem(it, 2) }, // 2 * 26.00 = 52.00
             byId["p_labaneh_baladi"]?.let { BasketItem(it, 2) }, // 2 * 13.00 = 26.00
             byId["p_jebrini_milk"]?.let { BasketItem(it, 2) }    // 2 * 6.00  = 12.00 -> Total 90.00
+        )
+        val invPartialItems = listOfNotNull(
+            byId["p_olive_oil"]?.let { BasketItem(it, 3) },      // 3 * 38.00 = 114.00
+            byId["p_tahini_nablus"]?.let { BasketItem(it, 2) }   // 2 * 22.00 = 44.00 -> Total 158.00
         )
         val inv5LongCreditItems = listOfNotNull(
             byId["p_olive_oil"]?.let { BasketItem(it, 2) },      // 2 * 38.00 = 76.00
@@ -684,6 +732,24 @@ object SampleCatalog {
                 cashierNameEn = "Abu Kareem",
                 isPaidInFull = false,
                 remainingDebitIls = 90.00,
+                printCount = 1
+            ),
+            InvoiceRecord(
+                id = "inv_1036",
+                invoiceNumber = 1036,
+                timestamp = "2026-11-02 18:20",
+                items = invPartialItems,
+                subtotalIls = 158.00,
+                discountIls = 0.00,
+                netTotalIls = 158.00,
+                cashReceivedIls = 58.00,
+                changeReturnedIls = 0.00,
+                customerId = "cust_04",
+                customerNote = "شركة مطعم ومقهى الياسمين التراثي • دفعة أولى 58 ₪ والباقي بالذمة",
+                cashierNameAr = "أبو كريم",
+                cashierNameEn = "Abu Kareem",
+                isPaidInFull = false,
+                remainingDebitIls = 100.00,
                 printCount = 1
             ),
             InvoiceRecord(

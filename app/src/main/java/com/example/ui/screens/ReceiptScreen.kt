@@ -82,6 +82,7 @@ import java.math.RoundingMode
 private enum class InvoiceHistoryFilter {
     ALL,
     PAID_CASH,
+    PARTIAL,
     ON_CREDIT
 }
 
@@ -102,6 +103,7 @@ fun ReceiptScreen(
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
     var localActionFeedback by remember(receipt?.id) { mutableStateOf<String?>(null) }
+    var isSalesReturnPreviewOpen by remember(receipt?.id) { mutableStateOf(false) }
 
     if (receipt == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -252,13 +254,16 @@ fun ReceiptScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = if (receipt.isPaidInFull) {
-                                    lang.tr(
+                                text = when (receipt.paymentStatus) {
+                                    com.example.model.InvoicePaymentStatus.PAID_CASH -> lang.tr(
                                         "مسددة نقداً بالكامل بتاريخ ${receipt.timestamp}",
                                         "Paid in full (Cash) on ${receipt.timestamp}"
                                     )
-                                } else {
-                                    lang.tr(
+                                    com.example.model.InvoicePaymentStatus.PARTIAL -> lang.tr(
+                                        "سداد جزئي: دُفع ${WesternFormatters.formatIls(receipt.cashReceivedIls)} ومتبقي بالذمة ${WesternFormatters.formatIls(receipt.remainingDebitIls)} (${receipt.timestamp})",
+                                        "Partial payment: Paid ${WesternFormatters.formatIls(receipt.cashReceivedIls)}, remaining due ${WesternFormatters.formatIls(receipt.remainingDebitIls)} (${receipt.timestamp})"
+                                    )
+                                    com.example.model.InvoicePaymentStatus.ON_CREDIT -> lang.tr(
                                         "فاتورة آجلة بقيمة ${WesternFormatters.formatIls(receipt.remainingDebitIls)} بتاريخ ${receipt.timestamp}",
                                         "Credit invoice of ${WesternFormatters.formatIls(receipt.remainingDebitIls)} issued on ${receipt.timestamp}"
                                     )
@@ -295,7 +300,7 @@ fun ReceiptScreen(
                     .fillMaxWidth()
             )
 
-            // 3. Concise Print (Explicitly Simulated) & Share Actions Card
+            // 3. Concise Print (Explicitly Simulated), Share & Sales Return Preview Actions Card
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -327,7 +332,7 @@ fun ReceiptScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
-                                    text = lang.tr("الطباعة والمشاركة", "Print & Share Document"),
+                                    text = lang.tr("الطباعة والمشاركة والمرتجع", "Print, Share & Return Preview"),
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
                                 )
                                 Surface(
@@ -553,6 +558,24 @@ fun ReceiptScreen(
                         }
                     }
 
+                    // Sales Return / Credit Note Preview Trigger
+                    OutlinedButton(
+                        onClick = { isSalesReturnPreviewOpen = true },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("open_sales_return_preview_button")
+                    ) {
+                        Text(
+                            text = lang.tr(
+                                "معاينة مرتجع مبيعات / إشعار دائن (Sales Return Preview)",
+                                "Sales Return / Credit Note Preview"
+                            ),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+                        )
+                    }
+
                     if (localActionFeedback != null) {
                         Text(
                             text = localActionFeedback!!,
@@ -630,6 +653,124 @@ fun ReceiptScreen(
             }
         }
     }
+
+    if (isSalesReturnPreviewOpen) {
+        SalesReturnPreviewDialog(
+            receipt = receipt,
+            lang = lang,
+            onDismiss = { isSalesReturnPreviewOpen = false }
+        )
+    }
+}
+
+@Composable
+private fun SalesReturnPreviewDialog(
+    receipt: InvoiceRecord,
+    lang: AppLanguage,
+    onDismiss: () -> Unit
+) {
+    val firstLine = receipt.items.firstOrNull()
+    val sampleReturnAmount = firstLine?.product?.priceIls ?: receipt.netTotalIls
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = lang.tr(
+                    "معاينة مرتجع مبيعات / إشعار دائن (${WesternFormatters.formatInvoiceCode(receipt.invoiceNumber)})",
+                    "Sales Return / Credit Note Preview (${WesternFormatters.formatInvoiceCode(receipt.invoiceNumber)})"
+                ),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = TraderTheme.financial.warningContainer.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = lang.tr(
+                            "معاينة تفاعلية: توضح أثر إرجاع صنف من الفاتورة على المخزون وحساب الزبون أو الصندوق. الترحيل المحاسبي الفعلي لإشعار الدائن يتم عبر خادم Laravel /api/v1 عند الربط.",
+                            "Interactive Preview: Illustrates stock and customer/cash credit-note impact when returning an invoice item. Authoritative credit-note posting connects to Laravel /api/v1."
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+
+                Text(
+                    text = lang.tr("الأصناف القابلة للإرجاع من الوثيقة:", "Returnable Lines on Document:"),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
+                receipt.items.forEach { item ->
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.product.name(lang),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                )
+                                Text(
+                                    text = "${lang.tr("المباع:", "Sold:")} ${WesternFormatters.formatInt(item.quantity)} × ${WesternFormatters.formatIls(item.product.priceIls)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Text(
+                                text = WesternFormatters.formatIls(item.lineTotal),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
+                Text(
+                    text = if (receipt.isPaidInFull) {
+                        lang.tr(
+                            "الأثر المالي المتوقع عند إرجاع وحدة واحدة: رد نقدي ${WesternFormatters.formatIls(sampleReturnAmount)} من الصندوق + إعادة +1 للمخزون.",
+                            "Projected impact for 1-unit return: Cash refund of ${WesternFormatters.formatIls(sampleReturnAmount)} + restock +1 unit."
+                        )
+                    } else {
+                        lang.tr(
+                            "الأثر المالي المتوقع عند إرجاع وحدة واحدة: إشعار دائن يخفض ذمة الزبون بمقدار ${WesternFormatters.formatIls(sampleReturnAmount)} + إعادة +1 للمخزون.",
+                            "Projected impact for 1-unit return: Credit note reducing customer debt by ${WesternFormatters.formatIls(sampleReturnAmount)} + restock +1 unit."
+                        )
+                    },
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = TraderTheme.financial.income,
+                    modifier = Modifier.testTag("sales_return_impact_summary")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.testTag("close_sales_return_preview_button")
+            ) {
+                Text(lang.tr("إغلاق المعاينة", "Close Preview"))
+            }
+        }
+    )
 }
 
 @Composable
@@ -640,7 +781,9 @@ private fun InvoiceReceiptDocumentCard(
     paperWidthMm: Int,
     modifier: Modifier = Modifier
 ) {
-    val isPaidCash = receipt.isPaidInFull
+    val paymentStatus = receipt.paymentStatus
+    val isPaidCash = paymentStatus == com.example.model.InvoicePaymentStatus.PAID_CASH
+    val isPartial = paymentStatus == com.example.model.InvoicePaymentStatus.PARTIAL
 
     Card(
         modifier = modifier.testTag("thermal_receipt_paper"),
@@ -699,10 +842,10 @@ private fun InvoiceReceiptDocumentCard(
             // 2. Document Type & Settlement Status Badge
             Surface(
                 shape = RoundedCornerShape(8.dp),
-                color = if (isPaidCash) {
-                    TraderTheme.financial.incomeContainer
-                } else {
-                    TraderTheme.financial.debitContainer
+                color = when {
+                    isPaidCash -> TraderTheme.financial.incomeContainer
+                    isPartial -> TraderTheme.financial.warningContainer
+                    else -> TraderTheme.financial.debitContainer
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -714,16 +857,16 @@ private fun InvoiceReceiptDocumentCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (isPaidCash) {
-                            lang.tr("إيصال قبض وفاتورة مبيعات نقدية", "Cash Sales Invoice & Receipt")
-                        } else {
-                            lang.tr("فاتورة مبيعات آجلة — ذمة على الحساب", "Credit Sales Invoice — On Account")
+                        text = when {
+                            isPaidCash -> lang.tr("إيصال قبض وفاتورة مبيعات نقدية", "Cash Sales Invoice & Receipt")
+                            isPartial -> lang.tr("فاتورة مبيعات — سداد جزئي والباقي بالذمة", "Sales Invoice — Partial Payment & Credit")
+                            else -> lang.tr("فاتورة مبيعات آجلة — ذمة على الحساب", "Credit Sales Invoice — On Account")
                         },
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                        color = if (isPaidCash) {
-                            TraderTheme.financial.income
-                        } else {
-                            TraderTheme.financial.debit
+                        color = when {
+                            isPaidCash -> TraderTheme.financial.income
+                            isPartial -> TraderTheme.financial.warning
+                            else -> TraderTheme.financial.debit
                         },
                         modifier = Modifier.weight(1f)
                     )
@@ -734,10 +877,10 @@ private fun InvoiceReceiptDocumentCard(
                             fontFamily = MonoFontFamily,
                             fontWeight = FontWeight.Bold
                         ),
-                        color = if (isPaidCash) {
-                            TraderTheme.financial.income
-                        } else {
-                            TraderTheme.financial.debit
+                        color = when {
+                            isPaidCash -> TraderTheme.financial.income
+                            isPartial -> TraderTheme.financial.warning
+                            else -> TraderTheme.financial.debit
                         }
                     )
                 }
@@ -870,41 +1013,64 @@ private fun InvoiceReceiptDocumentCard(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
 
-                if (isPaidCash) {
-                    DocumentMetaRow(
-                        label = lang.tr("طريقة السداد:", "Settlement:"),
-                        value = lang.tr("مدفوع نقداً بالكامل", "Paid in Full (Cash)"),
-                        useMono = false,
-                        valueColor = TraderTheme.financial.income
-                    )
-                    DocumentMetaRow(
-                        label = lang.tr("المبلغ المقبوض نقداً:", "Cash Received:"),
-                        value = WesternFormatters.formatIls(receipt.cashReceivedIls),
-                        useMono = false
-                    )
-                    DocumentMetaRow(
-                        label = lang.tr("الباقي المرجع للزبون:", "Change Returned:"),
-                        value = WesternFormatters.formatIls(receipt.changeReturnedIls),
-                        useMono = false
-                    )
-                } else {
-                    DocumentMetaRow(
-                        label = lang.tr("طريقة السداد:", "Settlement:"),
-                        value = lang.tr("ذمة آجلة على حساب الزبون", "Unpaid — On Customer Account"),
-                        useMono = false,
-                        valueColor = TraderTheme.financial.debit
-                    )
-                    DocumentMetaRow(
-                        label = lang.tr("المدفوع نقداً عند الإصدار:", "Cash Paid at Issue:"),
-                        value = WesternFormatters.formatIls(receipt.cashReceivedIls),
-                        useMono = false
-                    )
-                    DocumentMetaRow(
-                        label = lang.tr("المبلغ المقيد بالذمة:", "Balance Due on Account:"),
-                        value = WesternFormatters.formatIls(receipt.remainingDebitIls),
-                        useMono = false,
-                        valueColor = TraderTheme.financial.debit
-                    )
+                when {
+                    isPaidCash -> {
+                        DocumentMetaRow(
+                            label = lang.tr("طريقة السداد:", "Settlement:"),
+                            value = lang.tr("مدفوع نقداً بالكامل", "Paid in Full (Cash)"),
+                            useMono = false,
+                            valueColor = TraderTheme.financial.income
+                        )
+                        DocumentMetaRow(
+                            label = lang.tr("المبلغ المقبوض نقداً:", "Cash Received:"),
+                            value = WesternFormatters.formatIls(receipt.cashReceivedIls),
+                            useMono = false
+                        )
+                        DocumentMetaRow(
+                            label = lang.tr("الباقي المرجع للزبون:", "Change Returned:"),
+                            value = WesternFormatters.formatIls(receipt.changeReturnedIls),
+                            useMono = false
+                        )
+                    }
+                    isPartial -> {
+                        DocumentMetaRow(
+                            label = lang.tr("طريقة السداد:", "Settlement:"),
+                            value = lang.tr("سداد جزئي (دفعة نقدية + باقي بالذمة)", "Partial Payment (Cash + Account Debt)"),
+                            useMono = false,
+                            valueColor = TraderTheme.financial.warning
+                        )
+                        DocumentMetaRow(
+                            label = lang.tr("المدفوع نقداً:", "Cash Paid:"),
+                            value = WesternFormatters.formatIls(receipt.cashReceivedIls),
+                            useMono = false,
+                            valueColor = TraderTheme.financial.income
+                        )
+                        DocumentMetaRow(
+                            label = lang.tr("المتبقي بالذمة على الحساب:", "Remaining Due on Account:"),
+                            value = WesternFormatters.formatIls(receipt.remainingDebitIls),
+                            useMono = false,
+                            valueColor = TraderTheme.financial.debit
+                        )
+                    }
+                    else -> {
+                        DocumentMetaRow(
+                            label = lang.tr("طريقة السداد:", "Settlement:"),
+                            value = lang.tr("ذمة آجلة على حساب الزبون", "Unpaid — On Customer Account"),
+                            useMono = false,
+                            valueColor = TraderTheme.financial.debit
+                        )
+                        DocumentMetaRow(
+                            label = lang.tr("المدفوع نقداً عند الإصدار:", "Cash Paid at Issue:"),
+                            value = WesternFormatters.formatIls(receipt.cashReceivedIls),
+                            useMono = false
+                        )
+                        DocumentMetaRow(
+                            label = lang.tr("المبلغ المقيد بالذمة:", "Balance Due on Account:"),
+                            value = WesternFormatters.formatIls(receipt.remainingDebitIls),
+                            useMono = false,
+                            valueColor = TraderTheme.financial.debit
+                        )
+                    }
                 }
             }
         }
@@ -948,10 +1114,10 @@ private fun buildPlainTextDocument(
     lang: AppLanguage
 ): String {
     val sb = StringBuilder()
-    val docTitle = if (receipt.isPaidInFull) {
-        lang.tr("إيصال قبض وفاتورة مبيعات نقدية", "Cash Sales Invoice & Receipt")
-    } else {
-        lang.tr("فاتورة مبيعات آجلة (ذمة على الحساب)", "Credit Sales Invoice (On Account)")
+    val docTitle = when (receipt.paymentStatus) {
+        com.example.model.InvoicePaymentStatus.PAID_CASH -> lang.tr("إيصال قبض وفاتورة مبيعات نقدية", "Cash Sales Invoice & Receipt")
+        com.example.model.InvoicePaymentStatus.PARTIAL -> lang.tr("فاتورة مبيعات بسداد جزئي", "Partial-Payment Sales Invoice")
+        com.example.model.InvoicePaymentStatus.ON_CREDIT -> lang.tr("فاتورة مبيعات آجلة (ذمة على الحساب)", "Credit Sales Invoice (On Account)")
     }
     sb.appendLine(business.name(lang))
     sb.appendLine("${business.city(lang)} • ${business.phone}")
@@ -973,6 +1139,9 @@ private fun buildPlainTextDocument(
         sb.appendLine("${lang.tr("المقبوض نقداً", "Cash Received")}: ${WesternFormatters.formatIls(receipt.cashReceivedIls)}")
         sb.appendLine("${lang.tr("الباقي للزبون", "Change Returned")}: ${WesternFormatters.formatIls(receipt.changeReturnedIls)}")
     } else {
+        if (receipt.cashReceivedIls > 0.005) {
+            sb.appendLine("${lang.tr("المدفوع نقداً", "Cash Paid")}: ${WesternFormatters.formatIls(receipt.cashReceivedIls)}")
+        }
         sb.appendLine("${lang.tr("المتبقي بالذمة", "Balance Due on Account")}: ${WesternFormatters.formatIls(receipt.remainingDebitIls)}")
     }
     return sb.toString().trim()
@@ -988,16 +1157,24 @@ fun InvoicesHistoryScreen(
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(InvoiceHistoryFilter.ALL) }
 
-    val paidCount = remember(state.invoices) { state.invoices.count { it.isPaidInFull } }
-    val creditCount = remember(state.invoices) { state.invoices.count { !it.isPaidInFull } }
+    val paidCount = remember(state.invoices) {
+        state.invoices.count { it.paymentStatus == com.example.model.InvoicePaymentStatus.PAID_CASH }
+    }
+    val partialCount = remember(state.invoices) {
+        state.invoices.count { it.paymentStatus == com.example.model.InvoicePaymentStatus.PARTIAL }
+    }
+    val creditCount = remember(state.invoices) {
+        state.invoices.count { it.paymentStatus == com.example.model.InvoicePaymentStatus.ON_CREDIT }
+    }
 
     val filteredInvoices = remember(state.invoices, searchQuery, selectedFilter) {
         val q = TraderUiState.normalizeForSearch(WesternFormatters.sanitizeWesternDigits(searchQuery.trim()))
         state.invoices.filter { inv ->
             val matchesStatus = when (selectedFilter) {
                 InvoiceHistoryFilter.ALL -> true
-                InvoiceHistoryFilter.PAID_CASH -> inv.isPaidInFull
-                InvoiceHistoryFilter.ON_CREDIT -> !inv.isPaidInFull
+                InvoiceHistoryFilter.PAID_CASH -> inv.paymentStatus == com.example.model.InvoicePaymentStatus.PAID_CASH
+                InvoiceHistoryFilter.PARTIAL -> inv.paymentStatus == com.example.model.InvoicePaymentStatus.PARTIAL
+                InvoiceHistoryFilter.ON_CREDIT -> inv.paymentStatus == com.example.model.InvoicePaymentStatus.ON_CREDIT
             }
             if (!matchesStatus) return@filter false
             if (q.isEmpty()) return@filter true
@@ -1078,7 +1255,7 @@ fun InvoicesHistoryScreen(
                         if (filteredCreditTotalIls > 0.005) {
                             Column {
                                 Text(
-                                    text = lang.tr("فواتير آجلة بالعرض", "Credit in View"),
+                                    text = lang.tr("متبقي ذمم بالعرض", "Unpaid in View"),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -1165,7 +1342,7 @@ fun InvoicesHistoryScreen(
                     shape = RoundedCornerShape(10.dp)
                 )
 
-                // Status Filter Chips (All / Paid Cash / On Credit)
+                // Status Filter Chips (All / Paid Cash / Partial / On Credit)
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1198,6 +1375,21 @@ fun InvoicesHistoryScreen(
                                 )
                             },
                             modifier = Modifier.testTag("invoice_filter_PAID")
+                        )
+                    }
+                    item {
+                        FilterChip(
+                            selected = selectedFilter == InvoiceHistoryFilter.PARTIAL,
+                            onClick = { selectedFilter = InvoiceHistoryFilter.PARTIAL },
+                            label = {
+                                Text(
+                                    lang.tr(
+                                        "سداد جزئي (${WesternFormatters.formatInt(partialCount)})",
+                                        "Partial (${WesternFormatters.formatInt(partialCount)})"
+                                    )
+                                )
+                            },
+                            modifier = Modifier.testTag("invoice_filter_PARTIAL")
                         )
                     }
                     item {
@@ -1275,3 +1467,4 @@ fun InvoicesHistoryScreen(
         }
     }
 }
+
