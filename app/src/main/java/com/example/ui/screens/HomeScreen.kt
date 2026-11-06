@@ -851,12 +851,15 @@ private fun ActionableLowStockSection(
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     if (lowStockProducts.size > 2) {
                         TextButton(
                             onClick = { expanded = !expanded },
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                            modifier = Modifier.height(30.dp)
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.heightIn(min = 48.dp)
                         ) {
                             Text(
                                 text = if (expanded) {
@@ -864,13 +867,13 @@ private fun ActionableLowStockSection(
                                 } else {
                                     "+${WesternFormatters.formatInt(lowStockProducts.size - 2)}"
                                 },
-                                style = MaterialTheme.typography.labelMedium,
+                                style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Icon(
                                 imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                                 contentDescription = null,
-                                modifier = Modifier.size(15.dp),
+                                modifier = Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -878,8 +881,8 @@ private fun ActionableLowStockSection(
 
                     TextButton(
                         onClick = onNavigateToCatalog,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        modifier = Modifier.height(30.dp)
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.heightIn(min = 48.dp)
                     ) {
                         Text(
                             text = lang.tr("الجرد", "Inventory"),
@@ -922,40 +925,37 @@ private fun LowStockActionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp),
+            .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .weight(1f)
-                .padding(end = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                .padding(end = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             Text(
                 text = product.name(lang),
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false)
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = if (isOut) {
-                    lang.tr("• نفد", "• Out")
+                    lang.tr("نفد من المخزون", "Out of stock")
                 } else {
                     if (lang == AppLanguage.AR) {
-                        "• متبقي ${WesternFormatters.formatInt(product.stockCount)} ${product.unit(lang)}"
+                        "متبقي ${WesternFormatters.formatInt(product.stockCount)} ${product.unit(lang)}"
                     } else {
-                        "• ${WesternFormatters.formatInt(product.stockCount)} ${product.unit(lang)}"
+                        "${WesternFormatters.formatInt(product.stockCount)} ${product.unit(lang)} left"
                     }
                 },
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = if (isOut) financial.debit else financial.warning,
-                maxLines = 1
+                color = if (isOut) financial.debit else financial.warning
             )
         }
 
@@ -963,14 +963,14 @@ private fun LowStockActionRow(
             FilledTonalButton(
                 onClick = onRestock,
                 modifier = Modifier
-                    .height(34.dp)
+                    .heightIn(min = 48.dp)
                     .testTag("restock_${product.id}"),
-                shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
             ) {
                 Text(
                     text = lang.tr("+10 توريد", "+10 Restock"),
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
                     fontFamily = CairoFontFamily
                 )
@@ -978,13 +978,13 @@ private fun LowStockActionRow(
         } else if (!isOut) {
             OutlinedButton(
                 onClick = onAddToSale,
-                modifier = Modifier.height(34.dp),
-                shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                modifier = Modifier.heightIn(min = 48.dp),
+                shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
             ) {
                 Text(
                     text = lang.tr("بيع", "Sell"),
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold
                 )
             }
@@ -1020,8 +1020,10 @@ private fun RecentInvoicesSection(
             )
             TextButton(
                 onClick = onViewAllInvoices,
-                modifier = Modifier.testTag("view_all_invoices_button"),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("view_all_invoices_button"),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
             ) {
                 Text(
                     text = lang.tr("كل الفواتير", "All Invoices"),
@@ -1178,14 +1180,14 @@ private fun OperationPill(
     Surface(
         onClick = onClick,
         modifier = Modifier
-            .heightIn(min = 44.dp)
+            .heightIn(min = 48.dp)
             .testTag(testTag),
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -1193,7 +1195,7 @@ private fun OperationPill(
                 imageVector = icon,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(17.dp)
+                modifier = Modifier.size(18.dp)
             )
             Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
                 Text(
@@ -1291,10 +1293,10 @@ fun RecentInvoiceCard(
             ) {
                 Text(
                     text = customerTitle,
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
                         .weight(1f)

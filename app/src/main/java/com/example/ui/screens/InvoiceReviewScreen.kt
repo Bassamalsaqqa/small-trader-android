@@ -309,9 +309,9 @@ private fun EditableInvoiceLinesSection(
                 FilledTonalButton(
                     onClick = onAddMoreItems,
                     shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     modifier = Modifier
-                        .heightIn(min = 38.dp)
+                        .heightIn(min = 48.dp)
                         .testTag("invoice_add_more_items_button")
                 ) {
                     Icon(
@@ -372,7 +372,7 @@ private fun EditableInvoiceLinesSection(
                             )
                             Text(
                                 text = product.name(lang),
-                                style = MaterialTheme.typography.titleSmall,
+                                style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 2,
@@ -388,69 +388,73 @@ private fun EditableInvoiceLinesSection(
                         )
                     }
 
-                    // Bottom Row: Unit price × quantity & stock impact | Remove + [- qty +] stepper
+                    // Bottom Row: Two-line Unit price × quantity & stock impact | Remove + [- qty +] 48dp stepper
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = buildString {
-                                append("${WesternFormatters.formatIls(product.priceIls)} × ${WesternFormatters.formatInt(item.quantity)} (${product.unit(lang)})")
-                                append(" • ")
-                                append(
-                                    when {
-                                        !product.isStockTracked -> lang.tr("مادة حرة", "Custom")
-                                        isMaxStock -> lang.tr(
-                                            "الحد الأقصى (${WesternFormatters.formatInt(product.stockCount)})",
-                                            "Max (${WesternFormatters.formatInt(product.stockCount)})"
-                                        )
-                                        else -> lang.tr(
-                                            "يتبقى ${WesternFormatters.formatInt(stockRemainingAfterSale)}",
-                                            "${WesternFormatters.formatInt(stockRemainingAfterSale)} left"
-                                        )
-                                    }
-                                )
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = if (isMaxStock) FontWeight.SemiBold else FontWeight.Medium,
-                            color = if (isMaxStock) financial.warning else MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                        Column(
                             modifier = Modifier
                                 .weight(1f)
-                                .padding(end = 10.dp)
-                        )
+                                .padding(end = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = "${WesternFormatters.formatIls(product.priceIls)} × ${WesternFormatters.formatInt(item.quantity)} (${product.unit(lang)})",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = when {
+                                    !product.isStockTracked -> lang.tr("مادة حرة بدون جرد مخزني", "Custom item (no stock deduction)")
+                                    isMaxStock -> lang.tr(
+                                        "الحد الأقصى بالمخزون (${WesternFormatters.formatInt(product.stockCount)})",
+                                        "Max available stock (${WesternFormatters.formatInt(product.stockCount)})"
+                                    )
+                                    else -> lang.tr(
+                                        "يتبقى بالمخزون بعد البيع: ${WesternFormatters.formatInt(stockRemainingAfterSale)}",
+                                        "Stock remaining after sale: ${WesternFormatters.formatInt(stockRemainingAfterSale)}"
+                                    )
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (isMaxStock) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (isMaxStock) financial.warning else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             IconButton(
                                 onClick = { onRemoveProduct(product.id) },
                                 modifier = Modifier
-                                    .size(34.dp)
+                                    .size(48.dp)
                                     .testTag("remove_line_${product.id}")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.DeleteOutline,
                                     contentDescription = lang.tr("حذف الصنف", "Remove item"),
                                     tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(19.dp)
                                 )
                             }
 
                             FilledTonalIconButton(
                                 onClick = { onDecrementProduct(product.id) },
                                 modifier = Modifier
-                                    .size(34.dp)
+                                    .size(48.dp)
                                     .testTag("dec_line_${product.id}"),
-                                shape = RoundedCornerShape(8.dp)
+                                shape = RoundedCornerShape(10.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Remove,
                                     contentDescription = lang.tr("إنقاص", "Decrease"),
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
 
@@ -468,14 +472,14 @@ private fun EditableInvoiceLinesSection(
                                 onClick = { onIncrementProduct(product) },
                                 enabled = !isMaxStock,
                                 modifier = Modifier
-                                    .size(34.dp)
+                                    .size(48.dp)
                                     .testTag("inc_line_${product.id}"),
-                                shape = RoundedCornerShape(8.dp)
+                                shape = RoundedCornerShape(10.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Add,
                                     contentDescription = lang.tr("زيادة", "Increase"),
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
@@ -569,9 +573,9 @@ private fun CustomerAndAccountImpactCard(
                 FilledTonalButton(
                     onClick = onOpenCustomerPicker,
                     shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     modifier = Modifier
-                        .heightIn(min = 38.dp)
+                        .heightIn(min = 48.dp)
                         .testTag("select_customer_button")
                 ) {
                     Icon(
@@ -619,7 +623,7 @@ private fun CustomerAndAccountImpactCard(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = selectedCustomer.name(lang),
-                                    style = MaterialTheme.typography.titleSmall,
+                                    style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface,
                                     maxLines = 2,
@@ -634,18 +638,20 @@ private fun CustomerAndAccountImpactCard(
 
                             TextButton(
                                 onClick = onClearCustomer,
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                modifier = Modifier.testTag("clear_selected_customer_button")
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("clear_selected_customer_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = null,
-                                    modifier = Modifier.size(15.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(3.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = lang.tr("نقدي عام", "Walk-in"),
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
@@ -1159,7 +1165,7 @@ private fun DiscountAndRoundingCard(
                         label = {
                             Text(
                                 text = lang.tr(preset.labelAr, preset.labelEn),
-                                style = MaterialTheme.typography.labelMedium,
+                                style = MaterialTheme.typography.labelLarge,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                             )
                         },
@@ -1168,7 +1174,9 @@ private fun DiscountAndRoundingCard(
                             selectedContainerColor = MaterialTheme.colorScheme.primary,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimary
                         ),
-                        modifier = Modifier.testTag("discount_chip_${preset.name}")
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("discount_chip_${preset.name}")
                     )
                 }
             }

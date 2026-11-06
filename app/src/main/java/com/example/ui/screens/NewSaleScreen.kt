@@ -146,35 +146,17 @@ fun NewSaleScreen(
                             )
                         },
                         trailingIcon = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(end = 4.dp)
-                            ) {
-                                if (state.searchQuery.isNotEmpty()) {
-                                    IconButton(
-                                        onClick = { onSearchQueryChange("") },
-                                        modifier = Modifier
-                                            .size(34.dp)
-                                            .testTag("clear_search_button")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Clear,
-                                            contentDescription = lang.tr("مسح البحث", "Clear search"),
-                                            modifier = Modifier.size(17.dp)
-                                        )
-                                    }
-                                }
+                            if (state.searchQuery.isNotEmpty()) {
                                 IconButton(
-                                    onClick = onOpenScanner,
+                                    onClick = { onSearchQueryChange("") },
                                     modifier = Modifier
-                                        .size(38.dp)
-                                        .testTag("sale_scan_barcode_button")
+                                        .size(48.dp)
+                                        .testTag("clear_search_button")
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.QrCodeScanner,
-                                        contentDescription = lang.tr("إدخال أو مسح باركود", "Enter or Scan Barcode"),
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
+                                        imageVector = Icons.Default.Clear,
+                                        contentDescription = lang.tr("مسح البحث", "Clear search"),
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -196,6 +178,25 @@ fun NewSaleScreen(
                         )
                     )
 
+                    // Dedicated 48dp Barcode Scanner button with clear spacing
+                    FilledTonalIconButton(
+                        onClick = onOpenScanner,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                            contentColor = MaterialTheme.colorScheme.primary
+                        ),
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("sale_scan_barcode_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.QrCodeScanner,
+                            contentDescription = lang.tr("إدخال أو مسح باركود", "Enter or Scan Barcode"),
+                            modifier = Modifier.size(21.dp)
+                        )
+                    }
+
                     // Always-visible custom item entry
                     FilledTonalButton(
                         onClick = onOpenCustomItem,
@@ -206,7 +207,7 @@ fun NewSaleScreen(
                             contentColor = MaterialTheme.colorScheme.onSurface
                         ),
                         modifier = Modifier
-                            .height(48.dp)
+                            .heightIn(min = 48.dp)
                             .testTag("sale_custom_item_chip")
                     ) {
                         Icon(
@@ -225,7 +226,7 @@ fun NewSaleScreen(
 
                 // Category Filter Strip
                 LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(end = 4.dp)
                 ) {
                     items(ProductCategory.entries, key = { it.name }) { category ->
@@ -236,11 +237,11 @@ fun NewSaleScreen(
                             label = {
                                 Text(
                                     text = category.label(lang),
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.labelLarge,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                 )
                             },
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(10.dp),
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = MaterialTheme.colorScheme.primary,
                                 selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
@@ -254,7 +255,7 @@ fun NewSaleScreen(
                                 selectedBorderColor = MaterialTheme.colorScheme.primary
                             ),
                             modifier = Modifier
-                                .heightIn(min = 34.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("category_chip_${category.name}")
                         )
                     }
@@ -512,7 +513,7 @@ private fun ProductSaleCatalogRow(
             ) {
                 Text(
                     text = product.name(lang),
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -574,7 +575,7 @@ private fun ProductSaleCatalogRow(
                 }
             }
 
-            // Right/End: Tabular Price + Calm Action / Stepper
+            // Right/End: Tabular Price + 48dp Action / Stepper
             if (!isSelected) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -611,7 +612,7 @@ private fun ProductSaleCatalogRow(
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(48.dp)
                                 .testTag("add_product_${product.id}")
                         ) {
                             Box(contentAlignment = Alignment.Center) {
@@ -619,7 +620,7 @@ private fun ProductSaleCatalogRow(
                                     imageVector = Icons.Default.Add,
                                     contentDescription = lang.tr("إضافة للسلة", "Add to basket"),
                                     tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
@@ -637,9 +638,9 @@ private fun ProductSaleCatalogRow(
                             WesternFormatters.formatIls(product.priceIls)
                         },
                         style = if (quantityInBasket > 1) {
-                            MaterialTheme.typography.labelMedium
+                            MaterialTheme.typography.labelLarge
                         } else {
-                            MaterialTheme.typography.titleSmall
+                            MaterialTheme.typography.titleMedium
                         },
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
@@ -652,9 +653,9 @@ private fun ProductSaleCatalogRow(
                         FilledTonalIconButton(
                             onClick = onDecrement,
                             modifier = Modifier
-                                .size(34.dp)
+                                .size(48.dp)
                                 .testTag("dec_product_${product.id}"),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(10.dp),
                             colors = IconButtonDefaults.filledTonalIconButtonColors(
                                 containerColor = MaterialTheme.colorScheme.surface,
                                 contentColor = MaterialTheme.colorScheme.onSurface
@@ -663,7 +664,7 @@ private fun ProductSaleCatalogRow(
                             Icon(
                                 imageVector = Icons.Default.Remove,
                                 contentDescription = lang.tr("إنقاص", "Decrease"),
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
 
@@ -681,14 +682,14 @@ private fun ProductSaleCatalogRow(
                             onClick = onAdd,
                             enabled = !isMaxStockReached,
                             modifier = Modifier
-                                .size(34.dp)
+                                .size(48.dp)
                                 .testTag("inc_product_${product.id}"),
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(10.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Add,
                                 contentDescription = lang.tr("زيادة", "Increase"),
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
@@ -762,8 +763,10 @@ private fun BasketStickyBottomSheet(
                         }
                         TextButton(
                             onClick = onClearBasket,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            modifier = Modifier.testTag("clear_basket_button")
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("clear_basket_button")
                         ) {
                             Icon(
                                 imageVector = Icons.Default.DeleteOutline,
@@ -788,8 +791,8 @@ private fun BasketStickyBottomSheet(
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 220.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                            .heightIn(max = 240.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         items(state.basket, key = { "basket_${it.product.id}" }) { item ->
                             val atMaxStock = item.product.isStockTracked && item.quantity >= item.product.stockCount
@@ -808,7 +811,7 @@ private fun BasketStickyBottomSheet(
                                         text = item.product.name(lang),
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
+                                        maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier
                                             .weight(1f)
@@ -816,7 +819,7 @@ private fun BasketStickyBottomSheet(
                                     )
                                     Text(
                                         text = WesternFormatters.formatIls(item.lineTotal),
-                                        style = MaterialTheme.typography.titleSmall,
+                                        style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
@@ -847,55 +850,55 @@ private fun BasketStickyBottomSheet(
 
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
                                         IconButton(
                                             onClick = { onRemove(item.product.id) },
                                             modifier = Modifier
-                                                .size(30.dp)
+                                                .size(48.dp)
                                                 .testTag("basket_remove_${item.product.id}")
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.DeleteOutline,
                                                 contentDescription = lang.tr("حذف الصنف", "Remove item"),
                                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(16.dp)
+                                                modifier = Modifier.size(18.dp)
                                             )
                                         }
 
                                         FilledTonalIconButton(
                                             onClick = { onDecrement(item.product.id) },
                                             modifier = Modifier
-                                                .size(30.dp)
+                                                .size(48.dp)
                                                 .testTag("basket_dec_${item.product.id}"),
-                                            shape = RoundedCornerShape(8.dp)
+                                            shape = RoundedCornerShape(10.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Remove,
                                                 contentDescription = lang.tr("إنقاص", "Decrease"),
-                                                modifier = Modifier.size(15.dp)
+                                                modifier = Modifier.size(18.dp)
                                             )
                                         }
 
                                         Text(
                                             text = WesternFormatters.formatInt(item.quantity),
-                                            style = MaterialTheme.typography.titleSmall,
+                                            style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 2.dp)
+                                            modifier = Modifier.padding(horizontal = 4.dp)
                                         )
 
                                         FilledIconButton(
                                             onClick = { onIncrement(item.product) },
                                             enabled = !atMaxStock,
                                             modifier = Modifier
-                                                .size(30.dp)
+                                                .size(48.dp)
                                                 .testTag("basket_inc_${item.product.id}"),
-                                            shape = RoundedCornerShape(8.dp)
+                                            shape = RoundedCornerShape(10.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Add,
                                                 contentDescription = lang.tr("زيادة", "Increase"),
-                                                modifier = Modifier.size(15.dp)
+                                                modifier = Modifier.size(18.dp)
                                             )
                                         }
                                     }

@@ -75,15 +75,15 @@ val Typography = Typography(
     titleLarge = TextStyle(
         fontFamily = CairoFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 16.5.sp,
-        lineHeight = 23.sp,
+        fontSize = 17.sp,
+        lineHeight = 24.sp,
         fontFeatureSettings = TabularNumsFeature
     ),
     titleMedium = TextStyle(
         fontFamily = CairoFontFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 15.5.sp,
-        lineHeight = 22.sp,
+        fontSize = 16.sp,
+        lineHeight = 23.sp,
         fontFeatureSettings = TabularNumsFeature
     ),
     titleSmall = TextStyle(

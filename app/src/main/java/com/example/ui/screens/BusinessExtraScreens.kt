@@ -260,12 +260,12 @@ fun ExpensesScreen(
                             )
                             IconButton(
                                 onClick = onDismissFeedback,
-                                modifier = Modifier.size(36.dp)
+                                modifier = Modifier.size(48.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = lang.tr("إغلاق", "Dismiss"),
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
@@ -562,7 +562,7 @@ fun AddExpenseDialog(
                             selected = selectedCategory == cat,
                             onClick = { selectedCategory = cat },
                             label = { Text(cat.label(lang)) },
-                            modifier = Modifier.heightIn(min = 34.dp)
+                            modifier = Modifier.heightIn(min = 48.dp)
                         )
                     }
                 }

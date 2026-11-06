@@ -243,12 +243,12 @@ fun CustomersScreen(
                             if (onDismissFeedback != null) {
                                 IconButton(
                                     onClick = onDismissFeedback,
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(48.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Clear,
                                         contentDescription = lang.tr("إغلاق", "Dismiss"),
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -556,13 +556,15 @@ private fun CustomerDirectoryRow(
                 if (onQuickCollect != null) {
                     FilledTonalButton(
                         onClick = onQuickCollect,
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                        modifier = Modifier.testTag("quick_collect_${customer.id}")
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("quick_collect_${customer.id}")
                     ) {
                         Text(
                             text = lang.tr("قبض", "Collect"),
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                         )
                     }
                 }
@@ -645,12 +647,12 @@ fun CustomerDetailScreen(
                             if (onDismissFeedback != null) {
                                 IconButton(
                                     onClick = onDismissFeedback,
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(48.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Clear,
                                         contentDescription = lang.tr("إغلاق", "Dismiss"),
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -1091,15 +1093,15 @@ private fun CustomerStatementRow(
                 if (onOpenInvoice != null && tx.invoiceNumber != null) {
                     TextButton(
                         onClick = onOpenInvoice,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        modifier = Modifier.height(28.dp)
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.heightIn(min = 48.dp)
                     ) {
                         Text(
                             text = lang.tr(
                                 "عرض الفاتورة ${WesternFormatters.formatInvoiceCode(tx.invoiceNumber)}",
                                 "View ${WesternFormatters.formatInvoiceCode(tx.invoiceNumber)}"
                             ),
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                         )
                     }
                 }
@@ -1209,7 +1211,7 @@ fun CustomerPaymentCollectionDialog(
                                     )
                                 },
                                 modifier = Modifier
-                                    .heightIn(min = 34.dp)
+                                    .heightIn(min = 48.dp)
                                     .testTag("collect_preset_full")
                             )
                         }
@@ -1219,7 +1221,7 @@ fun CustomerPaymentCollectionDialog(
                             selected = payAmountText == preset.toString(),
                             onClick = { payAmountText = preset.toString() },
                             label = { Text("$preset ₪") },
-                            modifier = Modifier.heightIn(min = 34.dp)
+                            modifier = Modifier.heightIn(min = 48.dp)
                         )
                     }
                 }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -141,13 +142,13 @@ fun CashPaymentScreen(
                         )
                         IconButton(
                             onClick = onDismissCheckoutError,
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(48.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Close,
                                 contentDescription = lang.tr("إغلاق التنبيه", "Dismiss error"),
                                 tint = financial.debit,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
@@ -301,11 +302,12 @@ fun CashPaymentScreen(
                                                 onSetExactAmount()
                                                 focusManager.clearFocus()
                                             },
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                            modifier = Modifier.heightIn(min = 48.dp)
                                         ) {
                                             Text(
                                                 text = lang.tr("بالضبط", "Exact"),
-                                                style = MaterialTheme.typography.labelMedium,
+                                                style = MaterialTheme.typography.labelLarge,
                                                 fontWeight = FontWeight.Bold
                                             )
                                         }
@@ -317,7 +319,7 @@ fun CashPaymentScreen(
                                                 onUpdateCashText("")
                                             },
                                             modifier = Modifier
-                                                .size(32.dp)
+                                                .size(48.dp)
                                                 .testTag("keypad_btn_C")
                                         ) {
                                             Icon(
@@ -375,7 +377,7 @@ fun CashPaymentScreen(
                                 ),
                                 modifier = Modifier
                                     .weight(1.25f)
-                                    .height(42.dp)
+                                    .heightIn(min = 48.dp)
                                     .testTag("cash_exact_button")
                             ) {
                                 Row(
@@ -422,7 +424,7 @@ fun CashPaymentScreen(
                                     ),
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(42.dp)
+                                        .heightIn(min = 48.dp)
                                         .testTag("cash_bill_$bill")
                                 ) {
                                     Row(
@@ -431,7 +433,7 @@ fun CashPaymentScreen(
                                     ) {
                                         Text(
                                             text = "$bill",
-                                            style = MaterialTheme.typography.titleSmall.copy(
+                                            style = MaterialTheme.typography.titleMedium.copy(
                                                 fontWeight = if (coversDue || isSelectedBill) FontWeight.Bold else FontWeight.Medium
                                             ),
                                             color = when {
@@ -532,10 +534,10 @@ fun CashPaymentScreen(
                                             onSetExactAmount()
                                             focusManager.clearFocus()
                                         },
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                                        shape = RoundedCornerShape(10.dp),
                                         modifier = Modifier
-                                            .height(34.dp)
+                                            .heightIn(min = 48.dp)
                                             .testTag("recover_exact_cash_button")
                                     ) {
                                         Text(
@@ -543,7 +545,7 @@ fun CashPaymentScreen(
                                                 "تعيين المبلغ الكامل (${WesternFormatters.formatIls(state.basketNetTotalIls)})",
                                                 "Set Exact Due (${WesternFormatters.formatIls(state.basketNetTotalIls)})"
                                             ),
-                                            style = MaterialTheme.typography.labelMedium,
+                                            style = MaterialTheme.typography.labelLarge,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
@@ -627,10 +629,10 @@ fun CashPaymentScreen(
 
                         OutlinedButton(
                             onClick = { isCustomerPickerOpen = true },
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
-                                .height(36.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("payment_select_customer_button")
                         ) {
                             Icon(
@@ -649,7 +651,7 @@ fun CashPaymentScreen(
                                 } else {
                                     lang.tr("اختيار زبون", "Select Customer")
                                 },
-                                style = MaterialTheme.typography.labelMedium,
+                                style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -874,13 +876,13 @@ fun CashPaymentScreen(
                             "On confirm: Drawer +${WesternFormatters.formatIls(state.basketNetTotalIls)} • No change due • Deduct ${WesternFormatters.formatInt(state.stockUnitsToDeduct)} stock"
                         )
                     },
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelMedium,
                     color = if (sufficient) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     } else {
                         financial.warning
                     },
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
 

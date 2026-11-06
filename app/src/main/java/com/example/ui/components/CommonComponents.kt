@@ -209,20 +209,21 @@ fun SmallTraderTopBar(
                 if (showResumeBasket) {
                     Surface(
                         onClick = { onNavigateTo(TraderScreen.NEW_SALE) },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(10.dp),
                         color = MaterialTheme.colorScheme.primaryContainer,
                         modifier = Modifier
                             .padding(end = 4.dp)
+                            .heightIn(min = 48.dp)
                             .testTag("top_bar_resume_sale_button")
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ShoppingCart,
                                 contentDescription = null,
-                                modifier = Modifier.size(15.dp),
+                                modifier = Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                             Spacer(modifier = Modifier.width(5.dp))
@@ -231,7 +232,7 @@ fun SmallTraderTopBar(
                                     "السلة (${WesternFormatters.formatInt(state.basketItemCount)})",
                                     "Sale (${WesternFormatters.formatInt(state.basketItemCount)})"
                                 ),
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
@@ -259,7 +260,7 @@ fun SmallTraderTopBar(
                     val isConnected = state.connectedPrinter != null
                     Surface(
                         onClick = onOpenPrinter,
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(10.dp),
                         color = if (isConnected) {
                             MaterialTheme.colorScheme.primaryContainer
                         } else {
@@ -267,11 +268,12 @@ fun SmallTraderTopBar(
                         },
                         modifier = Modifier
                             .padding(end = 8.dp)
+                            .heightIn(min = 48.dp)
                             .testTag("top_bar_printer_button")
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                         ) {
                             Icon(
                                 imageVector = if (isConnected) Icons.Default.BluetoothConnected else Icons.Default.Bluetooth,
@@ -286,7 +288,7 @@ fun SmallTraderTopBar(
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = "${state.receiptPaperWidthMm}mm",
-                                style = MaterialTheme.typography.labelSmall.copy(
+                                style = MaterialTheme.typography.labelMedium.copy(
                                     fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.Bold
                                 ),
@@ -644,7 +646,7 @@ fun SimulatedBarcodeScannerSheet(
                 }
                 IconButton(
                     onClick = onDismiss,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(48.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
@@ -776,9 +778,9 @@ fun SimulatedBarcodeScannerSheet(
                     OutlinedButton(
                         onClick = onScanRandom,
                         shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                         modifier = Modifier
-                            .height(38.dp)
+                            .heightIn(min = 48.dp)
                             .testTag("scan_random_product_button")
                     ) {
                         Icon(
@@ -1018,7 +1020,7 @@ fun BluetoothPrinterModalSheet(
                 }
                 IconButton(
                     onClick = onDismiss,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(48.dp)
                 ) {
                     Icon(
                         Icons.Default.Close,
@@ -1071,8 +1073,10 @@ fun BluetoothPrinterModalSheet(
                     if (state.connectedPrinter != null) {
                         TextButton(
                             onClick = onDisconnectPrinter,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            modifier = Modifier.testTag("disconnect_printer_button")
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("disconnect_printer_button")
                         ) {
                             Text(
                                 text = lang.tr("فصل", "Disconnect"),
@@ -1101,7 +1105,9 @@ fun BluetoothPrinterModalSheet(
                                 fontFamily = MonoFontFamily
                             )
                         },
-                        modifier = Modifier.testTag("paper_width_58_chip")
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("paper_width_58_chip")
                     )
                     FilterChip(
                         selected = state.receiptPaperWidthMm == 80,
@@ -1112,7 +1118,9 @@ fun BluetoothPrinterModalSheet(
                                 fontFamily = MonoFontFamily
                             )
                         },
-                        modifier = Modifier.testTag("paper_width_80_chip")
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("paper_width_80_chip")
                     )
                 }
             }
@@ -1131,7 +1139,9 @@ fun BluetoothPrinterModalSheet(
                 )
                 TextButton(
                     onClick = onScanPrinters,
-                    modifier = Modifier.testTag("scan_printers_button")
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("scan_printers_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Refresh,

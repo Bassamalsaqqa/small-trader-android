@@ -552,12 +552,12 @@ fun ProductDetailScreen(
                             if (onDismissFeedback != null) {
                                 IconButton(
                                     onClick = onDismissFeedback,
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(48.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Clear,
                                         contentDescription = lang.tr("إغلاق", "Dismiss"),
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -1028,7 +1028,7 @@ fun ProductDetailScreen(
                             label = { Text(lang.tr("إضافة وتوريد (+)", "Add Stock (+)")) },
                             modifier = Modifier
                                 .weight(1f)
-                                .heightIn(min = 36.dp)
+                                .heightIn(min = 48.dp)
                         )
                         FilterChip(
                             selected = !isAddingStock,
@@ -1040,7 +1040,7 @@ fun ProductDetailScreen(
                             label = { Text(lang.tr("خصم / تالف (−)", "Deduct (−)")) },
                             modifier = Modifier
                                 .weight(1f)
-                                .heightIn(min = 36.dp)
+                                .heightIn(min = 48.dp)
                         )
                     }
 
@@ -1074,7 +1074,7 @@ fun ProductDetailScreen(
                                 selected = stockReasonText == preset,
                                 onClick = { stockReasonText = preset },
                                 label = { Text(preset, style = MaterialTheme.typography.labelSmall) },
-                                modifier = Modifier.heightIn(min = 34.dp)
+                                modifier = Modifier.heightIn(min = 48.dp)
                             )
                         }
                     }

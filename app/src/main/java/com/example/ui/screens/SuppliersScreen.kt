@@ -249,12 +249,12 @@ fun SuppliersScreen(
                             if (onDismissFeedback != null) {
                                 IconButton(
                                     onClick = onDismissFeedback,
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(48.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Clear,
                                         contentDescription = lang.tr("إغلاق", "Dismiss"),
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -629,12 +629,12 @@ fun SupplierDetailScreen(
                             if (onDismissFeedback != null) {
                                 IconButton(
                                     onClick = onDismissFeedback,
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(48.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Clear,
                                         contentDescription = lang.tr("إغلاق", "Dismiss"),
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -979,7 +979,7 @@ fun SupplierDetailScreen(
                                             )
                                         )
                                     },
-                                    modifier = Modifier.heightIn(min = 34.dp)
+                                    modifier = Modifier.heightIn(min = 48.dp)
                                 )
                             }
                         }
@@ -988,7 +988,7 @@ fun SupplierDetailScreen(
                                 selected = payAmountText == preset.toString(),
                                 onClick = { payAmountText = preset.toString() },
                                 label = { Text("$preset ₪") },
-                                modifier = Modifier.heightIn(min = 34.dp)
+                                modifier = Modifier.heightIn(min = 48.dp)
                             )
                         }
                     }
@@ -1290,7 +1290,7 @@ fun ReceivePurchaseBillDialog(
                                 selected = selectedSupplierId == sup.id,
                                 onClick = { selectedSupplierId = sup.id },
                                 label = { Text(sup.name(lang), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                modifier = Modifier.heightIn(min = 34.dp)
+                                modifier = Modifier.heightIn(min = 48.dp)
                             )
                         }
                     }
