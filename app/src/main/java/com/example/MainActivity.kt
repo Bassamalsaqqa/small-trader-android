@@ -198,8 +198,20 @@ fun SmallTraderApp(
                                 state = state,
                                 onPrintReceipt = traderViewModel::simulateThermalPrint,
                                 onOpenPrinterSettings = { traderViewModel.setPrinterSheetOpen(true) },
-                                onStartNewSale = traderViewModel::startFreshSale,
-                                onBackToHome = { traderViewModel.navigateTo(TraderScreen.HOME) },
+                                onStartNewSale = {
+                                    if (state.basket.isNotEmpty()) {
+                                        traderViewModel.navigateTo(TraderScreen.NEW_SALE)
+                                    } else {
+                                        traderViewModel.startFreshSale()
+                                    }
+                                },
+                                onBackToHome = {
+                                    if (!state.isNewlyCompletedSale && state.screenHistory.isNotEmpty()) {
+                                        traderViewModel.navigateBack()
+                                    } else {
+                                        traderViewModel.navigateTo(TraderScreen.HOME)
+                                    }
+                                },
                                 onOpenCustomerAccount = { cust ->
                                     traderViewModel.selectCustomerForDetail(cust)
                                 }
@@ -210,7 +222,13 @@ fun SmallTraderApp(
                             InvoicesHistoryScreen(
                                 state = state,
                                 onOpenInvoice = traderViewModel::openInvoiceReceipt,
-                                onStartNewSale = traderViewModel::startFreshSale
+                                onStartNewSale = {
+                                    if (state.basket.isNotEmpty()) {
+                                        traderViewModel.navigateTo(TraderScreen.NEW_SALE)
+                                    } else {
+                                        traderViewModel.startFreshSale()
+                                    }
+                                }
                             )
                         }
 

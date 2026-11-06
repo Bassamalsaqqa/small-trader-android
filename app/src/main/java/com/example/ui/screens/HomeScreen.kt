@@ -201,15 +201,23 @@ fun HomeScreen(
                     }
                 }
             } else {
+                // 3. Store Operations & Back-Office Hub (Immediately visible 2x2 grid — no horizontal scroll)
                 item {
-                    RecentInvoicesSection(
-                        invoices = state.invoices.take(2),
+                    SecondaryOperationsSection(
+                        state = state,
                         lang = lang,
-                        onOpenInvoice = onOpenInvoice,
-                        onViewAllInvoices = onViewAllInvoices
+                        canViewReports = canViewReports,
+                        onNavigateToCatalog = onNavigateToCatalog,
+                        onNavigateToSuppliers = onNavigateToSuppliers,
+                        onNavigateToExpenses = onNavigateToExpenses,
+                        onNavigateToReports = onNavigateToReports,
+                        onNavigateToCustomers = onNavigateToCustomers,
+                        onOpenPrinter = onOpenPrinter,
+                        onNavigateToSettings = onNavigateToSettings
                     )
                 }
 
+                // 4. Actionable Low-Stock Warning
                 if (state.lowStockProducts.isNotEmpty()) {
                     item {
                         ActionableLowStockSection(
@@ -223,19 +231,13 @@ fun HomeScreen(
                     }
                 }
 
-                // 4. Secondary Store Operations (Relocated from 6-card directory to a calm utility strip)
+                // 5. Latest Invoices
                 item {
-                    SecondaryOperationsSection(
-                        state = state,
+                    RecentInvoicesSection(
+                        invoices = state.invoices.take(2),
                         lang = lang,
-                        canViewReports = canViewReports,
-                        onNavigateToCatalog = onNavigateToCatalog,
-                        onNavigateToSuppliers = onNavigateToSuppliers,
-                        onNavigateToExpenses = onNavigateToExpenses,
-                        onNavigateToReports = onNavigateToReports,
-                        onNavigateToCustomers = onNavigateToCustomers,
-                        onOpenPrinter = onOpenPrinter,
-                        onNavigateToSettings = onNavigateToSettings
+                        onOpenInvoice = onOpenInvoice,
+                        onViewAllInvoices = onViewAllInvoices
                     )
                 }
             }
@@ -1063,10 +1065,10 @@ private fun RecentInvoicesSection(
 }
 
 /**
- * Secondary Store Operations:
- * Relocates back-office destinations that are not in the primary bottom bar into a calm,
- * compact horizontal utility strip so they remain 1-tap reachable without turning Home into
- * a 6-card module directory.
+ * Secondary Store Operations Hub:
+ * Displays back-office destinations (Inventory, Suppliers, Expenses, Reports) in a balanced 2x2
+ * non-scrolling Bento Grid so merchants never have to scroll horizontally to discover core store modules,
+ * paired with a compact 2-button utility row for Printer and Store Settings.
  */
 @Composable
 private fun SecondaryOperationsSection(
@@ -1081,128 +1083,176 @@ private fun SecondaryOperationsSection(
     onOpenPrinter: () -> Unit,
     onNavigateToSettings: () -> Unit
 ) {
+    val lowStockCount = state.lowStockProducts.size
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
-            text = lang.tr("إدارة المتجر", "Store Operations"),
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            text = lang.tr("إدارة المتجر والدفاتر", "Store Operations & Ledgers"),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
         )
 
+        // Row 1: Inventory & Suppliers
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            OperationPill(
-                title = lang.tr("المخزون", "Inventory"),
-                subtitle = if (lang == AppLanguage.AR) {
-                    "${WesternFormatters.formatInt(state.products.size)} صنف"
+            OperationGridTile(
+                title = lang.tr("المخزون والأصناف", "Inventory"),
+                subtitle = if (lowStockCount > 0) {
+                    lang.tr(
+                        "${WesternFormatters.formatInt(state.products.size)} صنف • ${WesternFormatters.formatInt(lowStockCount)} نواقص",
+                        "${WesternFormatters.formatInt(state.products.size)} items • ${WesternFormatters.formatInt(lowStockCount)} low"
+                    )
                 } else {
-                    "${WesternFormatters.formatInt(state.products.size)} items"
+                    lang.tr(
+                        "${WesternFormatters.formatInt(state.products.size)} صنف مسجل",
+                        "${WesternFormatters.formatInt(state.products.size)} items"
+                    )
                 },
                 icon = Icons.Default.Inventory2,
                 onClick = onNavigateToCatalog,
-                testTag = "home_catalog_button"
+                testTag = "home_catalog_button",
+                modifier = Modifier.weight(1f)
             )
 
-            OperationPill(
-                title = lang.tr("الموردون", "Suppliers"),
-                subtitle = if (lang == AppLanguage.AR) {
-                    "${WesternFormatters.formatInt(state.suppliers.size)} مورد"
-                } else {
-                    "${WesternFormatters.formatInt(state.suppliers.size)} vendors"
-                },
+            OperationGridTile(
+                title = lang.tr("الموردون والمشتريات", "Suppliers"),
+                subtitle = lang.tr(
+                    "${WesternFormatters.formatInt(state.suppliers.size)} مورد • ${WesternFormatters.formatIls(state.totalSupplierPayablesIls)}",
+                    "${WesternFormatters.formatInt(state.suppliers.size)} vendors • ${WesternFormatters.formatIls(state.totalSupplierPayablesIls)}"
+                ),
                 icon = Icons.Default.LocalShipping,
                 onClick = onNavigateToSuppliers,
-                testTag = "home_suppliers_button"
+                testTag = "home_suppliers_button",
+                modifier = Modifier.weight(1f)
             )
+        }
 
-            OperationPill(
-                title = lang.tr("المصاريف", "Expenses"),
-                subtitle = WesternFormatters.formatIls(state.shiftExpensesIls),
+        // Row 2: Expenses & Reports (or Customers for Cashier)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            OperationGridTile(
+                title = lang.tr("المصاريف والنثريات", "Expenses"),
+                subtitle = lang.tr(
+                    "اليوم: ${WesternFormatters.formatIls(state.shiftExpensesIls)}",
+                    "Today: ${WesternFormatters.formatIls(state.shiftExpensesIls)}"
+                ),
                 icon = Icons.Default.Payments,
                 onClick = onNavigateToExpenses,
-                testTag = "home_expenses_button"
+                testTag = "home_expenses_button",
+                modifier = Modifier.weight(1f)
             )
 
             if (canViewReports) {
-                OperationPill(
-                    title = lang.tr("التقارير", "Reports"),
-                    subtitle = lang.tr("اليومية والأرباح", "Daily P&L"),
+                OperationGridTile(
+                    title = lang.tr("التقارير والصندوق", "Reports & Drawer"),
+                    subtitle = lang.tr(
+                        "الصندوق: ${WesternFormatters.formatIls(state.drawerTotalCashIls)}",
+                        "Drawer: ${WesternFormatters.formatIls(state.drawerTotalCashIls)}"
+                    ),
                     icon = Icons.Default.Analytics,
                     onClick = onNavigateToReports,
-                    testTag = "home_reports_button"
+                    testTag = "home_reports_button",
+                    modifier = Modifier.weight(1f)
                 )
             } else {
-                // Keep Customers reachable via home_customers_button for Cashier role as well
-                OperationPill(
-                    title = lang.tr("الزبائن", "Customers"),
-                    subtitle = lang.tr("دفتر الديون", "Receivables"),
+                OperationGridTile(
+                    title = lang.tr("دفتر الزبائن", "Customers"),
+                    subtitle = lang.tr(
+                        "الذمم: ${WesternFormatters.formatIls(state.totalCustomerDebtsIls)}",
+                        "Receivables: ${WesternFormatters.formatIls(state.totalCustomerDebtsIls)}"
+                    ),
                     icon = Icons.Default.People,
                     onClick = onNavigateToCustomers,
-                    testTag = "home_customers_button"
+                    testTag = "home_customers_button",
+                    modifier = Modifier.weight(1f)
                 )
             }
+        }
 
-            OperationPill(
-                title = lang.tr("الطابعة", "Printer"),
+        // Utility Row: Thermal Printer Setup & Store/Profile Settings
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            OperationUtilityButton(
+                title = lang.tr("الطابعة الحرارية", "Printer"),
                 subtitle = "${WesternFormatters.formatInt(state.receiptPaperWidthMm)}mm",
                 icon = Icons.Default.Print,
                 onClick = onOpenPrinter,
-                testTag = "home_printer_setup_button"
+                testTag = "home_printer_setup_button",
+                modifier = Modifier.weight(1f)
             )
 
-            OperationPill(
-                title = lang.tr("الإعدادات", "Settings"),
+            OperationUtilityButton(
+                title = lang.tr("الإعدادات والملف", "Settings & Profile"),
                 subtitle = state.currentSession.role.label(lang),
                 icon = Icons.Default.Settings,
                 onClick = onNavigateToSettings,
-                testTag = "home_settings_button"
+                testTag = "home_settings_button",
+                modifier = Modifier.weight(1f)
             )
         }
     }
 }
 
 @Composable
-private fun OperationPill(
+private fun OperationGridTile(
     title: String,
     subtitle: String,
     icon: ImageVector,
     onClick: () -> Unit,
-    testTag: String
+    testTag: String,
+    modifier: Modifier = Modifier
 ) {
     Surface(
         onClick = onClick,
-        modifier = Modifier
-            .heightIn(min = 48.dp)
+        modifier = modifier
+            .heightIn(min = 60.dp)
             .testTag(testTag),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp)
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                modifier = Modifier.size(36.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = subtitle,
@@ -1212,6 +1262,61 @@ private fun OperationPill(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun OperationUtilityButton(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    testTag: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier
+            .heightIn(min = 48.dp)
+            .testTag(testTag),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(17.dp)
+                )
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
         }
     }
 }

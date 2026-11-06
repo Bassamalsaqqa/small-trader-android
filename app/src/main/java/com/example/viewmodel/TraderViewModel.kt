@@ -358,6 +358,15 @@ data class TraderUiState(
     val isRootDestination: Boolean
         get() = currentScreen in ROOT_DESTINATIONS
 
+    val isStoreOperationDestination: Boolean
+        get() = currentScreen in STORE_OPERATION_DESTINATIONS
+
+    val isAccountOrSettingsDestination: Boolean
+        get() = currentScreen in ACCOUNT_SETTINGS_DESTINATIONS
+
+    val isCheckoutFlowDestination: Boolean
+        get() = currentScreen in CHECKOUT_FLOW_DESTINATIONS
+
     fun quantityInBasket(productId: String): Int =
         basket.firstOrNull { it.product.id == productId }?.quantity ?: 0
 
@@ -367,6 +376,24 @@ data class TraderUiState(
             TraderScreen.NEW_SALE,
             TraderScreen.INVOICES_HISTORY,
             TraderScreen.CUSTOMERS
+        )
+
+        val STORE_OPERATION_DESTINATIONS = setOf(
+            TraderScreen.PRODUCTS_CATALOG,
+            TraderScreen.SUPPLIERS,
+            TraderScreen.EXPENSES,
+            TraderScreen.FINANCIAL_REPORTS
+        )
+
+        val ACCOUNT_SETTINGS_DESTINATIONS = setOf(
+            TraderScreen.USER_PROFILE,
+            TraderScreen.BUSINESS_SETTINGS
+        )
+
+        val CHECKOUT_FLOW_DESTINATIONS = setOf(
+            TraderScreen.NEW_SALE,
+            TraderScreen.INVOICE_REVIEW,
+            TraderScreen.CASH_PAYMENT
         )
 
         fun normalizeForSearch(raw: String): String {
@@ -470,8 +497,16 @@ class TraderViewModel(
             } else {
                 val updatedHistory = when {
                     target == TraderScreen.HOME -> emptyList()
-                    target in TraderUiState.ROOT_DESTINATIONS && state.currentScreen in TraderUiState.ROOT_DESTINATIONS -> {
+                    target in TraderUiState.ROOT_DESTINATIONS -> {
                         listOf(TraderScreen.HOME)
+                    }
+                    target in TraderUiState.STORE_OPERATION_DESTINATIONS &&
+                        state.currentScreen in TraderUiState.STORE_OPERATION_DESTINATIONS -> {
+                        state.screenHistory.ifEmpty { listOf(TraderScreen.HOME) }
+                    }
+                    target in TraderUiState.ACCOUNT_SETTINGS_DESTINATIONS &&
+                        state.currentScreen in TraderUiState.ACCOUNT_SETTINGS_DESTINATIONS -> {
+                        state.screenHistory.ifEmpty { listOf(TraderScreen.HOME) }
                     }
                     target in state.screenHistory -> {
                         state.screenHistory.takeWhile { it != target }

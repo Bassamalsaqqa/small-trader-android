@@ -155,17 +155,42 @@ fun SmallTraderTopBar(
     }
 
     val contextualSubtitle: String? = when (state.currentScreen) {
-        TraderScreen.HOME -> lang.tr(
-            "سوبرماركت ومحمصة الزيتونة • نابلس",
-            "Al-Zaytouna Market & Roastery • Nablus"
+        TraderScreen.HOME -> "${state.businessInfo.name(lang)} • ${state.businessInfo.city(lang)}"
+        TraderScreen.NEW_SALE -> if (state.basketItemCount > 0) {
+            lang.tr(
+                "${WesternFormatters.formatInt(state.basketItemCount)} وحدات في السلة • ${WesternFormatters.formatIls(state.basketNetTotalIls)}",
+                "${WesternFormatters.formatInt(state.basketItemCount)} in basket • ${WesternFormatters.formatIls(state.basketNetTotalIls)}"
+            )
+        } else {
+            lang.tr("اختر الأصناف أو امسح الباركود", "Tap items or scan barcode")
+        }
+        TraderScreen.INVOICE_REVIEW -> lang.tr(
+            "الخطوة 2 من 3 • الصافي ${WesternFormatters.formatIls(state.basketNetTotalIls)}",
+            "Step 2 of 3 • Net ${WesternFormatters.formatIls(state.basketNetTotalIls)}"
         )
+        TraderScreen.CASH_PAYMENT -> lang.tr(
+            "الخطوة 3 من 3 • المطلوب ${WesternFormatters.formatIls(state.basketNetTotalIls)}",
+            "Step 3 of 3 • Due ${WesternFormatters.formatIls(state.basketNetTotalIls)}"
+        )
+        TraderScreen.RECEIPT -> state.activeReceipt?.let { rec ->
+            "${WesternFormatters.formatInvoiceCode(rec.invoiceNumber)} • ${rec.customerNote}"
+        }
+        TraderScreen.PRODUCT_DETAIL -> state.selectedProductForDetail?.let { prod ->
+            "${lang.tr("الأصناف والمخزون", "Inventory")} • ${prod.name(lang)}"
+        }
+        TraderScreen.CUSTOMER_DETAIL -> state.selectedCustomerForDetail?.let { cust ->
+            "${lang.tr("حسابات الزبائن", "Customers")} • ${cust.name(lang)}"
+        }
+        TraderScreen.SUPPLIER_DETAIL -> state.selectedSupplierForDetail?.let { sup ->
+            "${lang.tr("الموردون", "Suppliers")} • ${sup.name(lang)}"
+        }
         else -> null
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         TopAppBar(
             title = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                     Text(
                         text = screenTitle,
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
@@ -187,7 +212,9 @@ fun SmallTraderTopBar(
                 if (showBack) {
                     IconButton(
                         onClick = onNavigateBack,
-                        modifier = Modifier.testTag("top_bar_back_button")
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("top_bar_back_button")
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -197,7 +224,7 @@ fun SmallTraderTopBar(
                 }
             },
             actions = {
-                // 1. Resume Unfinished Sale chip on non-sale screens when basket has items
+                // 1. Resume Unfinished Sale pill on non-checkout screens when basket has items
                 val showResumeBasket = state.basketItemCount > 0 &&
                     state.currentScreen !in setOf(
                         TraderScreen.HOME,
@@ -211,14 +238,16 @@ fun SmallTraderTopBar(
                         onClick = { onNavigateTo(TraderScreen.NEW_SALE) },
                         shape = RoundedCornerShape(10.dp),
                         color = MaterialTheme.colorScheme.primaryContainer,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
                         modifier = Modifier
-                            .padding(end = 4.dp)
+                            .padding(end = 6.dp)
                             .heightIn(min = 48.dp)
                             .testTag("top_bar_resume_sale_button")
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ShoppingCart,
@@ -226,26 +255,27 @@ fun SmallTraderTopBar(
                                 modifier = Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer
                             )
-                            Spacer(modifier = Modifier.width(5.dp))
                             Text(
                                 text = lang.tr(
-                                    "السلة (${WesternFormatters.formatInt(state.basketItemCount)})",
-                                    "Sale (${WesternFormatters.formatInt(state.basketItemCount)})"
+                                    "السلة (${WesternFormatters.formatInt(state.basketItemCount)}) • ${WesternFormatters.formatIls(state.basketNetTotalIls)}",
+                                    "Sale (${WesternFormatters.formatInt(state.basketItemCount)}) • ${WesternFormatters.formatIls(state.basketNetTotalIls)}"
                                 ),
-                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                maxLines = 1
                             )
                         }
                     }
                 }
 
-                // 2. Barcode Scanner button in top bar only on Catalog screen
-                // (Home and New Sale already provide dedicated primary scan controls)
+                // 2. Barcode Scanner button in top bar on Catalog screen
                 val showScanner = state.currentScreen == TraderScreen.PRODUCTS_CATALOG
                 if (showScanner) {
                     IconButton(
                         onClick = onOpenScanner,
-                        modifier = Modifier.testTag("top_bar_scanner_button")
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("top_bar_scanner_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.QrCodeScanner,
@@ -255,7 +285,7 @@ fun SmallTraderTopBar(
                     }
                 }
 
-                // 3. Bluetooth Printer status shortcut: shown only on Receipt screen
+                // 3. Bluetooth Printer status shortcut on Receipt screen
                 if (state.currentScreen == TraderScreen.RECEIPT) {
                     val isConnected = state.connectedPrinter != null
                     Surface(
@@ -302,12 +332,14 @@ fun SmallTraderTopBar(
                     }
                 }
 
-                // 4. Root-only actions (Home screen only — deep screens stay clean and focused)
+                // 4. Home identity & quick display preferences (focused on Account/Role & Settings, no duplicate store modules)
                 if (isHome) {
                     TextButton(
                         onClick = onToggleLanguage,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                        modifier = Modifier.testTag("language_toggle_button")
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("language_toggle_button")
                     ) {
                         Text(
                             text = if (lang == AppLanguage.AR) "EN" else "عربي",
@@ -318,7 +350,9 @@ fun SmallTraderTopBar(
 
                     IconButton(
                         onClick = onToggleTheme,
-                        modifier = Modifier.testTag("theme_toggle_button")
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("theme_toggle_button")
                     ) {
                         Icon(
                             imageVector = if (state.isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
@@ -328,16 +362,33 @@ fun SmallTraderTopBar(
                         )
                     }
 
-                    Box {
-                        IconButton(
+                    Box(modifier = Modifier.padding(end = 6.dp)) {
+                        Surface(
                             onClick = { isAccountMenuOpen = true },
-                            modifier = Modifier.testTag("top_bar_account_button")
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("top_bar_account_button")
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.AccountCircle,
-                                contentDescription = lang.tr("الحساب والأقسام", "Account & Modules"),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AccountCircle,
+                                    contentDescription = lang.tr("الحساب والإعدادات", "Account & Settings"),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = state.currentSession.role.label(lang),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
 
                         DropdownMenu(
@@ -352,7 +403,7 @@ fun SmallTraderTopBar(
                                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                                         )
                                         Text(
-                                            text = "${state.currentSession.role.label(lang)} • ${lang.tr("الملف الشخصي", "My Profile")}",
+                                            text = "${state.currentSession.role.label(lang)} • ${lang.tr("الملف الشخصي وتبديل الدور", "Profile & Role Switcher")}",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -373,46 +424,28 @@ fun SmallTraderTopBar(
                             )
                             HorizontalDivider()
                             DropdownMenuItem(
-                                text = { Text(lang.tr("الأصناف والمخزون", "Inventory & Catalog")) },
-                                leadingIcon = { Icon(Icons.Default.Inventory2, contentDescription = null) },
-                                onClick = {
-                                    isAccountMenuOpen = false
-                                    onNavigateTo(TraderScreen.PRODUCTS_CATALOG)
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(lang.tr("الموردون والمشتريات", "Suppliers & Bills")) },
-                                leadingIcon = { Icon(Icons.Default.Store, contentDescription = null) },
-                                onClick = {
-                                    isAccountMenuOpen = false
-                                    onNavigateTo(TraderScreen.SUPPLIERS)
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(lang.tr("المصاريف والنثريات", "Expenses")) },
-                                leadingIcon = { Icon(Icons.Default.Payments, contentDescription = null) },
-                                onClick = {
-                                    isAccountMenuOpen = false
-                                    onNavigateTo(TraderScreen.EXPENSES)
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(lang.tr("التقارير والصندوق", "Reports & Cash Drawer")) },
-                                leadingIcon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = null) },
-                                onClick = {
-                                    isAccountMenuOpen = false
-                                    onNavigateTo(TraderScreen.FINANCIAL_REPORTS)
-                                }
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text(lang.tr("إعدادات التطبيق والمتجر", "Store & App Settings")) },
+                                text = { Text(lang.tr("إعدادات المتجر والطابعة", "Store & Printer Settings")) },
                                 leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
                                 onClick = {
                                     isAccountMenuOpen = false
                                     onNavigateTo(TraderScreen.BUSINESS_SETTINGS)
                                 },
                                 modifier = Modifier.testTag("menu_business_settings_item")
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        lang.tr(
+                                            "الطابعة الحرارية (${state.receiptPaperWidthMm}mm)",
+                                            "Thermal Printer (${state.receiptPaperWidthMm}mm)"
+                                        )
+                                    )
+                                },
+                                leadingIcon = { Icon(Icons.Default.Print, contentDescription = null) },
+                                onClick = {
+                                    isAccountMenuOpen = false
+                                    onOpenPrinter()
+                                }
                             )
                         }
                     }
@@ -423,10 +456,285 @@ fun SmallTraderTopBar(
                 titleContentColor = MaterialTheme.colorScheme.onSurface
             )
         )
+
+        // Interactive 3-Step Checkout Funnel Bar (shown during active checkout flow)
+        val showCheckoutSteps = state.currentScreen == TraderScreen.INVOICE_REVIEW ||
+            state.currentScreen == TraderScreen.CASH_PAYMENT ||
+            (state.currentScreen == TraderScreen.NEW_SALE && state.basketItemCount > 0)
+        if (showCheckoutSteps) {
+            CheckoutStepSubBar(
+                currentScreen = state.currentScreen,
+                basketItemCount = state.basketItemCount,
+                lang = lang,
+                onNavigateTo = onNavigateTo
+            )
+        }
+
+        // Lateral Store Operations Switcher Bar (Inventory • Suppliers • Expenses • Reports)
+        if (state.isStoreOperationDestination) {
+            StoreOperationsSubBar(
+                currentScreen = state.currentScreen,
+                canViewReports = state.currentSession.canViewReports(),
+                lang = lang,
+                onNavigateTo = onNavigateTo
+            )
+        }
+
+        // Lateral Account & Settings Switcher Bar (Profile & Role • Store & Printer Settings)
+        if (state.isAccountOrSettingsDestination) {
+            AccountSettingsSubBar(
+                currentScreen = state.currentScreen,
+                lang = lang,
+                onNavigateTo = onNavigateTo
+            )
+        }
+
         HorizontalDivider(
             thickness = 1.dp,
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)
         )
+    }
+}
+
+@Composable
+private fun CheckoutStepSubBar(
+    currentScreen: TraderScreen,
+    basketItemCount: Int,
+    lang: AppLanguage,
+    onNavigateTo: (TraderScreen) -> Unit
+) {
+    val canAdvanceFromItems = basketItemCount > 0
+    val steps = listOf(
+        Triple(
+            TraderScreen.NEW_SALE,
+            lang.tr(
+                "1. الأصناف (${WesternFormatters.formatInt(basketItemCount)})",
+                "1. Items (${WesternFormatters.formatInt(basketItemCount)})"
+            ),
+            "checkout_step_items"
+        ),
+        Triple(
+            TraderScreen.INVOICE_REVIEW,
+            lang.tr("2. المراجعة", "2. Review"),
+            "checkout_step_review"
+        ),
+        Triple(
+            TraderScreen.CASH_PAYMENT,
+            lang.tr("3. الدفع", "3. Payment"),
+            "checkout_step_payment"
+        )
+    )
+
+    val currentStepIndex = when (currentScreen) {
+        TraderScreen.NEW_SALE -> 0
+        TraderScreen.INVOICE_REVIEW -> 1
+        TraderScreen.CASH_PAYMENT -> 2
+        else -> 0
+    }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            steps.forEachIndexed { index, (targetScreen, label, tag) ->
+                val isCurrent = index == currentStepIndex
+                val isCompleted = index < currentStepIndex
+                val isEnabled = index == 0 || canAdvanceFromItems
+
+                Surface(
+                    onClick = {
+                        if (isEnabled && targetScreen != currentScreen) {
+                            onNavigateTo(targetScreen)
+                        }
+                    },
+                    enabled = isEnabled,
+                    shape = RoundedCornerShape(8.dp),
+                    color = when {
+                        isCurrent -> MaterialTheme.colorScheme.primary
+                        isCompleted -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+                        else -> Color.Transparent
+                    },
+                    border = if (!isCurrent && !isCompleted) {
+                        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    } else null,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag(tag)
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = if (isCurrent || isCompleted) FontWeight.Bold else FontWeight.Medium
+                            ),
+                            color = when {
+                                isCurrent -> MaterialTheme.colorScheme.onPrimary
+                                isCompleted -> MaterialTheme.colorScheme.onPrimaryContainer
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StoreOperationsSubBar(
+    currentScreen: TraderScreen,
+    canViewReports: Boolean,
+    lang: AppLanguage,
+    onNavigateTo: (TraderScreen) -> Unit
+) {
+    val modules = buildList {
+        add(Triple(TraderScreen.PRODUCTS_CATALOG, lang.tr("المخزون", "Inventory"), "store_nav_catalog"))
+        add(Triple(TraderScreen.SUPPLIERS, lang.tr("الموردون", "Suppliers"), "store_nav_suppliers"))
+        add(Triple(TraderScreen.EXPENSES, lang.tr("المصاريف", "Expenses"), "store_nav_expenses"))
+        if (canViewReports) {
+            add(Triple(TraderScreen.FINANCIAL_REPORTS, lang.tr("التقارير", "Reports"), "store_nav_reports"))
+        }
+    }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            modules.forEach { (screen, label, tag) ->
+                val isSelected = currentScreen == screen
+                Surface(
+                    onClick = {
+                        if (!isSelected) onNavigateTo(screen)
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSelected) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        Color.Transparent
+                    },
+                    border = if (isSelected) {
+                        BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+                    } else null,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag(tag)
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            ),
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccountSettingsSubBar(
+    currentScreen: TraderScreen,
+    lang: AppLanguage,
+    onNavigateTo: (TraderScreen) -> Unit
+) {
+    val tabs = listOf(
+        Triple(
+            TraderScreen.USER_PROFILE,
+            lang.tr("الملف الشخصي والوردية", "Profile & Role"),
+            "account_nav_profile"
+        ),
+        Triple(
+            TraderScreen.BUSINESS_SETTINGS,
+            lang.tr("إعدادات المتجر والطابعة", "Store & Printer Settings"),
+            "account_nav_settings"
+        )
+    )
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            tabs.forEach { (screen, label, tag) ->
+                val isSelected = currentScreen == screen
+                Surface(
+                    onClick = {
+                        if (!isSelected) onNavigateTo(screen)
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSelected) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        Color.Transparent
+                    },
+                    border = if (isSelected) {
+                        BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+                    } else null,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag(tag)
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            ),
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -447,6 +755,7 @@ fun SmallTraderBottomBar(
 ) {
     val lang = state.language
     val current = state.currentScreen
+    val saleCount = state.basketItemCount
 
     val tabs = listOf(
         PrimaryNavTab(
@@ -459,12 +768,12 @@ fun SmallTraderBottomBar(
         ),
         PrimaryNavTab(
             screen = TraderScreen.NEW_SALE,
-            labelAr = "بيع جديد",
-            labelEn = "Sale",
+            labelAr = if (saleCount > 0) "السلة (${WesternFormatters.formatInt(saleCount)})" else "بيع جديد",
+            labelEn = if (saleCount > 0) "Sale (${WesternFormatters.formatInt(saleCount)})" else "New Sale",
             selectedIcon = Icons.Filled.PointOfSale,
             unselectedIcon = Icons.Outlined.PointOfSale,
             testTag = "nav_sale_tab",
-            badgeCount = state.basketItemCount
+            badgeCount = saleCount
         ),
         PrimaryNavTab(
             screen = TraderScreen.INVOICES_HISTORY,
@@ -486,7 +795,7 @@ fun SmallTraderBottomBar(
 
     Surface(
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 0.dp,
+        tonalElevation = 2.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -501,13 +810,18 @@ fun SmallTraderBottomBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(58.dp),
+                    .height(64.dp),
                 horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 tabs.forEach { tab ->
                     val isSelected = current == tab.screen
-                    val contentColor = if (isSelected) {
+                    val iconColor = if (isSelected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    val labelColor = if (isSelected) {
                         MaterialTheme.colorScheme.primary
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
@@ -521,55 +835,57 @@ fun SmallTraderBottomBar(
                             .testTag(tab.testTag),
                         contentAlignment = Alignment.Center
                     ) {
-                        // Understated top active line indicator instead of oversized pill
-                        if (isSelected) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopCenter)
-                                    .width(28.dp)
-                                    .height(2.5.dp)
-                                    .clip(RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp))
-                                    .background(MaterialTheme.colorScheme.primary)
-                            )
-                        }
-
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                            modifier = Modifier.padding(top = 2.dp)
+                            verticalArrangement = Arrangement.Center
                         ) {
-                            BadgedBox(
-                                badge = {
-                                    if (tab.badgeCount > 0) {
-                                        Badge(
-                                            containerColor = MaterialTheme.colorScheme.primary,
-                                            contentColor = MaterialTheme.colorScheme.onPrimary
-                                        ) {
-                                            Text(
-                                                text = WesternFormatters.formatInt(tab.badgeCount),
-                                                style = MaterialTheme.typography.labelSmall.copy(
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 10.sp
+                            Box(
+                                modifier = Modifier
+                                    .width(56.dp)
+                                    .height(28.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(
+                                        if (isSelected) {
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        } else {
+                                            Color.Transparent
+                                        }
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                BadgedBox(
+                                    badge = {
+                                        if (tab.badgeCount > 0) {
+                                            Badge(
+                                                containerColor = MaterialTheme.colorScheme.primary,
+                                                contentColor = MaterialTheme.colorScheme.onPrimary
+                                            ) {
+                                                Text(
+                                                    text = WesternFormatters.formatInt(tab.badgeCount),
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 10.sp
+                                                    )
                                                 )
-                                            )
+                                            }
                                         }
                                     }
+                                ) {
+                                    Icon(
+                                        imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
+                                        contentDescription = lang.tr(tab.labelAr, tab.labelEn),
+                                        tint = iconColor,
+                                        modifier = Modifier.size(20.dp)
+                                    )
                                 }
-                            ) {
-                                Icon(
-                                    imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
-                                    contentDescription = lang.tr(tab.labelAr, tab.labelEn),
-                                    tint = contentColor,
-                                    modifier = Modifier.size(22.dp)
-                                )
                             }
-                            Spacer(modifier = Modifier.height(2.dp))
+                            Spacer(modifier = Modifier.height(3.dp))
                             Text(
                                 text = lang.tr(tab.labelAr, tab.labelEn),
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                 ),
-                                color = contentColor,
+                                color = labelColor,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )

@@ -880,16 +880,30 @@ class ExampleUnitTest {
         assertTrue(viewModel.navigateBack())
         assertEquals(TraderScreen.HOME, viewModel.uiState.value.currentScreen)
 
-        // 5. Navigate Home -> Reports -> Back -> Home -> Settings -> Back -> Home
+        // 5. Lateral Store Operations switching (Catalog -> Suppliers -> Expenses -> Reports)
+        // does not build a deep back-stack loop; Back returns directly to HOME
+        viewModel.navigateTo(TraderScreen.PRODUCTS_CATALOG)
+        assertTrue(viewModel.uiState.value.isStoreOperationDestination)
+        viewModel.navigateTo(TraderScreen.SUPPLIERS)
+        assertTrue(viewModel.uiState.value.isStoreOperationDestination)
+        viewModel.navigateTo(TraderScreen.EXPENSES)
+        assertTrue(viewModel.uiState.value.isStoreOperationDestination)
         viewModel.navigateTo(TraderScreen.FINANCIAL_REPORTS)
         assertEquals(TraderScreen.FINANCIAL_REPORTS, viewModel.uiState.value.currentScreen)
         assertFalse(viewModel.uiState.value.isRootDestination)
+        assertTrue(viewModel.uiState.value.isStoreOperationDestination)
+        assertEquals(listOf(TraderScreen.HOME), viewModel.uiState.value.screenHistory)
         assertTrue(viewModel.navigateBack())
         assertEquals(TraderScreen.HOME, viewModel.uiState.value.currentScreen)
 
+        // Lateral Profile <-> Settings switching also avoids back-stack loops and returns to HOME on Back
+        viewModel.navigateTo(TraderScreen.USER_PROFILE)
+        assertTrue(viewModel.uiState.value.isAccountOrSettingsDestination)
         viewModel.navigateTo(TraderScreen.BUSINESS_SETTINGS)
         assertEquals(TraderScreen.BUSINESS_SETTINGS, viewModel.uiState.value.currentScreen)
         assertFalse(viewModel.uiState.value.isRootDestination)
+        assertTrue(viewModel.uiState.value.isAccountOrSettingsDestination)
+        assertEquals(listOf(TraderScreen.HOME), viewModel.uiState.value.screenHistory)
         assertTrue(viewModel.navigateBack())
         assertEquals(TraderScreen.HOME, viewModel.uiState.value.currentScreen)
 

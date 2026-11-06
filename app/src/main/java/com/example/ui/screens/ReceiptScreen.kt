@@ -565,7 +565,7 @@ fun ReceiptScreen(
             }
         }
 
-        // Bottom Bar: Return Home or Start New Sale
+        // Bottom Bar: Return to Origin / Home or Start / Resume Sale
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 4.dp,
@@ -592,7 +592,13 @@ fun ReceiptScreen(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(lang.tr("الرئيسية", "Home"))
+                    Text(
+                        if (state.isNewlyCompletedSale) {
+                            lang.tr("الرئيسية", "Home")
+                        } else {
+                            lang.tr("رجوع", "Back")
+                        }
+                    )
                 }
 
                 Button(
@@ -610,7 +616,14 @@ fun ReceiptScreen(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = lang.tr("بيع جديد", "Start New Sale"),
+                        text = if (state.basketItemCount > 0) {
+                            lang.tr(
+                                "متابعة السلة (${WesternFormatters.formatInt(state.basketItemCount)})",
+                                "Resume Sale (${WesternFormatters.formatInt(state.basketItemCount)})"
+                            )
+                        } else {
+                            lang.tr("بيع جديد", "Start New Sale")
+                        },
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                     )
                 }

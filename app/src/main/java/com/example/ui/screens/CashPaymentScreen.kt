@@ -212,6 +212,19 @@ fun CashPaymentScreen(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            TextButton(
+                                onClick = onEditInvoice,
+                                contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("payment_edit_invoice_button")
+                            ) {
+                                Text(
+                                    text = lang.tr("تعديل الأصناف أو الخصم", "Edit Items or Discount"),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
 
                         VerticalDivider(
