@@ -1260,6 +1260,7 @@ private fun PurchaseBillRow(
                         ),
                         color = MaterialTheme.colorScheme.primary
                     )
+                    val hasExpectedSku = !bill.expectedProductId.isNullOrBlank() && bill.expectedQuantity > 0
                     Surface(
                         shape = RoundedCornerShape(6.dp),
                         color = if (bill.isReceived) {
@@ -1269,10 +1270,10 @@ private fun PurchaseBillRow(
                         }
                     ) {
                         Text(
-                            text = if (bill.isReceived) {
-                                lang.tr("تم استلام البضاعة بالمخزن (GRN)", "Goods Received in Stock (GRN)")
-                            } else {
-                                lang.tr("قيد مالي فقط • بانتظار استلام مخزني", "Financial bill only • Pending GRN")
+                            text = when {
+                                bill.isReceived -> lang.tr("تم استلام البضاعة بالمخزن (GRN)", "Goods Received in Stock (GRN)")
+                                hasExpectedSku -> lang.tr("بانتظار استلام مخزني (${WesternFormatters.formatInt(bill.expectedQuantity)} وحدة)", "Pending GRN (${WesternFormatters.formatInt(bill.expectedQuantity)} units)")
+                                else -> lang.tr("قيد مالي نصي فقط • بدون بنود أصناف", "Financial summary only • No SKU lines")
                             },
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                             color = if (bill.isReceived) {
@@ -1324,13 +1325,19 @@ private fun PurchaseBillRow(
                 )
             }
 
-            if (!bill.isReceived && canReceiveStock && onOpenReceiveGoodsDialog != null) {
+            val canConfirmExpectedSku = !bill.isReceived &&
+                !bill.expectedProductId.isNullOrBlank() &&
+                bill.expectedQuantity > 0 &&
+                canReceiveStock &&
+                onOpenReceiveGoodsDialog != null
+
+            if (canConfirmExpectedSku) {
                 OutlinedButton(
-                    onClick = onOpenReceiveGoodsDialog,
+                    onClick = onOpenReceiveGoodsDialog!!,
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 42.dp)
+                        .heightIn(min = 48.dp)
                         .testTag("confirm_grn_${bill.id}")
                 ) {
                     Text(
@@ -1441,16 +1448,14 @@ private fun PhysicalGoodsReceiptDialog(
     onDismiss: () -> Unit,
     onConfirmGrn: (productId: String, receivedQty: Int, batchNote: String) -> Unit
 ) {
-    val stockProducts = remember(products) { products.filter { it.isStockTracked } }
-    var selectedProductId by remember(stockProducts) {
-        mutableStateOf(stockProducts.firstOrNull()?.id ?: "")
+    val expectedProduct = remember(products, bill.expectedProductId) {
+        products.firstOrNull { it.id == bill.expectedProductId && it.isStockTracked }
     }
-    var qtyText by remember { mutableStateOf("12") }
-    var batchNote by remember {
+    val expectedQty = bill.expectedQuantity.coerceAtLeast(0)
+    var batchNote by remember(bill.id) {
         mutableStateOf("استلام مخزني مطابق للفاتورة ${WesternFormatters.formatBillCode(bill.billNumber)}")
     }
-    val parsedQty = qtyText.toIntOrNull() ?: 0
-    val selectedProduct = stockProducts.firstOrNull { it.id == selectedProductId }
+    val canConfirm = !bill.isReceived && expectedProduct != null && expectedQty > 0
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1476,8 +1481,8 @@ private fun PhysicalGoodsReceiptDialog(
                 ) {
                     Text(
                         text = lang.tr(
-                            "يفصل هذا السند بين الفاتورة المالية واستلام المخزن: سيُعلّم الفاتورة كمستلمة ويضيف الكمية الفعلية لرصيد الصنف المختار دون تغيير ذمة المورد المالية.",
-                            "Separates financial bill from physical receiving: Marks bill received and adds inspected quantity to the selected product's stock without altering supplier payable."
+                            "عرض تجريبي محدد لبند واحد: يطابق الصنف والكمية المسجلين في الفاتورة لمرة واحدة فقط دون تغيير ذمة المورد المالية.",
+                            "Bounded single-SKU demo: Verifies the bill's expected item and quantity once without altering supplier payable."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -1485,52 +1490,68 @@ private fun PhysicalGoodsReceiptDialog(
                     )
                 }
 
-                Text(
-                    text = lang.tr("اختر الصنف المستلم لإضافته للمخزون:", "Select Received Catalog Product:"),
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
-                )
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(stockProducts.take(6), key = { it.id }) { prod ->
-                        FilterChip(
-                            selected = selectedProductId == prod.id,
-                            onClick = { selectedProductId = prod.id },
-                            label = { Text(prod.name(lang), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            modifier = Modifier.testTag("grn_product_chip_${prod.id}")
-                        )
+                if (expectedProduct != null && expectedQty > 0) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("grn_product_chip_${expectedProduct.id}")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = lang.tr("الصنف المحدد في الفاتورة:", "Expected Product on Bill:"),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = expectedProduct.name(lang),
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = lang.tr(
+                                    "الكمية المتوقعة للاستلام: ${WesternFormatters.formatInt(expectedQty)} (${expectedProduct.unit(lang)})",
+                                    "Expected quantity to receive: ${WesternFormatters.formatInt(expectedQty)} (${expectedProduct.unit(lang)})"
+                                ),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.testTag("grn_qty_input")
+                            )
+                        }
                     }
-                }
 
-                OutlinedTextField(
-                    value = qtyText,
-                    onValueChange = { qtyText = WesternFormatters.sanitizeWesternDigits(it).filter { ch -> ch.isDigit() } },
-                    label = { Text(lang.tr("الكمية الفعلية المستلمة بالمخزن", "Received Quantity")) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("grn_qty_input")
-                )
+                    OutlinedTextField(
+                        value = batchNote,
+                        onValueChange = { batchNote = it },
+                        label = { Text(lang.tr("ملاحظة الفحص / رقم التشغيلة", "Inspection / Batch Note")) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("grn_note_input")
+                    )
 
-                OutlinedTextField(
-                    value = batchNote,
-                    onValueChange = { batchNote = it },
-                    label = { Text(lang.tr("ملاحظة الفحص / رقم التشغيلة", "Inspection / Batch Note")) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("grn_note_input")
-                )
-
-                if (selectedProduct != null && parsedQty > 0) {
                     Text(
                         text = lang.tr(
-                            "رصيد (${selectedProduct.name(lang)}) سيرتفع من ${WesternFormatters.formatInt(selectedProduct.stockCount)} إلى ${WesternFormatters.formatInt(selectedProduct.stockCount + parsedQty)} ${selectedProduct.unit(lang)}",
-                            "${selectedProduct.name(lang)} stock will increase from ${WesternFormatters.formatInt(selectedProduct.stockCount)} to ${WesternFormatters.formatInt(selectedProduct.stockCount + parsedQty)}"
+                            "رصيد (${expectedProduct.name(lang)}) سيرتفع من ${WesternFormatters.formatInt(expectedProduct.stockCount)} إلى ${WesternFormatters.formatInt(expectedProduct.stockCount + expectedQty)} ${expectedProduct.unit(lang)}",
+                            "${expectedProduct.name(lang)} stock will increase from ${WesternFormatters.formatInt(expectedProduct.stockCount)} to ${WesternFormatters.formatInt(expectedProduct.stockCount + expectedQty)}"
                         ),
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                         color = TraderTheme.financial.income
+                    )
+                } else {
+                    Text(
+                        text = lang.tr(
+                            "هذه الفاتورة قيد مالي نصي فقط ولا تحتوي على صنف مخزني محدد للاستلام الآلي.",
+                            "This bill is a financial summary only and has no linked catalog SKU for automated GRN."
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TraderTheme.financial.warning
                     )
                 }
             }
@@ -1538,11 +1559,12 @@ private fun PhysicalGoodsReceiptDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (selectedProductId.isNotBlank() && parsedQty > 0) {
-                        onConfirmGrn(selectedProductId, parsedQty, batchNote.trim())
+                    val prod = expectedProduct
+                    if (!bill.isReceived && prod != null && expectedQty > 0) {
+                        onConfirmGrn(prod.id, expectedQty, batchNote.trim())
                     }
                 },
-                enabled = selectedProductId.isNotBlank() && parsedQty > 0,
+                enabled = canConfirm,
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.testTag("confirm_grn_submit_button")
             ) {

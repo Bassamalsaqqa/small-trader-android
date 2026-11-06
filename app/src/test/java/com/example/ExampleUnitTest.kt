@@ -1852,12 +1852,201 @@ class ExampleUnitTest {
         viewModel.toggleShiftClosePreview(false)
         assertFalse(viewModel.uiState.value.isShiftClosedPreview)
     }
+
+    // =========================================================================
+    // 37. Regression: Physical Goods Receiving (GRN) Safety & Idempotency Guards
+    // =========================================================================
+
+    @Test
+    fun physicalGoodsReceiptGrn_rejectsUnknownBill_unrelatedProduct_mismatchedQuantity_textOnlyBill_andDuplicateReceipt() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        val manager = repo.getCurrentSession()
+
+        val pendingBill = viewModel.uiState.value.purchaseBills.first { it.id == "pb_03" }
+        assertEquals("p_rice_medium", pendingBill.expectedProductId)
+        assertEquals(12, pendingBill.expectedQuantity)
+        assertFalse(pendingBill.isReceived)
+
+        val riceBefore = viewModel.uiState.value.products.first { it.id == "p_rice_medium" }.stockCount
+        val oliveOilBefore = viewModel.uiState.value.products.first { it.id == "p_olive_oil" }.stockCount
+
+        // 1. Unknown bill ID -> rejected with NoSuchElementException, zero stock mutation
+        val unknownBillResult = repo.confirmPhysicalGoodsReceipt(
+            billId = "pb_unknown_999",
+            productId = "p_rice_medium",
+            receivedQty = 12,
+            batchNote = "Invalid bill",
+            operator = manager
+        )
+        assertTrue("Unknown bill ID must be rejected", unknownBillResult.isFailure)
+        assertTrue(unknownBillResult.exceptionOrNull() is NoSuchElementException)
+        assertEquals(riceBefore, repo.findProductById("p_rice_medium")!!.stockCount)
+
+        // 2. Unrelated product ID -> rejected with IllegalArgumentException, bill remains unreceived
+        val unrelatedProductResult = repo.confirmPhysicalGoodsReceipt(
+            billId = "pb_03",
+            productId = "p_olive_oil",
+            receivedQty = 12,
+            batchNote = "Wrong SKU",
+            operator = manager
+        )
+        assertTrue("Unrelated product must be rejected for GRN", unrelatedProductResult.isFailure)
+        assertTrue(unrelatedProductResult.exceptionOrNull() is IllegalArgumentException)
+        assertEquals(oliveOilBefore, repo.findProductById("p_olive_oil")!!.stockCount)
+        assertFalse(repo.getPurchaseBills().first { it.id == "pb_03" }.isReceived)
+
+        // 3. Mismatched / partial quantity -> rejected with IllegalArgumentException, bill remains unreceived
+        val mismatchedQtyResult = repo.confirmPhysicalGoodsReceipt(
+            billId = "pb_03",
+            productId = "p_rice_medium",
+            receivedQty = 5,
+            batchNote = "Partial mismatch",
+            operator = manager
+        )
+        assertTrue("Mismatched quantity must be rejected in bounded single-SKU GRN", mismatchedQtyResult.isFailure)
+        assertTrue(mismatchedQtyResult.exceptionOrNull() is IllegalArgumentException)
+        assertEquals(riceBefore, repo.findProductById("p_rice_medium")!!.stockCount)
+        assertFalse(repo.getPurchaseBills().first { it.id == "pb_03" }.isReceived)
+
+        // 4. Text-only financial purchase bill (no linked SKU) -> rejected with IllegalStateException
+        val textOnlyBill = repo.recordPurchaseBill(
+            supplierId = "sup_01",
+            itemsSummary = "فاتورة مشتريات مالية ملخصة بدون بنود أصناف",
+            totalIls = 300.0,
+            paidNowIls = 100.0,
+            operator = manager
+        ).getOrThrow()
+        assertEquals(null, textOnlyBill.expectedProductId)
+        val textOnlyGrnResult = repo.confirmPhysicalGoodsReceipt(
+            billId = textOnlyBill.id,
+            productId = "p_olive_oil",
+            receivedQty = 10,
+            batchNote = "Attempt GRN on text-only financial bill",
+            operator = manager
+        )
+        assertTrue("Text-only financial bill without expected SKU must reject automated GRN", textOnlyGrnResult.isFailure)
+        assertTrue(textOnlyGrnResult.exceptionOrNull() is IllegalStateException)
+        assertEquals(oliveOilBefore, repo.findProductById("p_olive_oil")!!.stockCount)
+
+        // 5. Valid GRN matching expected SKU and expected quantity succeeds once
+        assertTrue(
+            viewModel.confirmPhysicalGoodsReceipt(
+                billId = "pb_03",
+                productId = "p_rice_medium",
+                receivedQty = 12,
+                batchNote = "LOT-RICE-GRN303"
+            )
+        )
+        assertEquals(riceBefore + 12, viewModel.uiState.value.products.first { it.id == "p_rice_medium" }.stockCount)
+        assertTrue(viewModel.uiState.value.purchaseBills.first { it.id == "pb_03" }.isReceived)
+
+        // 6. Repeated GRN call on already-received bill (#BILL-0303 or #BILL-0301) is rejected -> never double-increments stock
+        assertFalse(
+            "Repeated GRN on already-received bill must fail",
+            viewModel.confirmPhysicalGoodsReceipt(
+                billId = "pb_03",
+                productId = "p_rice_medium",
+                receivedQty = 12,
+                batchNote = "Duplicate GRN attempt"
+            )
+        )
+        assertEquals(
+            "Stock must not increase a second time for the same bill",
+            riceBefore + 12,
+            viewModel.uiState.value.products.first { it.id == "p_rice_medium" }.stockCount
+        )
+    }
+
+    // =========================================================================
+    // 38. Regression: Sample Catalog Financial Consistency (#INV-1036, #INV-1038 & Statements)
+    // =========================================================================
+
+    @Test
+    fun sampleCatalogFinancialConsistency_invoicesLineItemsReceiptsCustomerBalancesAndStatements_reconcile100Percent() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        val state = viewModel.uiState.value
+
+        // 1. Every seeded invoice's subtotalIls and netTotalIls match its canonical line items
+        for (invoice in state.invoices) {
+            val lineSum = invoice.items.fold(BigDecimal.ZERO) { acc, item ->
+                val line = BigDecimal(item.product.priceIls.toString())
+                    .multiply(BigDecimal(item.quantity))
+                    .setScale(2, RoundingMode.HALF_UP)
+                acc.add(line)
+            }.setScale(2, RoundingMode.HALF_UP).toDouble()
+
+            assertEquals(
+                "Invoice #INV-${invoice.invoiceNumber} subtotal must equal canonical sum of line items",
+                lineSum,
+                invoice.subtotalIls,
+                0.001
+            )
+            val expectedNet = BigDecimal(invoice.subtotalIls.toString())
+                .subtract(BigDecimal(invoice.discountIls.toString()))
+                .setScale(2, RoundingMode.HALF_UP)
+                .toDouble()
+            assertEquals(
+                "Invoice #INV-${invoice.invoiceNumber} netTotal must equal subtotal - discount",
+                expectedNet,
+                invoice.netTotalIls,
+                0.001
+            )
+
+            // Every customer-linked invoice has a matching transaction entry in customerTransactions
+            if (invoice.customerId != null) {
+                val matchingTx = state.customerTransactions.firstOrNull {
+                    it.customerId == invoice.customerId && it.invoiceNumber == invoice.invoiceNumber
+                }
+                assertNotNull(
+                    "Customer invoice #INV-${invoice.invoiceNumber} must exist in customerTransactions",
+                    matchingTx
+                )
+            }
+        }
+
+        // 2. Partial-payment invoice #INV-1036 reconciles with cust_04 balance (460.00 ILS) and statement history
+        val cust04 = state.customers.first { it.id == "cust_04" }
+        assertEquals(460.00, cust04.balanceIls, 0.001)
+
+        val cust04Txs = state.customerTransactions.filter { it.customerId == "cust_04" }
+        assertEquals(2, cust04Txs.size)
+
+        val latestTx = cust04Txs[0] // 2026-11-02 18:20 (#INV-1036)
+        val priorTx = cust04Txs[1]  // 2026-11-01 10:00 (Payment 500.00 -> running balance 360.00)
+        assertEquals(Integer.valueOf(1036), latestTx.invoiceNumber)
+        assertEquals(158.00, latestTx.debitIls, 0.001)
+        assertEquals(58.00, latestTx.creditIls, 0.001)
+        assertEquals(460.00, latestTx.runningBalanceIls, 0.001)
+        assertEquals(360.00, priorTx.runningBalanceIls, 0.001)
+        assertEquals(
+            "Running balance after #INV-1036 must equal prior balance (360) + unpaid remainder (158 - 58 = 100)",
+            priorTx.runningBalanceIls + (latestTx.debitIls - latestTx.creditIls),
+            latestTx.runningBalanceIls,
+            0.001
+        )
+        assertEquals(cust04.balanceIls, latestTx.runningBalanceIls, 0.001)
+
+        // Statement share text for cust_04 includes #INV-1036, 158.00 total, 58.00 paid, +100.00 remaining, and 460.00 balance
+        val cust04Statement = viewModel.formatCustomerStatementText(cust04)
+        assertTrue(cust04Statement.contains("1036"))
+        assertTrue(cust04Statement.contains("158.00"))
+        assertTrue(cust04Statement.contains("58.00"))
+        assertTrue(cust04Statement.contains("100.00"))
+        assertTrue(cust04Statement.contains("460.00"))
+
+        // 3. Every customer with transactions has latest runningBalanceIls equal to customer.balanceIls
+        for (customer in state.customers) {
+            val txs = state.customerTransactions.filter { it.customerId == customer.id }
+            if (txs.isNotEmpty()) {
+                assertEquals(
+                    "Latest transaction running balance for ${customer.id} must match customer.balanceIls",
+                    customer.balanceIls,
+                    txs.first().runningBalanceIls,
+                    0.001
+                )
+            }
+        }
+    }
 }
-
-
-
-
-
-
-
-

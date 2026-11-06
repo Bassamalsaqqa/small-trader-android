@@ -442,17 +442,33 @@ class OfflineDemoTraderRepository : TraderRepository {
                 totalPurchasesIls = newTotalPurchases
             )
 
+            val netCashApplied = declaredNet
+                .subtract(remainingDebit)
+                .setScale(2, RoundingMode.HALF_UP)
+                .toDouble()
+                .coerceAtLeast(0.0)
+            val txTypeAr = when {
+                remainingDebit <= BigDecimal("0.00") -> "فاتورة مبيعات مسددة #INV-${invoice.invoiceNumber}"
+                netCashApplied > 0.005 -> "فاتورة مبيعات مدفوعة جزئياً #INV-${invoice.invoiceNumber}"
+                else -> "مبيعات على الحساب #INV-${invoice.invoiceNumber}"
+            }
+            val txTypeEn = when {
+                remainingDebit <= BigDecimal("0.00") -> "Paid Invoice #INV-${invoice.invoiceNumber}"
+                netCashApplied > 0.005 -> "Partially Paid Invoice #INV-${invoice.invoiceNumber}"
+                else -> "Credit Sale #INV-${invoice.invoiceNumber}"
+            }
+
             customerTransactions.add(
                 0,
                 CustomerTransaction(
                     id = "ctx_${System.currentTimeMillis()}_${invoice.invoiceNumber}",
                     customerId = customer.id,
                     date = timestamp,
-                    typeAr = if (invoice.remainingDebitIls > 0.0) "مبيعات على الحساب #INV-${invoice.invoiceNumber}" else "فاتورة مبيعات مسددة #INV-${invoice.invoiceNumber}",
-                    typeEn = if (invoice.remainingDebitIls > 0.0) "Credit Sale #INV-${invoice.invoiceNumber}" else "Paid Invoice #INV-${invoice.invoiceNumber}",
+                    typeAr = txTypeAr,
+                    typeEn = txTypeEn,
                     invoiceNumber = invoice.invoiceNumber,
                     debitIls = invoice.netTotalIls,
-                    creditIls = invoice.cashReceivedIls,
+                    creditIls = netCashApplied,
                     runningBalanceIls = newBalance,
                     note = invoice.customerNote
                 )
@@ -670,9 +686,42 @@ class OfflineDemoTraderRepository : TraderRepository {
         if (!operator.canManageInventory()) {
             return Result.failure(SecurityException("غير مصرح: استلام البضاعة المخزني متاح للمالك والمدير فقط | Permission denied: Goods receiving requires Owner or Manager"))
         }
-        if (receivedQty <= 0) {
-            return Result.failure(IllegalArgumentException("الكمية المستلمة يجب أن تكون أكبر من صفر | Received quantity must be greater than zero."))
+        if (billId.isBlank()) {
+            return Result.failure(IllegalArgumentException("معرف فاتورة الشراء غير صالح | Purchase bill ID cannot be blank"))
         }
+        val billIdx = purchaseBills.indexOfFirst { it.id == billId }
+        if (billIdx == -1) {
+            return Result.failure(
+                NoSuchElementException("فاتورة الشراء غير موجودة لاستلامها مخزنياً | Purchase bill not found: $billId")
+            )
+        }
+        val bill = purchaseBills[billIdx]
+        val billCode = WesternFormatters.formatBillCode(bill.billNumber)
+
+        if (bill.isReceived) {
+            return Result.failure(
+                IllegalStateException("تم تأكيد استلام الفاتورة $billCode مخزنياً من قبل ولا يمكن تكرار إضافة المخزون | Purchase bill $billCode has already been physically received")
+            )
+        }
+
+        val expectedProductId = bill.expectedProductId
+        val expectedQty = bill.expectedQuantity
+        if (expectedProductId.isNullOrBlank() || expectedQty <= 0) {
+            return Result.failure(
+                IllegalStateException("الفاتورة $billCode قيد مالي نصي بدون بنود أصناف محددة؛ يُرجى تعديل المخزون من بطاقة الصنف مباشرة | Financial-only purchase bill $billCode has no linked SKU line for automated GRN")
+            )
+        }
+        if (productId != expectedProductId) {
+            return Result.failure(
+                IllegalArgumentException("الصنف المختار لا يطابق الصنف المحدد في فاتورة الشراء $billCode | Selected product ($productId) does not match bill $billCode expected SKU ($expectedProductId)")
+            )
+        }
+        if (receivedQty <= 0 || receivedQty != expectedQty) {
+            return Result.failure(
+                IllegalArgumentException("الكمية المدخلة ($receivedQty) لا تطابق الكمية المتوقعة في فاتورة الشراء $billCode ($expectedQty) | Received quantity ($receivedQty) must match bill $billCode expected quantity ($expectedQty)")
+            )
+        }
+
         val prodIdx = products.indexOfFirst { it.id == productId }
         if (prodIdx == -1) return Result.failure(NoSuchElementException("Product not found: $productId"))
         val prod = products[prodIdx]
@@ -680,15 +729,7 @@ class OfflineDemoTraderRepository : TraderRepository {
             return Result.failure(IllegalStateException("لا يمكن تسجيل استلام مخزني لصنف غير خاضع للجرد | Cannot receive physical stock for a non-tracked item"))
         }
 
-        val billIdx = purchaseBills.indexOfFirst { it.id == billId }
-        val billCode = if (billIdx >= 0) {
-            val bill = purchaseBills[billIdx]
-            purchaseBills[billIdx] = bill.copy(isReceived = true)
-            WesternFormatters.formatBillCode(bill.billNumber)
-        } else {
-            "GRN"
-        }
-
+        purchaseBills[billIdx] = bill.copy(isReceived = true)
         val newStock = prod.stockCount + receivedQty
         products[prodIdx] = prod.copy(stockCount = newStock)
         val noteSuffix = batchNote.trim().takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: ""

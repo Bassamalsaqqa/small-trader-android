@@ -1541,8 +1541,8 @@ fun UserProfileScreen(
                     )
                     Text(
                         text = lang.tr(
-                            "• الفروع المرتبطة: الفرع الرئيسي (رام الله) • مستودع الجملة المركزي\n• حالة الجلسة: جلسة محلية نشطة — التحقق الثنائي (MFA) وإبطال الجلسات عن بُعد وتجميد الاشتراك (وضع القراءة فقط) ترتبط بواجهة Laravel Sanctum /api/v1.",
-                            "• Linked Branches: Main Branch (Ramallah) • Central Wholesale Warehouse\n• Session & MFA: Active local demo session — 2FA/MFA, remote session revocation, and subscription read-only mode connect to Laravel Sanctum /api/v1."
+                            "• الفروع المرتبطة: الفرع الرئيسي (نابلس) • مستودع الجملة المركزي\n• حالة الجلسة: جلسة عرض محلية نشطة — فحص الجلسة الحالية وإدارة جلسات الأجهزة عبر المسارات المعتمدة (`GET /api/v1/session`، `GET /api/v1/sessions`، `DELETE /api/v1/sessions/{opaqueHandle}`).",
+                            "• Linked Branches: Main Branch (Nablus) • Central Wholesale Warehouse\n• Session Context: Active local demo session — session inspection and device revocation map to existing session-authenticated routes (`GET /api/v1/session`, `GET /api/v1/sessions`, `DELETE /api/v1/sessions/{opaqueHandle}`)."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant

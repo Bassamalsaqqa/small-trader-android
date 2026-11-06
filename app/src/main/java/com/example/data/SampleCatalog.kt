@@ -411,16 +411,40 @@ object SampleCatalog {
             note = "زيت وسكر وتموين"
         ),
         CustomerTransaction(
+            id = "ctx_103_paid",
+            customerId = "cust_02",
+            date = "${WesternFormatters.currentDate()} 10:20",
+            typeAr = "فاتورة مبيعات #INV-1041",
+            typeEn = "Sales Invoice #INV-1041",
+            invoiceNumber = 1041,
+            debitIls = 61.00,
+            creditIls = 61.00,
+            runningBalanceIls = 90.00,
+            note = "دفعة نقدية فورية كاملة"
+        ),
+        CustomerTransaction(
             id = "ctx_103",
             customerId = "cust_02",
             date = "2026-11-03 14:10",
-            typeAr = "مشتريات آجل",
-            typeEn = "Credit Purchase",
+            typeAr = "مشتريات آجل #INV-1038",
+            typeEn = "Credit Purchase #INV-1038",
             invoiceNumber = 1038,
             debitIls = 90.00,
             creditIls = 0.00,
             runningBalanceIls = 90.00,
             note = "ألبان وأجبان"
+        ),
+        CustomerTransaction(
+            id = "ctx_106",
+            customerId = "cust_04",
+            date = "2026-11-02 18:20",
+            typeAr = "فاتورة مبيعات مدفوعة جزئياً #INV-1036",
+            typeEn = "Partially Paid Invoice #INV-1036",
+            invoiceNumber = 1036,
+            debitIls = 158.00,
+            creditIls = 58.00,
+            runningBalanceIls = 460.00,
+            note = "إجمالي الفاتورة 158.00 ₪ • مدفوع نقداً 58.00 ₪ • متبقي بالذمة 100.00 ₪"
         ),
         CustomerTransaction(
             id = "ctx_104",
@@ -431,8 +455,8 @@ object SampleCatalog {
             invoiceNumber = null,
             debitIls = 0.00,
             creditIls = 500.00,
-            runningBalanceIls = 460.00,
-            note = "سند قبض نقدي"
+            runningBalanceIls = 360.00,
+            note = "سند قبض نقدي من رصيد سابق (860.00 ₪)"
         ),
         CustomerTransaction(
             id = "ctx_105",
@@ -486,8 +510,10 @@ object SampleCatalog {
             date = "2026-11-01",
             totalIls = 1750.00,
             paidIls = 550.00,
-            itemsSummary = "50 زجاجة زيت زيتون بكر بلدي (جنين)",
-            isReceived = true
+            itemsSummary = "20 زجاجة زيت زيتون بلدي بكر ممتاز (1 لتر) — معصرة جنين",
+            isReceived = true,
+            expectedProductId = "p_olive_oil",
+            expectedQuantity = 20
         ),
         PurchaseBill(
             id = "pb_02",
@@ -496,8 +522,10 @@ object SampleCatalog {
             date = "2026-11-03",
             totalIls = 650.00,
             paidIls = 200.00,
-            itemsSummary = "حليب طازج الجبريني ولبنة 500غم",
-            isReceived = true
+            itemsSummary = "25 عبوة حليب طازج كامل الدسم (الجبريني) — توريد مبرد",
+            isReceived = true,
+            expectedProductId = "p_jebrini_milk",
+            expectedQuantity = 25
         ),
         PurchaseBill(
             id = "pb_03",
@@ -506,8 +534,10 @@ object SampleCatalog {
             date = "2026-11-04",
             totalIls = 850.00,
             paidIls = 0.00,
-            itemsSummary = "قهوة عربية بالهيل وزعتر بلدي جنين",
-            isReceived = false
+            itemsSummary = "12 كيس أرز حبة متوسطة فاخر (5 كغم) — توريد مطاحن نابلس",
+            isReceived = false,
+            expectedProductId = "p_rice_medium",
+            expectedQuantity = 12
         )
     )
 
@@ -643,9 +673,9 @@ object SampleCatalog {
         )
 
         val inv4CreditItems = listOfNotNull(
-            byId["p_nabulsi_cheese"]?.let { BasketItem(it, 2) }, // 2 * 26.00 = 52.00
-            byId["p_labaneh_baladi"]?.let { BasketItem(it, 2) }, // 2 * 13.00 = 26.00
-            byId["p_jebrini_milk"]?.let { BasketItem(it, 2) }    // 2 * 6.00  = 12.00 -> Total 90.00
+            byId["p_nabulsi_cheese"]?.let { BasketItem(it, 2) }, // 2 * 32.00 = 64.00
+            byId["p_labaneh_baladi"]?.let { BasketItem(it, 1) }, // 1 * 11.00 = 11.00
+            byId["p_jebrini_milk"]?.let { BasketItem(it, 2) }    // 2 * 7.50  = 15.00 -> Total 90.00
         )
         val invPartialItems = listOfNotNull(
             byId["p_olive_oil"]?.let { BasketItem(it, 3) },      // 3 * 38.00 = 114.00

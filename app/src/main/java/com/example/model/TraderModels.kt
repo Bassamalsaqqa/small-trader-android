@@ -238,7 +238,9 @@ data class PurchaseBill(
     val totalIls: Double,
     val paidIls: Double,
     val itemsSummary: String,
-    val isReceived: Boolean = false // Truthful accounting: text-only bills are pending physical goods inspection
+    val isReceived: Boolean = false, // Truthful accounting: text-only bills are pending physical goods inspection
+    val expectedProductId: String? = null,
+    val expectedQuantity: Int = 0
 ) {
     val remainingPayableIls: Double
         get() = BigDecimal(totalIls.toString())

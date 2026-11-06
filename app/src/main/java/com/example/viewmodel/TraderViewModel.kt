@@ -1914,6 +1914,12 @@ class TraderViewModel(
                 "+${WesternFormatters.formatIls(tx.debitIls)}"
             } else if (tx.creditIls > 0 && tx.debitIls == 0.0) {
                 "-${WesternFormatters.formatIls(tx.creditIls)}"
+            } else if (tx.debitIls > 0 && tx.creditIls > 0 && tx.debitIls > tx.creditIls + 0.005) {
+                val netDebit = tx.debitIls - tx.creditIls
+                lang.tr(
+                    "إجمالي ${WesternFormatters.formatIls(tx.debitIls)} / مدفوع ${WesternFormatters.formatIls(tx.creditIls)} / متبقي +${WesternFormatters.formatIls(netDebit)}",
+                    "Total ${WesternFormatters.formatIls(tx.debitIls)} / Paid ${WesternFormatters.formatIls(tx.creditIls)} / Rem +${WesternFormatters.formatIls(netDebit)}"
+                )
             } else {
                 WesternFormatters.formatIls(tx.debitIls)
             }
