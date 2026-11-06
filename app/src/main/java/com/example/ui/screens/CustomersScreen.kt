@@ -11,14 +11,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
@@ -56,6 +59,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -160,7 +164,6 @@ fun CustomersScreen(
                             Text(
                                 text = WesternFormatters.formatIls(state.totalCustomerDebtsIls),
                                 style = MaterialTheme.typography.titleMedium.copy(
-                                    fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.Bold
                                 ),
                                 color = TraderTheme.financial.debit,
@@ -177,7 +180,6 @@ fun CustomersScreen(
                             Text(
                                 text = WesternFormatters.formatIls(state.totalCustomerAdvancesIls),
                                 style = MaterialTheme.typography.titleMedium.copy(
-                                    fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.Bold
                                 ),
                                 color = if (state.totalCustomerAdvancesIls > 0.005) {
@@ -477,14 +479,14 @@ private fun CustomerDirectoryRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 11.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Left/Start: Name + LTR Phone + Neighborhood
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
                     text = customer.name(lang),
@@ -529,12 +531,11 @@ private fun CustomerDirectoryRow(
             ) {
                 Column(
                     horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Text(
                         text = displayedAmount,
                         style = MaterialTheme.typography.titleMedium.copy(
-                            fontFamily = MonoFontFamily,
                             fontWeight = FontWeight.Bold
                         ),
                         color = amountColor
@@ -788,7 +789,6 @@ fun CustomerDetailScreen(
                                             else -> WesternFormatters.formatIls(0.0)
                                         },
                                         style = MaterialTheme.typography.headlineSmall.copy(
-                                            fontFamily = MonoFontFamily,
                                             fontWeight = FontWeight.Bold
                                         ),
                                         color = when {
@@ -829,7 +829,6 @@ fun CustomerDetailScreen(
                             Text(
                                 text = WesternFormatters.formatIls(customer.totalPurchasesIls),
                                 style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.SemiBold
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface
@@ -974,7 +973,7 @@ private fun CustomerStatementRow(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 11.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Row(
@@ -1016,7 +1015,6 @@ private fun CustomerStatementRow(
                             Text(
                                 text = "+ ${WesternFormatters.formatIls(tx.debitIls)}",
                                 style = MaterialTheme.typography.titleSmall.copy(
-                                    fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.Bold
                                 ),
                                 color = TraderTheme.financial.debit
@@ -1031,7 +1029,6 @@ private fun CustomerStatementRow(
                             Text(
                                 text = "- ${WesternFormatters.formatIls(tx.creditIls)}",
                                 style = MaterialTheme.typography.titleSmall.copy(
-                                    fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.Bold
                                 ),
                                 color = TraderTheme.financial.income
@@ -1046,13 +1043,12 @@ private fun CustomerStatementRow(
                             Text(
                                 text = WesternFormatters.formatIls(tx.debitIls),
                                 style = MaterialTheme.typography.titleSmall.copy(
-                                    fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.Bold
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = lang.tr("فاتورة مسددة نقداً", "Paid Cash at Sale"),
+                                text = lang.tr("مسددة نقداً", "Paid Cash"),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = TraderTheme.financial.income
                             )
@@ -1062,7 +1058,6 @@ private fun CustomerStatementRow(
                                 Text(
                                     text = "+ ${WesternFormatters.formatIls(tx.debitIls)}",
                                     style = MaterialTheme.typography.titleSmall.copy(
-                                        fontFamily = MonoFontFamily,
                                         fontWeight = FontWeight.Bold
                                     ),
                                     color = TraderTheme.financial.debit
@@ -1072,7 +1067,6 @@ private fun CustomerStatementRow(
                                 Text(
                                     text = "- ${WesternFormatters.formatIls(tx.creditIls)}",
                                     style = MaterialTheme.typography.titleSmall.copy(
-                                        fontFamily = MonoFontFamily,
                                         fontWeight = FontWeight.Bold
                                     ),
                                     color = TraderTheme.financial.income
@@ -1152,7 +1146,10 @@ fun CustomerPaymentCollectionDialog(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 // Customer Identity & Current Balance Summary
                 Surface(
                     shape = RoundedCornerShape(8.dp),
@@ -1211,7 +1208,9 @@ fun CustomerPaymentCollectionDialog(
                                         )
                                     )
                                 },
-                                modifier = Modifier.testTag("collect_preset_full")
+                                modifier = Modifier
+                                    .heightIn(min = 34.dp)
+                                    .testTag("collect_preset_full")
                             )
                         }
                     }
@@ -1219,7 +1218,8 @@ fun CustomerPaymentCollectionDialog(
                         FilterChip(
                             selected = payAmountText == preset.toString(),
                             onClick = { payAmountText = preset.toString() },
-                            label = { Text("$preset ₪") }
+                            label = { Text("$preset ₪") },
+                            modifier = Modifier.heightIn(min = 34.dp)
                         )
                     }
                 }
@@ -1230,6 +1230,8 @@ fun CustomerPaymentCollectionDialog(
                     label = { Text(lang.tr("المبلغ المقبوض نقداً (₪)", "Cash Collected (₪)")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("payment_amount_input")
@@ -1280,6 +1282,7 @@ fun CustomerPaymentCollectionDialog(
                     label = { Text(lang.tr("ملاحظة (اختياري)", "Note (Optional)")) },
                     placeholder = { Text(lang.tr("مثال: دفعة نقدية بالمحل", "e.g. Cash paid at counter")) },
                     singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("payment_note_input")
@@ -1292,6 +1295,7 @@ fun CustomerPaymentCollectionDialog(
                     onConfirmPayment(customer.id, enteredAmount, payNoteText, operationId)
                 },
                 enabled = enteredAmount > 0.0,
+                shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.testTag("confirm_customer_payment_button")
             ) {
                 Text(lang.tr("تأكيد القبض بالصندوق", "Confirm Collection"))
@@ -1317,40 +1321,51 @@ fun AddCustomerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(16.dp),
         title = {
             Text(
-                text = lang.tr("إضافة زبون جديد لدفتر الحسابات", "Add Customer to Ledger"),
+                text = lang.tr("إضافة زبون جديد", "New Customer"),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 OutlinedTextField(
                     value = newCustName,
                     onValueChange = { newCustName = it },
                     label = { Text(lang.tr("اسم الزبون أو المنشأة", "Customer / Business Name")) },
                     singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    textStyle = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("new_customer_name_input")
                 )
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    OutlinedTextField(
-                        value = newCustPhone,
-                        onValueChange = { newCustPhone = WesternFormatters.sanitizeWesternDigits(it) },
-                        label = { Text(lang.tr("رقم الجوال (059...)", "Phone Number (059...)")) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("new_customer_phone_input")
-                    )
-                }
+                OutlinedTextField(
+                    value = newCustPhone,
+                    onValueChange = { newCustPhone = WesternFormatters.sanitizeWesternDigits(it) },
+                    label = { Text(lang.tr("رقم الجوال (059...)", "Phone Number (059...)")) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        fontFamily = MonoFontFamily,
+                        textDirection = TextDirection.Ltr
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("new_customer_phone_input")
+                )
                 OutlinedTextField(
                     value = newCustAddr,
                     onValueChange = { newCustAddr = it },
                     label = { Text(lang.tr("المنطقة / العنوان", "Neighborhood / Address")) },
                     singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    textStyle = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("new_customer_address_input")
@@ -1361,6 +1376,7 @@ fun AddCustomerDialog(
             Button(
                 onClick = { onConfirm(newCustName, newCustPhone, newCustAddr) },
                 enabled = newCustName.isNotBlank(),
+                shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.testTag("confirm_add_customer_button")
             ) {
                 Text(lang.tr("حفظ الزبون", "Save Customer"))

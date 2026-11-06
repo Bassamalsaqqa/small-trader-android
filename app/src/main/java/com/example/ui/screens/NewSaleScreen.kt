@@ -109,8 +109,8 @@ fun NewSaleScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -124,12 +124,13 @@ fun NewSaleScreen(
                             .weight(1f)
                             .testTag("product_search_input"),
                         singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        textStyle = MaterialTheme.typography.bodyMedium,
                         placeholder = {
                             Text(
                                 text = lang.tr(
-                                    "اسم الصنف، الوزن، أو الباركود...",
-                                    "Search name, unit, or barcode..."
+                                    "ابحث بالاسم أو الباركود...",
+                                    "Search name or barcode..."
                                 ),
                                 style = MaterialTheme.typography.bodyMedium,
                                 maxLines = 1,
@@ -141,19 +142,39 @@ fun NewSaleScreen(
                                 imageVector = Icons.Default.Search,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(19.dp)
                             )
                         },
                         trailingIcon = {
-                            if (state.searchQuery.isNotEmpty()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(end = 4.dp)
+                            ) {
+                                if (state.searchQuery.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = { onSearchQueryChange("") },
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .testTag("clear_search_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Clear,
+                                            contentDescription = lang.tr("مسح البحث", "Clear search"),
+                                            modifier = Modifier.size(17.dp)
+                                        )
+                                    }
+                                }
                                 IconButton(
-                                    onClick = { onSearchQueryChange("") },
-                                    modifier = Modifier.testTag("clear_search_button")
+                                    onClick = onOpenScanner,
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .testTag("sale_scan_barcode_button")
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Clear,
-                                        contentDescription = lang.tr("مسح البحث", "Clear search"),
-                                        modifier = Modifier.size(18.dp)
+                                        imageVector = Icons.Default.QrCodeScanner,
+                                        contentDescription = lang.tr("إدخال أو مسح باركود", "Enter or Scan Barcode"),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                             }
@@ -175,35 +196,17 @@ fun NewSaleScreen(
                         )
                     )
 
-                    // Single dedicated barcode entry button on the sale screen
-                    FilledTonalIconButton(
-                        onClick = onOpenScanner,
-                        modifier = Modifier
-                            .size(52.dp)
-                            .testTag("sale_scan_barcode_button"),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurface
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.QrCodeScanner,
-                            contentDescription = lang.tr("إدخال أو مسح باركود", "Enter or Scan Barcode")
-                        )
-                    }
-
-                    // Always-visible custom item entry (no need to scroll past categories)
+                    // Always-visible custom item entry
                     FilledTonalButton(
                         onClick = onOpenCustomItem,
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.filledTonalButtonColors(
                             containerColor = MaterialTheme.colorScheme.surfaceVariant,
                             contentColor = MaterialTheme.colorScheme.onSurface
                         ),
                         modifier = Modifier
-                            .height(52.dp)
+                            .height(48.dp)
                             .testTag("sale_custom_item_chip")
                     ) {
                         Icon(
@@ -233,11 +236,11 @@ fun NewSaleScreen(
                             label = {
                                 Text(
                                     text = category.label(lang),
-                                    style = MaterialTheme.typography.labelLarge,
+                                    style = MaterialTheme.typography.labelMedium,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                 )
                             },
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(8.dp),
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = MaterialTheme.colorScheme.primary,
                                 selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
@@ -250,7 +253,9 @@ fun NewSaleScreen(
                                 borderColor = MaterialTheme.colorScheme.outlineVariant,
                                 selectedBorderColor = MaterialTheme.colorScheme.primary
                             ),
-                            modifier = Modifier.testTag("category_chip_${category.name}")
+                            modifier = Modifier
+                                .heightIn(min = 34.dp)
+                                .testTag("category_chip_${category.name}")
                         )
                     }
                 }
@@ -494,7 +499,7 @@ private fun ProductSaleCatalogRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 12.dp, end = 16.dp, top = 11.dp, bottom = 11.dp),
+                .padding(start = 12.dp, end = 14.dp, top = 9.dp, bottom = 9.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -502,12 +507,12 @@ private fun ProductSaleCatalogRow(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(end = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(3.dp)
+                    .padding(end = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
                     text = product.name(lang),
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -721,14 +726,14 @@ private fun BasketStickyBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp)
+                .padding(horizontal = 14.dp, vertical = 8.dp)
         ) {
             // Expandable editable basket drawer
             AnimatedVisibility(visible = isExpanded && hasItems) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 10.dp)
+                        .padding(bottom = 8.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),

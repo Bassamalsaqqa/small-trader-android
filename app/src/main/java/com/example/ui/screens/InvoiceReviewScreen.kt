@@ -346,9 +346,9 @@ private fun EditableInvoiceLinesSection(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
                         .testTag("invoice_line_${product.id}"),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     // Top Row: Index + Full Product Name | Line Total
                     Row(
@@ -394,37 +394,33 @@ private fun EditableInvoiceLinesSection(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(
+                        Text(
+                            text = buildString {
+                                append("${WesternFormatters.formatIls(product.priceIls)} × ${WesternFormatters.formatInt(item.quantity)} (${product.unit(lang)})")
+                                append(" • ")
+                                append(
+                                    when {
+                                        !product.isStockTracked -> lang.tr("مادة حرة", "Custom")
+                                        isMaxStock -> lang.tr(
+                                            "الحد الأقصى (${WesternFormatters.formatInt(product.stockCount)})",
+                                            "Max (${WesternFormatters.formatInt(product.stockCount)})"
+                                        )
+                                        else -> lang.tr(
+                                            "يتبقى ${WesternFormatters.formatInt(stockRemainingAfterSale)}",
+                                            "${WesternFormatters.formatInt(stockRemainingAfterSale)} left"
+                                        )
+                                    }
+                                )
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = if (isMaxStock) FontWeight.SemiBold else FontWeight.Medium,
+                            color = if (isMaxStock) financial.warning else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
                                 .weight(1f)
-                                .padding(end = 10.dp),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Text(
-                                text = "${WesternFormatters.formatIls(product.priceIls)} × ${WesternFormatters.formatInt(item.quantity)} (${product.unit(lang)})",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = when {
-                                    !product.isStockTracked -> lang.tr(
-                                        "مادة حرة • لا تُخصم من المخزون",
-                                        "Custom item • No inventory deduction"
-                                    )
-                                    isMaxStock -> lang.tr(
-                                        "الحد الأقصى بالمخزون (${WesternFormatters.formatInt(product.stockCount)}) • يتبقى 0 بعد البيع",
-                                        "Max available stock (${WesternFormatters.formatInt(product.stockCount)}) • 0 left after sale"
-                                    )
-                                    else -> lang.tr(
-                                        "يُخصم ${WesternFormatters.formatInt(item.quantity)} • يتبقى بالمخزون ${WesternFormatters.formatInt(stockRemainingAfterSale)}",
-                                        "Deducts ${WesternFormatters.formatInt(item.quantity)} • ${WesternFormatters.formatInt(stockRemainingAfterSale)} left in stock"
-                                    )
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (isMaxStock) financial.warning else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                            )
-                        }
+                                .padding(end = 10.dp)
+                        )
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -1188,7 +1184,7 @@ private fun DiscountAndRoundingCard(
                         placeholder = { Text("5.00") },
                         singleLine = true,
                         shape = RoundedCornerShape(10.dp),
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = MonoFontFamily),
+                        textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1236,8 +1232,8 @@ private fun ReviewCheckoutDock(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // Subtotal & Discount breakdown row when discount is applied
             if (hasDiscount) {

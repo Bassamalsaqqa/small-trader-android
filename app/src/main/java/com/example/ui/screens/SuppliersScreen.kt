@@ -11,14 +11,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
@@ -156,7 +159,6 @@ fun SuppliersScreen(
                             Text(
                                 text = WesternFormatters.formatIls(state.totalSupplierPayablesIls),
                                 style = MaterialTheme.typography.titleMedium.copy(
-                                    fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.Bold
                                 ),
                                 color = TraderTheme.financial.debit,
@@ -173,7 +175,6 @@ fun SuppliersScreen(
                             Text(
                                 text = WesternFormatters.formatIls(state.totalSupplierAdvancesIls),
                                 style = MaterialTheme.typography.titleMedium.copy(
-                                    fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.Bold
                                 ),
                                 color = if (state.totalSupplierAdvancesIls > 0.005) {
@@ -470,13 +471,13 @@ private fun SupplierDirectoryRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 11.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
                     text = supplier.name(lang),
@@ -515,12 +516,11 @@ private fun SupplierDirectoryRow(
 
             Column(
                 horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(3.dp)
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
                     text = displayedAmount,
                     style = MaterialTheme.typography.titleMedium.copy(
-                        fontFamily = MonoFontFamily,
                         fontWeight = FontWeight.Bold
                     ),
                     color = amountColor
@@ -763,7 +763,6 @@ fun SupplierDetailScreen(
                                             else -> WesternFormatters.formatIls(0.0)
                                         },
                                         style = MaterialTheme.typography.headlineSmall.copy(
-                                            fontFamily = MonoFontFamily,
                                             fontWeight = FontWeight.Bold
                                         ),
                                         color = when {
@@ -936,6 +935,7 @@ fun SupplierDetailScreen(
 
         AlertDialog(
             onDismissRequest = { isPayDialogOpen = false },
+            shape = RoundedCornerShape(16.dp),
             title = {
                 Text(
                     text = lang.tr("سداد دفعة نقدية للمورد", "Pay Supplier from Cash Drawer"),
@@ -943,7 +943,10 @@ fun SupplierDetailScreen(
                 )
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Text(
                         text = "${supplier.name(lang)} • ${
                             if (supplier.balanceOwedIls > 0.005) {
@@ -975,7 +978,8 @@ fun SupplierDetailScreen(
                                                 "Full Owed (${WesternFormatters.formatIls(supplier.balanceOwedIls)})"
                                             )
                                         )
-                                    }
+                                    },
+                                    modifier = Modifier.heightIn(min = 34.dp)
                                 )
                             }
                         }
@@ -983,7 +987,8 @@ fun SupplierDetailScreen(
                             FilterChip(
                                 selected = payAmountText == preset.toString(),
                                 onClick = { payAmountText = preset.toString() },
-                                label = { Text("$preset ₪") }
+                                label = { Text("$preset ₪") },
+                                modifier = Modifier.heightIn(min = 34.dp)
                             )
                         }
                     }
@@ -994,6 +999,8 @@ fun SupplierDetailScreen(
                         label = { Text(lang.tr("المبلغ المصروف من الصندوق (₪)", "Disbursement Amount (₪)")) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("supplier_payment_amount_input")
@@ -1041,6 +1048,7 @@ fun SupplierDetailScreen(
                         }
                     },
                     enabled = enteredAmount > 0.0,
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.testTag("confirm_supplier_payment_button")
                 ) {
                     Text(lang.tr("تأكيد الصرف", "Confirm Payment"))
@@ -1071,7 +1079,7 @@ private fun SupplierPaymentRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1095,7 +1103,6 @@ private fun SupplierPaymentRow(
                 Text(
                     text = "- ${WesternFormatters.formatIls(payment.amountIls)}",
                     style = MaterialTheme.typography.titleSmall.copy(
-                        fontFamily = MonoFontFamily,
                         fontWeight = FontWeight.Bold
                     ),
                     color = TraderTheme.financial.income
@@ -1124,7 +1131,7 @@ private fun PurchaseBillRow(
             .testTag("purchase_bill_${bill.billNumber}")
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(
@@ -1191,18 +1198,17 @@ private fun PurchaseBillRow(
             ) {
                 Text(
                     text = "${lang.tr("قيمة الفاتورة:", "Bill Total:")} ${WesternFormatters.formatIls(bill.totalIls)}",
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
                     text = "${lang.tr("دُفع نقداً:", "Paid Cash:")} ${WesternFormatters.formatIls(bill.paidIls)}",
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
+                    style = MaterialTheme.typography.bodySmall,
                     color = if (bill.paidIls > 0.005) TraderTheme.financial.income else MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
                     text = "${lang.tr("ذمة للمورد:", "Payable:")} ${WesternFormatters.formatIls(bill.remainingPayableIls)}",
                     style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = MonoFontFamily,
                         fontWeight = FontWeight.Bold
                     ),
                     color = if (bill.remainingPayableIls > 0.005) TraderTheme.financial.debit else TraderTheme.financial.income
@@ -1244,6 +1250,7 @@ fun ReceivePurchaseBillDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(16.dp),
         title = {
             Text(
                 text = lang.tr("قيد فاتورة مشتريات مالية", "Record Financial Purchase Bill"),
@@ -1251,8 +1258,11 @@ fun ReceivePurchaseBillDialog(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                // Natural explanation of financial bill vs stock receiving
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Concise explanation of financial bill vs stock receiving
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
@@ -1260,12 +1270,12 @@ fun ReceivePurchaseBillDialog(
                 ) {
                     Text(
                         text = lang.tr(
-                            "يسجل هذا السند قيمة الفاتورة في ذمة المورد ويخصم الدفعة النقدية من الصندوق. (تزويد كميات الأصناف يتم بشكل مستقل من شاشة الأصناف والمخزون).",
-                            "Records the bill amount on the supplier's payable account and deducts any immediate cash from the drawer. (Itemized stock quantities are updated separately in Inventory)."
+                            "يسجل هذا السند التزام المورد والدفعة النقدية. (تزويد كميات الأصناف يتم من شاشة المخزون).",
+                            "Records supplier payable and cash paid. (Itemized stock quantities are updated in Inventory)."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(10.dp)
+                        modifier = Modifier.padding(8.dp)
                     )
                 }
 
@@ -1279,7 +1289,8 @@ fun ReceivePurchaseBillDialog(
                             FilterChip(
                                 selected = selectedSupplierId == sup.id,
                                 onClick = { selectedSupplierId = sup.id },
-                                label = { Text(sup.name(lang), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                                label = { Text(sup.name(lang), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                modifier = Modifier.heightIn(min = 34.dp)
                             )
                         }
                     }
@@ -1298,6 +1309,7 @@ fun ReceivePurchaseBillDialog(
                     label = { Text(lang.tr("بيان البضاعة أو رقم فاتورة المورد", "Bill Summary / Supplier Ref")) },
                     placeholder = { Text(lang.tr("مثال: 20 كرتونة زيت وحلاوة", "e.g. 20 cartons oil & halva")) },
                     singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("purchase_bill_summary_input")
@@ -1309,6 +1321,8 @@ fun ReceivePurchaseBillDialog(
                     label = { Text(lang.tr("إجمالي قيمة الفاتورة (₪)", "Total Bill Amount (₪)")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("purchase_bill_total_input")
@@ -1320,6 +1334,8 @@ fun ReceivePurchaseBillDialog(
                     label = { Text(lang.tr("المسدد نقداً الآن من الصندوق (₪)", "Cash Paid Now from Drawer (₪)")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("purchase_bill_paid_input")
@@ -1366,6 +1382,7 @@ fun ReceivePurchaseBillDialog(
                     onConfirmBill(selectedSupplierId, purchaseDesc.trim(), totalVal, paidVal.coerceAtLeast(0.0))
                 },
                 enabled = isFormValid,
+                shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.testTag("confirm_purchase_bill_button")
             ) {
                 Text(lang.tr("تثبيت الفاتورة المالية", "Record Financial Bill"))

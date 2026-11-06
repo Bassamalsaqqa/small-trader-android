@@ -164,8 +164,8 @@ fun CashPaymentScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     // Top Row: Amount Due & Cash Received at a glance
                     Row(
@@ -337,7 +337,6 @@ fun CashPaymentScreen(
                                 onDone = { focusManager.clearFocus() }
                             ),
                             textStyle = MaterialTheme.typography.titleLarge.copy(
-                                fontFamily = MonoFontFamily,
                                 fontWeight = FontWeight.Bold
                             ),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -433,7 +432,6 @@ fun CashPaymentScreen(
                                         Text(
                                             text = "$bill",
                                             style = MaterialTheme.typography.titleSmall.copy(
-                                                fontFamily = MonoFontFamily,
                                                 fontWeight = if (coversDue || isSelectedBill) FontWeight.Bold else FontWeight.Medium
                                             ),
                                             color = when {
@@ -573,7 +571,7 @@ fun CashPaymentScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(

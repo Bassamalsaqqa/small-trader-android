@@ -11,14 +11,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
@@ -361,14 +364,14 @@ private fun CatalogDirectoryRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 11.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Left/Start: Product Name + Unit + Category + Barcode (no cost or cart buttons here)
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
                     text = product.name(lang),
@@ -421,12 +424,11 @@ private fun CatalogDirectoryRow(
             // Right/End: Selling Price + Restrained Availability Pill
             Column(
                 horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
                     text = WesternFormatters.formatIls(product.priceIls),
                     style = MaterialTheme.typography.titleMedium.copy(
-                        fontFamily = MonoFontFamily,
                         fontWeight = FontWeight.Bold
                     ),
                     color = MaterialTheme.colorScheme.onSurface
@@ -662,7 +664,6 @@ fun ProductDetailScreen(
                                 Text(
                                     text = WesternFormatters.formatIls(product.priceIls),
                                     style = MaterialTheme.typography.headlineSmall.copy(
-                                        fontFamily = MonoFontFamily,
                                         fontWeight = FontWeight.Bold
                                     ),
                                     color = MaterialTheme.colorScheme.onSurface,
@@ -687,14 +688,13 @@ fun ProductDetailScreen(
                                         Text(
                                             text = WesternFormatters.formatIls(product.costIls),
                                             style = MaterialTheme.typography.titleMedium.copy(
-                                                fontFamily = MonoFontFamily,
                                                 fontWeight = FontWeight.SemiBold
                                             ),
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
                                             text = "${lang.tr("الهامش:", "Margin:")} ${WesternFormatters.formatIls(unitMarginIls)}",
-                                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFontFamily),
+                                            style = MaterialTheme.typography.labelSmall,
                                             color = if (unitMarginIls >= 0) {
                                                 TraderTheme.financial.income
                                             } else {
@@ -728,7 +728,6 @@ fun ProductDetailScreen(
                                     Text(
                                         text = "${WesternFormatters.formatInt(product.stockCount)} ${product.unit(lang)}",
                                         style = MaterialTheme.typography.titleMedium.copy(
-                                            fontFamily = MonoFontFamily,
                                             fontWeight = FontWeight.Bold
                                         ),
                                         color = when {
@@ -890,6 +889,7 @@ fun ProductDetailScreen(
 
         AlertDialog(
             onDismissRequest = { isEditPriceOpen = false },
+            shape = RoundedCornerShape(16.dp),
             title = {
                 Text(
                     text = lang.tr("تعديل سعر البيع", "Edit Selling Price"),
@@ -897,7 +897,10 @@ fun ProductDetailScreen(
                 )
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Text(
                         text = product.name(lang),
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
@@ -915,6 +918,8 @@ fun ProductDetailScreen(
                         label = { Text(lang.tr("سعر البيع الجديد (₪)", "New Selling Price (₪)")) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("price_input_field")
@@ -947,6 +952,7 @@ fun ProductDetailScreen(
                         }
                     },
                     enabled = parsedPrice > 0.0,
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.testTag("confirm_price_update_button")
                 ) {
                     Text(lang.tr("حفظ السعر", "Save Price"))
@@ -989,6 +995,7 @@ fun ProductDetailScreen(
 
         AlertDialog(
             onDismissRequest = { isAdjustStockOpen = false },
+            shape = RoundedCornerShape(16.dp),
             title = {
                 Text(
                     text = lang.tr("تسوية وتعديل رصيد المخزون", "Inventory Stock Adjustment"),
@@ -996,7 +1003,10 @@ fun ProductDetailScreen(
                 )
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Text(
                         text = "${product.name(lang)} • ${lang.tr("المخزون الحالي:", "Current Stock:")} ${WesternFormatters.formatInt(product.stockCount)}",
                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
@@ -1016,7 +1026,9 @@ fun ProductDetailScreen(
                             },
                             leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp)) },
                             label = { Text(lang.tr("إضافة وتوريد (+)", "Add Stock (+)")) },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 36.dp)
                         )
                         FilterChip(
                             selected = !isAddingStock,
@@ -1026,7 +1038,9 @@ fun ProductDetailScreen(
                             },
                             leadingIcon = { Icon(Icons.Default.Remove, contentDescription = null, modifier = Modifier.size(16.dp)) },
                             label = { Text(lang.tr("خصم / تالف (−)", "Deduct (−)")) },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 36.dp)
                         )
                     }
 
@@ -1043,6 +1057,8 @@ fun ProductDetailScreen(
                         },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("stock_delta_input")
@@ -1057,7 +1073,8 @@ fun ProductDetailScreen(
                             FilterChip(
                                 selected = stockReasonText == preset,
                                 onClick = { stockReasonText = preset },
-                                label = { Text(preset, style = MaterialTheme.typography.labelSmall) }
+                                label = { Text(preset, style = MaterialTheme.typography.labelSmall) },
+                                modifier = Modifier.heightIn(min = 34.dp)
                             )
                         }
                     }
@@ -1067,6 +1084,7 @@ fun ProductDetailScreen(
                         onValueChange = { stockReasonText = it },
                         label = { Text(lang.tr("سبب التعديل (مطلوب للسجل)", "Reason for Adjustment")) },
                         singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("stock_reason_input")
@@ -1100,7 +1118,7 @@ fun ProductDetailScreen(
                             } else {
                                 MaterialTheme.colorScheme.onSurface
                             },
-                            modifier = Modifier.padding(10.dp)
+                            modifier = Modifier.padding(8.dp)
                         )
                     }
                 }
@@ -1114,6 +1132,7 @@ fun ProductDetailScreen(
                         }
                     },
                     enabled = isResultValid,
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.testTag("confirm_stock_adjust_button")
                 ) {
                     Text(lang.tr("تأكيد وحفظ الحركة", "Confirm Adjustment"))
@@ -1145,7 +1164,7 @@ private fun StockMovementRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 11.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1169,14 +1188,13 @@ private fun StockMovementRow(
                 Text(
                     text = "${if (isPositive) "+" else ""}${WesternFormatters.formatInt(sm.delta)}",
                     style = MaterialTheme.typography.titleSmall.copy(
-                        fontFamily = MonoFontFamily,
                         fontWeight = FontWeight.Bold
                     ),
                     color = if (isPositive) TraderTheme.financial.income else TraderTheme.financial.debit
                 )
                 Text(
                     text = "${lang.tr("الرصيد:", "Stock:")} ${WesternFormatters.formatInt(sm.resultingStock)}",
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFontFamily),
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }

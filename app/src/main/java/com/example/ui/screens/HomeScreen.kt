@@ -115,10 +115,10 @@ fun HomeScreen(
             contentPadding = PaddingValues(
                 start = if (isExpanded) 24.dp else 16.dp,
                 end = if (isExpanded) 24.dp else 16.dp,
-                top = 12.dp,
-                bottom = 28.dp
+                top = 10.dp,
+                bottom = 20.dp
             ),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // 1. Primary Action: Active Basket in Progress OR Immediate Sale Entry
             item {
@@ -201,6 +201,15 @@ fun HomeScreen(
                     }
                 }
             } else {
+                item {
+                    RecentInvoicesSection(
+                        invoices = state.invoices.take(2),
+                        lang = lang,
+                        onOpenInvoice = onOpenInvoice,
+                        onViewAllInvoices = onViewAllInvoices
+                    )
+                }
+
                 if (state.lowStockProducts.isNotEmpty()) {
                     item {
                         ActionableLowStockSection(
@@ -212,15 +221,6 @@ fun HomeScreen(
                             onNavigateToCatalog = onNavigateToCatalog
                         )
                     }
-                }
-
-                item {
-                    RecentInvoicesSection(
-                        invoices = state.invoices.take(2),
-                        lang = lang,
-                        onOpenInvoice = onOpenInvoice,
-                        onViewAllInvoices = onViewAllInvoices
-                    )
                 }
 
                 // 4. Secondary Store Operations (Relocated from 6-card directory to a calm utility strip)
@@ -263,7 +263,7 @@ private fun PrimaryRegisterSection(
     if (basketCount > 0) {
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(14.dp),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
             ),
@@ -273,8 +273,8 @@ private fun PrimaryRegisterSection(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -289,29 +289,29 @@ private fun PrimaryRegisterSection(
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(36.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Default.ShoppingBag,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.onPrimary,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
                         Column {
                             Text(
                                 text = lang.tr("عملية بيع قيد الإجراء", "Sale in Progress"),
-                                style = MaterialTheme.typography.titleMedium,
+                                style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
                                 text = if (lang == AppLanguage.AR) {
-                                    "${WesternFormatters.formatInt(basketCount)} أصناف في السلة الحالية"
+                                    "${WesternFormatters.formatInt(basketCount)} أصناف في السلة"
                                 } else {
-                                    "${WesternFormatters.formatInt(basketCount)} items in current basket"
+                                    "${WesternFormatters.formatInt(basketCount)} items in basket"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -338,7 +338,7 @@ private fun PrimaryRegisterSection(
                             .weight(1f)
                             .heightIn(min = 48.dp)
                             .testTag("home_resume_review_button"),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary
@@ -356,7 +356,7 @@ private fun PrimaryRegisterSection(
                         modifier = Modifier
                             .heightIn(min = 48.dp)
                             .testTag("hero_new_sale_button"),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(10.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.AddShoppingCart,
@@ -376,7 +376,7 @@ private fun PrimaryRegisterSection(
                         modifier = Modifier
                             .size(48.dp)
                             .testTag("hero_scan_barcode_button"),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         colors = IconButtonDefaults.filledTonalIconButtonColors(
                             containerColor = MaterialTheme.colorScheme.surface,
                             contentColor = MaterialTheme.colorScheme.onSurface
@@ -393,7 +393,7 @@ private fun PrimaryRegisterSection(
                         modifier = Modifier
                             .size(48.dp)
                             .testTag("home_quick_custom_item_button"),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         colors = IconButtonDefaults.filledTonalIconButtonColors(
                             containerColor = MaterialTheme.colorScheme.surface,
                             contentColor = MaterialTheme.colorScheme.onSurface
@@ -408,81 +408,69 @@ private fun PrimaryRegisterSection(
             }
         }
     } else {
-        Card(
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface
-            ),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
+            Button(
+                onClick = onStartNewSale,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .weight(1f)
+                    .heightIn(min = 48.dp)
+                    .testTag("hero_new_sale_button"),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
             ) {
-                Button(
-                    onClick = onStartNewSale,
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 52.dp)
-                        .testTag("hero_new_sale_button"),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AddShoppingCart,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = lang.tr("بدء عملية بيع", "Start New Sale"),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.AddShoppingCart,
+                    contentDescription = null,
+                    modifier = Modifier.size(19.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = lang.tr("بدء عملية بيع", "Start New Sale"),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
 
-                FilledTonalButton(
-                    onClick = onOpenScanner,
-                    modifier = Modifier
-                        .heightIn(min = 52.dp)
-                        .testTag("hero_scan_barcode_button"),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.QrCodeScanner,
-                        contentDescription = lang.tr("مسح باركود", "Scan Barcode"),
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = lang.tr("مسح", "Scan"),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
+            FilledTonalButton(
+                onClick = onOpenScanner,
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("hero_scan_barcode_button"),
+                shape = RoundedCornerShape(12.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.QrCodeScanner,
+                    contentDescription = lang.tr("مسح باركود", "Scan Barcode"),
+                    modifier = Modifier.size(19.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = lang.tr("مسح", "Scan"),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
 
-                FilledTonalIconButton(
-                    onClick = onOpenCustomItem,
-                    modifier = Modifier
-                        .size(52.dp)
-                        .testTag("home_quick_custom_item_button"),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PointOfSale,
-                        contentDescription = lang.tr("مبلغ حر سريع", "Quick Custom Amount")
-                    )
-                }
+            FilledTonalIconButton(
+                onClick = onOpenCustomItem,
+                modifier = Modifier
+                    .size(48.dp)
+                    .testTag("home_quick_custom_item_button"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PointOfSale,
+                    contentDescription = lang.tr("مبلغ حر سريع", "Quick Custom Amount")
+                )
             }
         }
     }
@@ -508,7 +496,7 @@ private fun OwnerFinancialPulseCard(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
@@ -518,14 +506,14 @@ private fun OwnerFinancialPulseCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Primary Drawer Cash row (tappable to open Financial Reports)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(8.dp))
                     .clickable(onClick = onNavigateToReports)
                     .padding(vertical = 2.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -565,7 +553,7 @@ private fun OwnerFinancialPulseCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(IntrinsicSize.Min),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Today's Sales
@@ -575,7 +563,7 @@ private fun OwnerFinancialPulseCard(
                         .clip(RoundedCornerShape(8.dp))
                         .clickable(onClick = onNavigateToReports)
                         .padding(vertical = 2.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                    verticalArrangement = Arrangement.spacedBy(1.dp)
                 ) {
                     Text(
                         text = lang.tr("مبيعات اليوم", "Today's Sales"),
@@ -588,15 +576,16 @@ private fun OwnerFinancialPulseCard(
                         text = WesternFormatters.formatIls(state.todaySalesTotalIls),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
                     )
                     Text(
                         text = if (lang == AppLanguage.AR) {
-                            "${WesternFormatters.formatInt(state.todayInvoiceCount)} فاتورة"
+                            "${WesternFormatters.formatInt(state.todayInvoiceCount)} فواتير"
                         } else {
                             "${WesternFormatters.formatInt(state.todayInvoiceCount)} invoices"
                         },
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -614,7 +603,7 @@ private fun OwnerFinancialPulseCard(
                         .clickable(onClick = onNavigateToCustomers)
                         .testTag("home_customers_button")
                         .padding(vertical = 2.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                    verticalArrangement = Arrangement.spacedBy(1.dp)
                 ) {
                     Text(
                         text = lang.tr("ديون الزبائن", "Receivables"),
@@ -627,15 +616,16 @@ private fun OwnerFinancialPulseCard(
                         text = WesternFormatters.formatIls(state.totalCustomerDebtsIls),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
                     )
                     Text(
                         text = if (lang == AppLanguage.AR) {
-                            "${WesternFormatters.formatInt(debtorCustomersCount)} ذمم مفتوحة"
+                            "${WesternFormatters.formatInt(debtorCustomersCount)} ذمم"
                         } else {
                             "${WesternFormatters.formatInt(debtorCustomersCount)} open"
                         },
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                         color = if (state.totalCustomerDebtsIls > 0.009) financial.debit else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -652,10 +642,10 @@ private fun OwnerFinancialPulseCard(
                         .clip(RoundedCornerShape(8.dp))
                         .clickable(onClick = onNavigateToSuppliers)
                         .padding(vertical = 2.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                    verticalArrangement = Arrangement.spacedBy(1.dp)
                 ) {
                     Text(
-                        text = lang.tr("مستحقات الموردين", "Payables"),
+                        text = lang.tr("ذمم الموردين", "Payables"),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -665,7 +655,8 @@ private fun OwnerFinancialPulseCard(
                         text = WesternFormatters.formatIls(state.totalSupplierPayablesIls),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
                     )
                     Text(
                         text = if (lang == AppLanguage.AR) {
@@ -673,7 +664,7 @@ private fun OwnerFinancialPulseCard(
                         } else {
                             "${WesternFormatters.formatInt(owedSuppliersCount)} owed"
                         },
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -800,16 +791,16 @@ private fun ActionableLowStockSection(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
         border = BorderStroke(
             width = 1.dp,
             color = if (outOfStockCount > 0) {
-                financial.debit.copy(alpha = 0.4f)
+                financial.debit.copy(alpha = 0.35f)
             } else {
-                financial.warning.copy(alpha = 0.4f)
+                financial.warning.copy(alpha = 0.35f)
             }
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -817,8 +808,8 @@ private fun ActionableLowStockSection(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -827,64 +818,82 @@ private fun ActionableLowStockSection(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = if (outOfStockCount > 0) financial.debitContainer else financial.warningContainer,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.WarningAmber,
-                                contentDescription = null,
-                                tint = if (outOfStockCount > 0) financial.debit else financial.warning,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                    Column {
+                    Icon(
+                        imageVector = Icons.Default.WarningAmber,
+                        contentDescription = null,
+                        tint = if (outOfStockCount > 0) financial.debit else financial.warning,
+                        modifier = Modifier.size(17.dp)
+                    )
+                    Text(
+                        text = if (lang == AppLanguage.AR) {
+                            "نواقص المخزون (${WesternFormatters.formatInt(lowStockProducts.size)})"
+                        } else {
+                            "Low Stock (${WesternFormatters.formatInt(lowStockProducts.size)})"
+                        },
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (outOfStockCount > 0) {
                         Text(
                             text = if (lang == AppLanguage.AR) {
-                                "نواقص المخزون (${WesternFormatters.formatInt(lowStockProducts.size)})"
+                                "• ${WesternFormatters.formatInt(outOfStockCount)} نفد"
                             } else {
-                                "Low Stock (${WesternFormatters.formatInt(lowStockProducts.size)})"
+                                "• ${WesternFormatters.formatInt(outOfStockCount)} out"
                             },
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = financial.debit
                         )
-                        if (outOfStockCount > 0) {
-                            Text(
-                                text = if (lang == AppLanguage.AR) {
-                                    "${WesternFormatters.formatInt(outOfStockCount)} أصناف نفدت بالكامل"
-                                } else {
-                                    "${WesternFormatters.formatInt(outOfStockCount)} items out of stock"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = financial.debit
-                            )
-                        }
                     }
                 }
 
-                TextButton(
-                    onClick = onNavigateToCatalog,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = lang.tr("فتح الجرد", "Inventory"),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (lowStockProducts.size > 2) {
+                        TextButton(
+                            onClick = { expanded = !expanded },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Text(
+                                text = if (expanded) {
+                                    lang.tr("طي", "Less")
+                                } else {
+                                    "+${WesternFormatters.formatInt(lowStockProducts.size - 2)}"
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Icon(
+                                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    TextButton(
+                        onClick = onNavigateToCatalog,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.height(30.dp)
+                    ) {
+                        Text(
+                            text = lang.tr("الجرد", "Inventory"),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 visibleProducts.forEachIndexed { index, product ->
                     if (index > 0) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                     }
                     LowStockActionRow(
                         product = product,
@@ -892,36 +901,6 @@ private fun ActionableLowStockSection(
                         lang = lang,
                         onRestock = { onRestockProduct(product) },
                         onAddToSale = { onAddProductToSale(product) }
-                    )
-                }
-            }
-
-            if (lowStockProducts.size > 2) {
-                TextButton(
-                    onClick = { expanded = !expanded },
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = if (expanded) {
-                            lang.tr("طي القائمة", "Show less")
-                        } else {
-                            val remaining = lowStockProducts.size - 2
-                            if (lang == AppLanguage.AR) {
-                                "عرض ${WesternFormatters.formatInt(remaining)} أصناف أخرى"
-                            } else {
-                                "Show ${WesternFormatters.formatInt(remaining)} more"
-                            }
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -943,15 +922,16 @@ private fun LowStockActionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
+            .padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .weight(1f)
                 .padding(end = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
                 text = product.name(lang),
@@ -959,24 +939,23 @@ private fun LowStockActionRow(
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
             )
             Text(
                 text = if (isOut) {
-                    if (lang == AppLanguage.AR) {
-                        "نفد من الرف • الحد الأدنى ${WesternFormatters.formatInt(product.minStockThreshold)}"
-                    } else {
-                        "Out of stock • Min ${WesternFormatters.formatInt(product.minStockThreshold)}"
-                    }
+                    lang.tr("• نفد", "• Out")
                 } else {
                     if (lang == AppLanguage.AR) {
-                        "المتبقي ${WesternFormatters.formatInt(product.stockCount)} ${product.unit(lang)} (الحد ${WesternFormatters.formatInt(product.minStockThreshold)})"
+                        "• متبقي ${WesternFormatters.formatInt(product.stockCount)} ${product.unit(lang)}"
                     } else {
-                        "${WesternFormatters.formatInt(product.stockCount)} ${product.unit(lang)} left (Min ${WesternFormatters.formatInt(product.minStockThreshold)})"
+                        "• ${WesternFormatters.formatInt(product.stockCount)} ${product.unit(lang)}"
                     }
                 },
-                style = MaterialTheme.typography.bodySmall,
-                color = if (isOut) financial.debit else financial.warning
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isOut) financial.debit else financial.warning,
+                maxLines = 1
             )
         }
 
@@ -984,10 +963,10 @@ private fun LowStockActionRow(
             FilledTonalButton(
                 onClick = onRestock,
                 modifier = Modifier
-                    .heightIn(min = 40.dp)
+                    .height(34.dp)
                     .testTag("restock_${product.id}"),
-                shape = RoundedCornerShape(10.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
             ) {
                 Text(
                     text = lang.tr("+10 توريد", "+10 Restock"),
@@ -999,9 +978,9 @@ private fun LowStockActionRow(
         } else if (!isOut) {
             OutlinedButton(
                 onClick = onAddToSale,
-                modifier = Modifier.heightIn(min = 40.dp),
-                shape = RoundedCornerShape(10.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                modifier = Modifier.height(34.dp),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
             ) {
                 Text(
                     text = lang.tr("بيع", "Sell"),
@@ -1199,24 +1178,24 @@ private fun OperationPill(
     Surface(
         onClick = onClick,
         modifier = Modifier
-            .heightIn(min = 52.dp)
+            .heightIn(min = 44.dp)
             .testTag(testTag),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(17.dp)
             )
-            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
                 Text(
                     text = title,
                     style = MaterialTheme.typography.labelLarge,
@@ -1225,7 +1204,7 @@ private fun OperationPill(
                 )
                 Text(
                     text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1251,16 +1230,16 @@ fun RecentInvoiceCard(
         )
         isPartial -> Triple(
             lang.tr(
-                "جزئي • متبقي ${WesternFormatters.formatIls(invoice.remainingDebitIls)}",
-                "Partial • Due ${WesternFormatters.formatIls(invoice.remainingDebitIls)}"
+                "جزئي • ${WesternFormatters.formatIls(invoice.remainingDebitIls)}",
+                "Partial • ${WesternFormatters.formatIls(invoice.remainingDebitIls)}"
             ),
             financial.onWarningContainer,
             financial.warningContainer
         )
         else -> Triple(
             lang.tr(
-                "ذمة آجلة • متبقي ${WesternFormatters.formatIls(invoice.remainingDebitIls)}",
-                "On Credit • Due ${WesternFormatters.formatIls(invoice.remainingDebitIls)}"
+                "ذمة • ${WesternFormatters.formatIls(invoice.remainingDebitIls)}",
+                "Credit • ${WesternFormatters.formatIls(invoice.remainingDebitIls)}"
             ),
             financial.onDebitContainer,
             financial.debitContainer
@@ -1279,8 +1258,8 @@ fun RecentInvoiceCard(
         lang.tr("زبون نقدي", "Walk-in Customer")
     }
     val itemSummary = lang.tr(
-        "${WesternFormatters.formatInt(invoice.items.size)} أصناف (${WesternFormatters.formatInt(invoice.totalQuantity)} وحدات)",
-        "${WesternFormatters.formatInt(invoice.items.size)} items (${WesternFormatters.formatInt(invoice.totalQuantity)} units)"
+        "${WesternFormatters.formatInt(invoice.items.size)} أصناف",
+        "${WesternFormatters.formatInt(invoice.items.size)} items"
     )
 
     Card(

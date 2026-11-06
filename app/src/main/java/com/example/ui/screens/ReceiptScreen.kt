@@ -800,7 +800,6 @@ private fun InvoiceReceiptDocumentCard(
                             Text(
                                 text = WesternFormatters.formatIls(item.lineTotal),
                                 style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.SemiBold
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface
@@ -808,7 +807,7 @@ private fun InvoiceReceiptDocumentCard(
                         }
                         Text(
                             text = "${WesternFormatters.formatInt(item.quantity)} × ${WesternFormatters.formatIls(item.product.priceIls)} (${item.product.unit(lang)})",
-                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFontFamily),
+                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 14.dp)
                         )
@@ -824,12 +823,12 @@ private fun InvoiceReceiptDocumentCard(
                     DocumentMetaRow(
                         label = lang.tr("المجموع الفرعي:", "Subtotal:"),
                         value = WesternFormatters.formatIls(receipt.subtotalIls),
-                        useMono = true
+                        useMono = false
                     )
                     DocumentMetaRow(
                         label = lang.tr("الخصم الممنوح:", "Discount:"),
                         value = "- ${WesternFormatters.formatIls(receipt.discountIls)}",
-                        useMono = true,
+                        useMono = false,
                         valueColor = TraderTheme.financial.income
                     )
                 }
@@ -849,7 +848,6 @@ private fun InvoiceReceiptDocumentCard(
                     Text(
                         text = WesternFormatters.formatIls(receipt.netTotalIls),
                         style = MaterialTheme.typography.titleLarge.copy(
-                            fontFamily = MonoFontFamily,
                             fontWeight = FontWeight.Bold
                         ),
                         color = MaterialTheme.colorScheme.onSurface,
@@ -869,12 +867,12 @@ private fun InvoiceReceiptDocumentCard(
                     DocumentMetaRow(
                         label = lang.tr("المبلغ المقبوض نقداً:", "Cash Received:"),
                         value = WesternFormatters.formatIls(receipt.cashReceivedIls),
-                        useMono = true
+                        useMono = false
                     )
                     DocumentMetaRow(
                         label = lang.tr("الباقي المرجع للزبون:", "Change Returned:"),
                         value = WesternFormatters.formatIls(receipt.changeReturnedIls),
-                        useMono = true
+                        useMono = false
                     )
                 } else {
                     DocumentMetaRow(
@@ -886,12 +884,12 @@ private fun InvoiceReceiptDocumentCard(
                     DocumentMetaRow(
                         label = lang.tr("المدفوع نقداً عند الإصدار:", "Cash Paid at Issue:"),
                         value = WesternFormatters.formatIls(receipt.cashReceivedIls),
-                        useMono = true
+                        useMono = false
                     )
                     DocumentMetaRow(
                         label = lang.tr("المبلغ المقيد بالذمة:", "Balance Due on Account:"),
                         value = WesternFormatters.formatIls(receipt.remainingDebitIls),
-                        useMono = true,
+                        useMono = false,
                         valueColor = TraderTheme.financial.debit
                     )
                 }
@@ -1058,7 +1056,6 @@ fun InvoicesHistoryScreen(
                             Text(
                                 text = WesternFormatters.formatIls(state.todaySalesTotalIls),
                                 style = MaterialTheme.typography.titleMedium.copy(
-                                    fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.Bold
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface
@@ -1075,7 +1072,6 @@ fun InvoicesHistoryScreen(
                                 Text(
                                     text = WesternFormatters.formatIls(filteredCreditTotalIls),
                                     style = MaterialTheme.typography.titleMedium.copy(
-                                        fontFamily = MonoFontFamily,
                                         fontWeight = FontWeight.Bold
                                     ),
                                     color = TraderTheme.financial.debit
@@ -1091,7 +1087,6 @@ fun InvoicesHistoryScreen(
                                 Text(
                                     text = WesternFormatters.formatIls(filteredPaidTotalIls),
                                     style = MaterialTheme.typography.titleMedium.copy(
-                                        fontFamily = MonoFontFamily,
                                         fontWeight = FontWeight.Bold
                                     ),
                                     color = TraderTheme.financial.income

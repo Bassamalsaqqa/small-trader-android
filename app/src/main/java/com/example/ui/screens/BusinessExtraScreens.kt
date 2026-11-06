@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AccountBalanceWallet
@@ -159,7 +160,6 @@ fun ExpensesScreen(
                             Text(
                                 text = WesternFormatters.formatIls(state.shiftExpensesIls),
                                 style = MaterialTheme.typography.titleLarge.copy(
-                                    fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.Bold
                                 ),
                                 color = financial.debit
@@ -174,7 +174,6 @@ fun ExpensesScreen(
                             Text(
                                 text = WesternFormatters.formatIls(state.totalExpensesIls),
                                 style = MaterialTheme.typography.titleMedium.copy(
-                                    fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.SemiBold
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface
@@ -365,7 +364,6 @@ fun ExpensesScreen(
                         Text(
                             text = WesternFormatters.formatIls(filteredTotalIls),
                             style = MaterialTheme.typography.labelMedium.copy(
-                                fontFamily = MonoFontFamily,
                                 fontWeight = FontWeight.Bold
                             ),
                             color = financial.debit
@@ -419,7 +417,7 @@ fun ExpensesScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -427,7 +425,7 @@ fun ExpensesScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .padding(end = 12.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                verticalArrangement = Arrangement.spacedBy(3.dp)
                             ) {
                                 Text(
                                     text = expense.title(lang),
@@ -464,20 +462,11 @@ fun ExpensesScreen(
                                         )
                                     }
                                 }
-                                Text(
-                                    text = lang.tr(
-                                        "المصدر: صرف نقدي مباشر من صندوق الكاش",
-                                        "Source: Paid from main cash drawer"
-                                    ),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
                             }
 
                             Text(
                                 text = "- ${WesternFormatters.formatIls(expense.amountIls)}",
                                 style = MaterialTheme.typography.titleMedium.copy(
-                                    fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.Bold
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface
@@ -541,6 +530,7 @@ fun AddExpenseDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(16.dp),
         title = {
             Text(
                 text = lang.tr("تسجيل مصروف نقدي من الصندوق", "Record Cash Drawer Expense"),
@@ -548,19 +538,16 @@ fun AddExpenseDialog(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Text(
                     text = lang.tr(
                         "التاريخ: ${state.todayDate} • المصدر: صندوق الكاش الرئيسي",
                         "Date: ${state.todayDate} • Source: Main Cash Drawer"
                     ),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Text(
-                    text = lang.tr("تصنيف المصروف:", "Category:"),
-                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
@@ -574,7 +561,8 @@ fun AddExpenseDialog(
                         FilterChip(
                             selected = selectedCategory == cat,
                             onClick = { selectedCategory = cat },
-                            label = { Text(cat.label(lang)) }
+                            label = { Text(cat.label(lang)) },
+                            modifier = Modifier.heightIn(min = 34.dp)
                         )
                     }
                 }
@@ -586,8 +574,8 @@ fun AddExpenseDialog(
                         localError = null
                     },
                     label = { Text(lang.tr("بيان المصروف (مثال: أكياس تغليف، فاتورة مياه)", "Description (e.g. Packaging bags, water bill)")) },
-                    singleLine = false,
-                    maxLines = 2,
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("expense_title_input")
@@ -602,6 +590,8 @@ fun AddExpenseDialog(
                     label = { Text(lang.tr("المبلغ المدفوع نقداً (₪)", "Cash Amount Paid (₪)")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("expense_amount_input")
@@ -626,7 +616,6 @@ fun AddExpenseDialog(
                             Text(
                                 text = WesternFormatters.formatIls(state.drawerTotalCashIls - parsedAmount),
                                 style = MaterialTheme.typography.labelLarge.copy(
-                                    fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.Bold
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface
@@ -883,7 +872,6 @@ fun FinancialReportsScreen(
                         Text(
                             text = WesternFormatters.formatIls(state.drawerTotalCashIls),
                             style = MaterialTheme.typography.headlineSmall.copy(
-                                fontFamily = MonoFontFamily,
                                 fontWeight = FontWeight.Bold
                             ),
                             color = MaterialTheme.colorScheme.primary,
@@ -1043,7 +1031,6 @@ private fun ReportMetricRow(
         Text(
             text = value,
             style = MaterialTheme.typography.titleMedium.copy(
-                fontFamily = MonoFontFamily,
                 fontWeight = if (boldValue) FontWeight.Bold else FontWeight.SemiBold
             ),
             color = valueColor
