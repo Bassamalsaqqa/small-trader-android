@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.MerchantCheckoutTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-11-07T21:27:21.288Z" hostname="pasta-hp-worker" time="10.749">
+  <properties/>
+  <testcase name="exactCashTender_onlyFillsInput_neverPostsSaleOrAltersDrawer" classname="com.example.MerchantCheckoutTest" time="8.249"/>
+  <testcase name="receiptScreen_compactResult_revealsDetailedThermalPaperOnToggle" classname="com.example.MerchantCheckoutTest" time="0.379"/>
+  <testcase name="invoiceReviewScreen_safeQuotation_doesNotPostOrAlterState" classname="com.example.MerchantCheckoutTest" time="0.71"/>
+  <testcase name="creditSale_requiresAssignedCustomer_andBlockedOverLimit" classname="com.example.MerchantCheckoutTest" time="0.351"/>
+  <testcase name="newSaleScreen_exposesOptionalSaleOptionsCallback" classname="com.example.MerchantCheckoutTest" time="0.256"/>
+  <testcase name="invoiceReviewScreen_progressiveDisclosure_expandsCustomerAndDiscountSections" classname="com.example.MerchantCheckoutTest" time="0.477"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

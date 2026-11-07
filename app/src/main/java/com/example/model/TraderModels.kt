@@ -17,6 +17,8 @@ enum class AppLanguage(val code: String, val isRtl: Boolean) {
 
 enum class TraderScreen {
     HOME,
+    PEOPLE,
+    PURCHASES,
     NEW_SALE,
     INVOICE_REVIEW,
     CASH_PAYMENT,

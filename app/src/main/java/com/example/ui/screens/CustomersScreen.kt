@@ -54,6 +54,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -115,7 +116,7 @@ fun CustomersScreen(
 ) {
     val lang = state.language
     val financial = TraderTheme.financial
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(CustomerBalanceFilter.ALL) }
 
     val debtorsCount = remember(state.customers) { state.customers.count { it.balanceIls > 0.005 } }
@@ -173,7 +174,7 @@ fun CustomersScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
+                    if (state.currentSession.canViewReports()) Row(
                         modifier = Modifier.weight(1f),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -215,6 +216,7 @@ fun CustomersScreen(
                         }
                     }
 
+                    if (!state.currentSession.canViewReports()) Spacer(Modifier.weight(1f))
                     Button(
                         onClick = onOpenAddCustomerDialog,
                         shape = RoundedCornerShape(10.dp),
@@ -498,7 +500,8 @@ fun CustomersScreen(
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .testTag("customers_directory_list"),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -687,8 +690,8 @@ fun CustomerDetailScreen(
     val transactions = remember(state.customerTransactions, customer.id) {
         state.customerTransactions.filter { it.customerId == customer.id }
     }
-    var isEditCustomerOpen by remember(customer.id) { mutableStateOf(false) }
-    var isStatementPreviewOpen by remember(customer.id) { mutableStateOf(false) }
+    var isEditCustomerOpen by rememberSaveable(customer.id) { mutableStateOf(false) }
+    var isStatementPreviewOpen by rememberSaveable(customer.id) { mutableStateOf(false) }
 
     val isDebtor = customer.balanceIls > 0.005
     val isAdvance = customer.balanceIls < -0.005
@@ -1131,9 +1134,9 @@ private fun EditCustomerDialog(
     onDismiss: () -> Unit,
     onConfirmUpdate: (name: String, phone: String, address: String, creditLimitIls: Double) -> Unit
 ) {
-    var nameText by remember(customer.id) { mutableStateOf(customer.nameAr) }
-    var phoneText by remember(customer.id) { mutableStateOf(customer.phone) }
-    var addressText by remember(customer.id) { mutableStateOf(customer.addressAr) }
+    var nameText by rememberSaveable(customer.id) { mutableStateOf(customer.nameAr) }
+    var phoneText by rememberSaveable(customer.id) { mutableStateOf(customer.phone) }
+    var addressText by rememberSaveable(customer.id) { mutableStateOf(customer.addressAr) }
     var limitText by remember(customer.id) {
         mutableStateOf(WesternFormatters.formatNumber(customer.creditLimitIls).removeSuffix(".00"))
     }
@@ -1248,7 +1251,7 @@ private fun CustomerStatementShareDialog(
     onDismiss: () -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
-    var copied by remember { mutableStateOf(false) }
+    var copied by rememberSaveable { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1516,10 +1519,10 @@ fun CustomerPaymentCollectionDialog(
     } else {
         ""
     }
-    var payAmountText by remember(customer.id) { mutableStateOf(initialAmt) }
-    var payNoteText by remember(customer.id) { mutableStateOf("") }
+    var payAmountText by rememberSaveable(customer.id) { mutableStateOf(initialAmt) }
+    var payNoteText by rememberSaveable(customer.id) { mutableStateOf("") }
     // Deterministic operation ID per dialog open session to prevent accidental double-tap replay
-    val operationId = remember(customer.id) { "cpay_${customer.id}_${System.currentTimeMillis()}" }
+    val operationId = rememberSaveable(customer.id) { "cpay_${customer.id}_${System.currentTimeMillis()}" }
 
     val enteredAmount = payAmountText.toDoubleOrNull() ?: 0.0
     val projectedBalance = remember(customer.balanceIls, enteredAmount) {
@@ -1742,9 +1745,9 @@ fun AddCustomerDialog(
     onDismiss: () -> Unit,
     onConfirm: (name: String, phone: String, address: String) -> Unit
 ) {
-    var newCustName by remember { mutableStateOf("") }
-    var newCustPhone by remember { mutableStateOf("") }
-    var newCustAddr by remember { mutableStateOf("") }
+    var newCustName by rememberSaveable { mutableStateOf("") }
+    var newCustPhone by rememberSaveable { mutableStateOf("") }
+    var newCustAddr by rememberSaveable { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,

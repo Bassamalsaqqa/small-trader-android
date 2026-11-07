@@ -57,6 +57,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -94,9 +95,10 @@ fun ExpensesScreen(
 ) {
     val lang = state.language
     val financial = TraderTheme.financial
-    val canManageExpenses = state.currentSession.canManageSuppliers() || state.currentSession.canViewReports()
+    val canManageExpenses = state.currentSession.canManageExpenses()
+    if (!canManageExpenses) return
 
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf<ExpenseCategory?>(null) }
 
     val filteredExpenses = remember(state.expenses, searchQuery, selectedCategory) {
@@ -521,9 +523,9 @@ fun AddExpenseDialog(
 ) {
     val lang = state.language
     val financial = TraderTheme.financial
-    var titleText by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf(ExpenseCategory.ELECTRICITY_WATER) }
-    var amountText by remember { mutableStateOf("") }
+    var titleText by rememberSaveable { mutableStateOf("") }
+    var selectedCategory by rememberSaveable { mutableStateOf(ExpenseCategory.ELECTRICITY_WATER) }
+    var amountText by rememberSaveable { mutableStateOf("") }
     var localError by remember { mutableStateOf<String?>(null) }
 
     val parsedAmount = amountText.toDoubleOrNull() ?: 0.0

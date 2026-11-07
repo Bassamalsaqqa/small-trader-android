@@ -45,6 +45,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -87,14 +89,35 @@ fun ProductsCatalogScreen(
     onProductClick: (Product) -> Unit,
     onAddProductToSale: (Product) -> Unit = {},
     onQuickRestock: (Product) -> Unit = {},
+    launchCreate: Boolean = false,
+    onLaunchConsumed: () -> Unit = {},
+    onOpenPurchases: () -> Unit = {},
+    launchLowStock: Boolean = false,
+    onLowStockConsumed: () -> Unit = {},
     onSaveProduct: ((productId: String?, nameAr: String, category: ProductCategory, unitAr: String, barcode: String, priceIls: Double, costIls: Double, minStockThreshold: Int, initialStock: Int, warehouseAr: String, lotBatchCode: String, expiryDate: String?, isWeightedDisplayOnly: Boolean) -> Unit)? = null
 ) {
+    val createDraft = rememberSaveableStateHolder()
     val lang = state.language
     val canManageInventory = state.currentSession.canManageInventory()
-    var stockFilter by remember { mutableStateOf(CatalogStockFilter.ALL) }
-    var isCreateProductOpen by remember { mutableStateOf(false) }
-    var isStockTransferPreviewOpen by remember { mutableStateOf(false) }
+    var stockFilter by rememberSaveable { mutableStateOf(CatalogStockFilter.ALL) }
+    var isCreateProductOpen by rememberSaveable { mutableStateOf(false) }
+    var isStockTransferPreviewOpen by rememberSaveable { mutableStateOf(false) }
 
+    androidx.compose.runtime.LaunchedEffect(canManageInventory) {
+        if (!canManageInventory) {
+            isCreateProductOpen = false
+            isStockTransferPreviewOpen = false
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(launchCreate) {
+        if (launchCreate && canManageInventory) { isCreateProductOpen = true; onLaunchConsumed() }
+    }
+    androidx.compose.runtime.LaunchedEffect(launchLowStock) {
+        if (launchLowStock) {
+            stockFilter = CatalogStockFilter.LOW_OR_OUT
+            onLowStockConsumed()
+        }
+    }
     val lowOrOutCount = remember(state.products) {
         state.products.count { it.isStockTracked && it.isLowStock }
     }
@@ -134,6 +157,11 @@ fun ProductsCatalogScreen(
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                if (state.currentSession.canManageSuppliers()) {
+                    OutlinedButton(onClick = onOpenPurchases, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                        Text(lang.tr("المشتريات", "Purchases"))
+                    }
+                }
                 // Action Row: + New Product (Owner/Manager) & Warehouse / Lot / Stock Count Preview
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -235,7 +263,7 @@ fun ProductsCatalogScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    item {
+        item {
                         FilterChip(
                             selected = stockFilter == CatalogStockFilter.ALL,
                             onClick = { stockFilter = CatalogStockFilter.ALL },
@@ -361,7 +389,8 @@ fun ProductsCatalogScreen(
         }
     }
 
-    if (isCreateProductOpen && onSaveProduct != null) {
+    if (canManageInventory && isCreateProductOpen && onSaveProduct != null) {
+        createDraft.SaveableStateProvider("product_${state.products.size}") {
         ProductEditorDialog(
             initialProduct = null,
             lang = lang,
@@ -371,6 +400,7 @@ fun ProductsCatalogScreen(
                 isCreateProductOpen = false
             }
         )
+        }
     }
 
     if (isStockTransferPreviewOpen) {
@@ -533,10 +563,17 @@ fun ProductDetailScreen(
         state.stockMovements.filter { it.productId == product.id }
     }
 
-    var isEditPriceOpen by remember(product.id) { mutableStateOf(false) }
-    var isAdjustStockOpen by remember(product.id) { mutableStateOf(false) }
-    var isEditProductOpen by remember(product.id) { mutableStateOf(false) }
+    var isEditPriceOpen by rememberSaveable(product.id) { mutableStateOf(false) }
+    var isAdjustStockOpen by rememberSaveable(product.id) { mutableStateOf(false) }
+    var isEditProductOpen by rememberSaveable(product.id) { mutableStateOf(false) }
 
+    androidx.compose.runtime.LaunchedEffect(canManageInventory) {
+        if (!canManageInventory) {
+            isEditPriceOpen = false
+            isAdjustStockOpen = false
+            isEditProductOpen = false
+        }
+    }
     val feedbackMessage = lang.tr(
         state.lastInventoryActionMessageAr ?: "",
         state.lastInventoryActionMessageEn ?: ""
@@ -1080,8 +1117,8 @@ fun ProductDetailScreen(
 
     // Authorized Stock Adjustment Dialog with Direction Toggle, Reason Presets & Safe Outcome Preview
     if (isAdjustStockOpen && canManageInventory && product.isStockTracked) {
-        var isAddingStock by remember { mutableStateOf(true) }
-        var qtyInputText by remember { mutableStateOf("10") }
+        var isAddingStock by rememberSaveable { mutableStateOf(true) }
+        var qtyInputText by rememberSaveable { mutableStateOf("10") }
         var stockReasonText by remember {
             mutableStateOf(lang.tr("استلام بضاعة جديدة للمستودع", "New stock received"))
         }
@@ -1258,7 +1295,7 @@ fun ProductDetailScreen(
         )
     }
 
-    if (isEditProductOpen && onSaveProduct != null) {
+    if (canManageInventory && isEditProductOpen && onSaveProduct != null) {
         ProductEditorDialog(
             initialProduct = product,
             lang = lang,
@@ -1293,44 +1330,44 @@ internal fun ProductEditorDialog(
     ) -> Unit
 ) {
     val isEditing = initialProduct != null
-    var nameAr by remember(initialProduct) { mutableStateOf(initialProduct?.nameAr ?: "") }
-    var selectedCategory by remember(initialProduct) {
+    var nameAr by rememberSaveable(initialProduct) { mutableStateOf(initialProduct?.nameAr ?: "") }
+    var selectedCategory by rememberSaveable(initialProduct) {
         mutableStateOf(initialProduct?.category ?: ProductCategory.PANTRY)
     }
-    var unitAr by remember(initialProduct) { mutableStateOf(initialProduct?.unitAr ?: "حبة") }
-    var priceText by remember(initialProduct) {
+    var unitAr by rememberSaveable(initialProduct) { mutableStateOf(initialProduct?.unitAr ?: "حبة") }
+    var priceText by rememberSaveable(initialProduct) {
         mutableStateOf(initialProduct?.priceIls?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "")
     }
-    var costText by remember(initialProduct) {
+    var costText by rememberSaveable(initialProduct) {
         mutableStateOf(initialProduct?.costIls?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "")
     }
-    var stockText by remember(initialProduct) {
+    var stockText by rememberSaveable(initialProduct) {
         mutableStateOf(initialProduct?.stockCount?.toString() ?: "10")
     }
-    var minStockText by remember(initialProduct) {
+    var minStockText by rememberSaveable(initialProduct) {
         mutableStateOf(initialProduct?.minStockThreshold?.toString() ?: "4")
     }
-    var barcodeText by remember(initialProduct) {
+    var barcodeText by rememberSaveable(initialProduct) {
         mutableStateOf(initialProduct?.barcode ?: "7290009988")
     }
-    var warehouseAr by remember(initialProduct) {
+    var warehouseAr by rememberSaveable(initialProduct) {
         mutableStateOf(initialProduct?.warehouseAr ?: "رف المعرض الأمامي - A1")
     }
-    var lotBatchText by remember(initialProduct) {
+    var lotBatchText by rememberSaveable(initialProduct) {
         mutableStateOf(initialProduct?.lotBatchCode ?: "")
     }
-    var expiryText by remember(initialProduct) {
+    var expiryText by rememberSaveable(initialProduct) {
         mutableStateOf(initialProduct?.expiryDate ?: "")
     }
-    var isWeightedDisplayOnly by remember(initialProduct) {
+    var isWeightedDisplayOnly by rememberSaveable(initialProduct) {
         mutableStateOf(initialProduct?.isWeightedDisplayOnly ?: false)
     }
 
     val parsedPrice = priceText.toDoubleOrNull() ?: 0.0
-    val parsedCost = costText.toDoubleOrNull() ?: (parsedPrice * 0.75)
+    val parsedCost = costText.toDoubleOrNull() ?: Double.NaN
     val parsedStock = stockText.toIntOrNull() ?: 0
     val parsedMinStock = minStockText.toIntOrNull() ?: 3
-    val canSubmit = nameAr.trim().length >= 2 && parsedPrice > 0.0
+    val canSubmit = nameAr.trim().length >= 2 && parsedPrice.isFinite() && parsedPrice > 0.0 && parsedCost.isFinite() && parsedCost >= 0.0
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1386,7 +1423,8 @@ internal fun ProductEditorDialog(
                             costText = WesternFormatters.sanitizeWesternDigits(it)
                                 .filter { ch -> ch.isDigit() || ch == '.' }
                         },
-                        label = { Text(lang.tr("سعر التكلفة (₪)", "Unit Cost (₪)")) },
+                        label = { Text(lang.tr("التكلفة (₪) *", "Unit cost (₪) *")) },
+                        isError = costText.isNotBlank() && (!parsedCost.isFinite() || parsedCost < 0.0),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                         shape = RoundedCornerShape(10.dp),

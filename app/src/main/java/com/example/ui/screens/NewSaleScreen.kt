@@ -40,6 +40,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -52,6 +53,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -117,7 +119,8 @@ fun NewSaleScreen(
     onClearBasket: () -> Unit,
     onOpenScanner: () -> Unit,
     onOpenCustomItem: () -> Unit,
-    onProceedToInvoiceReview: () -> Unit
+    onProceedToInvoiceReview: () -> Unit,
+    onOpenSaleOptions: () -> Unit = onProceedToInvoiceReview
 ) {
     val lang = state.language
     var isBasketExpanded by remember { mutableStateOf(false) }
@@ -131,84 +134,175 @@ fun NewSaleScreen(
     ) {
         val isWidePos = maxWidth >= 840.dp
 
-        Column(modifier = Modifier.fillMaxSize()) {
-            // 1. Unified Search, Barcode & Category Header
-            PosSearchAndCategoryHeader(
-                state = state,
-                onSearchQueryChange = onSearchQueryChange,
-                onSelectCategory = onSelectCategory,
-                onAddSingleFilteredProduct = onAddProduct,
-                onOpenScanner = onOpenScanner,
-                onOpenCustomItem = onOpenCustomItem
-            )
-
-            HorizontalDivider(
-                thickness = 0.5.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)
-            )
-
-            // 2. Product Catalog Ledger or Zero-Result Recovery State
-            if (state.filteredProducts.isEmpty()) {
-                ZeroResultCatalogState(
-                    searchQuery = state.searchQuery,
-                    selectedCategory = state.selectedCategory,
-                    allCategoriesMatchCount = state.allCategoriesMatchCount,
-                    lang = lang,
-                    onShowAllCategories = { onSelectCategory(ProductCategory.ALL) },
-                    onClearSearch = {
-                        onSearchQueryChange("")
-                        if (state.selectedCategory != ProductCategory.ALL) {
-                            onSelectCategory(ProductCategory.ALL)
-                        }
-                    },
-                    onOpenCustomItem = onOpenCustomItem,
+        if (isWidePos) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                Column(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                )
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surface)
-                        .testTag("product_catalog_list"),
-                    contentPadding = PaddingValues(vertical = 4.dp)
+                        .weight(1.2f)
+                        .fillMaxHeight()
                 ) {
-                    items(state.filteredProducts, key = { it.id }) { product ->
-                        val qtyInBasket = state.quantityInBasket(product.id)
-                        ProductSaleCatalogRow(
-                            product = product,
+                    PosSearchAndCategoryHeader(
+                        state = state,
+                        onSearchQueryChange = onSearchQueryChange,
+                        onSelectCategory = onSelectCategory,
+                        onAddSingleFilteredProduct = onAddProduct,
+                        onOpenScanner = onOpenScanner,
+                        onOpenCustomItem = onOpenCustomItem
+                    )
+
+                    HorizontalDivider(
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)
+                    )
+
+                    if (state.filteredProducts.isEmpty()) {
+                        ZeroResultCatalogState(
+                            searchQuery = state.searchQuery,
+                            selectedCategory = state.selectedCategory,
+                            allCategoriesMatchCount = state.allCategoriesMatchCount,
                             lang = lang,
-                            isDarkTheme = state.isDarkTheme,
-                            quantityInBasket = qtyInBasket,
-                            showBarcode = showBarcodeInRows,
-                            onAdd = { onAddProduct(product) },
-                            onDecrement = { onDecrementProduct(product.id) }
+                            onShowAllCategories = { onSelectCategory(ProductCategory.ALL) },
+                            onClearSearch = {
+                                onSearchQueryChange("")
+                                if (state.selectedCategory != ProductCategory.ALL) {
+                                    onSelectCategory(ProductCategory.ALL)
+                                }
+                            },
+                            onOpenCustomItem = onOpenCustomItem,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
                         )
-                        HorizontalDivider(
-                            thickness = 0.5.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surface)
+                                .testTag("product_catalog_list"),
+                            contentPadding = PaddingValues(vertical = 4.dp)
+                        ) {
+                            items(state.filteredProducts, key = { it.id }) { product ->
+                                val qtyInBasket = state.quantityInBasket(product.id)
+                                ProductSaleCatalogRow(
+                                    product = product,
+                                    lang = lang,
+                                    isDarkTheme = state.isDarkTheme,
+                                    quantityInBasket = qtyInBasket,
+                                    showBarcode = showBarcodeInRows,
+                                    onAdd = { onAddProduct(product) },
+                                    onDecrement = { onDecrementProduct(product.id) }
+                                )
+                                HorizontalDivider(
+                                    thickness = 0.5.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                )
+                            }
+                        }
                     }
                 }
-            }
 
-            // 3. State-Responsive Bottom Checkout Dock & Expandable Basket Drawer
-            BasketStickyBottomSheet(
-                state = state,
-                isExpanded = isBasketExpanded,
-                onToggleExpand = { isBasketExpanded = !isBasketExpanded },
-                onIncrement = onAddProduct,
-                onDecrement = onDecrementProduct,
-                onRemove = onRemoveProduct,
-                onClearBasket = {
-                    onClearBasket()
-                    isBasketExpanded = false
-                },
-                onProceedToReview = onProceedToInvoiceReview
-            )
+                VerticalDivider(
+                    thickness = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)
+                )
+
+                Column(
+                    modifier = Modifier
+                        .weight(0.8f)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.surface)
+                ) {
+                    WidePersistentCartPane(
+                        state = state,
+                        onIncrement = onAddProduct,
+                        onDecrement = onDecrementProduct,
+                        onRemove = onRemoveProduct,
+                        onClearBasket = onClearBasket,
+                        onProceedToPayment = onProceedToInvoiceReview,
+                        onOpenSaleOptions = onOpenSaleOptions
+                    )
+                }
+            }
+        } else {
+            Column(modifier = Modifier.fillMaxSize()) {
+                PosSearchAndCategoryHeader(
+                    state = state,
+                    onSearchQueryChange = onSearchQueryChange,
+                    onSelectCategory = onSelectCategory,
+                    onAddSingleFilteredProduct = onAddProduct,
+                    onOpenScanner = onOpenScanner,
+                    onOpenCustomItem = onOpenCustomItem
+                )
+
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)
+                )
+
+                if (state.filteredProducts.isEmpty()) {
+                    ZeroResultCatalogState(
+                        searchQuery = state.searchQuery,
+                        selectedCategory = state.selectedCategory,
+                        allCategoriesMatchCount = state.allCategoriesMatchCount,
+                        lang = lang,
+                        onShowAllCategories = { onSelectCategory(ProductCategory.ALL) },
+                        onClearSearch = {
+                            onSearchQueryChange("")
+                            if (state.selectedCategory != ProductCategory.ALL) {
+                                onSelectCategory(ProductCategory.ALL)
+                            }
+                        },
+                        onOpenCustomItem = onOpenCustomItem,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surface)
+                            .testTag("product_catalog_list"),
+                        contentPadding = PaddingValues(vertical = 4.dp)
+                    ) {
+                        items(state.filteredProducts, key = { it.id }) { product ->
+                            val qtyInBasket = state.quantityInBasket(product.id)
+                            ProductSaleCatalogRow(
+                                product = product,
+                                lang = lang,
+                                isDarkTheme = state.isDarkTheme,
+                                quantityInBasket = qtyInBasket,
+                                showBarcode = showBarcodeInRows,
+                                onAdd = { onAddProduct(product) },
+                                onDecrement = { onDecrementProduct(product.id) }
+                            )
+                            HorizontalDivider(
+                                thickness = 0.5.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                                modifier = Modifier.padding(horizontal = 16.dp)
+                            )
+                        }
+                    }
+                }
+
+                BasketStickyBottomSheet(
+                    state = state,
+                    isExpanded = isBasketExpanded,
+                    onToggleExpand = { isBasketExpanded = !isBasketExpanded },
+                    onIncrement = onAddProduct,
+                    onDecrement = onDecrementProduct,
+                    onRemove = onRemoveProduct,
+                    onClearBasket = {
+                        onClearBasket()
+                        isBasketExpanded = false
+                    },
+                    onProceedToPayment = onProceedToInvoiceReview,
+                    onOpenSaleOptions = onOpenSaleOptions
+                )
+            }
         }
     }
 }
@@ -945,7 +1039,8 @@ private fun BasketStickyBottomSheet(
     onDecrement: (String) -> Unit,
     onRemove: (String) -> Unit,
     onClearBasket: () -> Unit,
-    onProceedToReview: () -> Unit
+    onProceedToPayment: () -> Unit,
+    onOpenSaleOptions: () -> Unit
 ) {
     val lang = state.language
     val financial = TraderTheme.financial
@@ -982,8 +1077,8 @@ private fun BasketStickyBottomSheet(
                             )
                         } else {
                             lang.tr(
-                                "السلة فارغة • المس أي صنف للإضافة",
-                                "Basket empty • Tap any item to add"
+                                "السلة فارغة",
+                                "Basket empty"
                             )
                         },
                         style = MaterialTheme.typography.bodySmall,
@@ -1005,12 +1100,19 @@ private fun BasketStickyBottomSheet(
                         )
 
                         Text(
-                            text = lang.tr("مراجعة الفاتورة", "Review"),
+                            text = lang.tr("متابعة الدفع", "Continue"),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                             modifier = Modifier.testTag("review_invoice_button")
                         )
                     }
+                }
+                if (state.savedDrafts.isNotEmpty()) {
+                    TextButton(
+                        onClick = onOpenSaleOptions,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            .testTag("open_saved_drafts_button")
+                    ) { Text(lang.tr("المسودات", "Saved drafts")) }
                 }
             }
         }
@@ -1316,30 +1418,359 @@ private fun BasketStickyBottomSheet(
                     }
                 }
 
-                Button(
-                    onClick = onProceedToReview,
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ),
-                    modifier = Modifier
-                        .height(48.dp)
-                        .testTag("review_invoice_button")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    TextButton(
+                        onClick = onOpenSaleOptions,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("open_sale_options_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = lang.tr("خيارات", "Options"),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Button(
+                        onClick = onProceedToPayment,
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        modifier = Modifier
+                            .height(48.dp)
+                            .testTag("review_invoice_button")
+                    ) {
+                        Text(
+                            text = lang.tr("متابعة الدفع", "Continue to Payment"),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun WidePersistentCartPane(
+    state: TraderUiState,
+    onIncrement: (Product) -> Unit,
+    onDecrement: (String) -> Unit,
+    onRemove: (String) -> Unit,
+    onClearBasket: () -> Unit,
+    onProceedToPayment: () -> Unit,
+    onOpenSaleOptions: () -> Unit
+) {
+    val lang = state.language
+    val financial = TraderTheme.financial
+    val hasItems = state.basket.isNotEmpty()
+    val hasDiscount = state.calculatedDiscountIls > 0.005
+    val linkedCustomer = state.selectedCustomer
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = lang.tr(
+                        "سلة البيع (${WesternFormatters.formatInt(state.basket.size)} أصناف • ${WesternFormatters.formatInt(state.basketItemCount)} وحدات)",
+                        "Active Cart (${WesternFormatters.formatInt(state.basket.size)} items • ${WesternFormatters.formatInt(state.basketItemCount)} units)"
+                    ),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (linkedCustomer != null) {
                     Text(
-                        text = lang.tr("مراجعة الفاتورة", "Review Invoice"),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = null,
-                        modifier = Modifier.size(17.dp)
+                        text = lang.tr(
+                            "الزبون: ${linkedCustomer.name(lang)}",
+                            "Customer: ${linkedCustomer.name(lang)}"
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
+            }
+
+            if (hasItems) {
+                TextButton(
+                    onClick = onClearBasket,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.testTag("clear_basket_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = lang.tr("إفراغ", "Clear"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        }
+
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+
+        if (!hasItems) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = lang.tr(
+                        "السلة فارغة • اختر أصنافاً من القائمة",
+                        "Cart is empty • Select items from catalog"
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                items(state.basket, key = { it.product.id }) { item ->
+                    val atMaxStock = item.product.isStockTracked &&
+                        item.product.stockCount > 0 &&
+                        item.quantity >= item.product.stockCount
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        border = BorderStroke(
+                            0.5.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.product.name(lang),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${WesternFormatters.formatIls(item.product.priceIls)} × ${WesternFormatters.formatInt(item.quantity)} = ${WesternFormatters.formatIls(item.lineTotal)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                IconButton(
+                                    onClick = { onRemove(item.product.id) },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .testTag("basket_remove_${item.product.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeleteOutline,
+                                        contentDescription = lang.tr("حذف", "Remove"),
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onDecrement(item.product.id) },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .testTag("basket_dec_${item.product.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Remove,
+                                        contentDescription = lang.tr("تقليل", "Decrease"),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = WesternFormatters.formatInt(item.quantity),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 4.dp)
+                                )
+                                IconButton(
+                                    onClick = { onIncrement(item.product) },
+                                    enabled = !atMaxStock,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .testTag("basket_inc_${item.product.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = lang.tr("زيادة", "Increase"),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            if (hasDiscount) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = lang.tr("المجموع الفرعي", "Subtotal"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = WesternFormatters.formatIls(state.basketSubtotalIls),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = lang.tr("الخصم", "Discount"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = financial.income
+                    )
+                    Text(
+                        text = "-${WesternFormatters.formatIls(state.calculatedDiscountIls)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = financial.income,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = lang.tr("المبلغ المطلوب", "Total Due"),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = WesternFormatters.formatIls(state.basketNetTotalIls),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.testTag("basket_subtotal_text")
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedButton(
+                onClick = onOpenSaleOptions,
+                shape = RoundedCornerShape(12.dp),
+                enabled = hasItems,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .testTag("open_sale_options_button")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = lang.tr("خيارات", "Options"),
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+
+            Button(
+                onClick = onProceedToPayment,
+                shape = RoundedCornerShape(12.dp),
+                enabled = hasItems,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier
+                    .weight(1.5f)
+                    .height(48.dp)
+                    .testTag("review_invoice_button")
+            ) {
+                Text(
+                    text = lang.tr("متابعة الدفع", "Continue to Payment"),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
             }
         }
     }

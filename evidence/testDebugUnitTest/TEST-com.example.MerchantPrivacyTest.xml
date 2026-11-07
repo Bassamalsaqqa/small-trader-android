@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.MerchantPrivacyTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-07T21:27:32.922Z" hostname="pasta-hp-worker" time="2.552">
+  <properties/>
+  <testcase name="productDetail_editDialog_downgradeToCashierDismissesEditorAndCostSection_restoreOwnerDoesNotReopenStaleDialog" classname="com.example.MerchantPrivacyTest" time="0.478"/>
+  <testcase name="productCatalog_launchCreateEditor_downgradeToCashierDismissesEditorAndCostInput_restoreOwnerDoesNotReopenStaleDialog" classname="com.example.MerchantPrivacyTest" time="0.512"/>
+  <testcase name="productEditor_explicitNonZeroCost_enablesSubmitAndCapturesExactCost" classname="com.example.MerchantPrivacyTest" time="0.676"/>
+  <testcase name="productEditor_blankCostPreventsSubmit_explicitZeroCostEnablesAndCapturesZeroCost_neverFabricatesSeventyFivePercent" classname="com.example.MerchantPrivacyTest" time="0.595"/>
+  <testcase name="customerDirectory_ownerRendersDebtAndAdvanceAggregates_downgradeToCashierRemovesBoth_whileIndividualBalancesAndActionsRemain" classname="com.example.MerchantPrivacyTest" time="0.284"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

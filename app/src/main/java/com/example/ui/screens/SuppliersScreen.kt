@@ -45,6 +45,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -85,14 +87,21 @@ fun SuppliersScreen(
     onSupplierClick: (Supplier) -> Unit,
     onOpenReceivePurchaseDialog: () -> Unit,
     onDismissFeedback: (() -> Unit)? = null,
-    onSaveSupplier: ((supplierId: String?, name: String, company: String, phone: String) -> Unit)? = null
+    onSaveSupplier: ((supplierId: String?, name: String, company: String, phone: String) -> Unit)? = null,
+    launchCreate: Boolean = false,
+    onLaunchConsumed: () -> Unit = {}
 ) {
+    val createDraft = rememberSaveableStateHolder()
     val lang = state.language
     val canManageSuppliers = state.currentSession.canManageSuppliers()
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(SupplierBalanceFilter.ALL) }
-    var isAddSupplierOpen by remember { mutableStateOf(false) }
+    var isAddSupplierOpen by rememberSaveable { mutableStateOf(false) }
 
+    androidx.compose.runtime.LaunchedEffect(launchCreate) {
+        if (launchCreate && canManageSuppliers) { isAddSupplierOpen = true; onLaunchConsumed() }
+    }
+    if (!canManageSuppliers) return
     val payablesCount = remember(state.suppliers) { state.suppliers.count { it.balanceOwedIls > 0.005 } }
     val advancesCount = remember(state.suppliers) { state.suppliers.count { it.balanceOwedIls < -0.005 } }
     val settledCount = remember(state.suppliers) { state.suppliers.count { abs(it.balanceOwedIls) <= 0.005 } }
@@ -438,6 +447,7 @@ fun SuppliersScreen(
     }
 
     if (isAddSupplierOpen && onSaveSupplier != null) {
+        createDraft.SaveableStateProvider("supplier_${state.suppliers.size}") {
         SupplierEditorDialog(
             initialSupplier = null,
             lang = lang,
@@ -447,6 +457,7 @@ fun SuppliersScreen(
                 isAddSupplierOpen = false
             }
         )
+        }
     }
 }
 
@@ -578,8 +589,11 @@ fun SupplierDetailScreen(
     onOpenReceivePurchaseDialog: () -> Unit,
     onDismissFeedback: (() -> Unit)? = null,
     onSaveSupplier: ((supplierId: String?, name: String, company: String, phone: String) -> Unit)? = null,
+    launchPayment: Boolean = false,
+    onLaunchConsumed: () -> Unit = {},
     onConfirmGoodsReceipt: ((billId: String, productId: String, receivedQty: Int, batchNote: String) -> Unit)? = null
 ) {
+    val paymentDraft = rememberSaveableStateHolder()
     val lang = state.language
     val supplier = state.selectedSupplierForDetail ?: return
     val canManageSuppliers = state.currentSession.canManageSuppliers()
@@ -591,9 +605,13 @@ fun SupplierDetailScreen(
         state.supplierPayments.filter { it.supplierId == supplier.id }
     }
 
-    var isPayDialogOpen by remember(supplier.id) { mutableStateOf(false) }
-    var isEditSupplierOpen by remember(supplier.id) { mutableStateOf(false) }
-    var isPurchaseReturnPreviewOpen by remember(supplier.id) { mutableStateOf(false) }
+    var isPayDialogOpen by rememberSaveable(supplier.id) { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(launchPayment, supplier.id) {
+        if (launchPayment && canManageSuppliers) { isPayDialogOpen = true; onLaunchConsumed() }
+    }
+    if (!canManageSuppliers) return
+    var isEditSupplierOpen by rememberSaveable(supplier.id) { mutableStateOf(false) }
+    var isPurchaseReturnPreviewOpen by rememberSaveable(supplier.id) { mutableStateOf(false) }
     var activeBillForGrn by remember(supplier.id) { mutableStateOf<PurchaseBill?>(null) }
 
     val isPayableOwed = supplier.balanceOwedIls > 0.005
@@ -1026,12 +1044,13 @@ fun SupplierDetailScreen(
 
     // Supplier Disbursement Dialog
     if (isPayDialogOpen && canManageSuppliers) {
+        paymentDraft.SaveableStateProvider("payment_${supplier.id}_${state.supplierPayments.size}") {
         val initialPayStr = if (supplier.balanceOwedIls > 0.005) {
             WesternFormatters.formatNumber(minOf(200.0, supplier.balanceOwedIls)).removeSuffix(".00")
         } else {
             "200"
         }
-        var payAmountText by remember(supplier.id) { mutableStateOf(initialPayStr) }
+        var payAmountText by rememberSaveable(supplier.id) { mutableStateOf(initialPayStr) }
         val enteredAmount = payAmountText.toDoubleOrNull() ?: 0.0
         val projectedOwed = remember(supplier.balanceOwedIls, enteredAmount) {
             BigDecimal(supplier.balanceOwedIls.toString())
@@ -1167,6 +1186,7 @@ fun SupplierDetailScreen(
                 }
             }
         )
+        }
     }
 }
 
@@ -1361,9 +1381,9 @@ private fun SupplierEditorDialog(
     onConfirmSave: (supplierId: String?, name: String, company: String, phone: String) -> Unit
 ) {
     val isEditing = initialSupplier != null
-    var nameText by remember(initialSupplier) { mutableStateOf(initialSupplier?.nameAr ?: "") }
-    var companyText by remember(initialSupplier) { mutableStateOf(initialSupplier?.companyAr ?: "") }
-    var phoneText by remember(initialSupplier) { mutableStateOf(initialSupplier?.phone ?: "") }
+    var nameText by rememberSaveable(initialSupplier) { mutableStateOf(initialSupplier?.nameAr ?: "") }
+    var companyText by rememberSaveable(initialSupplier) { mutableStateOf(initialSupplier?.companyAr ?: "") }
+    var phoneText by rememberSaveable(initialSupplier) { mutableStateOf(initialSupplier?.phone ?: "") }
 
     val canSave = nameText.trim().length >= 2
 
@@ -1650,12 +1670,12 @@ fun ReceivePurchaseBillDialog(
     val suppliers = state.suppliers
     if (suppliers.isEmpty()) return
 
-    var selectedSupplierId by remember(state.selectedSupplierForDetail?.id) {
+    var selectedSupplierId by rememberSaveable(state.selectedSupplierForDetail?.id) {
         mutableStateOf(state.selectedSupplierForDetail?.id ?: suppliers.first().id)
     }
-    var purchaseDesc by remember { mutableStateOf("") }
-    var purchaseTotal by remember { mutableStateOf("") }
-    var purchasePaid by remember { mutableStateOf("0") }
+    var purchaseDesc by rememberSaveable { mutableStateOf("") }
+    var purchaseTotal by rememberSaveable { mutableStateOf("") }
+    var purchasePaid by rememberSaveable { mutableStateOf("0") }
 
     val totalVal = purchaseTotal.toDoubleOrNull() ?: 0.0
     val paidVal = if (purchasePaid.isBlank()) 0.0 else (purchasePaid.toDoubleOrNull() ?: -1.0)

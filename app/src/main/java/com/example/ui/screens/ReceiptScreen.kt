@@ -1,6 +1,16 @@
 package com.example.ui.screens
 
 import android.content.Intent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -104,6 +115,7 @@ fun ReceiptScreen(
     val context = LocalContext.current
     var localActionFeedback by remember(receipt?.id) { mutableStateOf<String?>(null) }
     var isSalesReturnPreviewOpen by remember(receipt?.id) { mutableStateOf(false) }
+    var isInvoiceDetailsExpanded by rememberSaveable(receipt?.id) { mutableStateOf(false) }
 
     if (receipt == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -131,7 +143,7 @@ fun ReceiptScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // 1. Context-aware Document Status Header (Newly Completed vs Revisited Record)
+            // 1. Quiet Native Success/Result Header (Newly Completed vs Historical Document)
             if (state.isNewlyCompletedSale) {
                 val isCash = receipt.isPaidInFull
                 val containerColor = if (isCash) {
@@ -146,81 +158,128 @@ fun ReceiptScreen(
                 }
 
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = containerColor,
                     border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("receipt_completion_banner")
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = accentColor,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(
-                                    text = if (isCash) {
-                                        lang.tr("تم حفظ عملية البيع النقدي وإصدار الإيصال", "Cash Sale Completed & Receipt Issued")
-                                    } else {
-                                        lang.tr("تم تسجيل فاتورة البيع الآجل على حساب الزبون", "Credit Invoice Posted to Customer Account")
-                                    },
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = accentColor
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = accentColor,
+                                    modifier = Modifier.size(22.dp)
                                 )
-                                Text(
-                                    text = if (isCash) {
-                                        if (receipt.changeReturnedIls > 0.005) {
-                                            lang.tr(
-                                                "الباقي للزبون: ${WesternFormatters.formatIls(receipt.changeReturnedIls)} • المقبوض: ${WesternFormatters.formatIls(receipt.cashReceivedIls)}",
-                                                "Change to return: ${WesternFormatters.formatIls(receipt.changeReturnedIls)} • Received: ${WesternFormatters.formatIls(receipt.cashReceivedIls)}"
-                                            )
+                                Column {
+                                    Text(
+                                        text = if (isCash) {
+                                            lang.tr("تم البيع نقداً بنجاح", "Cash Sale Completed")
                                         } else {
-                                            lang.tr(
-                                                "استُلم المبلغ بالضبط (${WesternFormatters.formatIls(receipt.cashReceivedIls)}) — لا يوجد باقي",
-                                                "Exact cash received (${WesternFormatters.formatIls(receipt.cashReceivedIls)}) — no change due"
-                                            )
-                                        }
-                                    } else {
-                                        lang.tr(
-                                            "قُيد مبلغ ${WesternFormatters.formatIls(receipt.remainingDebitIls)} ذمة على الحساب (لم يُقبض نقد بالصندوق)",
-                                            "${WesternFormatters.formatIls(receipt.remainingDebitIls)} recorded on customer account (0.00 ₪ cash drawer)"
-                                        )
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                            lang.tr("تم تسجيل البيع الآجل بالذمة", "Credit Invoice Posted")
+                                        },
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = accentColor
+                                    )
+                                    Text(
+                                        text = receipt.timestamp,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                            ) {
+                                Text(
+                                    text = WesternFormatters.formatInvoiceCode(receipt.invoiceNumber),
+                                    style = MaterialTheme.typography.labelLarge.copy(
+                                        fontFamily = MonoFontFamily,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = accentColor,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.width(8.dp))
+                        HorizontalDivider(color = accentColor.copy(alpha = 0.2f))
 
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = WesternFormatters.formatInvoiceCode(receipt.invoiceNumber),
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    fontFamily = MonoFontFamily,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = accentColor,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = lang.tr("إجمالي الفاتورة", "Invoice Total"),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = WesternFormatters.formatIls(receipt.netTotalIls),
+                                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = if (isCash) {
+                                        if (receipt.changeReturnedIls > 0.005) {
+                                            lang.tr(
+                                                "الباقي: ${WesternFormatters.formatIls(receipt.changeReturnedIls)}",
+                                                "Change: ${WesternFormatters.formatIls(receipt.changeReturnedIls)}"
+                                            )
+                                        } else {
+                                            lang.tr("مدفوع بالضبط", "Exact Cash")
+                                        }
+                                    } else {
+                                        lang.tr(
+                                            "المسجل بالذمة: ${WesternFormatters.formatIls(receipt.remainingDebitIls)}",
+                                            "Debit: ${WesternFormatters.formatIls(receipt.remainingDebitIls)}"
+                                        )
+                                    },
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = accentColor
+                                )
+                                if (isCash) {
+                                    Text(
+                                        text = lang.tr(
+                                            "المقبوض: ${WesternFormatters.formatIls(receipt.cashReceivedIls)}",
+                                            "Received: ${WesternFormatters.formatIls(receipt.cashReceivedIls)}"
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                } else if (linkedCustomer != null) {
+                                    Text(
+                                        text = linkedCustomer.name(lang),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -256,8 +315,8 @@ fun ReceiptScreen(
                             Text(
                                 text = when (receipt.paymentStatus) {
                                     com.example.model.InvoicePaymentStatus.PAID_CASH -> lang.tr(
-                                        "مسددة نقداً بالكامل بتاريخ ${receipt.timestamp}",
-                                        "Paid in full (Cash) on ${receipt.timestamp}"
+                                        "مسددة نقداً بالكامل (${WesternFormatters.formatIls(receipt.netTotalIls)}) بتاريخ ${receipt.timestamp}",
+                                        "Paid in full (Cash ${WesternFormatters.formatIls(receipt.netTotalIls)}) on ${receipt.timestamp}"
                                     )
                                     com.example.model.InvoicePaymentStatus.PARTIAL -> lang.tr(
                                         "سداد جزئي: دُفع ${WesternFormatters.formatIls(receipt.cashReceivedIls)} ومتبقي بالذمة ${WesternFormatters.formatIls(receipt.remainingDebitIls)} (${receipt.timestamp})",
@@ -288,17 +347,87 @@ fun ReceiptScreen(
                 }
             }
 
-            // 2. Trustworthy Invoice & Receipt Document Card (Clean, legible, no decorative paper theatre)
+            // 2. Collapsible Detailed Thermal Paper Content
             val maxDocWidth = if (state.receiptPaperWidthMm == 58) 380.dp else 480.dp
-            InvoiceReceiptDocumentCard(
-                receipt = receipt,
-                business = state.businessInfo,
-                lang = lang,
-                paperWidthMm = state.receiptPaperWidthMm,
-                modifier = Modifier
-                    .widthIn(max = maxDocWidth)
-                    .fillMaxWidth()
-            )
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isInvoiceDetailsExpanded = !isInvoiceDetailsExpanded }
+                            .padding(horizontal = 14.dp, vertical = 12.dp)
+                            .testTag("toggle_invoice_details_button"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = lang.tr("تفاصيل الفاتورة", "Invoice Details"),
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = lang.tr(
+                                        "${WesternFormatters.formatInt(receipt.items.size)} أصناف • عرض الورقة الحرارية",
+                                        "${WesternFormatters.formatInt(receipt.items.size)} items • Thermal paper preview"
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { isInvoiceDetailsExpanded = !isInvoiceDetailsExpanded },
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isInvoiceDetailsExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = if (isInvoiceDetailsExpanded) lang.tr("طي", "Collapse") else lang.tr("توسيع", "Expand"),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    AnimatedVisibility(
+                        visible = isInvoiceDetailsExpanded,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            InvoiceReceiptDocumentCard(
+                                receipt = receipt,
+                                business = state.businessInfo,
+                                lang = lang,
+                                paperWidthMm = state.receiptPaperWidthMm,
+                                modifier = Modifier
+                                    .widthIn(max = maxDocWidth)
+                                    .fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+            }
 
             // 3. Concise Print (Explicitly Simulated), Share & Sales Return Preview Actions Card
             Card(
@@ -456,7 +585,7 @@ fun ReceiptScreen(
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
                                 .weight(1.35f)
-                                .height(48.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("print_bluetooth_receipt_button")
                         ) {
                             Icon(
@@ -479,7 +608,7 @@ fun ReceiptScreen(
                             onClick = onOpenPrinterSettings,
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
-                                .height(48.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("receipt_printer_settings_button")
                         ) {
                             Icon(
@@ -517,7 +646,7 @@ fun ReceiptScreen(
                             },
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
-                                .height(48.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("share_receipt_button")
                         ) {
                             Icon(
@@ -547,7 +676,7 @@ fun ReceiptScreen(
                             },
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
-                                .height(48.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("copy_receipt_text_button")
                         ) {
                             Icon(
@@ -564,7 +693,7 @@ fun ReceiptScreen(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(48.dp)
+                            .heightIn(min = 48.dp)
                             .testTag("open_sales_return_preview_button")
                     ) {
                         Text(
@@ -606,7 +735,7 @@ fun ReceiptScreen(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .height(48.dp)
+                        .heightIn(min = 48.dp)
                         .testTag("receipt_home_button")
                 ) {
                     Icon(
@@ -629,7 +758,7 @@ fun ReceiptScreen(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .weight(1.4f)
-                        .height(48.dp)
+                        .heightIn(min = 48.dp)
                         .testTag("receipt_new_sale_button")
                 ) {
                     Icon(
@@ -696,8 +825,8 @@ private fun SalesReturnPreviewDialog(
                 ) {
                     Text(
                         text = lang.tr(
-                            "معاينة تفاعلية: توضح أثر إرجاع صنف من الفاتورة على المخزون وحساب الزبون أو الصندوق. الترحيل المحاسبي الفعلي لإشعار الدائن يتم عبر خادم Laravel /api/v1 عند الربط.",
-                            "Interactive Preview: Illustrates stock and customer/cash credit-note impact when returning an invoice item. Authoritative credit-note posting connects to Laravel /api/v1."
+                            "معاينة تفاعلية: توضح أثر إرجاع صنف من الفاتورة على المخزون وحساب الزبون أو الصندوق.",
+                            "Interactive Preview: Illustrates stock and customer/cash credit-note impact when returning an invoice item."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface,

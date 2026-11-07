@@ -834,7 +834,7 @@ class ExampleUnitTest {
         // 2. Navigate Home -> New Sale and build an unfinished basket
         viewModel.navigateTo(TraderScreen.NEW_SALE)
         assertEquals(TraderScreen.NEW_SALE, viewModel.uiState.value.currentScreen)
-        assertTrue(viewModel.uiState.value.isRootDestination)
+        assertFalse(viewModel.uiState.value.isRootDestination)
 
         val oliveOil = viewModel.uiState.value.products.first { it.id == "p_olive_oil" } // 38.00
         val zaatar = viewModel.uiState.value.products.first { it.id == "p_zaatar_jenin" } // 16.50
@@ -843,14 +843,14 @@ class ExampleUnitTest {
         assertEquals(2, viewModel.uiState.value.basketItemCount)
         assertEquals(54.50, viewModel.uiState.value.basketSubtotalIls, 0.001)
 
-        // 3. Switch across root tabs (New Sale -> Invoices -> Customers):
-        // Root tab switches must not pile up a deep chain; Back from Customers returns directly to HOME
+        // 3. Leave the sale child and switch between Sales and People roots:
+        // Root switches reset child history; Back from People returns to HOME
         viewModel.navigateTo(TraderScreen.INVOICES_HISTORY)
         assertEquals(TraderScreen.INVOICES_HISTORY, viewModel.uiState.value.currentScreen)
         assertTrue(viewModel.uiState.value.isRootDestination)
 
-        viewModel.navigateTo(TraderScreen.CUSTOMERS)
-        assertEquals(TraderScreen.CUSTOMERS, viewModel.uiState.value.currentScreen)
+        viewModel.navigateTo(TraderScreen.PEOPLE)
+        assertEquals(TraderScreen.PEOPLE, viewModel.uiState.value.currentScreen)
         assertTrue(viewModel.uiState.value.isRootDestination)
         assertEquals(listOf(TraderScreen.HOME), viewModel.uiState.value.screenHistory)
 
@@ -860,16 +860,16 @@ class ExampleUnitTest {
         assertEquals(TraderScreen.CUSTOMER_DETAIL, viewModel.uiState.value.currentScreen)
         assertFalse(viewModel.uiState.value.isRootDestination)
 
-        // Back from Customer Detail -> Customers -> Home
+        // Back from Customer Detail -> People -> Home
         assertTrue(viewModel.navigateBack())
-        assertEquals(TraderScreen.CUSTOMERS, viewModel.uiState.value.currentScreen)
+        assertEquals(TraderScreen.PEOPLE, viewModel.uiState.value.currentScreen)
         assertTrue(viewModel.navigateBack())
         assertEquals(TraderScreen.HOME, viewModel.uiState.value.currentScreen)
 
         // 4. Navigate Home -> Inventory (Products Catalog) -> Product Detail -> Back -> Back to Home
         viewModel.navigateTo(TraderScreen.PRODUCTS_CATALOG)
         assertEquals(TraderScreen.PRODUCTS_CATALOG, viewModel.uiState.value.currentScreen)
-        assertFalse("Inventory catalog is a secondary screen without root bottom bar", viewModel.uiState.value.isRootDestination)
+        assertTrue("Inventory is a Direction A root", viewModel.uiState.value.isRootDestination)
 
         viewModel.selectProductForDetail(oliveOil)
         assertEquals(TraderScreen.PRODUCT_DETAIL, viewModel.uiState.value.currentScreen)
@@ -880,8 +880,7 @@ class ExampleUnitTest {
         assertTrue(viewModel.navigateBack())
         assertEquals(TraderScreen.HOME, viewModel.uiState.value.currentScreen)
 
-        // 5. Lateral Store Operations switching (Catalog -> Suppliers -> Expenses -> Reports)
-        // does not build a deep back-stack loop; Back returns directly to HOME
+        // 5. Legacy management routes retain their explicit child history.
         viewModel.navigateTo(TraderScreen.PRODUCTS_CATALOG)
         assertTrue(viewModel.uiState.value.isStoreOperationDestination)
         viewModel.navigateTo(TraderScreen.SUPPLIERS)
@@ -892,9 +891,10 @@ class ExampleUnitTest {
         assertEquals(TraderScreen.FINANCIAL_REPORTS, viewModel.uiState.value.currentScreen)
         assertFalse(viewModel.uiState.value.isRootDestination)
         assertTrue(viewModel.uiState.value.isStoreOperationDestination)
-        assertEquals(listOf(TraderScreen.HOME), viewModel.uiState.value.screenHistory)
+        assertEquals(listOf(TraderScreen.HOME, TraderScreen.PRODUCTS_CATALOG, TraderScreen.SUPPLIERS, TraderScreen.EXPENSES), viewModel.uiState.value.screenHistory)
         assertTrue(viewModel.navigateBack())
-        assertEquals(TraderScreen.HOME, viewModel.uiState.value.currentScreen)
+        assertEquals(TraderScreen.EXPENSES, viewModel.uiState.value.currentScreen)
+        viewModel.navigateTo(TraderScreen.HOME)
 
         // Lateral Profile <-> Settings switching also avoids back-stack loops and returns to HOME on Back
         viewModel.navigateTo(TraderScreen.USER_PROFILE)

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.ExampleUnitTest" tests="39" skipped="0" failures="0" errors="0" timestamp="2026-11-07T21:27:20.972Z" hostname="pasta-hp-worker" time="0.308">
+  <properties/>
+  <testcase name="reportsCashDrawerReconciliation_profileAndSettings_reconcile100Percent" classname="com.example.ExampleUnitTest" time="0.099"/>
+  <testcase name="invoiceHistoryAndReceipts_longReceiptCreditDistinctionAndSimulatedPrinter_behaveTruthfully" classname="com.example.ExampleUnitTest" time="0.009"/>
+  <testcase name="customersLedger_debtorAdvanceSettledAndCollection_preserveBalancesAndRefreshDetail" classname="com.example.ExampleUnitTest" time="0.004"/>
+  <testcase name="westernFormatters_sanitizesFormattedLargeNumbersAndArabicSeparators" classname="com.example.ExampleUnitTest" time="0.001"/>
+  <testcase name="customerCreditLimit_isEnforcedAuthoritatively" classname="com.example.ExampleUnitTest" time="0.045"/>
+  <testcase name="staleOperation_revalidatesStockAtFinalPosting_rejectsWithoutSilentClamping" classname="com.example.ExampleUnitTest" time="0.01"/>
+  <testcase name="salesDraftsAndQuotations_saveResumeDeleteAndFormat_neverMutateInventoryOrDrawerCash" classname="com.example.ExampleUnitTest" time="0.013"/>
+  <testcase name="physicalGoodsReceiptGrn_rejectsUnknownBill_unrelatedProduct_mismatchedQuantity_textOnlyBill_andDuplicateReceipt" classname="com.example.ExampleUnitTest" time="0.018"/>
+  <testcase name="invoiceNumberCollision_differentIds_failsRatherThanSilentLoss" classname="com.example.ExampleUnitTest" time="0.005"/>
+  <testcase name="catalogAndInventory_trackedVsNonStockZeroStockAndPermissions_behaveTruthfully" classname="com.example.ExampleUnitTest" time="0.001"/>
+  <testcase name="customQuickItem_modelsAsPermissibleNonStockLine_withZeroInventedCostAndZeroStock" classname="com.example.ExampleUnitTest" time="0.003"/>
+  <testcase name="advancesAndDebts_areSeparatedWithoutConflation" classname="com.example.ExampleUnitTest" time="0.002"/>
+  <testcase name="homeScreenStates_initialUnfinishedBasketAndOwnerVsCashier_behaveTruthfully" classname="com.example.ExampleUnitTest" time="0.004"/>
+  <testcase name="lineQuantity_negativeOrZero_isRejectedAndDoesNotMutateStock" classname="com.example.ExampleUnitTest" time="0.001"/>
+  <testcase name="endToEndSaleFlow_basketInvoicePaymentAndReceipt_isCorrect" classname="com.example.ExampleUnitTest" time="0.003"/>
+  <testcase name="productSelectionAndSimulatedBarcode_fastAdditionsSearchAndStockLimits_behaveTruthfully" classname="com.example.ExampleUnitTest" time="0.007"/>
+  <testcase name="singleAuthoritativeDomainPath_viewModelMutationsDelegateToRepository" classname="com.example.ExampleUnitTest" time="0.001"/>
+  <testcase name="sampleCatalogFinancialConsistency_invoicesLineItemsReceiptsCustomerBalancesAndStatements_reconcile100Percent" classname="com.example.ExampleUnitTest" time="0.007"/>
+  <testcase name="discountRounding_exactMoneyValues_5PercentOn6Point50Yields33AgorotDiscountAnd6Point17Net" classname="com.example.ExampleUnitTest" time="0.001"/>
+  <testcase name="invoiceTotals_callerTamperedAmount_isRejectedByCanonicalPricing" classname="com.example.ExampleUnitTest" time="0.001"/>
+  <testcase name="todayAndShiftFigures_reflectDefinedDateBoundaries" classname="com.example.ExampleUnitTest" time="0.004"/>
+  <testcase name="suppliersAndExpenses_financialBillDoesNotMutateStock_andValidationsHold" classname="com.example.ExampleUnitTest" time="0.006"/>
+  <testcase name="recordExpense_cashierRole_isRejectedByPermissionBoundary" classname="com.example.ExampleUnitTest" time="0.001"/>
+  <testcase name="interactiveProductCreationAndEditing_persistsWarehouseLotExpiryAndWeightedDisplay_respectsRoleGate" classname="com.example.ExampleUnitTest" time="0.002"/>
+  <testcase name="customerPayment_idempotentReplayWithSameId_doesNotDoubleDeduct" classname="com.example.ExampleUnitTest" time="0.0"/>
+  <testcase name="cashierRole_cannotAccessPrivilegedControlsOrExposeOwnerFinancials" classname="com.example.ExampleUnitTest" time="0.002"/>
+  <testcase name="invoicePaymentStatus_distinguishesPaidCashPartialAndFullCredit" classname="com.example.ExampleUnitTest" time="0.001"/>
+  <testcase name="visualIdentity_lightAndDarkThemeTokens_haveGradedSurfacesAndNoPinkDebit" classname="com.example.ExampleUnitTest" time="0.022"/>
+  <testcase name="customerAndSupplierEditing_andPhysicalGoodsReceiptGrn_preserveFinancialAndStockSeparation" classname="com.example.ExampleUnitTest" time="0.002"/>
+  <testcase name="checkoutTenderAndCompletion_exactLargerShortfallCreditAndRetry_behaveTruthfully" classname="com.example.ExampleUnitTest" time="0.012"/>
+  <testcase name="navigationAndBackBehavior_acrossAllModules_preservesUnfinishedBasketAndRootHierarchy" classname="com.example.ExampleUnitTest" time="0.002"/>
+  <testcase name="repositoryRecordSale_isIdempotent_doesNotDoubleDeductStockOrDuplicateInvoices" classname="com.example.ExampleUnitTest" time="0.001"/>
+  <testcase name="aggregateStock_multipleLinesOfSameProduct_rejectsWhenCombinedDemandExceedsStock" classname="com.example.ExampleUnitTest" time="0.0"/>
+  <testcase name="shiftReconciliation_separatesExpectedBookCashFromCountedPhysicalCashAndCalculatesVariance" classname="com.example.ExampleUnitTest" time="0.005"/>
+  <testcase name="basketAndReviewExperience_walkInKnownCustomerEditsAndDiscounts_preserveExactFiguresAndConsequences" classname="com.example.ExampleUnitTest" time="0.004"/>
+  <testcase name="viewModelReplay_doubleClickOnSaleCompletion_isIdempotent" classname="com.example.ExampleUnitTest" time="0.001"/>
+  <testcase name="anonymousWalkIn_creditSale_isRejected" classname="com.example.ExampleUnitTest" time="0.001"/>
+  <testcase name="purchaseBill_rejectsNegativePaidNow_andInvalidSupplier" classname="com.example.ExampleUnitTest" time="0.0"/>
+  <testcase name="customProduct_negativePriceOrStock_isRejected" classname="com.example.ExampleUnitTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

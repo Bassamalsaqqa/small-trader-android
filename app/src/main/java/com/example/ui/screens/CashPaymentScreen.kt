@@ -1,5 +1,10 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -9,17 +14,14 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -31,6 +33,9 @@ import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAddAlt1
@@ -60,9 +65,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -76,18 +87,22 @@ import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
 import kotlin.math.abs
 
+enum class PaymentMode {
+    CASH,
+    CREDIT
+}
+
 /**
- * Native Material3 Cash Payment & Rapid Tender Settlement Screen (Step 3 of Checkout).
+ * Native Material3 Cash Payment & Settlement Screen (Step 3 of Checkout).
  *
- * Design Invariants Enforced:
- * 1. Financial Settlement Clarity: Primary board isolates Net Amount Due vs. Cash Received,
- *    and provides instant Change Due / Shortfall calculation with high-contrast status colors.
- * 2. Rapid Cashier Ergonomics: Exact tender button, standard bill chips (10, 20, 50, 100, 200),
- *    and an integrated 3x4 on-screen POS Keypad allow full one-handed touch entry without soft keyboard jumps.
- * 3. Strict 48dp Minimum Touch Targets on all buttons, bill chips, keypad keys, and clear affordances.
- * 4. Distinct Credit-to-Customer Separation: Credit posting is isolated in its own card, strictly
- *    blocked for walk-in cash customers, and displays 3-column debt projections + credit limit ceiling enforcement.
- * 5. Single Authoritative Confirmation Dock: Discloses full drawer cash, change, and stock impact before final commit.
+ * Implements Stage 3 Architecture:
+ * 1. Dominant Net Due Amount isolated prominently at top.
+ * 2. Segmented Cash / Credit Mode selection eliminating visual clutter.
+ * 3. Cash Mode: Exact tender prefill, standard bill chips, change/shortfall status,
+ *    and optional toggleable on-screen keypad to avoid soft keyboard collision.
+ * 4. Credit Mode: Named customer requirement, 3-column debt projection, credit limit ceiling.
+ * 5. Exactly ONE primary final confirmation button at bottom dock with submitting guards.
+ * 6. Clean, concise merchant Arabic / English without explanatory clutter or AI filler.
  */
 @Composable
 fun CashPaymentScreen(
@@ -107,7 +122,10 @@ fun CashPaymentScreen(
     val financial = TraderTheme.financial
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
-    var isCustomerPickerOpen by rememberSaveable { mutableStateOf(false) }
+    var isCustomerPickerOpen by rememberSaveable(state.saleSessionId) { mutableStateOf(false) }
+
+    var paymentMode by rememberSaveable(state.saleSessionId) { mutableStateOf(PaymentMode.CASH) }
+    var isKeypadVisible by rememberSaveable(state.saleSessionId) { mutableStateOf(false) }
 
     val selectedCustomer = state.selectedCustomer
     val sufficient = state.isCashSufficient
@@ -126,9 +144,9 @@ fun CashPaymentScreen(
                 .fillMaxWidth()
                 .verticalScroll(scrollState)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Recoverable Checkout Error Banner (shown only when a submit attempt failed)
+            // Recoverable Checkout Error Banner
             if (errorMsg != null) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
@@ -173,143 +191,202 @@ fun CashPaymentScreen(
                 }
             }
 
-            // =========================================================================
-            // 1. Primary Cash Settlement Board: Amount Due • Cash Received • Change Due
-            // =========================================================================
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier.fillMaxWidth()
+            // Tactile Segmented Payment Mode Selector (Min 48dp touch targets)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .padding(3.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                Surface(
+                    onClick = {
+                        paymentMode = PaymentMode.CASH
+                        focusManager.clearFocus()
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (paymentMode == PaymentMode.CASH) {
+                        MaterialTheme.colorScheme.surface
+                    } else {
+                        Color.Transparent
+                    },
+                    shadowElevation = if (paymentMode == PaymentMode.CASH) 2.dp else 0.dp,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .semantics {
+                            selected = paymentMode == PaymentMode.CASH
+                            role = Role.Tab
+                        }
+                        .testTag("payment_mode_cash_tab")
                 ) {
-                    // Top Row: Amount Due & Cash Received at a glance
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(IntrinsicSize.Min),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top
+                            .height(48.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = lang.tr("المبلغ المطلوب للدفع", "Amount Due"),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = WesternFormatters.formatIls(state.basketNetTotalIls),
-                                style = MaterialTheme.typography.headlineMedium.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.testTag("payment_total_due_text")
-                            )
-                            Text(
-                                text = buildString {
-                                    append(
-                                        lang.tr(
-                                            "${WesternFormatters.formatInt(state.basketItemCount)} وحدات",
-                                            "${WesternFormatters.formatInt(state.basketItemCount)} units"
-                                        )
-                                    )
-                                    if (state.calculatedDiscountIls > 0.005) {
-                                        append(" • ")
-                                        append(
-                                            lang.tr(
-                                                "خصم ${WesternFormatters.formatIls(state.calculatedDiscountIls)}",
-                                                "${WesternFormatters.formatIls(state.calculatedDiscountIls)} off"
-                                            )
-                                        )
-                                    }
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        Icon(
+                            imageVector = Icons.Default.Payments,
+                            contentDescription = null,
+                            tint = if (paymentMode == PaymentMode.CASH) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = lang.tr("نقداً", "Cash"),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = if (paymentMode == PaymentMode.CASH) FontWeight.Bold else FontWeight.Medium,
+                            color = if (paymentMode == PaymentMode.CASH) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Surface(
+                    onClick = {
+                        paymentMode = PaymentMode.CREDIT
+                        focusManager.clearFocus()
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (paymentMode == PaymentMode.CREDIT) {
+                        MaterialTheme.colorScheme.surface
+                    } else {
+                        Color.Transparent
+                    },
+                    shadowElevation = if (paymentMode == PaymentMode.CREDIT) 2.dp else 0.dp,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .semantics {
+                            selected = paymentMode == PaymentMode.CREDIT
+                            role = Role.Tab
+                        }
+                        .testTag("payment_mode_credit_tab")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccountBalanceWallet,
+                            contentDescription = null,
+                            tint = if (paymentMode == PaymentMode.CREDIT) financial.debit else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = lang.tr("آجل", "Credit"),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = if (paymentMode == PaymentMode.CREDIT) FontWeight.Bold else FontWeight.Medium,
+                            color = if (paymentMode == PaymentMode.CREDIT) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            // =========================================================================
+            // 1. CASH MODE: Settlement Board, Tender Input, Denominations & Change
+            // =========================================================================
+            if (paymentMode == PaymentMode.CASH) {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Dominant Amount Due & Quick Edit Invoice
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(IntrinsicSize.Min),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = lang.tr("المبلغ المطلوب للدفع", "Amount Due"),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = WesternFormatters.formatIls(state.basketNetTotalIls),
+                                    style = MaterialTheme.typography.headlineMedium.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.testTag("payment_total_due_text")
+                                )
+                            }
+
                             TextButton(
                                 onClick = onEditInvoice,
-                                contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                                 modifier = Modifier
                                     .heightIn(min = 48.dp)
                                     .testTag("payment_edit_invoice_button")
                             ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = lang.tr("تعديل الأصناف أو الخصم", "Edit Items or Discount"),
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.primary
+                                    text = lang.tr("تعديل", "Edit"),
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            }
+
+                            VerticalDivider(
+                                modifier = Modifier
+                                    .padding(horizontal = 8.dp)
+                                    .fillMaxHeight(),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            )
+
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                horizontalAlignment = Alignment.End
+                            ) {
+                                Text(
+                                    text = lang.tr("المقبوض نقداً", "Cash Received"),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = WesternFormatters.formatIls(state.cashTenderedIls),
+                                    style = MaterialTheme.typography.headlineMedium.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.testTag("payment_cash_received_text")
                                 )
                             }
                         }
 
-                        VerticalDivider(
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .padding(horizontal = 12.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
-                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            horizontalAlignment = Alignment.End
-                        ) {
-                            Text(
-                                text = lang.tr("النقد المستلم", "Cash Received"),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = WesternFormatters.formatIls(state.cashTenderedIls),
-                                style = MaterialTheme.typography.headlineMedium.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = if (sufficient) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    financial.warning
-                                },
-                                modifier = Modifier.testTag("payment_cash_received_text")
-                            )
-                            Text(
-                                text = if (isExact) {
-                                    lang.tr("مطابق للمطلوب بالضبط", "Exact amount")
-                                } else if (sufficient) {
-                                    lang.tr("أكبر من المطلوب (يوجد باقي)", "Exceeds due (change below)")
-                                } else {
-                                    lang.tr("أقل من المطلوب", "Less than amount due")
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (sufficient) {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                } else {
-                                    financial.warning
-                                }
-                            )
-                        }
-                    }
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
-
-                    // Native Tender Entry + Quick Bills
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        // Amount Received Input Field
                         OutlinedTextField(
                             value = state.cashInputText,
-                            onValueChange = { raw ->
-                                onUpdateCashText(raw)
+                            onValueChange = { input ->
+                                val cleaned = input.filter { it.isDigit() || it == '.' }
+                                onUpdateCashText(cleaned)
                             },
                             singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
                             label = {
                                 Text(
-                                    text = lang.tr(
-                                        "أدخل النقد المستلم من الزبون (₪)",
-                                        "Enter cash received from customer (₪)"
-                                    )
+                                    lang.tr("المبلغ المستلم من الزبون (شيكل)", "Cash Tendered (ILS)")
                                 )
                             },
                             placeholder = {
@@ -335,7 +412,9 @@ fun CashPaymentScreen(
                                                 focusManager.clearFocus()
                                             },
                                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                            modifier = Modifier.heightIn(min = 48.dp)
+                                            modifier = Modifier
+                                                .heightIn(min = 48.dp)
+                                                .testTag("cash_exact_button")
                                         ) {
                                             Text(
                                                 text = lang.tr("بالضبط", "Exact"),
@@ -382,54 +461,12 @@ fun CashPaymentScreen(
                                 .testTag("cash_tender_input")
                         )
 
-                        // Quick Shekel Presets Row: Exact + Standard Bills (All >= 48dp hit area)
+                        // Quick Shekel Bill Chips: 10, 20, 50, 100, 200
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Surface(
-                                onClick = {
-                                    onSetExactAmount()
-                                    focusManager.clearFocus()
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isExact) {
-                                    MaterialTheme.colorScheme.primaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
-                                },
-                                border = BorderStroke(
-                                    width = 1.dp,
-                                    color = if (isExact) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.outlineVariant
-                                    }
-                                ),
-                                modifier = Modifier
-                                    .weight(1.3f)
-                                    .heightIn(min = 48.dp)
-                                    .testTag("cash_exact_button")
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.padding(horizontal = 6.dp)
-                                ) {
-                                    Text(
-                                        text = lang.tr("بالضبط", "Exact"),
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isExact) {
-                                            MaterialTheme.colorScheme.onPrimaryContainer
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurface
-                                        },
-                                        maxLines = 1
-                                    )
-                                }
-                            }
-
                             val bills = listOf(10, 20, 50, 100, 200)
                             bills.forEach { bill ->
                                 val isSelectedBill = abs(state.cashTenderedIls - bill.toDouble()) < 0.005 && !isExact
@@ -449,8 +486,8 @@ fun CashPaymentScreen(
                                         width = 1.dp,
                                         color = when {
                                             isSelectedBill -> MaterialTheme.colorScheme.primary
-                                            coversDue -> MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
-                                            else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                            coversDue -> MaterialTheme.colorScheme.outlineVariant
+                                            else -> Color.Transparent
                                         }
                                     ),
                                     modifier = Modifier
@@ -458,16 +495,18 @@ fun CashPaymentScreen(
                                         .heightIn(min = 48.dp)
                                         .testTag("cash_bill_$bill")
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.padding(horizontal = 4.dp)
+                                    ) {
                                         Text(
                                             text = "$bill",
-                                            style = MaterialTheme.typography.titleMedium.copy(
-                                                fontWeight = if (coversDue || isSelectedBill) FontWeight.Bold else FontWeight.Medium
-                                            ),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = if (isSelectedBill || coversDue) FontWeight.Bold else FontWeight.Medium,
                                             color = when {
                                                 isSelectedBill -> MaterialTheme.colorScheme.onPrimaryContainer
                                                 coversDue -> MaterialTheme.colorScheme.onSurface
-                                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                                else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
                                             }
                                         )
                                     }
@@ -475,416 +514,444 @@ fun CashPaymentScreen(
                             }
                         }
 
-                        // Cashier Rapid Numeric Keypad (Ergonomic touch tender)
-                        CashierNumpadGrid(
-                            lang = lang,
-                            onKeypadPress = onKeypadPress,
-                            onClearFocus = { focusManager.clearFocus() },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-
-                    // Change to Return / Shortfall Callout Banner
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (sufficient) financial.incomeContainer else financial.warningContainer,
-                        border = BorderStroke(
-                            width = 1.dp,
+                        // Change Due or Shortfall Status Surface
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
                             color = if (sufficient) {
-                                financial.income.copy(alpha = 0.35f)
+                                financial.incomeContainer.copy(alpha = 0.55f)
                             } else {
-                                financial.warning.copy(alpha = 0.45f)
-                            }
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                financial.warningContainer.copy(alpha = 0.55f)
+                            },
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (sufficient) {
+                                    financial.income.copy(alpha = 0.35f)
+                                } else {
+                                    financial.warning.copy(alpha = 0.35f)
+                                }
+                            ),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = if (sufficient) {
+                                                lang.tr("الباقي للزبون", "Change to Return")
+                                            } else {
+                                                lang.tr("المبلغ المتبقي", "Shortfall Due")
+                                            },
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = if (sufficient) financial.income else financial.warning
+                                        )
+                                        Text(
+                                            text = when {
+                                                isExact -> lang.tr(
+                                                    "المبلغ المستلم مطابق تماماً — لا يوجد باقي",
+                                                    "Exact cash received — no change"
+                                                )
+                                                sufficient -> lang.tr(
+                                                    "سلّم الزبون هذا الباقي نقداً",
+                                                    "Hand this change to customer"
+                                                )
+                                                else -> lang.tr(
+                                                    "استلم كامل المبلغ لإتمام البيع النقدي",
+                                                    "Collect full cash to complete"
+                                                )
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (sufficient) {
+                                                financial.income.copy(alpha = 0.9f)
+                                            } else {
+                                                financial.warning.copy(alpha = 0.95f)
+                                            }
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(10.dp))
+
                                     Text(
                                         text = if (sufficient) {
-                                            lang.tr("الباقي لإرجاعه للزبون", "Change to Return")
+                                            WesternFormatters.formatIls(state.changeDueIls)
                                         } else {
-                                            lang.tr("النقص عن المبلغ المطلوب", "Shortfall (Still Due)")
+                                            WesternFormatters.formatIls(state.remainingUnpaidIls)
                                         },
-                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = if (sufficient) financial.income else financial.warning
-                                    )
-                                    Text(
-                                        text = when {
-                                            isExact -> lang.tr(
-                                                "المبلغ المستلم مطابق تماماً — لا يوجد باقي",
-                                                "Exact cash received — no change to return"
-                                            )
-                                            sufficient -> lang.tr(
-                                                "سلّم الزبون هذا الباقي نقداً مع الإيصال",
-                                                "Hand this change back to the customer"
-                                            )
-                                            else -> lang.tr(
-                                                "لا يُقبل الدفع النقدي الجزئي؛ استلم كامل المبلغ",
-                                                "Partial cash is not accepted; collect full amount"
-                                            )
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (sufficient) {
-                                            financial.income.copy(alpha = 0.9f)
-                                        } else {
-                                            financial.warning.copy(alpha = 0.95f)
-                                        }
+                                        style = MaterialTheme.typography.headlineSmall.copy(
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = if (sufficient) financial.income else financial.warning,
+                                        modifier = Modifier.testTag("payment_change_due_text")
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.width(10.dp))
-
-                                Text(
-                                    text = if (sufficient) {
-                                        WesternFormatters.formatIls(state.changeDueIls)
-                                    } else {
-                                        WesternFormatters.formatIls(state.remainingUnpaidIls)
-                                    },
-                                    style = MaterialTheme.typography.headlineSmall.copy(
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    color = if (sufficient) financial.income else financial.warning,
-                                    modifier = Modifier.testTag("payment_change_due_text")
-                                )
-                            }
-
-                            // One-tap recovery when cash tendered is insufficient
-                            if (!sufficient && state.basket.isNotEmpty()) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.End
-                                ) {
-                                    FilledTonalButton(
-                                        onClick = {
-                                            onSetExactAmount()
-                                            focusManager.clearFocus()
-                                        },
-                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                                        shape = RoundedCornerShape(10.dp),
-                                        modifier = Modifier
-                                            .heightIn(min = 48.dp)
-                                            .testTag("recover_exact_cash_button")
+                                if (!sufficient && state.basket.isNotEmpty()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End
                                     ) {
-                                        Text(
-                                            text = lang.tr(
-                                                "تعيين المبلغ الكامل (${WesternFormatters.formatIls(state.basketNetTotalIls)})",
-                                                "Set Exact Due (${WesternFormatters.formatIls(state.basketNetTotalIls)})"
-                                            ),
-                                            style = MaterialTheme.typography.labelLarge,
-                                            fontWeight = FontWeight.Bold
-                                        )
+                                        FilledTonalButton(
+                                            onClick = {
+                                                onSetExactAmount()
+                                                focusManager.clearFocus()
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier
+                                                .heightIn(min = 48.dp)
+                                                .testTag("recover_exact_cash_button")
+                                        ) {
+                                            Text(
+                                                text = lang.tr(
+                                                    "تعيين المبلغ الكامل (${WesternFormatters.formatIls(state.basketNetTotalIls)})",
+                                                    "Set Exact Due (${WesternFormatters.formatIls(state.basketNetTotalIls)})"
+                                                ),
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                }
-            }
 
-            // =========================================================================
-            // 2. Distinct & Truthful Credit-to-Customer Section
-            // =========================================================================
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(
-                    width = 1.dp,
-                    color = if (state.wouldCreditExceedCustomerLimit) {
-                        financial.debit.copy(alpha = 0.55f)
-                    } else {
-                        MaterialTheme.colorScheme.outlineVariant
-                    }
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                        // Optional Keypad Toggle (avoids fighting soft keyboard simultaneously)
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center
                         ) {
-                            Icon(
-                                imageVector = if (selectedCustomer != null) {
-                                    Icons.Default.Person
-                                } else {
-                                    Icons.Default.PersonAddAlt1
+                            TextButton(
+                                onClick = {
+                                    isKeypadVisible = !isKeypadVisible
+                                    focusManager.clearFocus()
                                 },
-                                contentDescription = null,
-                                tint = if (selectedCustomer != null) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Column {
-                                Text(
-                                    text = lang.tr(
-                                        "البيع الآجل على حساب زبون",
-                                        "Credit to Customer Account"
-                                    ),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("toggle_keypad_button")
+                            ) {
+                                Icon(
+                                    imageVector = if (isKeypadVisible) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
                                 )
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = if (selectedCustomer != null) {
-                                        selectedCustomer.name(lang)
+                                    text = if (isKeypadVisible) {
+                                        lang.tr("إخفاء لوحة الأرقام", "Hide Keypad")
                                     } else {
-                                        lang.tr("زبون نقدي مباشر (غير مربوط بحساب)", "Walk-in customer (no account linked)")
+                                        lang.tr("لوحة أرقام الصندوق", "Show Numpad")
                                     },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (selectedCustomer != null) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    style = MaterialTheme.typography.labelLarge
                                 )
                             }
                         }
 
-                        OutlinedButton(
-                            onClick = { isCustomerPickerOpen = true },
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                            shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("payment_select_customer_button")
+                        AnimatedVisibility(
+                            visible = isKeypadVisible,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
                         ) {
-                            Icon(
-                                imageVector = if (selectedCustomer != null) {
-                                    Icons.Default.SwapHoriz
-                                } else {
-                                    Icons.Default.PersonAddAlt1
-                                },
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (selectedCustomer != null) {
-                                    lang.tr("تغيير الزبون", "Change")
-                                } else {
-                                    lang.tr("اختيار زبون", "Select Customer")
-                                },
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold
+                            CashierNumpadGrid(
+                                lang = lang,
+                                onKeypadPress = onKeypadPress,
+                                onClearFocus = { focusManager.clearFocus() }
                             )
                         }
                     }
+                }
+            } else {
+                // =========================================================================
+                // 2. CREDIT MODE: Customer Assignment, Debt Projection & Credit Ceiling
+                // =========================================================================
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (state.wouldCreditExceedCustomerLimit) {
+                            financial.debit.copy(alpha = 0.55f)
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant
+                        }
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Dominant Amount Due & Notice
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = lang.tr("المبلغ المطلوب تقييده ديناً", "Credit Amount Due"),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = WesternFormatters.formatIls(state.basketNetTotalIls),
+                                    style = MaterialTheme.typography.headlineMedium.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = financial.debit,
+                                    modifier = Modifier.testTag("payment_total_due_text")
+                                )
+                            }
 
-                    if (selectedCustomer == null) {
-                        // Walk-in explanation: credit is distinct and requires an assigned customer
+                            TextButton(
+                                onClick = onEditInvoice,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("payment_edit_invoice_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = lang.tr("تعديل", "Edit"),
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            }
+                        }
+
+                        // Explicit zero cash disclosure
                         Surface(
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(8.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
                                 text = lang.tr(
-                                    "لتسجيل الفاتورة بالذمة (آجل)، اختر حساب زبون مسجل أولاً. البيع النقدي المباشر يُحصّل بالكامل في الصندوق.",
-                                    "To post on credit, select a registered customer first. Walk-in sales must be paid in full in cash."
+                                    "المبلغ المقبوض بالصندوق: 0.00 ₪ (تسجيل آجل بالكامل على الذمة)",
+                                    "Cash Drawer Impact: 0.00 ₪ (100% posted to customer debit)"
                                 ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
                             )
                         }
-                    } else {
-                        val projected = state.projectedCustomerBalanceIfCreditIls ?: selectedCustomer.balanceIls
-                        val overLimit = state.wouldCreditExceedCustomerLimit
 
-                        // Customer Debt Consequence Strip
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (overLimit) {
-                                financial.debitContainer.copy(alpha = 0.55f)
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                            },
-                            border = BorderStroke(
-                                width = 1.dp,
-                                color = if (overLimit) financial.debit.copy(alpha = 0.35f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                            ),
-                            modifier = Modifier.fillMaxWidth()
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                        // Customer Selection & Account Status
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(
-                                modifier = Modifier.padding(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = if (selectedCustomer != null) {
+                                        Icons.Default.Person
+                                    } else {
+                                        Icons.Default.PersonAddAlt1
+                                    },
+                                    contentDescription = null,
+                                    tint = if (selectedCustomer != null) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = lang.tr("حساب الزبون", "Customer Account"),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = if (selectedCustomer != null) {
+                                            selectedCustomer.name(lang)
+                                        } else {
+                                            lang.tr("لم يُحدد زبون مسجل", "No customer linked")
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (selectedCustomer != null) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            financial.debit
+                                        },
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            OutlinedButton(
+                                onClick = { isCustomerPickerOpen = true },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("payment_select_customer_button")
+                            ) {
+                                Icon(
+                                    imageVector = if (selectedCustomer != null) {
+                                        Icons.Default.SwapHoriz
+                                    } else {
+                                        Icons.Default.PersonAddAlt1
+                                    },
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (selectedCustomer != null) {
+                                        lang.tr("تغيير الزبون", "Change")
+                                    } else {
+                                        lang.tr("اختيار زبون", "Select Customer")
+                                    },
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        if (selectedCustomer == null) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = financial.debitContainer.copy(alpha = 0.45f),
+                                border = BorderStroke(1.dp, financial.debit.copy(alpha = 0.25f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = lang.tr(
+                                        "البيع الآجل يتطلب تحديد حساب زبون مسجل في النظام. اضغط على 'اختيار زبون' للربط قبل المتابعة.",
+                                        "Credit sales require a registered customer account. Tap 'Select Customer' to link an account."
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = financial.debit,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+                        } else {
+                            // 3-Column Debt Projection Ledger
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(IntrinsicSize.Min),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = lang.tr("الدين الحالي", "Current Debt"),
+                                            text = lang.tr("الرصيد السابق", "Prev Debt"),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         Text(
                                             text = WesternFormatters.formatIls(selectedCustomer.balanceIls),
                                             style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            text = lang.tr("قيمة الفاتورة", "Invoice +"),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = financial.debit
+                                        )
+                                        Text(
+                                            text = "+${WesternFormatters.formatIls(state.basketNetTotalIls)}",
+                                            style = MaterialTheme.typography.titleSmall,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (selectedCustomer.balanceIls > 0.005) {
+                                            color = financial.debit
+                                        )
+                                    }
+
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        horizontalAlignment = Alignment.End
+                                    ) {
+                                        Text(
+                                            text = lang.tr("الرصيد بعد القيد", "Projected Total"),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = WesternFormatters.formatIls(state.projectedCustomerBalanceIfCreditIls ?: 0.0),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (state.wouldCreditExceedCustomerLimit) {
                                                 financial.debit
                                             } else {
                                                 MaterialTheme.colorScheme.onSurface
                                             }
                                         )
                                     }
-
-                                    VerticalDivider(
-                                        modifier = Modifier.fillMaxHeight(),
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
-                                    )
-
-                                    Column(modifier = Modifier.weight(1.2f)) {
-                                        Text(
-                                            text = lang.tr("الرصيد بعد الآجل", "Balance After Credit"),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Text(
-                                            text = WesternFormatters.formatIls(projected),
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (overLimit) financial.debit else financial.warning
-                                        )
-                                    }
-
-                                    VerticalDivider(
-                                        modifier = Modifier.fillMaxHeight(),
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
-                                    )
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = lang.tr("سقف الدين", "Credit Limit"),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Text(
-                                            text = WesternFormatters.formatIls(selectedCustomer.creditLimitIls),
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-
-                                if (overLimit) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .testTag("payment_credit_limit_warning")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.WarningAmber,
-                                            contentDescription = null,
-                                            tint = financial.debit,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Text(
-                                            text = lang.tr(
-                                                "يتجاوز سقف الدين المسموح بمقدار ${WesternFormatters.formatIls(state.creditCeilingExcessIls)}. استلم الفاتورة نقداً بالأسفل، أو غيّر الزبون، أو خفّض الأصناف.",
-                                                "Exceeds credit limit by ${WesternFormatters.formatIls(state.creditCeilingExcessIls)}. Collect cash below, change customer, or reduce items."
-                                            ),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = financial.debit,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-                                } else {
-                                    Text(
-                                        text = lang.tr(
-                                            "عند التسجيل على الحساب: لا يدخل نقد للصندوق (0.00 ₪) ويُضاف ${WesternFormatters.formatIls(state.basketNetTotalIls)} لذمة الزبون.",
-                                            "On credit confirmation: 0.00 ₪ drawer cash; full ${WesternFormatters.formatIls(state.basketNetTotalIls)} added to customer debt."
-                                        ),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
                                 }
                             }
-                        }
 
-                        OutlinedButton(
-                            onClick = onCompleteCreditSale,
-                            enabled = state.basket.isNotEmpty() && !state.isSubmittingSale && !overLimit,
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(
-                                width = 1.dp,
-                                color = if (overLimit) {
-                                    MaterialTheme.colorScheme.outlineVariant
-                                } else {
-                                    financial.debit.copy(alpha = 0.65f)
+                            // Credit Limit Status / Warning
+                            val overLimit = state.wouldCreditExceedCustomerLimit
+                            if (overLimit) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("payment_credit_limit_warning")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.WarningAmber,
+                                        contentDescription = null,
+                                        tint = financial.debit,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = lang.tr(
+                                            "يتجاوز سقف الدين المسموح بمقدار ${WesternFormatters.formatIls(state.creditCeilingExcessIls)}. استلم الفاتورة نقداً، أو غيّر الزبون.",
+                                            "Exceeds credit ceiling by ${WesternFormatters.formatIls(state.creditCeilingExcessIls)}. Collect cash or change customer."
+                                        ),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = financial.debit,
+                                        modifier = Modifier.weight(1f)
+                                    )
                                 }
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 48.dp)
-                                .testTag("complete_credit_sale_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AccountBalanceWallet,
-                                contentDescription = null,
-                                tint = if (overLimit) {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                } else {
-                                    financial.debit
-                                },
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = if (overLimit) {
-                                    lang.tr(
-                                        "البيع الآجل متوقف لتجاوز سقف الدين",
-                                        "Credit Blocked: Exceeds Credit Limit"
-                                    )
-                                } else {
-                                    lang.tr(
-                                        "تسجيل كامل الفاتورة آجل على الحساب (${WesternFormatters.formatIls(state.basketNetTotalIls)})",
-                                        "Post Full Invoice on Customer Credit (${WesternFormatters.formatIls(state.basketNetTotalIls)})"
-                                    )
-                                },
-                                style = MaterialTheme.typography.labelLarge.copy(
-                                    color = if (overLimit) {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    } else {
-                                        financial.debit
-                                    },
-                                    fontWeight = FontWeight.Bold
+                            } else {
+                                Text(
+                                    text = lang.tr(
+                                        "ضمن سقف الدين المسموح به (${WesternFormatters.formatIls(selectedCustomer.creditLimitIls)}).",
+                                        "Within allowed credit ceiling (${WesternFormatters.formatIls(selectedCustomer.creditLimitIls)})."
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                            )
+                            }
                         }
                     }
                 }
@@ -892,7 +959,7 @@ fun CashPaymentScreen(
         }
 
         // =========================================================================
-        // 3. Authoritative Cash Confirmation Dock (Consequence + Primary Action)
+        // 3. Authoritative Single Final Confirmation Dock (Consequence + Primary Action)
         // =========================================================================
         Surface(
             color = MaterialTheme.colorScheme.surface,
@@ -904,69 +971,125 @@ fun CashPaymentScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.navigationBars)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Consequence line: exactly what will happen on confirmation
-                Text(
-                    text = when {
-                        !sufficient -> lang.tr(
-                            "أدخل نقداً مستلماً لا يقل عن ${WesternFormatters.formatIls(state.basketNetTotalIls)} لتأكيد القبض النقدي",
-                            "Enter at least ${WesternFormatters.formatIls(state.basketNetTotalIls)} cash received to confirm cash sale"
-                        )
-                        state.changeDueIls > 0.005 -> lang.tr(
-                            "عند التأكيد: صافي الصندوق +${WesternFormatters.formatIls(state.basketNetTotalIls)} • إرجاع باقي ${WesternFormatters.formatIls(state.changeDueIls)} • خصم ${WesternFormatters.formatInt(state.stockUnitsToDeduct)} مخزون",
-                            "On confirm: Drawer +${WesternFormatters.formatIls(state.basketNetTotalIls)} • Return ${WesternFormatters.formatIls(state.changeDueIls)} change • Deduct ${WesternFormatters.formatInt(state.stockUnitsToDeduct)} stock"
-                        )
-                        else -> lang.tr(
-                            "عند التأكيد: إيداع ${WesternFormatters.formatIls(state.basketNetTotalIls)} في الصندوق • بدون باقي • خصم ${WesternFormatters.formatInt(state.stockUnitsToDeduct)} مخزون",
-                            "On confirm: Drawer +${WesternFormatters.formatIls(state.basketNetTotalIls)} • No change due • Deduct ${WesternFormatters.formatInt(state.stockUnitsToDeduct)} stock"
-                        )
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (sufficient) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        financial.warning
-                    },
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Button(
-                    onClick = onCompleteSale,
-                    enabled = state.basket.isNotEmpty() && sufficient && !state.isSubmittingSale,
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .testTag("complete_sale_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
+                if (paymentMode == PaymentMode.CASH) {
+                    // Consequence line for cash sale
                     Text(
-                        text = if (sufficient && state.changeDueIls > 0.005) {
-                            lang.tr(
-                                "تأكيد القبض وإرجاع باقي ${WesternFormatters.formatIls(state.changeDueIls)}",
-                                "Confirm Cash & Return ${WesternFormatters.formatIls(state.changeDueIls)} Change"
+                        text = when {
+                            !sufficient -> lang.tr(
+                                "المتبقي: ${WesternFormatters.formatIls(state.remainingUnpaidIls)}",
+                                "Shortfall: ${WesternFormatters.formatIls(state.remainingUnpaidIls)}"
                             )
-                        } else {
-                            lang.tr(
-                                "إتمام البيع نقداً (${WesternFormatters.formatIls(state.basketNetTotalIls)})",
-                                "Complete Cash Sale (${WesternFormatters.formatIls(state.basketNetTotalIls)})"
+                            state.changeDueIls > 0.005 -> lang.tr(
+                                "المقبوض: ${WesternFormatters.formatIls(state.cashTenderedIls)} • الباقي: ${WesternFormatters.formatIls(state.changeDueIls)}",
+                                "Received: ${WesternFormatters.formatIls(state.cashTenderedIls)} • Change: ${WesternFormatters.formatIls(state.changeDueIls)}"
+                            )
+                            else -> lang.tr(
+                                "المقبوض: ${WesternFormatters.formatIls(state.cashTenderedIls)} • بدون باقي",
+                                "Received: ${WesternFormatters.formatIls(state.cashTenderedIls)} • Exact"
                             )
                         },
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (sufficient) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            financial.warning
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+
+                    Button(
+                        onClick = onCompleteSale,
+                        enabled = state.basket.isNotEmpty() && sufficient && !state.isSubmittingSale,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag("complete_sale_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = lang.tr("تأكيد البيع", "Confirm Sale"),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                } else {
+                    // Consequence line for credit sale
+                    val overLimit = state.wouldCreditExceedCustomerLimit
+                    Text(
+                        text = when {
+                            selectedCustomer == null -> lang.tr(
+                                "يلزم اختيار زبون مسجل للبيع الآجل",
+                                "Select a customer for credit sale"
+                            )
+                            overLimit -> lang.tr(
+                                "يتجاوز سقف الدين بمقدار ${WesternFormatters.formatIls(state.creditCeilingExcessIls)}",
+                                "Exceeds credit limit by ${WesternFormatters.formatIls(state.creditCeilingExcessIls)}"
+                            )
+                            else -> lang.tr(
+                                "قيد على الحساب: ${WesternFormatters.formatIls(state.basketNetTotalIls)} • الصندوق: 0.00 ₪",
+                                "Account Debit: ${WesternFormatters.formatIls(state.basketNetTotalIls)} • Cash: 0.00 ₪"
+                            )
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (selectedCustomer != null && !overLimit) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            financial.debit
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Button(
+                        onClick = onCompleteCreditSale,
+                        enabled = selectedCustomer != null && !overLimit && state.basket.isNotEmpty() && !state.isSubmittingSale,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (selectedCustomer != null && !overLimit) financial.debit else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (selectedCustomer != null && !overLimit) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag("complete_credit_sale_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccountBalanceWallet,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = when {
+                                selectedCustomer == null -> lang.tr(
+                                    "البيع الآجل غير متاح بدون زبون",
+                                    "Credit Disabled: No Customer"
+                                )
+                                overLimit -> lang.tr(
+                                    "متوقف لتجاوز سقف الدين",
+                                    "Credit Blocked: Over Limit"
+                                )
+                                else -> lang.tr(
+                                    "تأكيد البيع الآجل",
+                                    "Confirm Credit Sale"
+                                )
+                            },
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
                 }
             }
         }
@@ -999,27 +1122,55 @@ private fun CashierNumpadGrid(
         listOf("1", "2", "3"),
         listOf("4", "5", "6"),
         listOf("7", "8", "9"),
-        listOf("BACK", "0", ".")
+        listOf(".", "0", "BACK")
     )
+
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            rows.forEach { keys ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    keys.forEach { key ->
+        Column(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            rows.forEach { rowKeys ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    rowKeys.forEach { key ->
                         Surface(
-                            onClick = { onClearFocus(); onKeypadPress(key) },
+                            onClick = {
+                                onClearFocus()
+                                onKeypadPress(key)
+                            },
                             shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.weight(1f).heightIn(min = 48.dp)
+                            color = when (key) {
+                                "BACK" -> MaterialTheme.colorScheme.surfaceVariant
+                                else -> MaterialTheme.colorScheme.surface
+                            },
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
                                 .testTag("cash_key_$key")
                         ) {
-                            Box(Modifier.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                            Box(contentAlignment = Alignment.Center) {
                                 if (key == "BACK") {
-                                    Icon(Icons.AutoMirrored.Filled.Backspace,
-                                        contentDescription = lang.tr("حذف آخر رقم", "Delete last digit"))
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.Backspace,
+                                        contentDescription = lang.tr("حذف خانة", "Backspace"),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
                                 } else {
-                                    Text(key, style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = key,
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontFamily = MonoFontFamily,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
                                 }
                             }
                         }

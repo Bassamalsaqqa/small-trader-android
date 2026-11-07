@@ -1,8 +1,16 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -164,19 +172,7 @@ fun InvoiceReviewScreen(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // 0. Saved Sale Drafts (Hold / Resume) + Save Draft & Quotation Bar
-                item {
-                    DraftsAndQuotationBar(
-                        savedDrafts = state.savedDrafts,
-                        lang = lang,
-                        onSaveDraft = onSaveDraft,
-                        onOpenQuotation = { isQuotationDialogOpen = true },
-                        onResumeDraft = onResumeDraft,
-                        onDeleteDraft = onDeleteDraft
-                    )
-                }
-
-                // 1. Editable Invoice Line Items Ledger
+                // 1. Editable Invoice Line Items Ledger (Visible prominently at top)
                 item {
                     EditableInvoiceLinesSection(
                         basket = state.basket,
@@ -190,7 +186,7 @@ fun InvoiceReviewScreen(
                     )
                 }
 
-                // 2. Customer Account & Consequence Section (Scalable Searchable Sheet)
+                // 2. Customer Account Section (Native Expandable Section)
                 item {
                     CustomerAndAccountImpactCard(
                         selectedCustomer = state.selectedCustomer,
@@ -205,7 +201,7 @@ fun InvoiceReviewScreen(
                     )
                 }
 
-                // 3. Permitted Discount & Rounding Section
+                // 3. Permitted Discount & Rounding Section (Native Expandable Choices)
                 if (state.currentSession.canApplyDiscounts()) {
                     item {
                         DiscountAndRoundingCard(
@@ -215,6 +211,18 @@ fun InvoiceReviewScreen(
                             onUpdateCustomDiscount = onUpdateCustomDiscount
                         )
                     }
+                }
+
+                // 4. Drafts & Quotation Action Row + Collapsed Saved Drafts Group
+                item {
+                    DraftsAndQuotationBar(
+                        savedDrafts = state.savedDrafts,
+                        lang = lang,
+                        onSaveDraft = onSaveDraft,
+                        onOpenQuotation = { isQuotationDialogOpen = true },
+                        onResumeDraft = onResumeDraft,
+                        onDeleteDraft = onDeleteDraft
+                    )
                 }
             }
         }
@@ -265,6 +273,7 @@ private fun EmptyReviewBasketState(
         contentAlignment = Alignment.Center
     ) {
         Column(
+            modifier = Modifier.verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -341,6 +350,8 @@ private fun DraftsAndQuotationBar(
     onResumeDraft: ((String) -> Unit)?,
     onDeleteDraft: ((String) -> Unit)?
 ) {
+    var isDraftsExpanded by rememberSaveable { mutableStateOf(false) }
+
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -399,12 +410,62 @@ private fun DraftsAndQuotationBar(
         }
 
         if (savedDrafts.isNotEmpty() && onResumeDraft != null) {
-            SavedSaleDraftsCard(
-                savedDrafts = savedDrafts,
-                lang = lang,
-                onResumeDraft = onResumeDraft,
-                onDeleteDraft = onDeleteDraft
-            )
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { isDraftsExpanded = !isDraftsExpanded }
+                    .testTag("toggle_saved_drafts_button")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.BookmarkBorder,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = lang.tr(
+                                "المسودات المعلقة (${WesternFormatters.formatInt(savedDrafts.size)})",
+                                "Held Drafts (${WesternFormatters.formatInt(savedDrafts.size)})"
+                            ),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Icon(
+                        imageVector = if (isDraftsExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            AnimatedVisibility(
+                visible = isDraftsExpanded,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                SavedSaleDraftsCard(
+                    savedDrafts = savedDrafts,
+                    lang = lang,
+                    onResumeDraft = onResumeDraft,
+                    onDeleteDraft = onDeleteDraft
+                )
+            }
         }
     }
 }
@@ -865,6 +926,9 @@ private fun CustomerAndAccountImpactCard(
     onUpdateCustomerNote: (String) -> Unit
 ) {
     val financial = TraderTheme.financial
+    var isExpanded by rememberSaveable(selectedCustomer?.id) {
+        mutableStateOf(selectedCustomer != null || customerNote.isNotEmpty())
+    }
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -886,8 +950,11 @@ private fun CustomerAndAccountImpactCard(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // Header Row: Always visible, clickable to expand/collapse
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { isExpanded = !isExpanded },
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -904,282 +971,334 @@ private fun CustomerAndAccountImpactCard(
                     )
                     Column {
                         Text(
-                            text = lang.tr("الزبون وطريقة القيد", "Customer & Account"),
+                            text = lang.tr("الزبون والحساب", "Customer & Account"),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = if (selectedCustomer == null) {
-                                lang.tr(
-                                    "مبيعات نقدية عامة (لا تُسجّل ذمة على الحساب)",
-                                    "Walk-in cash sale (cannot record account debt)"
-                                )
+                                lang.tr("زبون نقدي عام", "Walk-in Cash")
                             } else {
-                                lang.tr(
-                                    "حساب مسجل — يقبل الدفع النقدي أو القيد بالذمة",
-                                    "Registered account — supports cash or credit debt"
-                                )
+                                "${selectedCustomer.name(lang)} • ${WesternFormatters.formatIls(selectedCustomer.balanceIls)}"
                             },
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (selectedCustomer != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
-                FilledTonalButton(
-                    onClick = onOpenCustomerPicker,
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    modifier = Modifier
-                        .heightIn(min = 48.dp)
-                        .testTag("select_customer_button")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = if (selectedCustomer == null) {
-                            lang.tr(
-                                "ربط بزبون (${WesternFormatters.formatInt(totalCustomersCount)})",
-                                "Select Customer (${WesternFormatters.formatInt(totalCustomersCount)})"
+                    if (!isExpanded && selectedCustomer == null) {
+                        FilledTonalButton(
+                            onClick = onOpenCustomerPicker,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier
+                                .heightIn(min = 40.dp)
+                                .testTag("select_customer_button")
+                        ) {
+                            Text(
+                                text = lang.tr("ربط", "Select"),
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
                             )
-                        } else {
-                            lang.tr("تغيير الزبون", "Change")
-                        },
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = { isExpanded = !isExpanded },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("toggle_customer_section_button")
+                    ) {
+                        Icon(
+                            imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = if (isExpanded) lang.tr("طي", "Collapse") else lang.tr("توسيع", "Expand"),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 
-            if (selectedCustomer != null) {
-                // Known Customer Account & Debt Consequence Summary
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("selected_customer_card")
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    if (selectedCustomer == null) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = selectedCustomer.name(lang),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                                        Text(
-                                            text = selectedCustomer.phone,
-                                            style = MaterialTheme.typography.bodySmall.copy(
-                                                fontFamily = MonoFontFamily,
-                                                fontWeight = FontWeight.SemiBold
-                                            ),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    Text(
-                                        text = "•",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.outlineVariant
-                                    )
-                                    Text(
-                                        text = selectedCustomer.address(lang),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
+                            Text(
+                                text = lang.tr("مبيعات نقدية عامة (لا تسجل ذمة)", "Walk-in cash (no debit)"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
 
-                            TextButton(
-                                onClick = onClearCustomer,
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            FilledTonalButton(
+                                onClick = onOpenCustomerPicker,
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                                 modifier = Modifier
                                     .heightIn(min = 48.dp)
-                                    .testTag("clear_selected_customer_button")
+                                    .testTag("select_customer_button")
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Close,
+                                    imageVector = Icons.Default.Search,
                                     contentDescription = null,
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = lang.tr("نقدي عام", "Walk-in"),
+                                    text = lang.tr(
+                                        "ربط بزبون (${WesternFormatters.formatInt(totalCustomersCount)})",
+                                        "Select Customer (${WesternFormatters.formatInt(totalCustomersCount)})"
+                                    ),
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
                         }
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                        // 3-column Debt Consequence Preview: Current Debt | If Posted on Credit | Credit Limit
-                        Row(
+                    } else {
+                        // Known Customer Account & Debt Consequence Summary
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(IntrinsicSize.Min),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .testTag("selected_customer_card")
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = lang.tr("الرصيد الحالي", "Current Debt"),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = WesternFormatters.formatIls(selectedCustomer.balanceIls),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (selectedCustomer.balanceIls > 0.005) {
-                                        financial.debit
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurface
-                                    }
-                                )
-                            }
-
-                            VerticalDivider(
-                                modifier = Modifier.fillMaxHeight(),
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                            )
-
-                            Column(modifier = Modifier.weight(1.2f)) {
-                                Text(
-                                    text = lang.tr("لو سُجّلت بالذمة", "If Posted on Credit"),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = WesternFormatters.formatIls(
-                                        projectedBalanceIfCreditIls ?: selectedCustomer.balanceIls
-                                    ),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (wouldCreditExceedLimit) financial.debit else financial.warning
-                                )
-                            }
-
-                            VerticalDivider(
-                                modifier = Modifier.fillMaxHeight(),
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                            )
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = lang.tr("سقف الائتمان", "Credit Limit"),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = WesternFormatters.formatIls(selectedCustomer.creditLimitIls),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        if (wouldCreditExceedLimit) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = financial.debitContainer,
-                                border = BorderStroke(1.dp, financial.debit.copy(alpha = 0.35f)),
-                                modifier = Modifier.fillMaxWidth()
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.WarningAmber,
-                                        contentDescription = null,
-                                        tint = financial.debit,
-                                        modifier = Modifier.size(16.dp)
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = selectedCustomer.name(lang),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                                Text(
+                                                    text = selectedCustomer.phone,
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        fontFamily = MonoFontFamily,
+                                                        fontWeight = FontWeight.SemiBold
+                                                    ),
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            Text(
+                                                text = "•",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.outlineVariant
+                                            )
+                                            Text(
+                                                text = selectedCustomer.address(lang),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        TextButton(
+                                            onClick = onOpenCustomerPicker,
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                            modifier = Modifier
+                                                .heightIn(min = 48.dp)
+                                                .testTag("select_customer_button")
+                                        ) {
+                                            Text(
+                                                text = lang.tr("تغيير", "Change"),
+                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                            )
+                                        }
+                                        TextButton(
+                                            onClick = onClearCustomer,
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                            modifier = Modifier
+                                                .heightIn(min = 48.dp)
+                                                .testTag("clear_selected_customer_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(2.dp))
+                                            Text(
+                                                text = lang.tr("نقدي عام", "Walk-in"),
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+                                }
+
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                                // 3-column Debt Consequence Preview
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(IntrinsicSize.Min),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = lang.tr("الدين الحالي", "Current Debt"),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = WesternFormatters.formatIls(selectedCustomer.balanceIls),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (selectedCustomer.balanceIls > 0.005) financial.debit else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+
+                                    VerticalDivider(
+                                        modifier = Modifier.fillMaxHeight(),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                                     )
-                                    Text(
-                                        text = lang.tr(
-                                            "تسجيل كامل الفاتورة بالذمة يتجاوز سقف الائتمان (${WesternFormatters.formatIls(selectedCustomer.creditLimitIls)})؛ يلزم الدفع النقدي الكامل أو تقليل الأصناف.",
-                                            "Full credit exceeds limit (${WesternFormatters.formatIls(selectedCustomer.creditLimitIls)}); full cash payment or reducing items required."
-                                        ),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = financial.debit
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = lang.tr("إذا سُجلت آجلة", "If on Credit"),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = WesternFormatters.formatIls(projectedBalanceIfCreditIls ?: selectedCustomer.balanceIls),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (wouldCreditExceedLimit) financial.debit else MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+
+                                    VerticalDivider(
+                                        modifier = Modifier.fillMaxHeight(),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                                     )
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = lang.tr("سقف الائتمان", "Credit Limit"),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = WesternFormatters.formatIls(selectedCustomer.creditLimitIls),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                if (wouldCreditExceedLimit) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = financial.debitContainer,
+                                        border = BorderStroke(1.dp, financial.debit.copy(alpha = 0.35f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.WarningAmber,
+                                                contentDescription = null,
+                                                tint = financial.debit,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Text(
+                                                text = lang.tr(
+                                                    "تسجيل الفاتورة آجلة يتجاوز سقف الائتمان (${WesternFormatters.formatIls(selectedCustomer.creditLimitIls)})",
+                                                    "Credit invoice exceeds limit (${WesternFormatters.formatIls(selectedCustomer.creditLimitIls)})"
+                                                ),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = financial.debit
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            }
 
-            // Optional Invoice / Delivery Note Input
-            OutlinedTextField(
-                value = customerNote,
-                onValueChange = onUpdateCustomerNote,
-                placeholder = {
-                    Text(
-                        text = if (selectedCustomer != null) {
-                            lang.tr(
-                                "ملاحظة إضافية على الفاتورة (مثال: استلام ابنه / توصيل)...",
-                                "Optional invoice note (e.g. delivery / recipient)..."
-                            )
-                        } else {
-                            lang.tr(
-                                "اسم المستلم أو ملاحظة اختيارية على الإيصال...",
-                                "Recipient name or optional receipt note..."
+                    // Optional Invoice / Delivery Note Input
+                    OutlinedTextField(
+                        value = customerNote,
+                        onValueChange = onUpdateCustomerNote,
+                        placeholder = {
+                            Text(
+                                text = if (selectedCustomer != null) {
+                                    lang.tr("ملاحظة على الفاتورة (توصيل / استلام)...", "Optional invoice note...")
+                                } else {
+                                    lang.tr("ملاحظة اختيارية على الإيصال...", "Optional receipt note...")
+                                },
+                                style = MaterialTheme.typography.bodySmall
                             )
                         },
-                        style = MaterialTheme.typography.bodySmall
+                        trailingIcon = {
+                            if (customerNote.isNotEmpty()) {
+                                IconButton(onClick = { onUpdateCustomerNote("") }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Clear,
+                                        contentDescription = lang.tr("مسح الملاحظة", "Clear note"),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.background,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.background
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("customer_note_input")
                     )
-                },
-                trailingIcon = {
-                    if (customerNote.isNotEmpty()) {
-                        IconButton(onClick = { onUpdateCustomerNote("") }) {
-                            Icon(
-                                imageVector = Icons.Default.Clear,
-                                contentDescription = lang.tr("مسح الملاحظة", "Clear note"),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(10.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.background,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.background
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("customer_note_input")
-            )
+                }
+            }
         }
     }
 }
@@ -1516,6 +1635,9 @@ private fun DiscountAndRoundingCard(
     val rawCustomTyped = WesternFormatters.sanitizeWesternDigits(state.customDiscountText).toDoubleOrNull() ?: 0.0
     val isCustomCapped = state.discountPreset == DiscountPreset.CUSTOM_ILS &&
         rawCustomTyped > state.basketSubtotalIls + 0.005
+    var isExpanded by rememberSaveable {
+        mutableStateOf(hasDiscount || state.discountPreset != DiscountPreset.NONE || state.customDiscountText.isNotEmpty())
+    }
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -1534,13 +1656,16 @@ private fun DiscountAndRoundingCard(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { isExpanded = !isExpanded },
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Discount,
@@ -1556,81 +1681,116 @@ private fun DiscountAndRoundingCard(
                     )
                 }
 
-                if (hasDiscount) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = financial.incomeContainer
-                    ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (hasDiscount) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = financial.incomeContainer
+                        ) {
+                            Text(
+                                text = "- ${WesternFormatters.formatIls(state.calculatedDiscountIls)}",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = financial.income,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    } else {
                         Text(
-                            text = "- ${WesternFormatters.formatIls(state.calculatedDiscountIls)}",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = financial.income,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            text = lang.tr("بدون خصم", "None"),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                }
-            }
 
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                DiscountPreset.entries.forEach { preset ->
-                    val selected = state.discountPreset == preset
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.heightIn(min = 48.dp)
-                    ) {
-                        FilterChip(
-                            selected = selected,
-                            onClick = { onSelectDiscountPreset(preset) },
-                            label = {
-                                Text(
-                                    text = lang.tr(preset.labelAr, preset.labelEn),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                                )
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary
-                            ),
-                            modifier = Modifier
-                                .heightIn(min = 40.dp)
-                                .testTag("discount_chip_${preset.name}")
-                        )
-                    }
-                }
-            }
-
-            AnimatedVisibility(visible = state.discountPreset == DiscountPreset.CUSTOM_ILS) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    OutlinedTextField(
-                        value = state.customDiscountText,
-                        onValueChange = onUpdateCustomDiscount,
-                        label = {
-                            Text(lang.tr("قيمة الخصم الثابت بالشيكل (₪)", "Fixed Discount Amount in ILS (₪)"))
-                        },
-                        placeholder = { Text("5.00") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
-                        textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    IconButton(
+                        onClick = { isExpanded = !isExpanded },
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("custom_discount_input")
-                    )
-                    if (isCustomCapped) {
-                        Text(
-                            text = lang.tr(
-                                "تم تقييد الخصم بحد أقصى يساوي قيمة المجموع الفرعي (${WesternFormatters.formatIls(state.basketSubtotalIls)})",
-                                "Discount is capped at the basket subtotal (${WesternFormatters.formatIls(state.basketSubtotalIls)})"
-                            ),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = financial.warning
+                            .size(48.dp)
+                            .testTag("toggle_discount_section_button")
+                    ) {
+                        Icon(
+                            imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = if (isExpanded) lang.tr("طي", "Collapse") else lang.tr("توسيع", "Expand"),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        DiscountPreset.entries.forEach { preset ->
+                            val selected = state.discountPreset == preset
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            ) {
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = { onSelectDiscountPreset(preset) },
+                                    label = {
+                                        Text(
+                                            text = lang.tr(preset.labelAr, preset.labelEn),
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
+                                    modifier = Modifier
+                                        .heightIn(min = 40.dp)
+                                        .testTag("discount_chip_${preset.name}")
+                                )
+                            }
+                        }
+                    }
+
+                    AnimatedVisibility(visible = state.discountPreset == DiscountPreset.CUSTOM_ILS) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            OutlinedTextField(
+                                value = state.customDiscountText,
+                                onValueChange = onUpdateCustomDiscount,
+                                label = {
+                                    Text(lang.tr("قيمة الخصم بالشيكل (₪)", "Discount Amount (ILS ₪)"))
+                                },
+                                placeholder = { Text("5.00") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(10.dp),
+                                textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("custom_discount_input")
+                            )
+                            if (isCustomCapped) {
+                                Text(
+                                    text = lang.tr(
+                                        "تم تقييد الخصم بحد أقصى يساوي المجموع الفرعي (${WesternFormatters.formatIls(state.basketSubtotalIls)})",
+                                        "Discount capped at subtotal (${WesternFormatters.formatIls(state.basketSubtotalIls)})"
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = financial.warning
+                                )
+                            }
+                        }
                     }
                 }
             }

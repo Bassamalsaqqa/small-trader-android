@@ -1,5 +1,8 @@
 package com.example.viewmodel
 
+import com.example.ui.navigation.TraderNavigationPolicy
+import com.example.ui.navigation.MerchantAction
+import com.example.ui.navigation.allowed
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.OfflineDemoTraderRepository
@@ -43,6 +46,15 @@ data class TraderUiState(
     val language: AppLanguage = AppLanguage.AR,
     val isDarkTheme: Boolean = false,
     val currentScreen: TraderScreen = TraderScreen.HOME,
+    val selectedRoot: TraderScreen = TraderScreen.HOME,
+    val saleSessionId: Long = 0,
+    val isQuickActionOpen: Boolean = false,
+    val pendingAction: MerchantAction? = null,
+    val saleSearchQuery: String = "",
+    val inventorySearchQuery: String = "",
+    val saleCategory: ProductCategory = ProductCategory.ALL,
+    val inventoryCategory: ProductCategory = ProductCategory.ALL,
+    val inventoryLowStockRequested: Boolean = false,
     val screenHistory: List<TraderScreen> = emptyList(),
 
     // Business & Authentication
@@ -398,9 +410,9 @@ data class TraderUiState(
     companion object {
         val ROOT_DESTINATIONS = setOf(
             TraderScreen.HOME,
-            TraderScreen.NEW_SALE,
+            TraderScreen.PRODUCTS_CATALOG,
             TraderScreen.INVOICES_HISTORY,
-            TraderScreen.CUSTOMERS
+            TraderScreen.PEOPLE
         )
 
         val STORE_OPERATION_DESTINATIONS = setOf(
@@ -512,10 +524,41 @@ class TraderViewModel(
     }
 
     fun switchUserSession(user: UserSession) {
-        _uiState.update { it.copy(currentSession = user) }
+        _uiState.update { state ->
+            val safe = TraderNavigationPolicy.allows(user, state.currentScreen)
+            state.copy(currentSession = user, currentScreen = if (safe) state.currentScreen else TraderScreen.HOME,
+                selectedRoot = if (safe) state.selectedRoot else TraderScreen.HOME,
+                screenHistory = state.screenHistory.filter { TraderNavigationPolicy.allows(user, it) },
+                pendingAction = null, isQuickActionOpen = false, isReceivePurchaseDialogOpen = false,
+                isAddExpenseDialogOpen = false, selectedSupplierForDetail = null)
+        }
+    }
+
+    fun setQuickActionOpen(open: Boolean) { _uiState.update { it.copy(isQuickActionOpen = open) } }
+    fun consumeAction() { _uiState.update { it.copy(pendingAction = null) } }
+    fun openMerchantAction(action: MerchantAction) {
+        if (!action.allowed(_uiState.value.currentSession)) return
+        _uiState.update { it.copy(pendingAction = null, isQuickActionOpen = false) }
+        when (action) {
+            MerchantAction.SALE -> navigateTo(TraderScreen.NEW_SALE)
+            MerchantAction.PURCHASE -> { navigateTo(TraderScreen.PURCHASES); openReceivePurchaseDialog(true) }
+            MerchantAction.CUSTOMER -> { navigateTo(TraderScreen.CUSTOMERS); openAddCustomerDialog(true) }
+            MerchantAction.EXPENSE -> { navigateTo(TraderScreen.EXPENSES); openAddExpenseDialog(true) }
+            MerchantAction.COLLECT, MerchantAction.PAY -> {
+                _uiState.update { it.copy(pendingAction = action) }
+            }
+            else -> {
+                navigateTo(when (action) {
+                    MerchantAction.PRODUCT -> TraderScreen.PRODUCTS_CATALOG
+                    else -> TraderScreen.SUPPLIERS
+                })
+                _uiState.update { it.copy(pendingAction = action) }
+            }
+        }
     }
 
     fun navigateTo(target: TraderScreen) {
+        if (!TraderNavigationPolicy.allows(_uiState.value.currentSession, target)) return
         _uiState.update { state ->
             if (state.currentScreen == target) {
                 state
@@ -524,10 +567,6 @@ class TraderViewModel(
                     target == TraderScreen.HOME -> emptyList()
                     target in TraderUiState.ROOT_DESTINATIONS -> {
                         listOf(TraderScreen.HOME)
-                    }
-                    target in TraderUiState.STORE_OPERATION_DESTINATIONS &&
-                        state.currentScreen in TraderUiState.STORE_OPERATION_DESTINATIONS -> {
-                        state.screenHistory.ifEmpty { listOf(TraderScreen.HOME) }
                     }
                     target in TraderUiState.ACCOUNT_SETTINGS_DESTINATIONS &&
                         state.currentScreen in TraderUiState.ACCOUNT_SETTINGS_DESTINATIONS -> {
@@ -547,6 +586,11 @@ class TraderViewModel(
                 }
                 state.copy(
                     currentScreen = target,
+                    selectedRoot = if (target in TraderUiState.ROOT_DESTINATIONS) target else state.selectedRoot,
+                    isQuickActionOpen = false,
+                    pendingAction = null,
+                    searchQuery = if (target == TraderScreen.PRODUCTS_CATALOG) state.inventorySearchQuery else if (target == TraderScreen.NEW_SALE) state.saleSearchQuery else state.searchQuery,
+                    selectedCategory = if (target == TraderScreen.PRODUCTS_CATALOG) state.inventoryCategory else if (target == TraderScreen.NEW_SALE) state.saleCategory else state.selectedCategory,
                     screenHistory = updatedHistory,
                     cashInputText = defaultCashText,
                     checkoutErrorAr = null,
@@ -558,6 +602,8 @@ class TraderViewModel(
 
     fun navigateBack(): Boolean {
         val current = _uiState.value
+        if (current.isQuickActionOpen) { setQuickActionOpen(false); return true }
+        if (current.pendingAction != null) { consumeAction(); return true }
         if (current.isScannerSheetOpen) {
             _uiState.update { it.copy(isScannerSheetOpen = false) }
             return true
@@ -591,6 +637,17 @@ class TraderViewModel(
         _uiState.update { state ->
             state.copy(
                 currentScreen = previous,
+                searchQuery = when (previous) {
+                    TraderScreen.NEW_SALE -> state.saleSearchQuery
+                    TraderScreen.PRODUCTS_CATALOG -> state.inventorySearchQuery
+                    else -> state.searchQuery
+                },
+                selectedCategory = when (previous) {
+                    TraderScreen.NEW_SALE -> state.saleCategory
+                    TraderScreen.PRODUCTS_CATALOG -> state.inventoryCategory
+                    else -> state.selectedCategory
+                },
+                selectedRoot = if (previous in TraderUiState.ROOT_DESTINATIONS) previous else state.selectedRoot,
                 screenHistory = state.screenHistory.dropLast(1)
             )
         }
@@ -599,11 +656,26 @@ class TraderViewModel(
 
     // Product Catalog & Inventory
     fun updateSearchQuery(query: String) {
-        _uiState.update { it.copy(searchQuery = query) }
+        _uiState.update { it.copy(searchQuery = query,
+            saleSearchQuery = if (it.currentScreen == TraderScreen.NEW_SALE) query else it.saleSearchQuery,
+            inventorySearchQuery = if (it.currentScreen == TraderScreen.PRODUCTS_CATALOG) query else it.inventorySearchQuery) }
+    }
+
+    fun openLowStockInventory() {
+        navigateTo(TraderScreen.PRODUCTS_CATALOG)
+        _uiState.update { it.copy(inventoryLowStockRequested = true,
+            inventorySearchQuery = "", searchQuery = "",
+            inventoryCategory = ProductCategory.ALL, selectedCategory = ProductCategory.ALL) }
+    }
+
+    fun consumeLowStockRequest() {
+        _uiState.update { it.copy(inventoryLowStockRequested = false) }
     }
 
     fun selectCategory(category: ProductCategory) {
-        _uiState.update { it.copy(selectedCategory = category) }
+        _uiState.update { state -> state.copy(selectedCategory = category,
+            saleCategory = if (state.currentScreen == TraderScreen.NEW_SALE) category else state.saleCategory,
+            inventoryCategory = if (state.currentScreen == TraderScreen.PRODUCTS_CATALOG) category else state.inventoryCategory) }
     }
 
     fun selectProductForDetail(product: Product) {
@@ -770,6 +842,7 @@ class TraderViewModel(
         _uiState.update { state ->
             state.copy(
                 basket = emptyList(),
+                saleSessionId = state.saleSessionId + 1,
                 discountPreset = DiscountPreset.NONE,
                 customDiscountText = "",
                 customerNote = "",
@@ -1156,6 +1229,7 @@ class TraderViewModel(
                     receiptCopyCount = 0,
                     lastSharedReceiptText = null,
                     basket = emptyList(),
+                saleSessionId = current.saleSessionId + 1,
                     discountPreset = DiscountPreset.NONE,
                     customDiscountText = "",
                     customerNote = "",
@@ -1271,6 +1345,12 @@ class TraderViewModel(
         }
     }
 
+    fun confirmCustomerCollection(customerId: String, paymentAmountIls: Double, note: String, paymentId: String): Boolean {
+        val saved = recordCustomerPayment(customerId, paymentAmountIls, note, paymentId)
+        if (saved) navigateTo(TraderScreen.CUSTOMER_DETAIL)
+        return saved
+    }
+
     fun recordCustomerPayment(customerId: String, paymentAmountIls: Double, note: String, paymentId: String = ""): Boolean {
         val pid = if (paymentId.isNotBlank()) paymentId else "cpay_${System.currentTimeMillis()}"
         val result = repository.recordCustomerPayment(customerId, paymentAmountIls, note, pid)
@@ -1325,7 +1405,14 @@ class TraderViewModel(
     }
 
     // Suppliers & Purchasing Operations
+    fun openSupplierPayment(supplier: Supplier) {
+        if (!_uiState.value.currentSession.canManageSuppliers()) return
+        selectSupplierForDetail(supplier)
+        _uiState.update { it.copy(pendingAction = MerchantAction.PAY) }
+    }
+
     fun selectSupplierForDetail(supplier: Supplier) {
+        if (!_uiState.value.currentSession.canManageSuppliers()) return
         _uiState.update { state ->
             val freshSupplier = state.suppliers.firstOrNull { it.id == supplier.id } ?: supplier
             state.copy(
@@ -1350,6 +1437,7 @@ class TraderViewModel(
     }
 
     fun openReceivePurchaseDialog(open: Boolean) {
+        if (open && !_uiState.value.currentSession.canManageSuppliers()) return
         _uiState.update { it.copy(isReceivePurchaseDialogOpen = open) }
     }
 
@@ -1443,6 +1531,7 @@ class TraderViewModel(
 
     // Expenses & Cash Outflow
     fun openAddExpenseDialog(open: Boolean) {
+        if (open && !_uiState.value.currentSession.canManageExpenses()) return
         _uiState.update { it.copy(isAddExpenseDialogOpen = open) }
     }
 
@@ -1768,6 +1857,7 @@ class TraderViewModel(
             current.copy(
                 savedDrafts = listOf(draft) + current.savedDrafts,
                 basket = emptyList(),
+                saleSessionId = current.saleSessionId + 1,
                 discountPreset = DiscountPreset.NONE,
                 customDiscountText = "",
                 customerNote = "",
@@ -1808,6 +1898,7 @@ class TraderViewModel(
         _uiState.update { current ->
             current.copy(
                 basket = restoredItems,
+                saleSessionId = current.saleSessionId + 1,
                 savedDrafts = current.savedDrafts.filterNot { it.id == draftId },
                 selectedCustomerId = draft.customerId,
                 customerNote = draft.customerNote,

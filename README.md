@@ -1,3 +1,5 @@
+> **Merchant reset candidate:** this branch is stacked on unmerged Phase 1. Native Home / Sales / Inventory / People navigation, quick actions and checkout are ready for owner testing; UX acceptance is pending. See [candidate handoff](docs/android-merchant-ux-reset/HANDOFF.md), [final validation](docs/android-merchant-ux-reset/VALIDATION.md) and [Windows Pixel_8a_T3 acceptance](docs/android-merchant-ux-reset/WINDOWS_ACCEPTANCE.md). The older prototype description below remains historical context.
+
 # التاجر الصغير · Small Trader (Android POS & Merchant Ledger)
 
 **التاجر الصغير (Small Trader)** is an Arabic-first (RTL) / English (LTR) native Android point-of-sale, customer debt ledger (`دفتر الدين`), inventory, supplier payables, and shift cash-drawer prototype built in **Kotlin** and **Jetpack Compose** (Material 3) for Palestinian shopkeepers, roasteries, and grocery merchants.
