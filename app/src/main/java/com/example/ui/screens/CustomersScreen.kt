@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,27 +24,33 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -55,8 +62,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDirection
@@ -83,6 +92,18 @@ private enum class CustomerBalanceFilter {
     SETTLED
 }
 
+/**
+ * Native Material3 Customer Directory & Accounts Receivable Ledger Screen (دفتر الديون).
+ *
+ * Design Invariants Enforced:
+ * 1. Strict Un-Netted Accounting: Separates Total Debts Owed to Store (Receivables)
+ *    from Customer Advance Deposits (Store Liabilities), never netting them together.
+ * 2. Instant Search & Multi-Axis Filtering: Live normalization across Arabic/English names,
+ *    LTR phone numbers, and addresses, with counts on all filter chips.
+ * 3. Rapid Debt Collection: One-tap quick collection button on debtor rows with 48dp hit targets.
+ * 4. Responsive & Accessible: Strict 48dp touch targets on chips, buttons, and inputs.
+ * 5. Bidi Polish: Western digits (0-9) and LTR monospace phone formatting inside Arabic RTL layout.
+ */
 @Composable
 fun CustomersScreen(
     state: TraderUiState,
@@ -93,6 +114,7 @@ fun CustomersScreen(
     onDismissFeedback: (() -> Unit)? = null
 ) {
     val lang = state.language
+    val financial = TraderTheme.financial
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(CustomerBalanceFilter.ALL) }
 
@@ -135,14 +157,15 @@ fun CustomersScreen(
         // Sticky Header: Daftar Al-Deyoun Summary + Search + Balance Filters
         Surface(
             color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 0.dp,
+            tonalElevation = 1.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 // Summary Strip: Owed to Store (Debts) vs Customer Advances + New Customer CTA
                 Row(
@@ -163,10 +186,10 @@ fun CustomersScreen(
                             )
                             Text(
                                 text = WesternFormatters.formatIls(state.totalCustomerDebtsIls),
-                                style = MaterialTheme.typography.titleMedium.copy(
+                                style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
-                                color = TraderTheme.financial.debit,
+                                color = financial.debit,
                                 modifier = Modifier.testTag("total_customer_debts_value")
                             )
                         }
@@ -179,11 +202,11 @@ fun CustomersScreen(
                             )
                             Text(
                                 text = WesternFormatters.formatIls(state.totalCustomerAdvancesIls),
-                                style = MaterialTheme.typography.titleMedium.copy(
+                                style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
                                 color = if (state.totalCustomerAdvancesIls > 0.005) {
-                                    TraderTheme.financial.income
+                                    financial.income
                                 } else {
                                     MaterialTheme.colorScheme.onSurfaceVariant
                                 },
@@ -195,14 +218,24 @@ fun CustomersScreen(
                     Button(
                         onClick = onOpenAddCustomerDialog,
                         shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        modifier = Modifier.testTag("add_customer_button")
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("add_customer_button")
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = lang.tr("زبون جديد", "New Customer"),
-                            style = MaterialTheme.typography.labelLarge
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                         )
                     }
                 }
@@ -210,8 +243,8 @@ fun CustomersScreen(
                 if (feedbackMessage != null) {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = TraderTheme.financial.incomeContainer,
-                        border = BorderStroke(1.dp, TraderTheme.financial.income.copy(alpha = 0.35f)),
+                        color = financial.incomeContainer,
+                        border = BorderStroke(1.dp, financial.income.copy(alpha = 0.35f)),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("customer_action_feedback_banner")
@@ -230,14 +263,14 @@ fun CustomersScreen(
                                 Icon(
                                     imageVector = Icons.Default.CheckCircle,
                                     contentDescription = null,
-                                    tint = TraderTheme.financial.income,
+                                    tint = financial.income,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = feedbackMessage,
                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                    color = TraderTheme.financial.income
+                                    color = financial.income
                                 )
                             }
                             if (onDismissFeedback != null) {
@@ -248,6 +281,7 @@ fun CustomersScreen(
                                     Icon(
                                         imageVector = Icons.Default.Clear,
                                         contentDescription = lang.tr("إغلاق", "Dismiss"),
+                                        tint = financial.income,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -278,87 +312,137 @@ fun CustomersScreen(
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
                         )
                     },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
+                            IconButton(
+                                onClick = { searchQuery = "" },
+                                modifier = Modifier.size(48.dp)
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.Clear,
-                                    contentDescription = lang.tr("مسح", "Clear")
+                                    contentDescription = lang.tr("مسح", "Clear"),
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.background,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.background
+                    )
                 )
 
                 // Balance Filter Chips (All / Debtors / In Credit / Settled)
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     item {
-                        FilterChip(
-                            selected = selectedFilter == CustomerBalanceFilter.ALL,
-                            onClick = { selectedFilter = CustomerBalanceFilter.ALL },
-                            label = {
-                                Text(
-                                    lang.tr(
-                                        "الكل (${WesternFormatters.formatInt(state.customers.size)})",
-                                        "All (${WesternFormatters.formatInt(state.customers.size)})"
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
+                            FilterChip(
+                                selected = selectedFilter == CustomerBalanceFilter.ALL,
+                                onClick = { selectedFilter = CustomerBalanceFilter.ALL },
+                                label = {
+                                    Text(
+                                        text = lang.tr(
+                                            "الكل (${WesternFormatters.formatInt(state.customers.size)})",
+                                            "All (${WesternFormatters.formatInt(state.customers.size)})"
+                                        ),
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = if (selectedFilter == CustomerBalanceFilter.ALL) FontWeight.Bold else FontWeight.Medium
+                                        )
                                     )
-                                )
-                            },
-                            modifier = Modifier.testTag("customer_filter_ALL")
-                        )
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                modifier = Modifier.testTag("customer_filter_ALL")
+                            )
+                        }
                     }
                     item {
-                        FilterChip(
-                            selected = selectedFilter == CustomerBalanceFilter.DEBTORS,
-                            onClick = { selectedFilter = CustomerBalanceFilter.DEBTORS },
-                            label = {
-                                Text(
-                                    lang.tr(
-                                        "عليهم دين (${WesternFormatters.formatInt(debtorsCount)})",
-                                        "Owes Store (${WesternFormatters.formatInt(debtorsCount)})"
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
+                            FilterChip(
+                                selected = selectedFilter == CustomerBalanceFilter.DEBTORS,
+                                onClick = { selectedFilter = CustomerBalanceFilter.DEBTORS },
+                                label = {
+                                    Text(
+                                        text = lang.tr(
+                                            "عليهم دين (${WesternFormatters.formatInt(debtorsCount)})",
+                                            "Owes Store (${WesternFormatters.formatInt(debtorsCount)})"
+                                        ),
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = if (selectedFilter == CustomerBalanceFilter.DEBTORS) FontWeight.Bold else FontWeight.Medium
+                                        )
                                     )
-                                )
-                            },
-                            modifier = Modifier.testTag("customer_filter_DEBTORS")
-                        )
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = financial.debit,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onError
+                                ),
+                                modifier = Modifier.testTag("customer_filter_DEBTORS")
+                            )
+                        }
                     }
                     item {
-                        FilterChip(
-                            selected = selectedFilter == CustomerBalanceFilter.ADVANCE,
-                            onClick = { selectedFilter = CustomerBalanceFilter.ADVANCE },
-                            label = {
-                                Text(
-                                    lang.tr(
-                                        "لهم رصيد مقدم (${WesternFormatters.formatInt(advanceCount)})",
-                                        "In Credit (${WesternFormatters.formatInt(advanceCount)})"
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
+                            FilterChip(
+                                selected = selectedFilter == CustomerBalanceFilter.ADVANCE,
+                                onClick = { selectedFilter = CustomerBalanceFilter.ADVANCE },
+                                label = {
+                                    Text(
+                                        text = lang.tr(
+                                            "لهم رصيد مقدم (${WesternFormatters.formatInt(advanceCount)})",
+                                            "In Credit (${WesternFormatters.formatInt(advanceCount)})"
+                                        ),
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = if (selectedFilter == CustomerBalanceFilter.ADVANCE) FontWeight.Bold else FontWeight.Medium
+                                        )
                                     )
-                                )
-                            },
-                            modifier = Modifier.testTag("customer_filter_ADVANCE")
-                        )
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = financial.income,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                modifier = Modifier.testTag("customer_filter_ADVANCE")
+                            )
+                        }
                     }
                     item {
-                        FilterChip(
-                            selected = selectedFilter == CustomerBalanceFilter.SETTLED,
-                            onClick = { selectedFilter = CustomerBalanceFilter.SETTLED },
-                            label = {
-                                Text(
-                                    lang.tr(
-                                        "خالص (${WesternFormatters.formatInt(settledCount)})",
-                                        "Settled (${WesternFormatters.formatInt(settledCount)})"
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
+                            FilterChip(
+                                selected = selectedFilter == CustomerBalanceFilter.SETTLED,
+                                onClick = { selectedFilter = CustomerBalanceFilter.SETTLED },
+                                label = {
+                                    Text(
+                                        text = lang.tr(
+                                            "خالص (${WesternFormatters.formatInt(settledCount)})",
+                                            "Settled (${WesternFormatters.formatInt(settledCount)})"
+                                        ),
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = if (selectedFilter == CustomerBalanceFilter.SETTLED) FontWeight.Bold else FontWeight.Medium
+                                        )
                                     )
-                                )
-                            },
-                            modifier = Modifier.testTag("customer_filter_SETTLED")
-                        )
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.secondary,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onSecondary
+                                ),
+                                modifier = Modifier.testTag("customer_filter_SETTLED")
+                            )
+                        }
                     }
                 }
             }
@@ -376,12 +460,12 @@ fun CustomersScreen(
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Person,
                         contentDescription = null,
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier.size(42.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                     )
                     Text(
@@ -390,17 +474,22 @@ fun CustomersScreen(
                         } else {
                             lang.tr("لا يوجد زبائن مسجلين حالياً", "No registered customers yet")
                         },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     if (searchQuery.isNotBlank() || selectedFilter != CustomerBalanceFilter.ALL) {
                         TextButton(
                             onClick = {
                                 searchQuery = ""
                                 selectedFilter = CustomerBalanceFilter.ALL
-                            }
+                            },
+                            modifier = Modifier.heightIn(min = 48.dp)
                         ) {
-                            Text(lang.tr("عرض كل الزبائن", "Show All Customers"))
+                            Text(
+                                text = lang.tr("عرض كل الزبائن", "Show All Customers"),
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                            )
                         }
                     }
                 }
@@ -435,23 +524,25 @@ private fun CustomerDirectoryRow(
     onClick: () -> Unit,
     onQuickCollect: (() -> Unit)?
 ) {
+    val financial = TraderTheme.financial
     val isDebtor = customer.balanceIls > 0.005
     val isAdvance = customer.balanceIls < -0.005
 
     val amountColor = when {
-        isDebtor || isAdvance -> MaterialTheme.colorScheme.onSurface
+        isDebtor -> financial.debit
+        isAdvance -> financial.income
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     val statusTextColor = when {
-        isDebtor -> TraderTheme.financial.onDebitContainer
-        isAdvance -> TraderTheme.financial.onIncomeContainer
+        isDebtor -> financial.onDebitContainer
+        isAdvance -> financial.onIncomeContainer
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     val statusBadgeBg = when {
-        isDebtor -> TraderTheme.financial.debitContainer
-        isAdvance -> TraderTheme.financial.incomeContainer
+        isDebtor -> financial.debitContainer
+        isAdvance -> financial.incomeContainer
         else -> MaterialTheme.colorScheme.surfaceVariant
     }
 
@@ -469,7 +560,7 @@ private fun CustomerDirectoryRow(
 
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
@@ -479,18 +570,18 @@ private fun CustomerDirectoryRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Left/Start: Name + LTR Phone + Neighborhood
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+                verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 Text(
                     text = customer.name(lang),
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
@@ -503,14 +594,17 @@ private fun CustomerDirectoryRow(
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                         Text(
                             text = customer.phone,
-                            style = MaterialTheme.typography.labelMedium.copy(fontFamily = MonoFontFamily),
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = MonoFontFamily,
+                                fontWeight = FontWeight.SemiBold
+                            ),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Text(
                         text = "•",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline
+                        color = MaterialTheme.colorScheme.outlineVariant
                     )
                     Text(
                         text = customer.address(lang),
@@ -573,6 +667,9 @@ private fun CustomerDirectoryRow(
     }
 }
 
+/**
+ * Customer Detailed Profile & Statement Ledger Screen (كشف حساب الزبون).
+ */
 @Composable
 fun CustomerDetailScreen(
     state: TraderUiState,
@@ -585,6 +682,7 @@ fun CustomerDetailScreen(
     onFormatStatementText: ((String) -> String)? = null
 ) {
     val lang = state.language
+    val financial = TraderTheme.financial
     val customer = state.selectedCustomerForDetail ?: return
     val transactions = remember(state.customerTransactions, customer.id) {
         state.customerTransactions.filter { it.customerId == customer.id }
@@ -612,14 +710,14 @@ fun CustomerDetailScreen(
                 .weight(1f)
                 .fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             if (feedbackMessage != null) {
                 item {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = TraderTheme.financial.incomeContainer,
-                        border = BorderStroke(1.dp, TraderTheme.financial.income.copy(alpha = 0.35f)),
+                        color = financial.incomeContainer,
+                        border = BorderStroke(1.dp, financial.income.copy(alpha = 0.35f)),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("customer_payment_feedback_banner")
@@ -638,14 +736,14 @@ fun CustomerDetailScreen(
                                 Icon(
                                     imageVector = Icons.Default.CheckCircle,
                                     contentDescription = null,
-                                    tint = TraderTheme.financial.income,
+                                    tint = financial.income,
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = feedbackMessage,
                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                    color = TraderTheme.financial.income
+                                    color = financial.income
                                 )
                             }
                             if (onDismissFeedback != null) {
@@ -656,6 +754,7 @@ fun CustomerDetailScreen(
                                     Icon(
                                         imageVector = Icons.Default.Clear,
                                         contentDescription = lang.tr("إغلاق", "Dismiss"),
+                                        tint = financial.income,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -668,9 +767,10 @@ fun CustomerDetailScreen(
             // 1. Customer Profile, Balance Status & Actions Card
             item {
                 Card(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -681,7 +781,7 @@ fun CustomerDetailScreen(
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
                                 text = customer.name(lang),
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Row(
@@ -692,14 +792,14 @@ fun CustomerDetailScreen(
                                     Icon(
                                         imageVector = Icons.Default.Phone,
                                         contentDescription = null,
-                                        modifier = Modifier.size(15.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                                         Text(
                                             text = customer.phone,
-                                            style = MaterialTheme.typography.bodySmall.copy(
+                                            style = MaterialTheme.typography.bodyMedium.copy(
                                                 fontFamily = MonoFontFamily,
                                                 fontWeight = FontWeight.SemiBold
                                             ),
@@ -714,13 +814,13 @@ fun CustomerDetailScreen(
                                     Icon(
                                         imageVector = Icons.Default.LocationOn,
                                         contentDescription = null,
-                                        modifier = Modifier.size(15.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
                                         text = customer.address(lang),
-                                        style = MaterialTheme.typography.bodySmall,
+                                        style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -729,16 +829,24 @@ fun CustomerDetailScreen(
                             }
                         }
 
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
 
                         // Clear Balance Status Banner (Debtor vs Advance Credit vs Settled)
                         Surface(
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             color = when {
-                                isDebtor -> TraderTheme.financial.debitContainer
-                                isAdvance -> TraderTheme.financial.incomeContainer
+                                isDebtor -> financial.debitContainer
+                                isAdvance -> financial.incomeContainer
                                 else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                             },
+                            border = BorderStroke(
+                                1.dp,
+                                when {
+                                    isDebtor -> financial.debit.copy(alpha = 0.35f)
+                                    isAdvance -> financial.income.copy(alpha = 0.35f)
+                                    else -> MaterialTheme.colorScheme.outlineVariant
+                                }
+                            ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
@@ -758,10 +866,10 @@ fun CustomerDetailScreen(
                                             isAdvance -> lang.tr("له عند المحل (رصيد مقدم / أمانة)", "Customer Advance (In Credit)")
                                             else -> lang.tr("حالة الحساب", "Account Status")
                                         },
-                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                                         color = when {
-                                            isDebtor -> TraderTheme.financial.debit
-                                            isAdvance -> TraderTheme.financial.income
+                                            isDebtor -> financial.debit
+                                            isAdvance -> financial.income
                                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                                         }
                                     )
@@ -794,12 +902,12 @@ fun CustomerDetailScreen(
                                             isAdvance -> WesternFormatters.formatIls(-customer.balanceIls)
                                             else -> WesternFormatters.formatIls(0.0)
                                         },
-                                        style = MaterialTheme.typography.headlineSmall.copy(
+                                        style = MaterialTheme.typography.headlineMedium.copy(
                                             fontWeight = FontWeight.Bold
                                         ),
                                         color = when {
-                                            isDebtor -> TraderTheme.financial.debit
-                                            isAdvance -> TraderTheme.financial.income
+                                            isDebtor -> financial.debit
+                                            isAdvance -> financial.income
                                             else -> MaterialTheme.colorScheme.onSurface
                                         },
                                         modifier = Modifier.testTag("customer_detail_balance_value")
@@ -812,8 +920,8 @@ fun CustomerDetailScreen(
                                         },
                                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                                         color = when {
-                                            isDebtor -> TraderTheme.financial.debit
-                                            isAdvance -> TraderTheme.financial.income
+                                            isDebtor -> financial.debit
+                                            isAdvance -> financial.income
                                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                                         }
                                     )
@@ -821,7 +929,7 @@ fun CustomerDetailScreen(
                             }
                         }
 
-                        // Secondary Metric Row: Total Historical Purchases & Transaction Count
+                        // Secondary Metric Row: Total Historical Purchases
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -835,13 +943,13 @@ fun CustomerDetailScreen(
                             Text(
                                 text = WesternFormatters.formatIls(customer.totalPurchasesIls),
                                 style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = FontWeight.SemiBold
+                                    fontWeight = FontWeight.Bold
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
 
-                        // Primary Actions: Collect Payment & Start Sale for Customer
+                        // Primary Actions: Collect Payment & Start Sale for Customer (min 48dp height)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -849,6 +957,10 @@ fun CustomerDetailScreen(
                             Button(
                                 onClick = onOpenPaymentDialog,
                                 shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
                                 modifier = Modifier
                                     .weight(1.15f)
                                     .height(48.dp)
@@ -862,12 +974,13 @@ fun CustomerDetailScreen(
                                     } else {
                                         lang.tr("إيداع دفعة بالحساب", "Record Deposit")
                                     },
-                                    style = MaterialTheme.typography.labelLarge
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                                 )
                             }
                             OutlinedButton(
                                 onClick = { onStartSaleForCustomer(customer) },
                                 shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(48.dp)
@@ -877,12 +990,12 @@ fun CustomerDetailScreen(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = lang.tr("بيع جديد للزبون", "New Sale"),
-                                    style = MaterialTheme.typography.labelLarge
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
                                 )
                             }
                         }
 
-                        // Secondary Actions: Edit Customer & Share/Print Statement
+                        // Secondary Actions: Edit Customer & Share/Print Statement (min 48dp height)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -891,13 +1004,16 @@ fun CustomerDetailScreen(
                                 OutlinedButton(
                                     onClick = { isEditCustomerOpen = true },
                                     shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(44.dp)
+                                        .height(48.dp)
                                         .testTag("edit_customer_button")
                                 ) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = lang.tr("تعديل البيانات وسقف الدين", "Edit Info & Limit"),
+                                        text = lang.tr("تعديل البيانات والسقف", "Edit Info & Limit"),
                                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
                                     )
                                 }
@@ -905,13 +1021,16 @@ fun CustomerDetailScreen(
                             OutlinedButton(
                                 onClick = { isStatementPreviewOpen = true },
                                 shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(44.dp)
+                                    .height(48.dp)
                                     .testTag("share_customer_statement_button")
                             ) {
+                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = lang.tr("مشاركة / طباعة كشف الحساب", "Share / Print Statement"),
+                                    text = lang.tr("مشاركة / كشف الحساب", "Share / Statement"),
                                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
                                 )
                             }
@@ -946,7 +1065,7 @@ fun CustomerDetailScreen(
             if (transactions.isEmpty()) {
                 item {
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surface,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier.fillMaxWidth()
@@ -1034,7 +1153,7 @@ private fun EditCustomerDialog(
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 OutlinedTextField(
                     value = nameText,
@@ -1053,6 +1172,10 @@ private fun EditCustomerDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        fontFamily = MonoFontFamily,
+                        textDirection = TextDirection.Ltr
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("edit_customer_phone_input")
@@ -1092,13 +1215,25 @@ private fun EditCustomerDialog(
                 },
                 enabled = canSave,
                 shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("confirm_edit_customer_button")
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("confirm_edit_customer_button")
             ) {
-                Text(lang.tr("حفظ التعديلات", "Save Changes"))
+                Text(
+                    text = lang.tr("حفظ التعديلات", "Save Changes"),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
                 Text(lang.tr("إلغاء", "Cancel"))
             }
         }
@@ -1112,7 +1247,7 @@ private fun CustomerStatementShareDialog(
     lang: AppLanguage,
     onDismiss: () -> Unit
 ) {
-    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -1163,17 +1298,29 @@ private fun CustomerStatementShareDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(statementText))
+                    clipboard.setText(AnnotatedString(statementText))
                     copied = true
                 },
                 shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("copy_customer_statement_button")
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("copy_customer_statement_button")
             ) {
-                Text(lang.tr("نسخ الكشف للمشاركة", "Copy Statement"))
+                Text(
+                    text = lang.tr("نسخ الكشف للمشاركة", "Copy Statement"),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
                 Text(lang.tr("إغلاق", "Close"))
             }
         }
@@ -1186,6 +1333,7 @@ private fun CustomerStatementRow(
     lang: AppLanguage,
     onOpenInvoice: (() -> Unit)?
 ) {
+    val financial = TraderTheme.financial
     val isCreditPurchase = tx.debitIls > 0.005 && tx.creditIls <= 0.005
     val isPaidInvoice = tx.debitIls > 0.005 && tx.creditIls >= tx.debitIls - 0.005
     val isPaymentCollection = tx.creditIls > 0.005 && tx.debitIls <= 0.005
@@ -1204,7 +1352,7 @@ private fun CustomerStatementRow(
     }
 
     Surface(
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
@@ -1214,8 +1362,8 @@ private fun CustomerStatementRow(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1228,7 +1376,7 @@ private fun CustomerStatementRow(
                 ) {
                     Text(
                         text = tx.type(lang),
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
@@ -1255,35 +1403,35 @@ private fun CustomerStatementRow(
                         isCreditPurchase -> {
                             Text(
                                 text = "+ ${WesternFormatters.formatIls(tx.debitIls)}",
-                                style = MaterialTheme.typography.titleSmall.copy(
+                                style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
-                                color = TraderTheme.financial.debit
+                                color = financial.debit
                             )
                             Text(
                                 text = lang.tr("دين مضاف", "Added to Debt"),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = TraderTheme.financial.debit
+                                color = financial.debit
                             )
                         }
                         isPaymentCollection -> {
                             Text(
                                 text = "- ${WesternFormatters.formatIls(tx.creditIls)}",
-                                style = MaterialTheme.typography.titleSmall.copy(
+                                style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
-                                color = TraderTheme.financial.income
+                                color = financial.income
                             )
                             Text(
                                 text = lang.tr("دفعة مقبوضة", "Payment Received"),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = TraderTheme.financial.income
+                                color = financial.income
                             )
                         }
                         isPaidInvoice -> {
                             Text(
                                 text = WesternFormatters.formatIls(tx.debitIls),
-                                style = MaterialTheme.typography.titleSmall.copy(
+                                style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface
@@ -1291,26 +1439,26 @@ private fun CustomerStatementRow(
                             Text(
                                 text = lang.tr("مسددة نقداً", "Paid Cash"),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = TraderTheme.financial.income
+                                color = financial.income
                             )
                         }
                         else -> {
                             if (tx.debitIls > 0) {
                                 Text(
                                     text = "+ ${WesternFormatters.formatIls(tx.debitIls)}",
-                                    style = MaterialTheme.typography.titleSmall.copy(
+                                    style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold
                                     ),
-                                    color = TraderTheme.financial.debit
+                                    color = financial.debit
                                 )
                             }
                             if (tx.creditIls > 0) {
                                 Text(
                                     text = "- ${WesternFormatters.formatIls(tx.creditIls)}",
-                                    style = MaterialTheme.typography.titleSmall.copy(
+                                    style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold
                                     ),
-                                    color = TraderTheme.financial.income
+                                    color = financial.income
                                 )
                             }
                         }
@@ -1335,6 +1483,12 @@ private fun CustomerStatementRow(
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                         modifier = Modifier.heightIn(min = 48.dp)
                     ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = lang.tr(
                                 "عرض الفاتورة ${WesternFormatters.formatInvoiceCode(tx.invoiceNumber)}",
@@ -1356,6 +1510,7 @@ fun CustomerPaymentCollectionDialog(
     onDismiss: () -> Unit,
     onConfirmPayment: (customerId: String, amountIls: Double, note: String, paymentId: String) -> Unit
 ) {
+    val financial = TraderTheme.financial
     val initialAmt = if (customer.balanceIls > 0.005) {
         WesternFormatters.formatNumber(customer.balanceIls).removeSuffix(".00")
     } else {
@@ -1376,6 +1531,7 @@ fun CustomerPaymentCollectionDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(16.dp),
         title = {
             Text(
                 text = if (customer.balanceIls > 0.005) {
@@ -1389,21 +1545,22 @@ fun CustomerPaymentCollectionDialog(
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 // Customer Identity & Current Balance Summary
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Text(
                             text = customer.name(lang),
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                         )
                         Text(
                             text = when {
@@ -1422,8 +1579,8 @@ fun CustomerPaymentCollectionDialog(
                             },
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                             color = when {
-                                customer.balanceIls > 0.005 -> TraderTheme.financial.debit
-                                customer.balanceIls < -0.005 -> TraderTheme.financial.income
+                                customer.balanceIls > 0.005 -> financial.debit
+                                customer.balanceIls < -0.005 -> financial.income
                                 else -> MaterialTheme.colorScheme.onSurfaceVariant
                             }
                         )
@@ -1433,35 +1590,48 @@ fun CustomerPaymentCollectionDialog(
                 // Quick Preset Chips
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (customer.balanceIls > 0.005) {
                         val fullStr = WesternFormatters.formatNumber(customer.balanceIls).removeSuffix(".00")
                         item {
-                            FilterChip(
-                                selected = payAmountText == fullStr || abs(enteredAmount - customer.balanceIls) < 0.005,
-                                onClick = { payAmountText = fullStr },
-                                label = {
-                                    Text(
-                                        lang.tr(
-                                            "كامل الدين (${WesternFormatters.formatIls(customer.balanceIls)})",
-                                            "Full Debt (${WesternFormatters.formatIls(customer.balanceIls)})"
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
+                                FilterChip(
+                                    selected = payAmountText == fullStr || abs(enteredAmount - customer.balanceIls) < 0.005,
+                                    onClick = { payAmountText = fullStr },
+                                    label = {
+                                        Text(
+                                            text = lang.tr(
+                                                "كامل الدين (${WesternFormatters.formatIls(customer.balanceIls)})",
+                                                "Full Debt (${WesternFormatters.formatIls(customer.balanceIls)})"
+                                            ),
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                                         )
-                                    )
-                                },
-                                modifier = Modifier
-                                    .heightIn(min = 48.dp)
-                                    .testTag("collect_preset_full")
-                            )
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
+                                    modifier = Modifier.testTag("collect_preset_full")
+                                )
+                            }
                         }
                     }
                     items(listOf(50, 100, 200)) { preset ->
-                        FilterChip(
-                            selected = payAmountText == preset.toString(),
-                            onClick = { payAmountText = preset.toString() },
-                            label = { Text("$preset ₪") },
-                            modifier = Modifier.heightIn(min = 48.dp)
-                        )
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
+                            FilterChip(
+                                selected = payAmountText == preset.toString(),
+                                onClick = { payAmountText = preset.toString() },
+                                label = { Text("$preset ₪") },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                )
+                            )
+                        }
                     }
                 }
 
@@ -1481,12 +1651,16 @@ fun CustomerPaymentCollectionDialog(
                 // Live Balance Consequence Preview
                 if (enteredAmount > 0.0) {
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(10.dp),
                         color = if (projectedBalance > 0.005) {
-                            TraderTheme.financial.warningContainer
+                            financial.warningContainer
                         } else {
-                            TraderTheme.financial.incomeContainer
+                            financial.incomeContainer
                         },
+                        border = BorderStroke(
+                            1.dp,
+                            if (projectedBalance > 0.005) financial.warning.copy(alpha = 0.35f) else financial.income.copy(alpha = 0.35f)
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("payment_projected_balance_banner")
@@ -1510,9 +1684,9 @@ fun CustomerPaymentCollectionDialog(
                             color = if (projectedBalance > 0.005) {
                                 MaterialTheme.colorScheme.onSurface
                             } else {
-                                TraderTheme.financial.income
+                                financial.income
                             },
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
                         )
                     }
                 }
@@ -1537,13 +1711,25 @@ fun CustomerPaymentCollectionDialog(
                 },
                 enabled = enteredAmount > 0.0,
                 shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("confirm_customer_payment_button")
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("confirm_customer_payment_button")
             ) {
-                Text(lang.tr("تأكيد القبض بالصندوق", "Confirm Collection"))
+                Text(
+                    text = lang.tr("تأكيد القبض بالصندوق", "Confirm Collection"),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
                 Text(lang.tr("إلغاء", "Cancel"))
             }
         }
@@ -1572,12 +1758,12 @@ fun AddCustomerDialog(
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 OutlinedTextField(
                     value = newCustName,
                     onValueChange = { newCustName = it },
-                    label = { Text(lang.tr("اسم الزبون أو المنشأة", "Customer / Business Name")) },
+                    label = { Text(lang.tr("اسم الزبون أو المنشأة *", "Customer / Business Name *")) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                     textStyle = MaterialTheme.typography.bodyMedium,
@@ -1615,16 +1801,28 @@ fun AddCustomerDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(newCustName, newCustPhone, newCustAddr) },
+                onClick = { onConfirm(newCustName.trim(), newCustPhone.trim(), newCustAddr.trim()) },
                 enabled = newCustName.isNotBlank(),
                 shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("confirm_add_customer_button")
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("confirm_add_customer_button")
             ) {
-                Text(lang.tr("حفظ الزبون", "Save Customer"))
+                Text(
+                    text = lang.tr("حفظ الزبون", "Save Customer"),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
                 Text(lang.tr("إلغاء", "Cancel"))
             }
         }

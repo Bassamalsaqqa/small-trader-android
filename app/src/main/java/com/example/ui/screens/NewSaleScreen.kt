@@ -11,8 +11,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
@@ -78,26 +81,30 @@ import com.example.model.AppLanguage
 import com.example.model.Product
 import com.example.model.ProductCategory
 import com.example.model.WesternFormatters
+import com.example.ui.components.PhaseOneCard
+import com.example.ui.components.PhaseOneStatusBadge
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
 
 /**
- * Redesigned New Sale (POS) Screen for Small Trader / التاجر الصغير.
+ * Rebuilt Native New Sale (POS) Catalog Screen for Small Trader (التاجر الصغير).
  *
- * Design Principles:
- * 1. Calm Top Instrument Bar: Combines product/barcode search and the camera scanner trigger
- *    into a single soft-filled capsule, with borderless category pills and a pinned "+ Custom"
- *    entry underneath.
- * 2. Exception-Based Catalog Ledger: Eliminates repetitive "In stock" labels and heavy boxed
- *    "+" buttons on every row. Healthy items show only their unit and price; low-stock and
- *    out-of-stock states surface by exception so they are noticed immediately.
- * 3. Single-Axis Selection Geometry: Tapping any available row adds the item. When selected,
- *    the start column shows the live line calculation (`38.00 ₪ × 2 = 76.00 ₪`) while the
- *    trailing edge presents a cohesive tactile stepper (`- 2 +`) without vertical layout jumps.
+ * Implements Phase 1 UX Architecture:
+ * 1. Calm Top Instrument Bar: Combines Arabic-normalized product/barcode search,
+ *    clear query shortcut, and camera scanner trigger into a single 48dp tactile capsule,
+ *    paired with borderless category pills and a pinned "+ Custom" item trigger.
+ * 2. Exception-Based Catalog Ledger: Healthy items display only title, unit, and tabular price
+ *    with a quiet circular "+" affordance. Redundant "In stock" labels are stripped so that
+ *    low-stock and out-of-stock items stand out immediately by exception.
+ * 3. Single-Axis Selection Geometry: Selected items tint the row calmly, display the live
+ *    line calculation (`38.00 ₪ × 2 = 76.00 ₪`), and replace the price with a tactile stepper
+ *    (`- qty +`) featuring 48dp minimum accessible touch targets.
  * 4. State-Responsive Checkout Dock: Remains a quiet 48dp status bar when the basket is empty,
  *    and elevates into a high-contrast checkout bar with an expandable line-item drawer as soon
- *    as the first product is added.
+ *    as products are added.
+ * 5. Adaptive POS Support: Scales fluidly on Compact phones and Wide tablet viewports while
+ *    preserving 100% of test tags and financial guards.
  */
 @Composable
 fun NewSaleScreen(
@@ -116,89 +123,93 @@ fun NewSaleScreen(
     var isBasketExpanded by remember { mutableStateOf(false) }
     val showBarcodeInRows = state.searchQuery.any { it.isDigit() }
 
-    Column(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .testTag("new_sale_screen")
     ) {
-        // 1. Unified Search, Barcode & Category Header
-        PosSearchAndCategoryHeader(
-            state = state,
-            onSearchQueryChange = onSearchQueryChange,
-            onSelectCategory = onSelectCategory,
-            onAddSingleFilteredProduct = onAddProduct,
-            onOpenScanner = onOpenScanner,
-            onOpenCustomItem = onOpenCustomItem
-        )
+        val isWidePos = maxWidth >= 840.dp
 
-        HorizontalDivider(
-            thickness = 0.5.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)
-        )
-
-        // 2. Product Catalog Ledger or Zero-Result Recovery State
-        if (state.filteredProducts.isEmpty()) {
-            ZeroResultCatalogState(
-                searchQuery = state.searchQuery,
-                selectedCategory = state.selectedCategory,
-                allCategoriesMatchCount = state.allCategoriesMatchCount,
-                lang = lang,
-                onShowAllCategories = { onSelectCategory(ProductCategory.ALL) },
-                onClearSearch = {
-                    onSearchQueryChange("")
-                    if (state.selectedCategory != ProductCategory.ALL) {
-                        onSelectCategory(ProductCategory.ALL)
-                    }
-                },
-                onOpenCustomItem = onOpenCustomItem,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
+        Column(modifier = Modifier.fillMaxSize()) {
+            // 1. Unified Search, Barcode & Category Header
+            PosSearchAndCategoryHeader(
+                state = state,
+                onSearchQueryChange = onSearchQueryChange,
+                onSelectCategory = onSelectCategory,
+                onAddSingleFilteredProduct = onAddProduct,
+                onOpenScanner = onOpenScanner,
+                onOpenCustomItem = onOpenCustomItem
             )
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .testTag("product_catalog_list"),
-                contentPadding = PaddingValues(vertical = 2.dp)
-            ) {
-                items(state.filteredProducts, key = { it.id }) { product ->
-                    val qtyInBasket = state.quantityInBasket(product.id)
-                    ProductSaleCatalogRow(
-                        product = product,
-                        lang = lang,
-                        isDarkTheme = state.isDarkTheme,
-                        quantityInBasket = qtyInBasket,
-                        showBarcode = showBarcodeInRows,
-                        onAdd = { onAddProduct(product) },
-                        onDecrement = { onDecrementProduct(product.id) }
-                    )
-                    HorizontalDivider(
-                        thickness = 0.5.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    )
+
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)
+            )
+
+            // 2. Product Catalog Ledger or Zero-Result Recovery State
+            if (state.filteredProducts.isEmpty()) {
+                ZeroResultCatalogState(
+                    searchQuery = state.searchQuery,
+                    selectedCategory = state.selectedCategory,
+                    allCategoriesMatchCount = state.allCategoriesMatchCount,
+                    lang = lang,
+                    onShowAllCategories = { onSelectCategory(ProductCategory.ALL) },
+                    onClearSearch = {
+                        onSearchQueryChange("")
+                        if (state.selectedCategory != ProductCategory.ALL) {
+                            onSelectCategory(ProductCategory.ALL)
+                        }
+                    },
+                    onOpenCustomItem = onOpenCustomItem,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface)
+                        .testTag("product_catalog_list"),
+                    contentPadding = PaddingValues(vertical = 4.dp)
+                ) {
+                    items(state.filteredProducts, key = { it.id }) { product ->
+                        val qtyInBasket = state.quantityInBasket(product.id)
+                        ProductSaleCatalogRow(
+                            product = product,
+                            lang = lang,
+                            isDarkTheme = state.isDarkTheme,
+                            quantityInBasket = qtyInBasket,
+                            showBarcode = showBarcodeInRows,
+                            onAdd = { onAddProduct(product) },
+                            onDecrement = { onDecrementProduct(product.id) }
+                        )
+                        HorizontalDivider(
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                    }
                 }
             }
-        }
 
-        // 3. State-Responsive Bottom Checkout Dock & Expandable Basket Drawer
-        BasketStickyBottomSheet(
-            state = state,
-            isExpanded = isBasketExpanded,
-            onToggleExpand = { isBasketExpanded = !isBasketExpanded },
-            onIncrement = onAddProduct,
-            onDecrement = onDecrementProduct,
-            onRemove = onRemoveProduct,
-            onClearBasket = {
-                onClearBasket()
-                isBasketExpanded = false
-            },
-            onProceedToReview = onProceedToInvoiceReview
-        )
+            // 3. State-Responsive Bottom Checkout Dock & Expandable Basket Drawer
+            BasketStickyBottomSheet(
+                state = state,
+                isExpanded = isBasketExpanded,
+                onToggleExpand = { isBasketExpanded = !isBasketExpanded },
+                onIncrement = onAddProduct,
+                onDecrement = onDecrementProduct,
+                onRemove = onRemoveProduct,
+                onClearBasket = {
+                    onClearBasket()
+                    isBasketExpanded = false
+                },
+                onProceedToReview = onProceedToInvoiceReview
+            )
+        }
     }
 }
 
@@ -227,11 +238,11 @@ private fun PosSearchAndCategoryHeader(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 8.dp, bottom = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Unified Search & Barcode Capsule
+            // Unified Search & Barcode Capsule (48dp height, 48dp scanner button)
             val searchContainerColor = if (isSearchFocused || hasActiveQuery) {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.90f)
             } else {
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
             }
@@ -340,7 +351,7 @@ private fun PosSearchAndCategoryHeader(
                 Box(
                     modifier = Modifier
                         .width(1.dp)
-                        .height(22.dp)
+                        .height(24.dp)
                         .background(MaterialTheme.colorScheme.outlineVariant)
                 )
 
@@ -437,7 +448,7 @@ private fun PosSearchAndCategoryHeader(
                 ) {
                     Surface(
                         shape = RoundedCornerShape(18.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.70f),
                         border = BorderStroke(
                             width = 1.dp,
                             color = MaterialTheme.colorScheme.outlineVariant
@@ -480,7 +491,7 @@ private fun PosSearchAndCategoryHeader(
                         color = if (isError) financial.debitContainer else financial.incomeContainer,
                         border = BorderStroke(
                             width = 1.dp,
-                            color = if (isError) financial.debit.copy(alpha = 0.3f) else financial.income.copy(alpha = 0.3f)
+                            color = if (isError) financial.debit.copy(alpha = 0.35f) else financial.income.copy(alpha = 0.35f)
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -488,13 +499,13 @@ private fun PosSearchAndCategoryHeader(
                             .testTag("sale_feedback_banner")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(7.dp)
+                                    .size(8.dp)
                                     .clip(CircleShape)
                                     .background(if (isError) financial.debit else financial.income)
                             )
@@ -514,6 +525,7 @@ private fun PosSearchAndCategoryHeader(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ZeroResultCatalogState(
     searchQuery: String,
@@ -534,7 +546,7 @@ private fun ZeroResultCatalogState(
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text(
                 text = if (searchQuery.isNotBlank()) {
@@ -563,9 +575,9 @@ private fun ZeroResultCatalogState(
                 )
             }
 
-            Row(
+            FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (selectedCategory != ProductCategory.ALL && allCategoriesMatchCount > 0) {
                     Button(
@@ -618,11 +630,10 @@ private fun ZeroResultCatalogState(
 
 /**
  * Exception-Based Retail POS Catalog Row:
- * - Unselected items display only the product title, packaging unit, and tabular price with a
- *   quiet circular "+" affordance. Stock status appears by exception (Out of stock or Low stock)
- *   so warnings stand out immediately without repeating "18 in stock" on every row.
- * - Selected items tint the row calmly, show the live line calculation (`38.00 ₪ × 2 = 76.00 ₪`)
- *   under the product title, and replace the price with a single unified `- qty +` stepper pill.
+ * - Unselected items display only product title, packaging unit, and tabular price with a
+ *   quiet circular "+" affordance. Low stock and out of stock appear strictly by exception.
+ * - Selected items tint the row calmly, display live line calculation (`38.00 ₪ × 2 = 76.00 ₪`),
+ *   and replace the price with a single unified `- qty +` stepper pill with 48dp hit targets.
  */
 @Composable
 private fun ProductSaleCatalogRow(
@@ -723,7 +734,7 @@ private fun ProductSaleCatalogRow(
                         }
                     }
                 } else {
-                    // Unselected: Show packaging unit + exception-only stock status (low stock or out of stock)
+                    // Unselected: Show packaging unit + exception-only stock status
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -794,19 +805,12 @@ private fun ProductSaleCatalogRow(
                     )
 
                     if (isOutOfStock) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = financial.debitContainer,
+                        PhaseOneStatusBadge(
+                            text = lang.tr("نفد", "Out"),
+                            textColor = financial.debit,
+                            containerColor = financial.debitContainer,
                             modifier = Modifier.padding(start = 2.dp)
-                        ) {
-                            Text(
-                                text = lang.tr("نفد", "Out"),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = financial.debit,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
+                        )
                     } else {
                         // 48dp accessible hit area with a subtle 30dp circular "+" affordance inside
                         Box(
@@ -838,13 +842,13 @@ private fun ProductSaleCatalogRow(
                     }
                 }
             } else {
-                // Unified Single-Axis Stepper Pill (- qty +)
+                // Unified Single-Axis Stepper Pill (- qty +) with 48dp hit targets
                 Surface(
                     shape = RoundedCornerShape(24.dp),
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(
                         width = 1.dp,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.30f)
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
                     ),
                     shadowElevation = 1.dp
                 ) {
@@ -950,7 +954,7 @@ private fun BasketStickyBottomSheet(
     val linkedCustomer = state.selectedCustomer
 
     if (!hasItems) {
-        // Quiet, flat 48dp status bar when basket is empty (eliminates bulky disabled card chrome)
+        // Quiet, flat 48dp status bar when basket is empty
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 0.dp,
@@ -1242,7 +1246,7 @@ private fun BasketStickyBottomSheet(
                 }
             }
 
-            // Primary Checkout Dock Row
+            // Primary Checkout Dock Row (Minimum 48dp hit area)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,

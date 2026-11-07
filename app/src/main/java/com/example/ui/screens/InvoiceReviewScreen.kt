@@ -13,14 +13,17 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -28,7 +31,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
@@ -42,6 +47,7 @@ import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -55,7 +61,6 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -67,28 +72,51 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.example.model.AppLanguage
 import com.example.model.BasketItem
 import com.example.model.Customer
 import com.example.model.DiscountPreset
 import com.example.model.Product
+import com.example.model.SaleDraft
 import com.example.model.WesternFormatters
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
 
+/**
+ * Native Material3 Invoice Review & Line-Item Adjustment Screen (Step 2 of Checkout).
+ *
+ * Design Invariants Enforced:
+ * 1. Single Authoritative Summary & Consequence Dock: Math is rendered once at the bottom,
+ *    clearly disclosing subtotal, discount, stock deduction, customer account, and final net total.
+ * 2. Unified Line Ledger: Clean 2-row layout per item with bold tabular prices, unit math,
+ *    exception-based stock badges, and strict 48dp minimum accessible touch targets on stepper controls.
+ * 3. Scalable Customer Assignment & Truthful Credit Bounds: Seamlessly scales to hundreds of
+ *    customers via a searchable modal sheet, displaying 3-column debt projections and prominent
+ *    credit limit ceiling warnings.
+ * 4. Commercial Drafts & Quotations: Safe hold/resume drafts and non-posting commercial price
+ *    quotation generation with copy-to-clipboard functionality.
+ * 5. Coherent Arabic RTL Primary & Western Digits (0-9) bidi layout across light and dark themes.
+ */
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun InvoiceReviewScreen(
@@ -162,7 +190,7 @@ fun InvoiceReviewScreen(
                     )
                 }
 
-                // 2. Customer Account & Consequence Section (Scales to hundreds of customers via Searchable Sheet)
+                // 2. Customer Account & Consequence Section (Scalable Searchable Sheet)
                 item {
                     CustomerAndAccountImpactCard(
                         selectedCustomer = state.selectedCustomer,
@@ -226,7 +254,7 @@ fun InvoiceReviewScreen(
 @Composable
 private fun EmptyReviewBasketState(
     lang: AppLanguage,
-    savedDrafts: List<com.example.model.SaleDraft>,
+    savedDrafts: List<SaleDraft>,
     onReturnToCatalog: () -> Unit,
     onResumeDraft: ((String) -> Unit)? = null,
     onDeleteDraft: ((String) -> Unit)? = null,
@@ -238,19 +266,19 @@ private fun EmptyReviewBasketState(
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Surface(
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.size(56.dp)
+                modifier = Modifier.size(64.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = Icons.Default.ShoppingBag,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(26.dp)
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(30.dp)
                     )
                 }
             }
@@ -265,13 +293,19 @@ private fun EmptyReviewBasketState(
                     "أضف أصنافاً من القائمة لمتابعة مراجعة الفاتورة والدفع.",
                     "Add items from the catalog to review and complete the sale."
                 ),
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Button(
                 onClick = onReturnToCatalog,
                 shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.testTag("invoice_add_more_items_button")
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("invoice_add_more_items_button")
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,
@@ -279,11 +313,14 @@ private fun EmptyReviewBasketState(
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text(lang.tr("العودة لاختيار الأصناف", "Return to Products"))
+                Text(
+                    text = lang.tr("العودة لاختيار الأصناف", "Return to Products"),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
             }
 
             if (savedDrafts.isNotEmpty() && onResumeDraft != null) {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
                 SavedSaleDraftsCard(
                     savedDrafts = savedDrafts,
                     lang = lang,
@@ -297,7 +334,7 @@ private fun EmptyReviewBasketState(
 
 @Composable
 private fun DraftsAndQuotationBar(
-    savedDrafts: List<com.example.model.SaleDraft>,
+    savedDrafts: List<SaleDraft>,
     lang: AppLanguage,
     onSaveDraft: (() -> Unit)?,
     onOpenQuotation: () -> Unit,
@@ -313,13 +350,24 @@ private fun DraftsAndQuotationBar(
                 OutlinedButton(
                     onClick = onSaveDraft,
                     shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ),
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 48.dp)
                         .testTag("save_draft_button")
                 ) {
+                    Icon(
+                        imageVector = Icons.Default.BookmarkBorder,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = lang.tr("حفظ كمسودة بيع", "Save as Draft"),
+                        text = lang.tr("حفظ كمسودة", "Save Draft"),
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
                     )
                 }
@@ -327,11 +375,22 @@ private fun DraftsAndQuotationBar(
             OutlinedButton(
                 onClick = onOpenQuotation,
                 shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(min = 48.dp)
                     .testTag("open_quotation_preview_button")
             ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = lang.tr("عرض سعر (Quotation)", "Price Quotation"),
                     style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
@@ -352,14 +411,14 @@ private fun DraftsAndQuotationBar(
 
 @Composable
 private fun SavedSaleDraftsCard(
-    savedDrafts: List<com.example.model.SaleDraft>,
+    savedDrafts: List<SaleDraft>,
     lang: AppLanguage,
     onResumeDraft: (String) -> Unit,
     onDeleteDraft: ((String) -> Unit)?
 ) {
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
             .fillMaxWidth()
@@ -387,7 +446,7 @@ private fun SavedSaleDraftsCard(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -399,7 +458,7 @@ private fun SavedSaleDraftsCard(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "${WesternFormatters.formatInt(draft.totalQuantity)} ${lang.tr("وحدة", "units")} • ${WesternFormatters.formatIls(draft.netTotalIls)} • ${draft.timestamp}",
+                                text = "${WesternFormatters.formatInt(draft.totalQuantity)} ${lang.tr("وحدات", "units")} • ${WesternFormatters.formatIls(draft.netTotalIls)} • ${draft.timestamp}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -408,9 +467,9 @@ private fun SavedSaleDraftsCard(
                             FilledTonalButton(
                                 onClick = { onResumeDraft(draft.id) },
                                 shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                 modifier = Modifier
-                                    .heightIn(min = 40.dp)
+                                    .heightIn(min = 48.dp)
                                     .testTag("resume_draft_${draft.id}")
                             ) {
                                 Text(
@@ -422,14 +481,14 @@ private fun SavedSaleDraftsCard(
                                 IconButton(
                                     onClick = { onDeleteDraft(draft.id) },
                                     modifier = Modifier
-                                        .size(40.dp)
+                                        .size(48.dp)
                                         .testTag("delete_draft_${draft.id}")
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.DeleteOutline,
                                         contentDescription = lang.tr("حذف المسودة", "Delete draft"),
                                         tint = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(19.dp)
                                     )
                                 }
                             }
@@ -448,7 +507,7 @@ private fun QuotationPreviewDialog(
     lang: AppLanguage,
     onDismiss: () -> Unit
 ) {
-    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val clipboard = LocalClipboardManager.current
     var copiedFeedback by rememberSaveable { mutableStateOf(false) }
     val displayDoc = quotationText.ifBlank {
         buildString {
@@ -457,8 +516,9 @@ private fun QuotationPreviewDialog(
         }
     }
 
-    androidx.compose.material3.AlertDialog(
+    AlertDialog(
         onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(16.dp),
         title = {
             Text(
                 text = lang.tr("معاينة عرض سعر للزبون (Quotation)", "Customer Price Quotation Preview"),
@@ -469,18 +529,31 @@ private fun QuotationPreviewDialog(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = TraderTheme.financial.warningContainer.copy(alpha = 0.5f),
+                    color = TraderTheme.financial.warningContainer.copy(alpha = 0.6f),
+                    border = BorderStroke(1.dp, TraderTheme.financial.warning.copy(alpha = 0.35f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = lang.tr(
-                            "وثيقة تسعير فقط: لا تخصم من المخزون ولا تسجل نقداً أو ذمة على الزبون حتى يتم اعتماد الفاتورة.",
-                            "Non-posting quotation: Does not deduct inventory or record cash/debt until confirmed as a sale."
-                        ),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(8.dp)
-                    )
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.WarningAmber,
+                            contentDescription = null,
+                            tint = TraderTheme.financial.warning,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = lang.tr(
+                                "وثيقة تسعير فقط: لا تخصم من المخزون ولا تسجل نقداً أو ذمة على الزبون حتى يتم اعتماد الفاتورة.",
+                                "Non-posting quotation: Does not deduct inventory or record cash/debt until confirmed as a sale."
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
                 Surface(
                     shape = RoundedCornerShape(10.dp),
@@ -508,17 +581,29 @@ private fun QuotationPreviewDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(displayDoc))
+                    clipboard.setText(AnnotatedString(displayDoc))
                     copiedFeedback = true
                 },
                 shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("copy_quotation_button")
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("copy_quotation_button")
             ) {
-                Text(lang.tr("نسخ عرض السعر", "Copy Quotation"))
+                Text(
+                    text = lang.tr("نسخ عرض السعر", "Copy Quotation"),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
                 Text(lang.tr("إغلاق", "Close"))
             }
         }
@@ -529,8 +614,8 @@ private fun QuotationPreviewDialog(
  * Unified Invoice Ledger Card:
  * Groups all basket lines inside one clean ledger surface with hairline dividers.
  * Each line has two uncluttered rows:
- * - Row 1: Index + Full Arabic/English product name (up to 2 lines) | Bold tabular Line Total
- * - Row 2: Unit price × quantity (unit) + stock impact | Remove icon + [- qty +] stepper
+ * - Row 1: Index + Full Arabic/English product name | Bold tabular Line Total
+ * - Row 2: Unit price × quantity (unit) + stock impact | Remove icon + [- qty +] stepper (min 48dp)
  */
 @Composable
 private fun EditableInvoiceLinesSection(
@@ -901,11 +986,33 @@ private fun CustomerAndAccountImpactCard(
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                Text(
-                                    text = "${selectedCustomer.phone} • ${selectedCustomer.address(lang)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                        Text(
+                                            text = selectedCustomer.phone,
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                fontFamily = MonoFontFamily,
+                                                fontWeight = FontWeight.SemiBold
+                                            ),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Text(
+                                        text = "•",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outlineVariant
+                                    )
+                                    Text(
+                                        text = selectedCustomer.address(lang),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
 
                             TextButton(
@@ -1002,6 +1109,7 @@ private fun CustomerAndAccountImpactCard(
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = financial.debitContainer,
+                                border = BorderStroke(1.dp, financial.debit.copy(alpha = 0.35f)),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
@@ -1143,7 +1251,10 @@ internal fun CustomerPickerModalSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                IconButton(onClick = onDismiss) {
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(48.dp)
+                ) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = lang.tr("إغلاق", "Close")
@@ -1174,7 +1285,10 @@ internal fun CustomerPickerModalSheet(
                 },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
+                        IconButton(
+                            onClick = { searchQuery = "" },
+                            modifier = Modifier.size(48.dp)
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Clear,
                                 contentDescription = lang.tr("مسح", "Clear")
@@ -1192,7 +1306,7 @@ internal fun CustomerPickerModalSheet(
                 onClick = { onSelectCustomer(null) },
                 shape = RoundedCornerShape(12.dp),
                 color = if (selectedCustomerId == null) {
-                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
                 } else {
                     MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                 },
@@ -1206,12 +1320,13 @@ internal fun CustomerPickerModalSheet(
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 48.dp)
                     .testTag("picker_walk_in_option")
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -1272,15 +1387,16 @@ internal fun CustomerPickerModalSheet(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .heightIn(min = 48.dp)
                                         .background(
                                             if (isSelected) {
-                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
                                             } else {
                                                 Color.Transparent
                                             }
                                         )
                                         .clickable { onSelectCustomer(cust) }
-                                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                                        .padding(horizontal = 14.dp, vertical = 10.dp)
                                         .testTag("customer_option_${cust.id}"),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
@@ -1298,11 +1414,33 @@ internal fun CustomerPickerModalSheet(
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis
                                         )
-                                        Text(
-                                            text = "${cust.phone} • ${cust.address(lang)}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                                Text(
+                                                    text = cust.phone,
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        fontFamily = MonoFontFamily,
+                                                        fontWeight = FontWeight.SemiBold
+                                                    ),
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            Text(
+                                                text = "•",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.outlineVariant
+                                            )
+                                            Text(
+                                                text = cust.address(lang),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
 
                                     Column(
@@ -1315,12 +1453,21 @@ internal fun CustomerPickerModalSheet(
                                                     "ذمة: ${WesternFormatters.formatIls(cust.balanceIls)}",
                                                     "Debt: ${WesternFormatters.formatIls(cust.balanceIls)}"
                                                 )
+                                            } else if (cust.balanceIls < -0.005) {
+                                                lang.tr(
+                                                    "مقدم: ${WesternFormatters.formatIls(-cust.balanceIls)}",
+                                                    "Advance: ${WesternFormatters.formatIls(-cust.balanceIls)}"
+                                                )
                                             } else {
                                                 lang.tr("لا يوجد دين", "No debt")
                                             },
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (cust.balanceIls > 0.005) financial.debit else financial.income
+                                            color = when {
+                                                cust.balanceIls > 0.005 -> financial.debit
+                                                cust.balanceIls < -0.005 -> financial.income
+                                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
                                         )
                                         Text(
                                             text = if (exceedsLimit) {
@@ -1431,25 +1578,30 @@ private fun DiscountAndRoundingCard(
             ) {
                 DiscountPreset.entries.forEach { preset ->
                     val selected = state.discountPreset == preset
-                    FilterChip(
-                        selected = selected,
-                        onClick = { onSelectDiscountPreset(preset) },
-                        label = {
-                            Text(
-                                text = lang.tr(preset.labelAr, preset.labelEn),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                            )
-                        },
-                        shape = RoundedCornerShape(10.dp),
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary
-                        ),
-                        modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .testTag("discount_chip_${preset.name}")
-                    )
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) {
+                        FilterChip(
+                            selected = selected,
+                            onClick = { onSelectDiscountPreset(preset) },
+                            label = {
+                                Text(
+                                    text = lang.tr(preset.labelAr, preset.labelEn),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            modifier = Modifier
+                                .heightIn(min = 40.dp)
+                                .testTag("discount_chip_${preset.name}")
+                        )
+                    }
                 }
             }
 
@@ -1512,6 +1664,7 @@ private fun ReviewCheckoutDock(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -1557,7 +1710,7 @@ private fun ReviewCheckoutDock(
                         imageVector = Icons.Default.Inventory2,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(15.dp)
                     )
                     Text(
                         text = buildString {
@@ -1633,7 +1786,7 @@ private fun ReviewCheckoutDock(
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     ),
                     modifier = Modifier
-                        .height(50.dp)
+                        .height(52.dp)
                         .testTag("proceed_to_cash_payment_button")
                 ) {
                     Icon(

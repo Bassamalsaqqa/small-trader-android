@@ -3,7 +3,6 @@ package com.example.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -21,13 +20,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.AddShoppingCart
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Inventory2
@@ -65,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,11 +71,30 @@ import com.example.model.AppLanguage
 import com.example.model.InvoiceRecord
 import com.example.model.Product
 import com.example.model.WesternFormatters
+import com.example.ui.components.PhaseOneBentoTile
+import com.example.ui.components.PhaseOneCard
+import com.example.ui.components.PhaseOneSectionHeader
+import com.example.ui.components.PhaseOneStatusBadge
 import com.example.ui.theme.CairoFontFamily
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
 
+/**
+ * Rebuilt Native Home Screen for Small Trader (التاجر الصغير).
+ *
+ * Implements Phase 1 UX Architecture:
+ * 1. Task-Driven Action Header: Instant recognition of active in-progress baskets
+ *    vs. fast new sale / barcode launch with 48dp minimum accessible touch targets.
+ * 2. BoardUI-Inspired Financial Pulse: Rich, subtle surface tinting for cash drawer,
+ *    today's sales, and receivables with strict Owner vs. Cashier permission boundaries.
+ * 3. Urgent Inventory Action Center: Prominently positions low-stock and out-of-stock
+ *    alerts with one-tap +10 restock for authorized roles.
+ * 4. Adaptive Bento Grid: Balanced 2x2 grid eliminating horizontal scroller fatigue on phone,
+ *    and smoothly expanding to dual-column responsive layout on Medium/Expanded displays.
+ * 5. Complete Callback & Financial Invariant Preservation: Preserves all navigation routes,
+ *    accounting guards, and automated test hooks.
+ */
 @Composable
 fun HomeScreen(
     state: TraderUiState,
@@ -106,7 +124,8 @@ fun HomeScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        val isExpanded = maxWidth >= 720.dp
+        // Material 3 Adaptive breakpoint: Compact (<600dp), Medium/Expanded (>=600dp / >=720dp)
+        val isExpanded = maxWidth >= 700.dp
 
         LazyColumn(
             modifier = Modifier
@@ -115,55 +134,54 @@ fun HomeScreen(
             contentPadding = PaddingValues(
                 start = if (isExpanded) 24.dp else 16.dp,
                 end = if (isExpanded) 24.dp else 16.dp,
-                top = 10.dp,
-                bottom = 20.dp
+                top = 12.dp,
+                bottom = 24.dp
             ),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // 1. Primary Action: Active Basket in Progress OR Immediate Sale Entry
-            item {
-                PrimaryRegisterSection(
-                    basketCount = state.basketItemCount,
-                    basketTotalIls = state.basketSubtotalIls,
-                    lang = lang,
-                    onStartNewSale = onStartNewSale,
-                    onReviewBasket = onReviewBasket,
-                    onOpenScanner = onOpenScanner,
-                    onOpenCustomItem = onOpenCustomItem
-                )
-            }
-
-            // 2. Role-Aware Financial & Shift Pulse
-            item {
-                if (canViewReports) {
-                    OwnerFinancialPulseCard(
-                        state = state,
+            if (isExpanded) {
+                // =============================================================
+                // ADAPTIVE DUAL-COLUMN LAYOUT (Tablets, Foldables, Wide Screens)
+                // =============================================================
+                item {
+                    PrimaryRegisterSection(
+                        basketCount = state.basketItemCount,
+                        basketTotalIls = state.basketSubtotalIls,
                         lang = lang,
-                        onNavigateToReports = onNavigateToReports,
-                        onNavigateToCustomers = onNavigateToCustomers,
-                        onNavigateToSuppliers = onNavigateToSuppliers
-                    )
-                } else {
-                    CashierShiftPulseCard(
-                        state = state,
-                        lang = lang,
-                        onViewInvoices = onViewAllInvoices
+                        onStartNewSale = onStartNewSale,
+                        onReviewBasket = onReviewBasket,
+                        onOpenScanner = onOpenScanner,
+                        onOpenCustomItem = onOpenCustomItem
                     )
                 }
-            }
 
-            // 3. Actionable Low-Stock Warning + Recent Sales (Side-by-side on tablet, stacked on phone)
-            if (isExpanded) {
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         verticalAlignment = Alignment.Top
                     ) {
+                        // Start Column: Financial Pulse & Recent Invoices
                         Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                            modifier = Modifier.weight(1.1f),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
+                            if (canViewReports) {
+                                OwnerFinancialPulseCard(
+                                    state = state,
+                                    lang = lang,
+                                    onNavigateToReports = onNavigateToReports,
+                                    onNavigateToCustomers = onNavigateToCustomers,
+                                    onNavigateToSuppliers = onNavigateToSuppliers
+                                )
+                            } else {
+                                CashierShiftPulseCard(
+                                    state = state,
+                                    lang = lang,
+                                    onViewInvoices = onViewAllInvoices
+                                )
+                            }
+
                             RecentInvoicesSection(
                                 invoices = state.invoices.take(3),
                                 lang = lang,
@@ -171,9 +189,11 @@ fun HomeScreen(
                                 onViewAllInvoices = onViewAllInvoices
                             )
                         }
+
+                        // End Column: Actionable Low Stock & Bento Grid Store Operations
                         Column(
                             modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
                             if (state.lowStockProducts.isNotEmpty()) {
                                 ActionableLowStockSection(
@@ -185,6 +205,7 @@ fun HomeScreen(
                                     onNavigateToCatalog = onNavigateToCatalog
                                 )
                             }
+
                             SecondaryOperationsSection(
                                 state = state,
                                 lang = lang,
@@ -201,7 +222,57 @@ fun HomeScreen(
                     }
                 }
             } else {
-                // 3. Store Operations & Back-Office Hub (Immediately visible 2x2 grid — no horizontal scroll)
+                // =============================================================
+                // COMPACT SINGLE-COLUMN LAYOUT (Phones < 700dp)
+                // =============================================================
+
+                // 1. Primary Register Task: Active Basket in Progress OR Start Sale
+                item {
+                    PrimaryRegisterSection(
+                        basketCount = state.basketItemCount,
+                        basketTotalIls = state.basketSubtotalIls,
+                        lang = lang,
+                        onStartNewSale = onStartNewSale,
+                        onReviewBasket = onReviewBasket,
+                        onOpenScanner = onOpenScanner,
+                        onOpenCustomItem = onOpenCustomItem
+                    )
+                }
+
+                // 2. Role-Aware Financial & Shift Ledger Pulse
+                item {
+                    if (canViewReports) {
+                        OwnerFinancialPulseCard(
+                            state = state,
+                            lang = lang,
+                            onNavigateToReports = onNavigateToReports,
+                            onNavigateToCustomers = onNavigateToCustomers,
+                            onNavigateToSuppliers = onNavigateToSuppliers
+                        )
+                    } else {
+                        CashierShiftPulseCard(
+                            state = state,
+                            lang = lang,
+                            onViewInvoices = onViewAllInvoices
+                        )
+                    }
+                }
+
+                // 3. Urgent Actionable Low-Stock Alert (Prioritized right after pulse)
+                if (state.lowStockProducts.isNotEmpty()) {
+                    item {
+                        ActionableLowStockSection(
+                            lowStockProducts = state.lowStockProducts,
+                            canManageInventory = canManageInventory,
+                            lang = lang,
+                            onRestockProduct = onRestockProduct,
+                            onAddProductToSale = onAddProductToSale,
+                            onNavigateToCatalog = onNavigateToCatalog
+                        )
+                    }
+                }
+
+                // 4. Store Operations Bento Grid (Immediately visible 2x2 grid, no horizontal scroll)
                 item {
                     SecondaryOperationsSection(
                         state = state,
@@ -217,21 +288,7 @@ fun HomeScreen(
                     )
                 }
 
-                // 4. Actionable Low-Stock Warning
-                if (state.lowStockProducts.isNotEmpty()) {
-                    item {
-                        ActionableLowStockSection(
-                            lowStockProducts = state.lowStockProducts,
-                            canManageInventory = canManageInventory,
-                            lang = lang,
-                            onRestockProduct = onRestockProduct,
-                            onAddProductToSale = onAddProductToSale,
-                            onNavigateToCatalog = onNavigateToCatalog
-                        )
-                    }
-                }
-
-                // 5. Latest Invoices
+                // 5. Latest Reconciled Invoices
                 item {
                     RecentInvoicesSection(
                         invoices = state.invoices.take(2),
@@ -247,10 +304,10 @@ fun HomeScreen(
 
 /**
  * Top task surface:
- * - When an unfinished basket exists (`basketCount > 0`), completing or editing that basket is the
- *   primary task instead of competing with a "New Sale" banner.
- * - When the basket is empty, starting a new sale is the unmistakable primary action, accompanied
- *   by fast barcode scan and custom-item entry without repeating store identity text.
+ * - When an unfinished basket exists (`basketCount > 0`), completing or reviewing that basket
+ *   is the primary task, accompanied by secondary scan and quick-item shortcuts.
+ * - When the basket is empty, starting a new sale is the prominent primary CTA with
+ *   integrated 48dp scan and custom-item shortcuts.
  */
 @Composable
 private fun PrimaryRegisterSection(
@@ -263,20 +320,15 @@ private fun PrimaryRegisterSection(
     onOpenCustomItem: () -> Unit
 ) {
     if (basketCount > 0) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-            ),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        PhaseOneCard(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+            borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.40f),
+            borderWidth = 1.2.dp,
+            contentPadding = PaddingValues(16.dp)
         ) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -285,27 +337,27 @@ private fun PrimaryRegisterSection(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.weight(1f)
                     ) {
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(40.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Default.ShoppingBag,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.onPrimary,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
-                        Column {
+                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                             Text(
                                 text = lang.tr("عملية بيع قيد الإجراء", "Sale in Progress"),
-                                style = MaterialTheme.typography.titleSmall,
+                                style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -323,7 +375,7 @@ private fun PrimaryRegisterSection(
 
                     Text(
                         text = WesternFormatters.formatIls(basketTotalIls),
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -340,11 +392,12 @@ private fun PrimaryRegisterSection(
                             .weight(1f)
                             .heightIn(min = 48.dp)
                             .testTag("home_resume_review_button"),
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary
-                        )
+                        ),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
                     ) {
                         Text(
                             text = lang.tr("مراجعة ودفع", "Review & Pay"),
@@ -358,7 +411,8 @@ private fun PrimaryRegisterSection(
                         modifier = Modifier
                             .heightIn(min = 48.dp)
                             .testTag("hero_new_sale_button"),
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.AddShoppingCart,
@@ -378,7 +432,7 @@ private fun PrimaryRegisterSection(
                         modifier = Modifier
                             .size(48.dp)
                             .testTag("hero_scan_barcode_button"),
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         colors = IconButtonDefaults.filledTonalIconButtonColors(
                             containerColor = MaterialTheme.colorScheme.surface,
                             contentColor = MaterialTheme.colorScheme.onSurface
@@ -386,7 +440,8 @@ private fun PrimaryRegisterSection(
                     ) {
                         Icon(
                             imageVector = Icons.Default.QrCodeScanner,
-                            contentDescription = lang.tr("مسح باركود", "Scan Barcode")
+                            contentDescription = lang.tr("مسح باركود", "Scan Barcode"),
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
@@ -395,7 +450,7 @@ private fun PrimaryRegisterSection(
                         modifier = Modifier
                             .size(48.dp)
                             .testTag("home_quick_custom_item_button"),
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         colors = IconButtonDefaults.filledTonalIconButtonColors(
                             containerColor = MaterialTheme.colorScheme.surface,
                             contentColor = MaterialTheme.colorScheme.onSurface
@@ -403,7 +458,8 @@ private fun PrimaryRegisterSection(
                     ) {
                         Icon(
                             imageVector = Icons.Default.PointOfSale,
-                            contentDescription = lang.tr("صنف حر سريع", "Quick Custom Item")
+                            contentDescription = lang.tr("صنف حر سريع", "Quick Custom Item"),
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
@@ -471,7 +527,8 @@ private fun PrimaryRegisterSection(
             ) {
                 Icon(
                     imageVector = Icons.Default.PointOfSale,
-                    contentDescription = lang.tr("مبلغ حر سريع", "Quick Custom Amount")
+                    contentDescription = lang.tr("مبلغ حر سريع", "Quick Custom Amount"),
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
@@ -480,8 +537,8 @@ private fun PrimaryRegisterSection(
 
 /**
  * Owner / Manager financial pulse:
- * Replaces 4 separate KPI cards with one cohesive, high-contrast ledger summary card
- * showing actual drawer cash, today's sales, and open receivables/payables.
+ * Provides a cohesive ledger summary card with subtle BoardUI-inspired surface tinting,
+ * displaying expected book cash in drawer, today's sales, and open receivables/payables.
  */
 @Composable
 private fun OwnerFinancialPulseCard(
@@ -496,35 +553,33 @@ private fun OwnerFinancialPulseCard(
     val debtorCustomersCount = state.customers.count { it.balanceIls > 0.009 }
     val owedSuppliersCount = state.suppliers.count { it.balanceOwedIls > 0.009 }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    PhaseOneCard(
+        borderColor = MaterialTheme.colorScheme.outlineVariant,
+        contentPadding = PaddingValues(16.dp)
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Primary Drawer Cash row (tappable to open Financial Reports)
+            // Primary Drawer Cash row (tappable to open Financial Reports reconciliation)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClick = onNavigateToReports)
-                    .padding(vertical = 2.dp),
+                    .heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(role = Role.Button, onClick = onNavigateToReports)
+                    .padding(vertical = 4.dp, horizontal = 2.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
                     Text(
-                        text = lang.tr("النقد الفعلي بالصندوق", "Cash in Drawer"),
+                        text = lang.tr("النقد المتوقع بالصندوق", "Expected drawer cash"),
                         style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
@@ -542,13 +597,13 @@ private fun OwnerFinancialPulseCard(
 
                 Text(
                     text = WesternFormatters.formatIls(state.drawerTotalCashIls),
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 )
             }
 
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f))
 
             // 3-column compact ledger metrics: Today's Sales | Customer Debt | Supplier Payables
             Row(
@@ -558,14 +613,15 @@ private fun OwnerFinancialPulseCard(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Today's Sales
+                // Today's Sales Column
                 Column(
                     modifier = Modifier
                         .weight(1f)
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onNavigateToReports)
-                        .padding(vertical = 2.dp),
-                    verticalArrangement = Arrangement.spacedBy(1.dp)
+                        .clickable(role = Role.Button, onClick = onNavigateToReports)
+                        .padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Text(
                         text = lang.tr("مبيعات اليوم", "Today's Sales"),
@@ -597,15 +653,16 @@ private fun OwnerFinancialPulseCard(
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                 )
 
-                // Customer Receivables
+                // Customer Receivables Column
                 Column(
                     modifier = Modifier
                         .weight(1f)
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onNavigateToCustomers)
+                        .clickable(role = Role.Button, onClick = onNavigateToCustomers)
                         .testTag("home_customers_button")
-                        .padding(vertical = 2.dp),
-                    verticalArrangement = Arrangement.spacedBy(1.dp)
+                        .padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Text(
                         text = lang.tr("ديون الزبائن", "Receivables"),
@@ -628,6 +685,7 @@ private fun OwnerFinancialPulseCard(
                             "${WesternFormatters.formatInt(debtorCustomersCount)} open"
                         },
                         style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
                         color = if (state.totalCustomerDebtsIls > 0.009) financial.debit else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -637,14 +695,15 @@ private fun OwnerFinancialPulseCard(
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                 )
 
-                // Supplier Payables
+                // Supplier Payables Column
                 Column(
                     modifier = Modifier
                         .weight(1f)
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onNavigateToSuppliers)
-                        .padding(vertical = 2.dp),
-                    verticalArrangement = Arrangement.spacedBy(1.dp)
+                        .clickable(role = Role.Button, onClick = onNavigateToSuppliers)
+                        .padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Text(
                         text = lang.tr("ذمم الموردين", "Payables"),
@@ -677,8 +736,8 @@ private fun OwnerFinancialPulseCard(
 
 /**
  * Cashier Shift Pulse:
- * Respects role boundaries (`canViewReports() == false`): hides store-wide profit and total debt KPIs,
- * showing only the cashier's immediate drawer responsibility and shift invoice count.
+ * Respects role security boundaries (`canViewReports() == false`): hides store-wide profit
+ * and total receivables/payables, showing only immediate shift drawer cash and invoice count.
  */
 @Composable
 private fun CashierShiftPulseCard(
@@ -686,22 +745,14 @@ private fun CashierShiftPulseCard(
     lang: AppLanguage,
     onViewInvoices: () -> Unit
 ) {
-    val financial = TraderTheme.financial
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    PhaseOneCard(
+        borderColor = MaterialTheme.colorScheme.outlineVariant,
+        contentPadding = PaddingValues(16.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(IntrinsicSize.Min)
-                .padding(16.dp),
+                .height(IntrinsicSize.Min),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -711,9 +762,9 @@ private fun CashierShiftPulseCard(
             ) {
                 Text(
                     text = if (lang == AppLanguage.AR) {
-                        "نقد الصندوق • ${state.currentSession.name}"
+                        "النقد المتوقع • ${state.currentSession.name}"
                     } else {
-                        "Drawer Cash • ${state.currentSession.name}"
+                        "Expected cash • ${state.currentSession.name}"
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -722,7 +773,7 @@ private fun CashierShiftPulseCard(
                 )
                 Text(
                     text = WesternFormatters.formatIls(state.drawerTotalCashIls),
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -745,9 +796,10 @@ private fun CashierShiftPulseCard(
             Column(
                 modifier = Modifier
                     .weight(0.9f)
+                    .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClick = onViewInvoices)
-                    .padding(vertical = 2.dp),
+                    .clickable(role = Role.Button, onClick = onViewInvoices)
+                    .padding(vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
@@ -773,9 +825,9 @@ private fun CashierShiftPulseCard(
 }
 
 /**
- * Actionable Stock Warning:
- * Shows the most urgent low-stock items (up to 2 by default, expandable if needed)
- * with inline +10 restock for authorized roles or quick catalog jump.
+ * Actionable Stock Warning Section:
+ * Surfaces urgent zero-stock and low-stock items with high-contrast warning badges,
+ * one-tap +10 restock for managers, or quick catalog jump.
  */
 @Composable
 private fun ActionableLowStockSection(
@@ -791,27 +843,18 @@ private fun ActionableLowStockSection(
     val visibleProducts = if (expanded) lowStockProducts else lowStockProducts.take(2)
     val outOfStockCount = lowStockProducts.count { it.stockCount <= 0 }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        border = BorderStroke(
-            width = 1.dp,
-            color = if (outOfStockCount > 0) {
-                financial.debit.copy(alpha = 0.35f)
-            } else {
-                financial.warning.copy(alpha = 0.35f)
-            }
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    PhaseOneCard(
+        borderColor = if (outOfStockCount > 0) {
+            financial.debit.copy(alpha = 0.40f)
+        } else {
+            financial.warning.copy(alpha = 0.40f)
+        },
+        borderWidth = 1.2.dp,
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -820,14 +863,14 @@ private fun ActionableLowStockSection(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(
                         imageVector = Icons.Default.WarningAmber,
                         contentDescription = null,
                         tint = if (outOfStockCount > 0) financial.debit else financial.warning,
-                        modifier = Modifier.size(17.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                     Text(
                         text = if (lang == AppLanguage.AR) {
@@ -840,15 +883,14 @@ private fun ActionableLowStockSection(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     if (outOfStockCount > 0) {
-                        Text(
+                        PhaseOneStatusBadge(
                             text = if (lang == AppLanguage.AR) {
-                                "• ${WesternFormatters.formatInt(outOfStockCount)} نفد"
+                                "${WesternFormatters.formatInt(outOfStockCount)} نفد"
                             } else {
-                                "• ${WesternFormatters.formatInt(outOfStockCount)} out"
+                                "${WesternFormatters.formatInt(outOfStockCount)} out"
                             },
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = financial.debit
+                            textColor = financial.onDebitContainer,
+                            containerColor = financial.debitContainer
                         )
                     }
                 }
@@ -889,7 +931,8 @@ private fun ActionableLowStockSection(
                         Text(
                             text = lang.tr("الجرد", "Inventory"),
                             style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
@@ -898,7 +941,7 @@ private fun ActionableLowStockSection(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 visibleProducts.forEachIndexed { index, product ->
                     if (index > 0) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
                     }
                     LowStockActionRow(
                         product = product,
@@ -995,8 +1038,8 @@ private fun LowStockActionRow(
 }
 
 /**
- * Latest Work:
- * Shows the latest 2 invoices for immediate verification or re-opening a receipt.
+ * Recent Invoices Section:
+ * Shows the latest invoices for immediate verification or receipt reprint.
  */
 @Composable
 private fun RecentInvoicesSection(
@@ -1007,47 +1050,24 @@ private fun RecentInvoicesSection(
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = lang.tr("آخر الفواتير", "Latest Invoices"),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            TextButton(
-                onClick = onViewAllInvoices,
-                modifier = Modifier
-                    .heightIn(min = 48.dp)
-                    .testTag("view_all_invoices_button"),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    text = lang.tr("كل الفواتير", "All Invoices"),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
+        PhaseOneSectionHeader(
+            title = lang.tr("آخر الفواتير", "Latest Invoices"),
+            actionTitle = lang.tr("كل الفواتير", "All Invoices"),
+            onActionClick = onViewAllInvoices,
+            actionTag = "view_all_invoices_button"
+        )
 
         if (invoices.isEmpty()) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            PhaseOneCard(
+                borderColor = MaterialTheme.colorScheme.outlineVariant,
+                contentPadding = PaddingValues(16.dp)
             ) {
                 Text(
                     text = lang.tr("لا توجد فواتير مسجلة اليوم بعد.", "No invoices recorded yet today."),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(16.dp)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         } else {
@@ -1066,9 +1086,7 @@ private fun RecentInvoicesSection(
 
 /**
  * Secondary Store Operations Hub:
- * Displays back-office destinations (Inventory, Suppliers, Expenses, Reports) in a balanced 2x2
- * non-scrolling Bento Grid so merchants never have to scroll horizontally to discover core store modules,
- * paired with a compact 2-button utility row for Printer and Store Settings.
+ * Balanced 2x2 Bento Grid for core store modules + utility buttons for Printer and Settings.
  */
 @Composable
 private fun SecondaryOperationsSection(
@@ -1087,7 +1105,7 @@ private fun SecondaryOperationsSection(
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
             text = lang.tr("إدارة المتجر والدفاتر", "Store Operations & Ledgers"),
@@ -1101,7 +1119,7 @@ private fun SecondaryOperationsSection(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            OperationGridTile(
+            PhaseOneBentoTile(
                 title = lang.tr("المخزون والأصناف", "Inventory"),
                 subtitle = if (lowStockCount > 0) {
                     lang.tr(
@@ -1120,12 +1138,12 @@ private fun SecondaryOperationsSection(
                 modifier = Modifier.weight(1f)
             )
 
-            OperationGridTile(
+            PhaseOneBentoTile(
                 title = lang.tr("الموردون والمشتريات", "Suppliers"),
-                subtitle = lang.tr(
+                subtitle = if (canViewReports) lang.tr(
                     "${WesternFormatters.formatInt(state.suppliers.size)} مورد • ${WesternFormatters.formatIls(state.totalSupplierPayablesIls)}",
                     "${WesternFormatters.formatInt(state.suppliers.size)} vendors • ${WesternFormatters.formatIls(state.totalSupplierPayablesIls)}"
-                ),
+                ) else lang.tr("دليل الموردين", "Supplier directory"),
                 icon = Icons.Default.LocalShipping,
                 onClick = onNavigateToSuppliers,
                 testTag = "home_suppliers_button",
@@ -1138,7 +1156,7 @@ private fun SecondaryOperationsSection(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            OperationGridTile(
+            PhaseOneBentoTile(
                 title = lang.tr("المصاريف والنثريات", "Expenses"),
                 subtitle = lang.tr(
                     "اليوم: ${WesternFormatters.formatIls(state.shiftExpensesIls)}",
@@ -1151,7 +1169,7 @@ private fun SecondaryOperationsSection(
             )
 
             if (canViewReports) {
-                OperationGridTile(
+                PhaseOneBentoTile(
                     title = lang.tr("التقارير والصندوق", "Reports & Drawer"),
                     subtitle = lang.tr(
                         "الصندوق: ${WesternFormatters.formatIls(state.drawerTotalCashIls)}",
@@ -1163,11 +1181,11 @@ private fun SecondaryOperationsSection(
                     modifier = Modifier.weight(1f)
                 )
             } else {
-                OperationGridTile(
+                PhaseOneBentoTile(
                     title = lang.tr("دفتر الزبائن", "Customers"),
                     subtitle = lang.tr(
-                        "الذمم: ${WesternFormatters.formatIls(state.totalCustomerDebtsIls)}",
-                        "Receivables: ${WesternFormatters.formatIls(state.totalCustomerDebtsIls)}"
+                        "حسابات الزبائن والتحصيل",
+                        "Accounts and collections"
                     ),
                     icon = Icons.Default.People,
                     onClick = onNavigateToCustomers,
@@ -1204,69 +1222,6 @@ private fun SecondaryOperationsSection(
 }
 
 @Composable
-private fun OperationGridTile(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    onClick: () -> Unit,
-    testTag: String,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier
-            .heightIn(min = 60.dp)
-            .testTag(testTag),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
-                modifier = Modifier.size(36.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun OperationUtilityButton(
     title: String,
     subtitle: String,
@@ -1281,13 +1236,13 @@ private fun OperationUtilityButton(
             .heightIn(min = 48.dp)
             .testTag(testTag),
         shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -1369,28 +1324,17 @@ fun RecentInvoiceCard(
         "${WesternFormatters.formatInt(invoice.items.size)} items"
     )
 
-    Card(
+    PhaseOneCard(
         onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("recent_invoice_${invoice.invoiceNumber}"),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        border = BorderStroke(
-            width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        testTag = "recent_invoice_${invoice.invoiceNumber}",
+        borderColor = MaterialTheme.colorScheme.outlineVariant,
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 11.dp)
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 11.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Top Row: Customer / Note (Primary identifier) + Net Total
+            // Top Row: Customer / Note + Net Total
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1416,7 +1360,7 @@ fun RecentInvoiceCard(
                 )
             }
 
-            // Bottom Row: Invoice Code • Date/Time • Item Count | Paid vs Credit Status Pill
+            // Bottom Row: Invoice Code • Date/Time • Item Count | Status Pill
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1462,21 +1406,12 @@ fun RecentInvoiceCard(
                     )
                 }
 
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = statusBg
-                ) {
-                    Text(
-                        text = statusText,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = statusColor,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        maxLines = 1
-                    )
-                }
+                PhaseOneStatusBadge(
+                    text = statusText,
+                    textColor = statusColor,
+                    containerColor = statusBg
+                )
             }
         }
     }
 }
-

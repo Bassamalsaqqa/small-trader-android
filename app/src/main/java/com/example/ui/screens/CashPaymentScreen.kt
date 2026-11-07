@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
@@ -25,6 +26,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
@@ -51,6 +53,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -58,11 +61,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.example.model.Customer
 import com.example.model.WesternFormatters
@@ -71,6 +76,19 @@ import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
 import kotlin.math.abs
 
+/**
+ * Native Material3 Cash Payment & Rapid Tender Settlement Screen (Step 3 of Checkout).
+ *
+ * Design Invariants Enforced:
+ * 1. Financial Settlement Clarity: Primary board isolates Net Amount Due vs. Cash Received,
+ *    and provides instant Change Due / Shortfall calculation with high-contrast status colors.
+ * 2. Rapid Cashier Ergonomics: Exact tender button, standard bill chips (10, 20, 50, 100, 200),
+ *    and an integrated 3x4 on-screen POS Keypad allow full one-handed touch entry without soft keyboard jumps.
+ * 3. Strict 48dp Minimum Touch Targets on all buttons, bill chips, keypad keys, and clear affordances.
+ * 4. Distinct Credit-to-Customer Separation: Credit posting is isolated in its own card, strictly
+ *    blocked for walk-in cash customers, and displays 3-column debt projections + credit limit ceiling enforcement.
+ * 5. Single Authoritative Confirmation Dock: Discloses full drawer cash, change, and stock impact before final commit.
+ */
 @Composable
 fun CashPaymentScreen(
     state: TraderUiState,
@@ -162,6 +180,7 @@ fun CashPaymentScreen(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -363,7 +382,7 @@ fun CashPaymentScreen(
                                 .testTag("cash_tender_input")
                         )
 
-                        // Quick Shekel Presets Row: Exact + Standard Bills
+                        // Quick Shekel Presets Row: Exact + Standard Bills (All >= 48dp hit area)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -389,13 +408,12 @@ fun CashPaymentScreen(
                                     }
                                 ),
                                 modifier = Modifier
-                                    .weight(1.25f)
+                                    .weight(1.3f)
                                     .heightIn(min = 48.dp)
                                     .testTag("cash_exact_button")
                             ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically,
+                                Box(
+                                    contentAlignment = Alignment.Center,
                                     modifier = Modifier.padding(horizontal = 6.dp)
                                 ) {
                                     Text(
@@ -440,10 +458,7 @@ fun CashPaymentScreen(
                                         .heightIn(min = 48.dp)
                                         .testTag("cash_bill_$bill")
                                 ) {
-                                    Row(
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
+                                    Box(contentAlignment = Alignment.Center) {
                                         Text(
                                             text = "$bill",
                                             style = MaterialTheme.typography.titleMedium.copy(
@@ -459,6 +474,14 @@ fun CashPaymentScreen(
                                 }
                             }
                         }
+
+                        // Cashier Rapid Numeric Keypad (Ergonomic touch tender)
+                        CashierNumpadGrid(
+                            lang = lang,
+                            onKeypadPress = onKeypadPress,
+                            onClearFocus = { focusManager.clearFocus() },
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
 
                     // Change to Return / Shortfall Callout Banner
@@ -583,6 +606,7 @@ fun CashPaymentScreen(
                         MaterialTheme.colorScheme.outlineVariant
                     }
                 ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -644,6 +668,7 @@ fun CashPaymentScreen(
                             onClick = { isCustomerPickerOpen = true },
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                             shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                             modifier = Modifier
                                 .heightIn(min = 48.dp)
                                 .testTag("payment_select_customer_button")
@@ -699,6 +724,10 @@ fun CashPaymentScreen(
                             } else {
                                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                             },
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (overLimit) financial.debit.copy(alpha = 0.35f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
@@ -721,7 +750,12 @@ fun CashPaymentScreen(
                                         Text(
                                             text = WesternFormatters.formatIls(selectedCustomer.balanceIls),
                                             style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (selectedCustomer.balanceIls > 0.005) {
+                                                financial.debit
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurface
+                                            }
                                         )
                                     }
 
@@ -816,7 +850,7 @@ fun CashPaymentScreen(
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(48.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("complete_credit_sale_button")
                         ) {
                             Icon(
@@ -864,6 +898,7 @@ fun CashPaymentScreen(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
             shadowElevation = 8.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -949,5 +984,48 @@ fun CashPaymentScreen(
                 isCustomerPickerOpen = false
             }
         )
+    }
+}
+
+/** Numeric keys retain their familiar LTR positions in either app language. */
+@Composable
+private fun CashierNumpadGrid(
+    lang: com.example.model.AppLanguage,
+    onKeypadPress: (String) -> Unit,
+    onClearFocus: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val rows = listOf(
+        listOf("1", "2", "3"),
+        listOf("4", "5", "6"),
+        listOf("7", "8", "9"),
+        listOf("BACK", "0", ".")
+    )
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            rows.forEach { keys ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    keys.forEach { key ->
+                        Surface(
+                            onClick = { onClearFocus(); onKeypadPress(key) },
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.weight(1f).heightIn(min = 48.dp)
+                                .testTag("cash_key_$key")
+                        ) {
+                            Box(Modifier.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                                if (key == "BACK") {
+                                    Icon(Icons.AutoMirrored.Filled.Backspace,
+                                        contentDescription = lang.tr("حذف آخر رقم", "Delete last digit"))
+                                } else {
+                                    Text(key, style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
