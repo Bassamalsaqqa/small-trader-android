@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,9 +24,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Search
@@ -33,25 +36,29 @@ import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +66,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -67,6 +75,10 @@ import com.example.model.PurchaseBill
 import com.example.model.Supplier
 import com.example.model.SupplierPayment
 import com.example.model.WesternFormatters
+import com.example.ui.components.StitchBadge
+import com.example.ui.components.StitchBadgeTone
+import com.example.ui.components.StitchBidiUtils
+import com.example.ui.components.StitchCard
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
@@ -81,6 +93,20 @@ private enum class SupplierBalanceFilter {
     SETTLED
 }
 
+/**
+ * Native Supplier Directory & Accounts Payable Ledger Screen (سجل الموردين والذمم).
+ *
+ * Implements Stitch Design System (ST-33, ST-37, ST-38, ST-40 / DESIGN_LOCK.md):
+ * 1. Role Protection: Only Owner/Manager can view or interact with suppliers. Cashier is
+ *    immediately gated out.
+ * 2. Truthful Directional Balances:
+ *    - Supplier Payable (علينا للمورد): Warning pill `#A15C00` / `#FFF5DF`
+ *    - Supplier Advance (لنا رصيد مقدم): Success pill `#14804A` / `#E8F5E9`
+ *    - Settled: Success checkmark pill
+ * 3. Separation of Concerns: Clear boundary between Financial Bills (debts & cash payments)
+ *    and Physical Goods Receipts (GRN - stock addition).
+ * 4. Microtype Safety & Spacing: 12sp floor, 12dp card radii, 10dp buttons, 48dp touch bounds.
+ */
 @Composable
 fun SuppliersScreen(
     state: TraderUiState,
@@ -98,10 +124,14 @@ fun SuppliersScreen(
     var selectedFilter by remember { mutableStateOf(SupplierBalanceFilter.ALL) }
     var isAddSupplierOpen by rememberSaveable { mutableStateOf(false) }
 
-    androidx.compose.runtime.LaunchedEffect(launchCreate) {
-        if (launchCreate && canManageSuppliers) { isAddSupplierOpen = true; onLaunchConsumed() }
+    LaunchedEffect(launchCreate) {
+        if (launchCreate && canManageSuppliers) {
+            isAddSupplierOpen = true
+            onLaunchConsumed()
+        }
     }
     if (!canManageSuppliers) return
+
     val payablesCount = remember(state.suppliers) { state.suppliers.count { it.balanceOwedIls > 0.005 } }
     val advancesCount = remember(state.suppliers) { state.suppliers.count { it.balanceOwedIls < -0.005 } }
     val settledCount = remember(state.suppliers) { state.suppliers.count { abs(it.balanceOwedIls) <= 0.005 } }
@@ -142,6 +172,7 @@ fun SuppliersScreen(
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 0.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -150,7 +181,7 @@ fun SuppliersScreen(
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Payables vs Prepayments Summary Strip + New Financial Bill & New Supplier CTAs
+                // Payables vs Prepayments Summary Strip + New Bill & New Supplier CTAs
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -168,7 +199,7 @@ fun SuppliersScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = WesternFormatters.formatIls(state.totalSupplierPayablesIls),
+                                text = StitchBidiUtils.formatIls(state.totalSupplierPayablesIls),
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
@@ -184,7 +215,7 @@ fun SuppliersScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = WesternFormatters.formatIls(state.totalSupplierAdvancesIls),
+                                text = StitchBidiUtils.formatIls(state.totalSupplierAdvancesIls),
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
@@ -204,8 +235,11 @@ fun SuppliersScreen(
                                 OutlinedButton(
                                     onClick = { isAddSupplierOpen = true },
                                     shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                                    modifier = Modifier.testTag("add_supplier_button")
+                                    modifier = Modifier
+                                        .heightIn(min = 48.dp)
+                                        .testTag("add_supplier_button")
                                 ) {
                                     Text(
                                         text = lang.tr("+ مورد", "+ Vendor"),
@@ -216,14 +250,20 @@ fun SuppliersScreen(
                             Button(
                                 onClick = onOpenReceivePurchaseDialog,
                                 shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                                modifier = Modifier.testTag("record_purchase_bill_button")
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("record_purchase_bill_button")
                             ) {
                                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = lang.tr("فاتورة شراء", "New Bill"),
-                                    style = MaterialTheme.typography.labelLarge
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                                 )
                             }
                         }
@@ -280,6 +320,7 @@ fun SuppliersScreen(
                                     Icon(
                                         imageVector = Icons.Default.Clear,
                                         contentDescription = lang.tr("إغلاق", "Dismiss"),
+                                        tint = if (isError) MaterialTheme.colorScheme.onErrorContainer else TraderTheme.financial.income,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -288,18 +329,19 @@ fun SuppliersScreen(
                     }
                 }
 
-                // Instant Search by Supplier Name, Company, or Phone
+                // Instant Search by Supplier Name, Representative or Phone
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 48.dp)
                         .testTag("supplier_search_input"),
                     placeholder = {
                         Text(
                             text = lang.tr(
-                                "ابحث باسم المورد، الشركة أو رقم الهاتف...",
-                                "Search supplier name, company, or phone..."
+                                "ابحث باسم المورد، الشركة، أو رقم الهاتف...",
+                                "Search by supplier name, company, or phone..."
                             ),
                             style = MaterialTheme.typography.bodyMedium,
                             maxLines = 1,
@@ -310,88 +352,134 @@ fun SuppliersScreen(
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
                         )
                     },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
+                            IconButton(
+                                onClick = { searchQuery = "" },
+                                modifier = Modifier.size(48.dp)
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.Clear,
-                                    contentDescription = lang.tr("مسح", "Clear")
+                                    contentDescription = lang.tr("مسح", "Clear"),
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                    )
                 )
 
-                // Balance Filter Chips
+                // Balance Filter Chips (All / Payables / Advances / Settled)
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     item {
-                        FilterChip(
-                            selected = selectedFilter == SupplierBalanceFilter.ALL,
-                            onClick = { selectedFilter = SupplierBalanceFilter.ALL },
-                            label = {
-                                Text(
-                                    lang.tr(
-                                        "الكل (${WesternFormatters.formatInt(state.suppliers.size)})",
-                                        "All (${WesternFormatters.formatInt(state.suppliers.size)})"
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
+                            FilterChip(
+                                selected = selectedFilter == SupplierBalanceFilter.ALL,
+                                onClick = { selectedFilter = SupplierBalanceFilter.ALL },
+                                label = {
+                                    Text(
+                                        text = lang.tr(
+                                            "الكل (${WesternFormatters.formatInt(state.suppliers.size)})",
+                                            "All (${WesternFormatters.formatInt(state.suppliers.size)})"
+                                        ),
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = if (selectedFilter == SupplierBalanceFilter.ALL) FontWeight.Bold else FontWeight.Medium
+                                        )
                                     )
-                                )
-                            },
-                            modifier = Modifier.testTag("supplier_filter_ALL")
-                        )
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                modifier = Modifier.testTag("supplier_filter_ALL")
+                            )
+                        }
                     }
                     item {
-                        FilterChip(
-                            selected = selectedFilter == SupplierBalanceFilter.PAYABLES,
-                            onClick = { selectedFilter = SupplierBalanceFilter.PAYABLES },
-                            label = {
-                                Text(
-                                    lang.tr(
-                                        "لهم ذمة علينا (${WesternFormatters.formatInt(payablesCount)})",
-                                        "We Owe (${WesternFormatters.formatInt(payablesCount)})"
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
+                            FilterChip(
+                                selected = selectedFilter == SupplierBalanceFilter.PAYABLES,
+                                onClick = { selectedFilter = SupplierBalanceFilter.PAYABLES },
+                                label = {
+                                    Text(
+                                        text = lang.tr(
+                                            "علينا ذمة (${WesternFormatters.formatInt(payablesCount)})",
+                                            "Payable (${WesternFormatters.formatInt(payablesCount)})"
+                                        ),
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = if (selectedFilter == SupplierBalanceFilter.PAYABLES) FontWeight.Bold else FontWeight.Medium
+                                        )
                                     )
-                                )
-                            },
-                            modifier = Modifier.testTag("supplier_filter_PAYABLES")
-                        )
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = TraderTheme.financial.debit,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onError
+                                ),
+                                modifier = Modifier.testTag("supplier_filter_PAYABLES")
+                            )
+                        }
                     }
-                    if (advancesCount > 0) {
-                        item {
+                    item {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
                             FilterChip(
                                 selected = selectedFilter == SupplierBalanceFilter.ADVANCES,
                                 onClick = { selectedFilter = SupplierBalanceFilter.ADVANCES },
                                 label = {
                                     Text(
-                                        lang.tr(
-                                            "لنا دفعة مقدمة (${WesternFormatters.formatInt(advancesCount)})",
-                                            "Store Advance (${WesternFormatters.formatInt(advancesCount)})"
+                                        text = lang.tr(
+                                            "لنا رصيد مقدم (${WesternFormatters.formatInt(advancesCount)})",
+                                            "Advance (${WesternFormatters.formatInt(advancesCount)})"
+                                        ),
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = if (selectedFilter == SupplierBalanceFilter.ADVANCES) FontWeight.Bold else FontWeight.Medium
                                         )
                                     )
                                 },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = TraderTheme.financial.income,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                ),
                                 modifier = Modifier.testTag("supplier_filter_ADVANCES")
                             )
                         }
                     }
-                    if (settledCount > 0) {
-                        item {
+                    item {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
                             FilterChip(
                                 selected = selectedFilter == SupplierBalanceFilter.SETTLED,
                                 onClick = { selectedFilter = SupplierBalanceFilter.SETTLED },
                                 label = {
                                     Text(
-                                        lang.tr(
+                                        text = lang.tr(
                                             "خالص (${WesternFormatters.formatInt(settledCount)})",
                                             "Settled (${WesternFormatters.formatInt(settledCount)})"
+                                        ),
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = if (selectedFilter == SupplierBalanceFilter.SETTLED) FontWeight.Bold else FontWeight.Medium
                                         )
                                     )
                                 },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.secondary,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onSecondary
+                                ),
                                 modifier = Modifier.testTag("supplier_filter_SETTLED")
                             )
                         }
@@ -412,26 +500,46 @@ fun SuppliersScreen(
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Store,
                         contentDescription = null,
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier.size(42.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                     )
                     Text(
-                        text = lang.tr("لا يوجد موردون مطابقون للبحث", "No matching suppliers found"),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = if (searchQuery.isNotBlank() || selectedFilter != SupplierBalanceFilter.ALL) {
+                            lang.tr("لا يوجد موردين مطابقين للبحث أو التصفية", "No matching suppliers found")
+                        } else {
+                            lang.tr("لا يوجد موردين مسجلين حالياً", "No registered suppliers yet")
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
+                    if (searchQuery.isNotBlank() || selectedFilter != SupplierBalanceFilter.ALL) {
+                        TextButton(
+                            onClick = {
+                                searchQuery = ""
+                                selectedFilter = SupplierBalanceFilter.ALL
+                            },
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        ) {
+                            Text(
+                                text = lang.tr("عرض كل الموردين", "Show All Suppliers"),
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
                 }
             }
         } else {
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .testTag("suppliers_directory_list"),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -447,20 +555,24 @@ fun SuppliersScreen(
     }
 
     if (isAddSupplierOpen && onSaveSupplier != null) {
-        createDraft.SaveableStateProvider("supplier_${state.suppliers.size}") {
-        SupplierEditorDialog(
-            initialSupplier = null,
-            lang = lang,
-            onDismiss = { isAddSupplierOpen = false },
-            onConfirmSave = { sid, name, company, phone ->
-                onSaveSupplier(sid, name, company, phone)
-                isAddSupplierOpen = false
-            }
-        )
+        createDraft.SaveableStateProvider("new_supplier_form") {
+            SupplierEditorDialog(
+                initialSupplier = null,
+                lang = lang,
+                onDismiss = { isAddSupplierOpen = false },
+                onSave = { name, company, phone ->
+                    onSaveSupplier(null, name, company, phone)
+                    isAddSupplierOpen = false
+                }
+            )
         }
     }
 }
 
+/**
+ * Calm compact supplier list row (ST-33 Stitch Specification).
+ * Displays trade name, representative phone, directional balance pill, and detail click.
+ */
 @Composable
 private fun SupplierDirectoryRow(
     supplier: Supplier,
@@ -470,38 +582,21 @@ private fun SupplierDirectoryRow(
     val isPayableOwed = supplier.balanceOwedIls > 0.005
     val isStoreAdvance = supplier.balanceOwedIls < -0.005
 
-    val amountColor = when {
-        isPayableOwed || isStoreAdvance -> MaterialTheme.colorScheme.onSurface
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    val statusTextColor = when {
-        isPayableOwed -> TraderTheme.financial.onDebitContainer
-        isStoreAdvance -> TraderTheme.financial.onIncomeContainer
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    val badgeBg = when {
-        isPayableOwed -> TraderTheme.financial.debitContainer
-        isStoreAdvance -> TraderTheme.financial.incomeContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
+    val statusBadgeTone = when {
+        isPayableOwed -> StitchBadgeTone.WARNING
+        isStoreAdvance -> StitchBadgeTone.SUCCESS
+        else -> StitchBadgeTone.NEUTRAL
     }
 
     val statusLabel = when {
-        isPayableOwed -> lang.tr("مستحق له", "We Owe")
-        isStoreAdvance -> lang.tr("دفعة مقدمة لنا", "Store Advance")
+        isPayableOwed -> "${lang.tr("مستحق للمورد", "Owed to Supplier")} ${StitchBidiUtils.formatIls(supplier.balanceOwedIls)}"
+        isStoreAdvance -> "${lang.tr("لنا رصيد مقدم", "Store Advance")} ${StitchBidiUtils.formatIls(-supplier.balanceOwedIls)}"
         else -> lang.tr("خالص", "Settled")
-    }
-
-    val displayedAmount = when {
-        isPayableOwed -> WesternFormatters.formatIls(supplier.balanceOwedIls)
-        isStoreAdvance -> WesternFormatters.formatIls(-supplier.balanceOwedIls)
-        else -> WesternFormatters.formatIls(0.0)
     }
 
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
@@ -511,69 +606,75 @@ private fun SupplierDirectoryRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Left/Start: Trade Name + LTR Phone + Company
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+                verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 Text(
                     text = supplier.name(lang),
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = supplier.company(lang),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "•",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline
-                    )
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                         Text(
                             text = supplier.phone,
-                            style = MaterialTheme.typography.labelMedium.copy(fontFamily = MonoFontFamily),
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = MonoFontFamily,
+                                fontWeight = FontWeight.SemiBold
+                            ),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    if (supplier.company(lang).isNotBlank() && supplier.company(lang) != supplier.name(lang)) {
+                        Text("•", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outlineVariant)
+                        Text(
+                            text = supplier.company(lang),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
+
+                // Balance Directional Badge
+                StitchBadge(
+                    text = statusLabel,
+                    tone = statusBadgeTone,
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.padding(top = 2.dp)
+                )
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(10.dp))
 
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+            // Right/End: Action button indicator
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier.heightIn(min = 48.dp)
             ) {
-                Text(
-                    text = displayedAmount,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold
-                    ),
-                    color = amountColor
-                )
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = badgeBg
+                Box(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = statusLabel,
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = statusTextColor,
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                        text = lang.tr("التفاصيل", "Details"),
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
@@ -581,6 +682,15 @@ private fun SupplierDirectoryRow(
     }
 }
 
+/**
+ * Supplier Detail Screen (ST-37 Specification).
+ *
+ * Implements Stitch ST-37 (Outstanding Payable 850.00 ₪) and ST-38 (Disburse 200.00 ₪):
+ * - Outstanding payable display with clear "علينا للمورد" semantic
+ * - Cash disbursement trigger from drawer funds (850 - 200 = 650 ₪)
+ * - Clear separation between Financial Purchase Bills and Physical Goods Receipts (GRN)
+ * - Dynamic SKU-linked GRN inspection without hardcoded values
+ */
 @Composable
 fun SupplierDetailScreen(
     state: TraderUiState,
@@ -606,10 +716,14 @@ fun SupplierDetailScreen(
     }
 
     var isPayDialogOpen by rememberSaveable(supplier.id) { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(launchPayment, supplier.id) {
-        if (launchPayment && canManageSuppliers) { isPayDialogOpen = true; onLaunchConsumed() }
+    LaunchedEffect(launchPayment, supplier.id) {
+        if (launchPayment && canManageSuppliers) {
+            isPayDialogOpen = true
+            onLaunchConsumed()
+        }
     }
     if (!canManageSuppliers) return
+
     var isEditSupplierOpen by rememberSaveable(supplier.id) { mutableStateOf(false) }
     var isPurchaseReturnPreviewOpen by rememberSaveable(supplier.id) { mutableStateOf(false) }
     var activeBillForGrn by remember(supplier.id) { mutableStateOf<PurchaseBill?>(null) }
@@ -628,23 +742,79 @@ fun SupplierDetailScreen(
             .background(MaterialTheme.colorScheme.background)
             .testTag("supplier_detail_screen")
     ) {
+        // Sticky Header with Back Button
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = lang.tr("رجوع", "Back"),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = supplier.name(lang),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            Text(
+                                text = supplier.phone,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = MonoFontFamily,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (supplier.company(lang).isNotBlank() && supplier.company(lang) != supplier.name(lang)) {
+                            Text("•", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outlineVariant)
+                            Text(
+                                text = supplier.company(lang),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             if (feedbackMessage != null) {
                 item {
                     val isError = state.isSupplierActionError
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isError) {
-                            MaterialTheme.colorScheme.errorContainer
-                        } else {
-                            TraderTheme.financial.incomeContainer
-                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isError) MaterialTheme.colorScheme.errorContainer else TraderTheme.financial.incomeContainer,
                         border = BorderStroke(
                             1.dp,
                             if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.4f)
@@ -669,7 +839,7 @@ fun SupplierDetailScreen(
                                     imageVector = if (isError) Icons.Default.Warning else Icons.Default.CheckCircle,
                                     contentDescription = null,
                                     tint = if (isError) MaterialTheme.colorScheme.onErrorContainer else TraderTheme.financial.income,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
@@ -686,6 +856,7 @@ fun SupplierDetailScreen(
                                     Icon(
                                         imageVector = Icons.Default.Clear,
                                         contentDescription = lang.tr("إغلاق", "Dismiss"),
+                                        tint = if (isError) MaterialTheme.colorScheme.onErrorContainer else TraderTheme.financial.income,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -695,285 +866,176 @@ fun SupplierDetailScreen(
                 }
             }
 
-            // 1. Supplier Identity, Payable/Advance Status & Actions Card
+            // 1. Outstanding Payable Summary Card (ST-37 Specification)
             item {
-                Card(
+                Surface(
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                text = supplier.name(lang),
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Text(
-                                    text = supplier.company(lang),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = "•",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.outline
-                                )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Phone,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(14.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                                        Text(
-                                            text = supplier.phone,
-                                            style = MaterialTheme.typography.bodySmall.copy(
-                                                fontFamily = MonoFontFamily,
-                                                fontWeight = FontWeight.SemiBold
-                                            ),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                        // Clear Balance Status Banner (We Owe vs Store Advance vs Settled)
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = when {
-                                isPayableOwed -> TraderTheme.financial.debitContainer
-                                isStoreAdvance -> TraderTheme.financial.incomeContainer
-                                else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                            },
-                            modifier = Modifier.fillMaxWidth()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    Text(
-                                        text = when {
-                                            isPayableOwed -> lang.tr("علينا للمورد (التزام مستحق)", "We Owe Supplier (Outstanding Payable)")
-                                            isStoreAdvance -> lang.tr("لنا عند المورد (دفعة مقدمة)", "Store Advance Credit")
-                                            else -> lang.tr("حالة حساب المورد", "Supplier Account Status")
-                                        },
-                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                                        color = when {
-                                            isPayableOwed -> TraderTheme.financial.debit
-                                            isStoreAdvance -> TraderTheme.financial.income
-                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                        }
-                                    )
-                                    Text(
-                                        text = when {
-                                            isPayableOwed -> lang.tr(
-                                                "المبلغ المتبقي للمورد من فواتير المشتريات المسجلة",
-                                                "Remaining payable from recorded purchase bills"
-                                            )
-                                            isStoreAdvance -> lang.tr(
-                                                "رصيد مدفوع مقدماً لصالح المحل يخصم من الفواتير القادمة",
-                                                "Prepaid balance in store's favor for upcoming bills"
-                                            )
-                                            else -> lang.tr(
-                                                "لا توجد التزامات متبقية للمورد حالياً",
-                                                "No outstanding payable owed to this supplier"
-                                            )
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.width(12.dp))
-
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text(
-                                        text = when {
-                                            isPayableOwed -> WesternFormatters.formatIls(supplier.balanceOwedIls)
-                                            isStoreAdvance -> WesternFormatters.formatIls(-supplier.balanceOwedIls)
-                                            else -> WesternFormatters.formatIls(0.0)
-                                        },
-                                        style = MaterialTheme.typography.headlineSmall.copy(
-                                            fontWeight = FontWeight.Bold
-                                        ),
-                                        color = when {
-                                            isPayableOwed -> TraderTheme.financial.debit
-                                            isStoreAdvance -> TraderTheme.financial.income
-                                            else -> MaterialTheme.colorScheme.onSurface
-                                        },
-                                        modifier = Modifier.testTag("supplier_detail_balance_value")
-                                    )
-                                    Text(
-                                        text = when {
-                                            isPayableOwed -> lang.tr("مستحق له", "We Owe")
-                                            isStoreAdvance -> lang.tr("رصيد لنا", "Advance")
-                                            else -> lang.tr("خالص", "Settled")
-                                        },
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = when {
-                                            isPayableOwed -> TraderTheme.financial.debit
-                                            isStoreAdvance -> TraderTheme.financial.income
-                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                        }
-                                    )
-                                }
-                            }
+                            Text(
+                                text = lang.tr(
+                                    "إجمالي المستحق للمورد (علينا)",
+                                    "Total Payable Owed to Supplier"
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            StitchBadge(
+                                text = when {
+                                    isPayableOwed -> lang.tr("قيد الاستحقاق", "Payable Due")
+                                    isStoreAdvance -> lang.tr("دفعة مقدمة لنا", "Store Advance")
+                                    else -> lang.tr("خالص", "Settled")
+                                },
+                                tone = when {
+                                    isPayableOwed -> StitchBadgeTone.WARNING
+                                    isStoreAdvance -> StitchBadgeTone.SUCCESS
+                                    else -> StitchBadgeTone.NEUTRAL
+                                },
+                                shape = RoundedCornerShape(8.dp)
+                            )
                         }
 
-                        if (canManageSuppliers) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Button(
-                                    onClick = { isPayDialogOpen = true },
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp)
-                                        .testTag("open_pay_supplier_dialog_button")
-                                ) {
-                                    Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = lang.tr("سداد دفعة للمورد", "Pay Supplier"),
-                                        style = MaterialTheme.typography.labelLarge
-                                    )
-                                }
-                                OutlinedButton(
-                                    onClick = onOpenReceivePurchaseDialog,
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp)
-                                        .testTag("supplier_new_bill_button")
-                                ) {
-                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = lang.tr("فاتورة شراء جديدة", "New Bill"),
-                                        style = MaterialTheme.typography.labelLarge
-                                    )
-                                }
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                if (onSaveSupplier != null) {
-                                    OutlinedButton(
-                                        onClick = { isEditSupplierOpen = true },
-                                        shape = RoundedCornerShape(10.dp),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(44.dp)
-                                            .testTag("edit_supplier_button")
-                                    ) {
-                                        Text(
-                                            text = lang.tr("تعديل بيانات المورد", "Edit Supplier"),
-                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
-                                        )
-                                    }
-                                }
-                                OutlinedButton(
-                                    onClick = { isPurchaseReturnPreviewOpen = true },
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(44.dp)
-                                        .testTag("open_purchase_return_preview_button")
-                                ) {
-                                    Text(
-                                        text = lang.tr("معاينة مرتجع مشتريات", "Purchase Return Preview"),
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
-                                    )
-                                }
-                            }
-                        } else {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = lang.tr(
-                                        "دور الكاشير: عرض حساب المورد فقط. قيد فواتير الشراء وسداد الموردين مخصص للمالك والمدير.",
-                                        "Cashier role: View-only. Recording purchase bills and supplier payments requires Owner or Manager."
-                                    ),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(10.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 2. Recorded Supplier Cash Disbursements (if any recorded in session)
-            if (payments.isNotEmpty()) {
-                item {
-                    Text(
-                        text = lang.tr("سندات الصرف النقدي للمورد", "Supplier Cash Disbursements"),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-                items(payments, key = { it.id }) { pay ->
-                    SupplierPaymentRow(payment = pay, lang = lang)
-                }
-            }
-
-            // 3. Purchase Bills Section (Clear distinction between Financial Payable vs Stock Receiving)
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                        // Big Dominant Amount (e.g. 850.00 ₪)
                         Text(
-                            text = lang.tr("فواتير المشتريات المالية مقابل استلام المخزن", "Financial Purchase Bills vs. Physical GRN"),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
+                            text = StitchBidiUtils.formatIls(supplier.balanceOwedIls),
+                            style = MaterialTheme.typography.displayLarge.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = when {
+                                isPayableOwed -> TraderTheme.financial.warning
+                                isStoreAdvance -> TraderTheme.financial.income
+                                else -> MaterialTheme.colorScheme.onSurface
+                            },
+                            modifier = Modifier.testTag("supplier_detail_balance_value")
                         )
+
                         Text(
                             text = lang.tr(
-                                "${WesternFormatters.formatInt(bills.size)} فواتير",
-                                "${WesternFormatters.formatInt(bills.size)} bills"
+                                "ذمم دائنة واجبة السداد من صندوق المحل لصالح المورد.",
+                                "Monetary obligation payable from shop cash drawer."
                             ),
-                            style = MaterialTheme.typography.labelMedium,
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Text(
-                        text = lang.tr(
-                            "الفاتورة المالية تثبت التزام المورد والدفعة النقدية فقط؛ بينما (سند استلام بضاعة مخزني - GRN) يضيف الكميات فعلياً لبطاقة الصنف بعد الفحص.",
-                            "Financial bills record supplier payables and cash paid; Physical Goods Receipt (GRN) adds inspected quantities to product stock."
+                }
+            }
+
+            // 2. Primary Fast Actions (>= 48dp Touch Targets)
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = { isPayDialogOpen = true },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
                         ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                            .testTag("open_pay_supplier_dialog_button")
+                    ) {
+                        Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = lang.tr("صرف ودفع دفعة للمورد", "Pay Supplier"),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = onOpenReceivePurchaseDialog,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                            .testTag("supplier_new_bill_button")
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = lang.tr("فاتورة شراء جديدة", "New Bill"),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+                        )
+                    }
+                }
+            }
+
+            // 3. Secondary Utility Actions (Edit & Return Preview)
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (onSaveSupplier != null) {
+                        OutlinedButton(
+                            onClick = { isEditSupplierOpen = true },
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp)
+                                .testTag("edit_supplier_button")
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = lang.tr("تعديل بيانات المورد", "Edit Info"),
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { isPurchaseReturnPreviewOpen = true },
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                            .testTag("open_purchase_return_preview_button")
+                    ) {
+                        Text(
+                            text = lang.tr("معاينة إرجاع بضاعة", "Return Preview"),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                        )
+                    }
+                }
+            }
+
+            // 4. Financial Purchase Bills Section
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = lang.tr("فواتير الشراء المسجلة", "Purchase Bills"),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    StitchBadge(
+                        text = "${WesternFormatters.formatInt(bills.size)} ${lang.tr("فاتورة", "bills")}",
+                        tone = StitchBadgeTone.NEUTRAL,
+                        shape = RoundedCornerShape(6.dp)
                     )
                 }
             }
@@ -981,13 +1043,16 @@ fun SupplierDetailScreen(
             if (bills.isEmpty()) {
                 item {
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surface,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = lang.tr("لا توجد فواتير شراء مسجلة لهذا المورد.", "No purchase bills recorded for this supplier."),
+                            text = lang.tr(
+                                "لا توجد فواتير شراء سابقة مسجلة لهذا المورد.",
+                                "No purchase bills recorded for this supplier yet."
+                            ),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(16.dp)
@@ -1004,6 +1069,53 @@ fun SupplierDetailScreen(
                     )
                 }
             }
+
+            // 5. Cash Disbursements History Section
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = lang.tr("سندات الصرف والدفعات النقدية", "Disbursement Payments"),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    StitchBadge(
+                        text = "${WesternFormatters.formatInt(payments.size)} ${lang.tr("سند", "receipts")}",
+                        tone = StitchBadgeTone.NEUTRAL,
+                        shape = RoundedCornerShape(6.dp)
+                    )
+                }
+            }
+
+            if (payments.isEmpty()) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = lang.tr(
+                                "لا توجد سندات صرف نقدية مسجلة لهذا المورد بعد.",
+                                "No cash disbursements recorded for this supplier yet."
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+                }
+            } else {
+                items(payments, key = { it.id }) { pay ->
+                    SupplierPaymentRow(payment = pay, lang = lang)
+                }
+            }
         }
     }
 
@@ -1012,8 +1124,8 @@ fun SupplierDetailScreen(
             initialSupplier = supplier,
             lang = lang,
             onDismiss = { isEditSupplierOpen = false },
-            onConfirmSave = { sid, name, company, phone ->
-                onSaveSupplier(sid, name, company, phone)
+            onSave = { name, company, phone ->
+                onSaveSupplier(supplier.id, name, company, phone)
                 isEditSupplierOpen = false
             }
         )
@@ -1022,170 +1134,252 @@ fun SupplierDetailScreen(
     if (isPurchaseReturnPreviewOpen) {
         PurchaseReturnPreviewDialog(
             supplier = supplier,
-            bills = bills,
             lang = lang,
             onDismiss = { isPurchaseReturnPreviewOpen = false }
         )
     }
 
+    // Physical Goods Receipt (GRN) Dialog
     if (activeBillForGrn != null && onConfirmGoodsReceipt != null) {
-        val bill = activeBillForGrn!!
         PhysicalGoodsReceiptDialog(
-            bill = bill,
+            bill = activeBillForGrn!!,
             products = state.products,
             lang = lang,
             onDismiss = { activeBillForGrn = null },
             onConfirmGrn = { productId, receivedQty, batchNote ->
+                val bill = activeBillForGrn ?: return@PhysicalGoodsReceiptDialog
                 onConfirmGoodsReceipt(bill.id, productId, receivedQty, batchNote)
                 activeBillForGrn = null
             }
         )
     }
 
-    // Supplier Disbursement Dialog
+    // Supplier Cash Disbursement Dialog (ST-38 Specification: 850 - 200 = 650 ₪)
     if (isPayDialogOpen && canManageSuppliers) {
         paymentDraft.SaveableStateProvider("payment_${supplier.id}_${state.supplierPayments.size}") {
-        val initialPayStr = if (supplier.balanceOwedIls > 0.005) {
-            WesternFormatters.formatNumber(minOf(200.0, supplier.balanceOwedIls)).removeSuffix(".00")
-        } else {
-            "200"
-        }
-        var payAmountText by rememberSaveable(supplier.id) { mutableStateOf(initialPayStr) }
-        val enteredAmount = payAmountText.toDoubleOrNull() ?: 0.0
-        val projectedOwed = remember(supplier.balanceOwedIls, enteredAmount) {
-            BigDecimal(supplier.balanceOwedIls.toString())
-                .subtract(BigDecimal(enteredAmount.toString()))
-                .setScale(2, RoundingMode.HALF_UP)
-                .toDouble()
-        }
+            val initialPayStr = if (supplier.balanceOwedIls > 0.005) {
+                WesternFormatters.formatNumber(supplier.balanceOwedIls).removeSuffix(".00")
+            } else {
+                ""
+            }
+            var payAmountText by rememberSaveable(supplier.id) { mutableStateOf(initialPayStr) }
+            val enteredAmount = payAmountText.toDoubleOrNull() ?: 0.0
+            val projectedOwed = remember(supplier.balanceOwedIls, enteredAmount) {
+                BigDecimal(supplier.balanceOwedIls.toString())
+                    .subtract(BigDecimal(enteredAmount.toString()))
+                    .setScale(2, RoundingMode.HALF_UP)
+                    .toDouble()
+            }
 
-        AlertDialog(
-            onDismissRequest = { isPayDialogOpen = false },
-            shape = RoundedCornerShape(16.dp),
-            title = {
-                Text(
-                    text = lang.tr("سداد دفعة نقدية للمورد", "Pay Supplier from Cash Drawer"),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
-            },
-            text = {
-                Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+            AlertDialog(
+                onDismissRequest = { isPayDialogOpen = false },
+                shape = RoundedCornerShape(12.dp),
+                title = {
                     Text(
-                        text = "${supplier.name(lang)} • ${
-                            if (supplier.balanceOwedIls > 0.005) {
-                                lang.tr("المستحق له حالياً: ${WesternFormatters.formatIls(supplier.balanceOwedIls)}", "Currently owed: ${WesternFormatters.formatIls(supplier.balanceOwedIls)}")
-                            } else if (supplier.balanceOwedIls < -0.005) {
-                                lang.tr("دفعة مقدمة لنا حالياً: ${WesternFormatters.formatIls(-supplier.balanceOwedIls)}", "Current advance credit: ${WesternFormatters.formatIls(-supplier.balanceOwedIls)}")
-                            } else {
-                                lang.tr("الرصيد الحالي: خالص (0.00 ₪)", "Current balance: Settled (0.00 ₪)")
-                            }
-                        }",
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = lang.tr("صرف دفعة نقدية للمورد", "Pay Supplier from Cash Drawer"),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
-
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                },
+                text = {
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        if (supplier.balanceOwedIls > 0.005) {
-                            val fullStr = WesternFormatters.formatNumber(supplier.balanceOwedIls).removeSuffix(".00")
-                            item {
-                                FilterChip(
-                                    selected = payAmountText == fullStr || abs(enteredAmount - supplier.balanceOwedIls) < 0.005,
-                                    onClick = { payAmountText = fullStr },
-                                    label = {
-                                        Text(
-                                            lang.tr(
-                                                "كامل المستحق (${WesternFormatters.formatIls(supplier.balanceOwedIls)})",
-                                                "Full Owed (${WesternFormatters.formatIls(supplier.balanceOwedIls)})"
-                                            )
+                        // Current Payable Status Card
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = supplier.name(lang),
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Text(
+                                    text = if (supplier.balanceOwedIls > 0.005) {
+                                        lang.tr(
+                                            "الرصيد المستحق الحالي للمورد (علينا): ${StitchBidiUtils.formatIls(supplier.balanceOwedIls)}",
+                                            "Currently owed to supplier: ${StitchBidiUtils.formatIls(supplier.balanceOwedIls)}"
                                         )
+                                    } else if (supplier.balanceOwedIls < -0.005) {
+                                        lang.tr(
+                                            "دفعة مقدمة لنا عند المورد: ${StitchBidiUtils.formatIls(-supplier.balanceOwedIls)}",
+                                            "Current advance credit: ${StitchBidiUtils.formatIls(-supplier.balanceOwedIls)}"
+                                        )
+                                    } else {
+                                        lang.tr("الرصيد الحالي: خالص (0.00 ₪)", "Current balance: Settled (0.00 ₪)")
                                     },
-                                    modifier = Modifier.heightIn(min = 48.dp)
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = if (supplier.balanceOwedIls > 0.005) TraderTheme.financial.warning else TraderTheme.financial.income
                                 )
                             }
                         }
-                        items(listOf(200, 500, 1000)) { preset ->
-                            FilterChip(
-                                selected = payAmountText == preset.toString(),
-                                onClick = { payAmountText = preset.toString() },
-                                label = { Text("$preset ₪") },
-                                modifier = Modifier.heightIn(min = 48.dp)
-                            )
-                        }
-                    }
 
-                    OutlinedTextField(
-                        value = payAmountText,
-                        onValueChange = { payAmountText = WesternFormatters.sanitizeWesternDigits(it) },
-                        label = { Text(lang.tr("المبلغ المصروف من الصندوق (₪)", "Disbursement Amount (₪)")) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
-                        textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("supplier_payment_amount_input")
-                    )
-
-                    if (enteredAmount > 0.0) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (projectedOwed > 0.005) {
-                                TraderTheme.financial.warningContainer
-                            } else {
-                                TraderTheme.financial.incomeContainer
-                            },
-                            modifier = Modifier.fillMaxWidth()
+                        // Preset Chips (200, 500, Full)
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = when {
-                                    projectedOwed > 0.005 -> lang.tr(
-                                        "بعد الصرف: يتبقى للمورد علينا ${WesternFormatters.formatIls(projectedOwed)}",
-                                        "After payment: Remaining payable ${WesternFormatters.formatIls(projectedOwed)}"
+                            if (supplier.balanceOwedIls > 0.005) {
+                                val fullStr = WesternFormatters.formatNumber(supplier.balanceOwedIls).removeSuffix(".00")
+                                item {
+                                    Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
+                                        FilterChip(
+                                            selected = payAmountText == fullStr || abs(enteredAmount - supplier.balanceOwedIls) < 0.005,
+                                            onClick = { payAmountText = fullStr },
+                                            label = {
+                                                Text(
+                                                    lang.tr(
+                                                        "كامل (${StitchBidiUtils.formatIls(supplier.balanceOwedIls)})",
+                                                        "Full (${StitchBidiUtils.formatIls(supplier.balanceOwedIls)})"
+                                                    ),
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                                )
+                                            },
+                                            shape = RoundedCornerShape(10.dp),
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                            items(listOf(200, 500)) { preset ->
+                                Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
+                                    FilterChip(
+                                        selected = payAmountText == preset.toString(),
+                                        onClick = { payAmountText = preset.toString() },
+                                        label = { Text("$preset ₪") },
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                        )
                                     )
-                                    projectedOwed < -0.005 -> lang.tr(
-                                        "بعد الصرف: يصبح لنا رصيد دفعة مقدمة عند المورد ${WesternFormatters.formatIls(-projectedOwed)}",
-                                        "After payment: Store advance credit of ${WesternFormatters.formatIls(-projectedOwed)}"
+                                }
+                            }
+                        }
+
+                        // Cash Amount Input
+                        OutlinedTextField(
+                            value = payAmountText,
+                            onValueChange = { payAmountText = WesternFormatters.sanitizeWesternDigits(it) },
+                            label = { Text(lang.tr("المبلغ المراد صرفه ودفعه نقداً (₪) *", "Cash Disbursement (₪) *")) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            textStyle = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                textDirection = TextDirection.Ltr
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .testTag("supplier_payment_amount_input")
+                        )
+
+                        // Live Financial Impact Banner (ST-38: 850 - 200 = 650 ₪)
+                        if (enteredAmount > 0.0) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = when {
+                                            projectedOwed > 0.005 -> lang.tr(
+                                                "الرصيد المتبقي للمورد بعد الدفع: ${StitchBidiUtils.formatIls(projectedOwed)}",
+                                                "Remaining payable after payment: ${StitchBidiUtils.formatIls(projectedOwed)}"
+                                            )
+                                            projectedOwed < -0.005 -> lang.tr(
+                                                "بعد الصرف: يصبح لنا رصيد دفعة مقدمة ${StitchBidiUtils.formatIls(-projectedOwed)}",
+                                                "After payment: Store advance credit of ${StitchBidiUtils.formatIls(-projectedOwed)}"
+                                            )
+                                            else -> lang.tr(
+                                                "بعد الصرف: يصبح حساب المورد خالصاً تماماً (0.00 ₪)",
+                                                "After payment: Supplier account is settled (0.00 ₪)"
+                                            )
+                                        },
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
-                                    else -> lang.tr(
-                                        "بعد الصرف: يصبح حساب المورد خالصاً (0.00 ₪)",
-                                        "After payment: Supplier account becomes settled (0.00 ₪)"
-                                    )
-                                },
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = if (projectedOwed > 0.005) MaterialTheme.colorScheme.onSurface else TraderTheme.financial.income,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-                            )
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Payments,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = lang.tr(
+                                                "جهة الخصم: الصندوق النقدي الحالي (الدرج)",
+                                                "Source: Current cash drawer funds"
+                                            ),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (enteredAmount > 0.0) {
+                                onPaySupplier(supplier, enteredAmount)
+                                isPayDialogOpen = false
+                            }
+                        },
+                        enabled = enteredAmount > 0.0,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("confirm_supplier_payment_button")
+                    ) {
+                        Text(
+                            text = if (enteredAmount > 0.0) {
+                                lang.tr(
+                                    "تأكيد صرف ${StitchBidiUtils.formatIls(enteredAmount)} ودفعها للمورد",
+                                    "Confirm ${StitchBidiUtils.formatIls(enteredAmount)} Disbursement"
+                                )
+                            } else {
+                                lang.tr("تأكيد الصرف", "Confirm Payment")
+                            },
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { isPayDialogOpen = false },
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) {
+                        Text(lang.tr("إلغاء", "Cancel"))
+                    }
                 }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (enteredAmount > 0.0) {
-                            onPaySupplier(supplier, enteredAmount)
-                            isPayDialogOpen = false
-                        }
-                    },
-                    enabled = enteredAmount > 0.0,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.testTag("confirm_supplier_payment_button")
-                ) {
-                    Text(lang.tr("تأكيد الصرف", "Confirm Payment"))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { isPayDialogOpen = false }) {
-                    Text(lang.tr("إلغاء", "Cancel"))
-                }
-            }
-        )
+            )
         }
     }
 }
@@ -1196,7 +1390,7 @@ private fun SupplierPaymentRow(
     lang: AppLanguage
 ) {
     Surface(
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
@@ -1206,7 +1400,7 @@ private fun SupplierPaymentRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1228,7 +1422,7 @@ private fun SupplierPaymentRow(
             Spacer(modifier = Modifier.width(12.dp))
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = "- ${WesternFormatters.formatIls(payment.amountIls)}",
+                    text = "- ${StitchBidiUtils.formatIls(payment.amountIls)}",
                     style = MaterialTheme.typography.titleSmall.copy(
                         fontWeight = FontWeight.Bold
                     ),
@@ -1252,7 +1446,7 @@ private fun PurchaseBillRow(
     onOpenReceiveGoodsDialog: (() -> Unit)? = null
 ) {
     Card(
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
@@ -1260,7 +1454,7 @@ private fun PurchaseBillRow(
             .testTag("purchase_bill_${bill.billNumber}")
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(
@@ -1273,7 +1467,7 @@ private fun PurchaseBillRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = WesternFormatters.formatBillCode(bill.billNumber),
+                        text = StitchBidiUtils.formatBillCode(bill.billNumber),
                         style = MaterialTheme.typography.labelLarge.copy(
                             fontFamily = MonoFontFamily,
                             fontWeight = FontWeight.Bold
@@ -1281,29 +1475,15 @@ private fun PurchaseBillRow(
                         color = MaterialTheme.colorScheme.primary
                     )
                     val hasExpectedSku = !bill.expectedProductId.isNullOrBlank() && bill.expectedQuantity > 0
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = if (bill.isReceived) {
-                            TraderTheme.financial.incomeContainer
-                        } else {
-                            TraderTheme.financial.warningContainer
-                        }
-                    ) {
-                        Text(
-                            text = when {
-                                bill.isReceived -> lang.tr("تم استلام البضاعة بالمخزن (GRN)", "Goods Received in Stock (GRN)")
-                                hasExpectedSku -> lang.tr("بانتظار استلام مخزني (${WesternFormatters.formatInt(bill.expectedQuantity)} وحدة)", "Pending GRN (${WesternFormatters.formatInt(bill.expectedQuantity)} units)")
-                                else -> lang.tr("قيد مالي نصي فقط • بدون بنود أصناف", "Financial summary only • No SKU lines")
-                            },
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = if (bill.isReceived) {
-                                TraderTheme.financial.income
-                            } else {
-                                TraderTheme.financial.warning
-                            },
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                        )
-                    }
+                    StitchBadge(
+                        text = when {
+                            bill.isReceived -> lang.tr("تم استلام البضاعة (GRN)", "Goods Received (GRN)")
+                            hasExpectedSku -> lang.tr("بانتظار استلام (${WesternFormatters.formatInt(bill.expectedQuantity)} وحدة)", "Pending GRN (${WesternFormatters.formatInt(bill.expectedQuantity)} units)")
+                            else -> lang.tr("قيد مالي فقط", "Financial only")
+                        },
+                        tone = if (bill.isReceived) StitchBadgeTone.SUCCESS else StitchBadgeTone.WARNING,
+                        shape = RoundedCornerShape(6.dp)
+                    )
                 }
 
                 Text(
@@ -1327,17 +1507,17 @@ private fun PurchaseBillRow(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${lang.tr("قيمة الفاتورة:", "Bill Total:")} ${WesternFormatters.formatIls(bill.totalIls)}",
+                    text = "${lang.tr("القيمة:", "Total:")} ${StitchBidiUtils.formatIls(bill.totalIls)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "${lang.tr("دُفع نقداً:", "Paid Cash:")} ${WesternFormatters.formatIls(bill.paidIls)}",
+                    text = "${lang.tr("دُفع نقداً:", "Paid Cash:")} ${StitchBidiUtils.formatIls(bill.paidIls)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (bill.paidIls > 0.005) TraderTheme.financial.income else MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "${lang.tr("ذمة للمورد:", "Payable:")} ${WesternFormatters.formatIls(bill.remainingPayableIls)}",
+                    text = "${lang.tr("ذمة للمورد:", "Payable:")} ${StitchBidiUtils.formatIls(bill.remainingPayableIls)}",
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontWeight = FontWeight.Bold
                     ),
@@ -1354,7 +1534,8 @@ private fun PurchaseBillRow(
             if (canConfirmExpectedSku) {
                 OutlinedButton(
                     onClick = onOpenReceiveGoodsDialog!!,
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp)
@@ -1365,7 +1546,10 @@ private fun PurchaseBillRow(
                             "تأكيد استلام بضاعة مخزني وإضافة الكمية للمخزون (GRN)",
                             "Confirm Physical Goods Receipt into Stock (GRN)"
                         ),
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     )
                 }
             }
@@ -1378,24 +1562,23 @@ private fun SupplierEditorDialog(
     initialSupplier: Supplier?,
     lang: AppLanguage,
     onDismiss: () -> Unit,
-    onConfirmSave: (supplierId: String?, name: String, company: String, phone: String) -> Unit
+    onSave: (name: String, company: String, phone: String) -> Unit
 ) {
-    val isEditing = initialSupplier != null
-    var nameText by rememberSaveable(initialSupplier) { mutableStateOf(initialSupplier?.nameAr ?: "") }
-    var companyText by rememberSaveable(initialSupplier) { mutableStateOf(initialSupplier?.companyAr ?: "") }
-    var phoneText by rememberSaveable(initialSupplier) { mutableStateOf(initialSupplier?.phone ?: "") }
+    var nameText by rememberSaveable(initialSupplier?.id) { mutableStateOf(initialSupplier?.nameAr ?: "") }
+    var companyText by rememberSaveable(initialSupplier?.id) { mutableStateOf(initialSupplier?.companyAr ?: "") }
+    var phoneText by rememberSaveable(initialSupplier?.id) { mutableStateOf(initialSupplier?.phone ?: "") }
 
-    val canSave = nameText.trim().length >= 2
+    val canSave = nameText.trim().length >= 2 && phoneText.trim().length >= 4
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         title = {
             Text(
-                text = if (isEditing) {
-                    lang.tr("تعديل بيانات المورد", "Edit Supplier Info")
+                text = if (initialSupplier == null) {
+                    lang.tr("إضافة مورد جديد", "New Supplier")
                 } else {
-                    lang.tr("إضافة مورد جديد", "Add New Supplier")
+                    lang.tr("تعديل بيانات المورد", "Edit Supplier")
                 },
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
             )
@@ -1403,12 +1586,13 @@ private fun SupplierEditorDialog(
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 OutlinedTextField(
                     value = nameText,
                     onValueChange = { nameText = it },
-                    label = { Text(lang.tr("اسم المورد / المندوب *", "Supplier / Agent Name *")) },
+                    label = { Text(lang.tr("اسم المورد أو الشركة *", "Supplier Name *")) },
+                    placeholder = { Text(lang.tr("مثال: شركة القدس للتوزيع", "e.g. Al-Quds Distribution")) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
@@ -1418,7 +1602,7 @@ private fun SupplierEditorDialog(
                 OutlinedTextField(
                     value = companyText,
                     onValueChange = { companyText = it },
-                    label = { Text(lang.tr("الشركة أو المستودع", "Company / Distributor")) },
+                    label = { Text(lang.tr("اسم الشركة التجاري / النشاط", "Company / Trade Name")) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
@@ -1428,10 +1612,15 @@ private fun SupplierEditorDialog(
                 OutlinedTextField(
                     value = phoneText,
                     onValueChange = { phoneText = WesternFormatters.sanitizeWesternDigits(it) },
-                    label = { Text(lang.tr("رقم الجوال / الهاتف", "Phone Number")) },
+                    label = { Text(lang.tr("هاتف المندوب أو الشركة *", "Representative Phone *")) },
+                    placeholder = { Text("059X-XXXXXX") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        fontFamily = MonoFontFamily,
+                        textDirection = TextDirection.Ltr
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("supplier_editor_phone_input")
@@ -1442,31 +1631,48 @@ private fun SupplierEditorDialog(
             Button(
                 onClick = {
                     if (canSave) {
-                        onConfirmSave(initialSupplier?.id, nameText.trim(), companyText.trim(), phoneText.trim())
+                        onSave(nameText.trim(), companyText.trim(), phoneText.trim())
                     }
                 },
                 enabled = canSave,
                 shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("confirm_save_supplier_button")
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("confirm_save_supplier_button")
             ) {
-                Text(lang.tr("حفظ المورد", "Save Supplier"))
+                Text(
+                    text = lang.tr("حفظ بيانات المورد", "Save Supplier"),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
                 Text(lang.tr("إلغاء", "Cancel"))
             }
         }
     )
 }
 
+/**
+ * Single-SKU physical receiving confirmation dialog (GRN).
+ * Bounded inspection contract dynamically linked to bill.expectedProductId and bill.expectedQuantity.
+ */
 @Composable
-private fun PhysicalGoodsReceiptDialog(
+internal fun PhysicalGoodsReceiptDialog(
     bill: PurchaseBill,
     products: List<com.example.model.Product>,
     lang: AppLanguage,
     onDismiss: () -> Unit,
-    onConfirmGrn: (productId: String, receivedQty: Int, batchNote: String) -> Unit
+    onConfirmGrn: (productId: String, receivedQty: Int, batchNote: String) -> Unit,
+    errorMessage: String? = null
 ) {
     val expectedProduct = remember(products, bill.expectedProductId) {
         products.firstOrNull { it.id == bill.expectedProductId && it.isStockTracked }
@@ -1479,7 +1685,7 @@ private fun PhysicalGoodsReceiptDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         title = {
             Text(
                 text = lang.tr(
@@ -1494,6 +1700,9 @@ private fun PhysicalGoodsReceiptDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                if (!errorMessage.isNullOrBlank()) {
+                    Text(errorMessage, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("goods_receipt_error"))
+                }
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = TraderTheme.financial.incomeContainer.copy(alpha = 0.5f),
@@ -1501,8 +1710,8 @@ private fun PhysicalGoodsReceiptDialog(
                 ) {
                     Text(
                         text = lang.tr(
-                            "عرض تجريبي محدد لبند واحد: يطابق الصنف والكمية المسجلين في الفاتورة لمرة واحدة فقط دون تغيير ذمة المورد المالية.",
-                            "Bounded single-SKU demo: Verifies the bill's expected item and quantity once without altering supplier payable."
+                            "يطابق هذا السند الصنف والكمية المسجلين في الفاتورة لمرة واحدة فقط لزيادة رصيد المخزن الفعلي.",
+                            "Verifies expected item and quantity to increase physical inventory without changing supplier debt."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -1548,99 +1757,18 @@ private fun PhysicalGoodsReceiptDialog(
                     OutlinedTextField(
                         value = batchNote,
                         onValueChange = { batchNote = it },
-                        label = { Text(lang.tr("ملاحظة الفحص / رقم التشغيلة", "Inspection / Batch Note")) },
+                        label = { Text(lang.tr("ملاحظة الاستلام المخزني", "GRN Batch Note")) },
                         singleLine = true,
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("grn_note_input")
                     )
-
-                    Text(
-                        text = lang.tr(
-                            "رصيد (${expectedProduct.name(lang)}) سيرتفع من ${WesternFormatters.formatInt(expectedProduct.stockCount)} إلى ${WesternFormatters.formatInt(expectedProduct.stockCount + expectedQty)} ${expectedProduct.unit(lang)}",
-                            "${expectedProduct.name(lang)} stock will increase from ${WesternFormatters.formatInt(expectedProduct.stockCount)} to ${WesternFormatters.formatInt(expectedProduct.stockCount + expectedQty)}"
-                        ),
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                        color = TraderTheme.financial.income
-                    )
                 } else {
                     Text(
                         text = lang.tr(
-                            "هذه الفاتورة قيد مالي نصي فقط ولا تحتوي على صنف مخزني محدد للاستلام الآلي.",
-                            "This bill is a financial summary only and has no linked catalog SKU for automated GRN."
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TraderTheme.financial.warning
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val prod = expectedProduct
-                    if (!bill.isReceived && prod != null && expectedQty > 0) {
-                        onConfirmGrn(prod.id, expectedQty, batchNote.trim())
-                    }
-                },
-                enabled = canConfirm,
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("confirm_grn_submit_button")
-            ) {
-                Text(lang.tr("تثبيت الاستلام المخزني", "Confirm Goods Receipt"))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(lang.tr("إلغاء", "Cancel"))
-            }
-        }
-    )
-}
-
-@Composable
-private fun PurchaseReturnPreviewDialog(
-    supplier: Supplier,
-    bills: List<PurchaseBill>,
-    lang: AppLanguage,
-    onDismiss: () -> Unit
-) {
-    val latestBill = bills.firstOrNull()
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(16.dp),
-        title = {
-            Text(
-                text = lang.tr("معاينة مرتجع مشتريات للمورد (Purchase Return)", "Supplier Purchase Return Preview"),
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
-        },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = TraderTheme.financial.warningContainer.copy(alpha = 0.5f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = lang.tr(
-                            "معاينة نموذجية (Shallow Preview): إرجاع بضاعة تالفة أو قريبة الانتهاء للمورد (${supplier.name(lang)}) يخصم الكمية من المستودع ويصدر إشعار مدين يخفض التزام المورد عبر Laravel /api/v1.",
-                            "Shallow Preview: Returning damaged/expiring goods to (${supplier.name(lang)}) deducts stock and issues a supplier debit note via Laravel /api/v1."
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(10.dp)
-                    )
-                }
-                if (latestBill != null) {
-                    Text(
-                        text = lang.tr(
-                            "مثال تطبيقي على الفاتورة ${WesternFormatters.formatBillCode(latestBill.billNumber)} (${latestBill.itemsSummary}):\n• إرجاع 2 كرتونة تالفة بتكلفة 120.00 ₪\n• الأثر المالي: خفض ذمة المورد من ${WesternFormatters.formatIls(supplier.balanceOwedIls)} إلى ${WesternFormatters.formatIls((supplier.balanceOwedIls - 120.0).coerceAtLeast(0.0))}",
-                            "Sample return against ${WesternFormatters.formatBillCode(latestBill.billNumber)}:\n• Return 2 damaged cartons (120.00 ₪)\n• Financial impact: Reduces payable owed from ${WesternFormatters.formatIls(supplier.balanceOwedIls)} to ${WesternFormatters.formatIls((supplier.balanceOwedIls - 120.0).coerceAtLeast(0.0))}"
+                            "هذه الفاتورة لا تحتوي على صنف محدد قابل للتتبع المخزني.",
+                            "This bill does not have a linked stock-tracked product."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1650,16 +1778,91 @@ private fun PurchaseReturnPreviewDialog(
         },
         confirmButton = {
             Button(
-                onClick = onDismiss,
+                onClick = {
+                    if (canConfirm && expectedProduct != null) {
+                        onConfirmGrn(expectedProduct.id, expectedQty, batchNote)
+                    }
+                },
+                enabled = canConfirm,
                 shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("close_purchase_return_preview_button")
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("confirm_grn_submit_button")
             ) {
-                Text(lang.tr("إغلاق المعاينة", "Close Preview"))
+                Text(
+                    text = lang.tr("تثبيت الاستلام المخزني", "Confirm Goods Receipt"),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
+                Text(lang.tr("إلغاء", "Cancel"))
             }
         }
     )
 }
 
+@Composable
+private fun PurchaseReturnPreviewDialog(
+    supplier: Supplier,
+    lang: AppLanguage,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(12.dp),
+        title = {
+            Text(
+                text = lang.tr("إرجاع بضاعة للمورد (معاينة)", "Purchase Return Preview"),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "${supplier.name(lang)} • ${
+                        lang.tr("رصيد الذمة الحالي: ${StitchBidiUtils.formatIls(supplier.balanceOwedIls)}", "Current balance: ${StitchBidiUtils.formatIls(supplier.balanceOwedIls)}")
+                    }",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                )
+                Text(
+                    text = lang.tr(
+                        "تتيح ميزة إرجاع المشتريات إعادة البضاعة التالفة أو غير المطابقة وخصم قيمتها من ذمة المورد تلقائياً.",
+                        "Purchase returns allow returning damaged items and deducting value from supplier balance."
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("close_purchase_return_preview_button")
+            ) {
+                Text(lang.tr("إغلاق", "Close"))
+            }
+        }
+    )
+}
+
+/**
+ * Public composable dialog for recording a new financial purchase bill.
+ */
 @Composable
 fun ReceivePurchaseBillDialog(
     state: TraderUiState,
@@ -1692,7 +1895,7 @@ fun ReceivePurchaseBillDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         title = {
             Text(
                 text = lang.tr("قيد فاتورة مشتريات مالية", "Record Financial Purchase Bill"),
@@ -1704,7 +1907,6 @@ fun ReceivePurchaseBillDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Concise explanation of financial bill vs stock receiving
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
@@ -1721,35 +1923,37 @@ fun ReceivePurchaseBillDialog(
                     )
                 }
 
-                // Supplier Selector Chips (if more than one supplier)
-                if (state.selectedSupplierForDetail == null && suppliers.size > 1) {
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        items(suppliers, key = { it.id }) { sup ->
+                // Supplier Picker Chips
+                Text(
+                    text = lang.tr("اختر المورد:", "Select Supplier:"),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(suppliers, key = { it.id }) { s ->
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
                             FilterChip(
-                                selected = selectedSupplierId == sup.id,
-                                onClick = { selectedSupplierId = sup.id },
-                                label = { Text(sup.name(lang), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                modifier = Modifier.heightIn(min = 48.dp)
+                                selected = s.id == selectedSupplierId,
+                                onClick = { selectedSupplierId = s.id },
+                                label = { Text(s.name(lang)) },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                )
                             )
                         }
                     }
-                } else {
-                    val activeSup = suppliers.firstOrNull { it.id == selectedSupplierId } ?: suppliers.first()
-                    Text(
-                        text = "${lang.tr("المورد:", "Supplier:")} ${activeSup.name(lang)}",
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
                 }
 
                 OutlinedTextField(
                     value = purchaseDesc,
                     onValueChange = { purchaseDesc = it },
-                    label = { Text(lang.tr("بيان البضاعة أو رقم فاتورة المورد", "Bill Summary / Supplier Ref")) },
-                    placeholder = { Text(lang.tr("مثال: 20 كرتونة زيت وحلاوة", "e.g. 20 cartons oil & halva")) },
+                    label = { Text(lang.tr("بيان الفاتورة / الأصناف *", "Bill Summary / Items *")) },
+                    placeholder = { Text(lang.tr("مثال: فاتورة بقوليات وأرز 25 كغم", "e.g. Rice & Grains 25kg")) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
@@ -1760,11 +1964,14 @@ fun ReceivePurchaseBillDialog(
                 OutlinedTextField(
                     value = purchaseTotal,
                     onValueChange = { purchaseTotal = WesternFormatters.sanitizeWesternDigits(it) },
-                    label = { Text(lang.tr("إجمالي قيمة الفاتورة (₪)", "Total Bill Amount (₪)")) },
+                    label = { Text(lang.tr("إجمالي الفاتورة (₪) *", "Bill Total (₪) *")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
-                    textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    textStyle = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        textDirection = TextDirection.Ltr
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("purchase_bill_total_input")
@@ -1773,46 +1980,33 @@ fun ReceivePurchaseBillDialog(
                 OutlinedTextField(
                     value = purchasePaid,
                     onValueChange = { purchasePaid = WesternFormatters.sanitizeWesternDigits(it) },
-                    label = { Text(lang.tr("المسدد نقداً الآن من الصندوق (₪)", "Cash Paid Now from Drawer (₪)")) },
+                    label = { Text(lang.tr("المدفوع نقداً الآن من الصندوق (₪)", "Paid Cash Now (₪)")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
-                    textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    textStyle = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        textDirection = TextDirection.Ltr
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("purchase_bill_paid_input")
                 )
 
-                if (totalVal > 0.0 && !isPaidValid) {
+                if (totalVal > 0.0 && isPaidValid) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.errorContainer,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
                             text = lang.tr(
-                                "المبلغ المدفوع فوراً يجب أن يكون بين 0.00 ₪ وإجمالي الفاتورة (${WesternFormatters.formatIls(totalVal)})",
-                                "Paid-now amount must be between 0.00 ₪ and bill total (${WesternFormatters.formatIls(totalVal)})"
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            modifier = Modifier.padding(8.dp)
-                        )
-                    }
-                } else if (isFormValid) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = TraderTheme.financial.warningContainer,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = lang.tr(
-                                "المضاف لذمة المورد: ${WesternFormatters.formatIls(payableAdded)} • المخصوم من نقد الصندوق اليوم: ${WesternFormatters.formatIls(paidVal)}",
-                                "Added to supplier payable: ${WesternFormatters.formatIls(payableAdded)} • Deducted from today's cash drawer: ${WesternFormatters.formatIls(paidVal)}"
+                                "يُقيد ذمة للمورد: ${StitchBidiUtils.formatIls(payableAdded)} • يُصرف من الصندوق: ${StitchBidiUtils.formatIls(paidVal)}",
+                                "Payable added: ${StitchBidiUtils.formatIls(payableAdded)} • Disbursed: ${StitchBidiUtils.formatIls(paidVal)}"
                             ),
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(8.dp)
+                            color = if (payableAdded > 0.005) TraderTheme.financial.debit else TraderTheme.financial.income,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
                         )
                     }
                 }
@@ -1821,17 +2015,31 @@ fun ReceivePurchaseBillDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    onConfirmBill(selectedSupplierId, purchaseDesc.trim(), totalVal, paidVal.coerceAtLeast(0.0))
+                    if (isFormValid) {
+                        onConfirmBill(selectedSupplierId, purchaseDesc.trim(), totalVal, paidVal)
+                    }
                 },
                 enabled = isFormValid,
                 shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("confirm_purchase_bill_button")
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("confirm_purchase_bill_button")
             ) {
-                Text(lang.tr("تثبيت الفاتورة المالية", "Record Financial Bill"))
+                Text(
+                    text = lang.tr("قيد الفاتورة", "Record Bill"),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
                 Text(lang.tr("إلغاء", "Cancel"))
             }
         }

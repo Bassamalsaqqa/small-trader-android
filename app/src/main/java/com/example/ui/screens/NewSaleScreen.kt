@@ -11,16 +11,16 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -42,6 +42,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -49,11 +50,11 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -61,6 +62,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,20 +73,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.model.AppLanguage
 import com.example.model.Product
 import com.example.model.ProductCategory
 import com.example.model.WesternFormatters
-import com.example.ui.components.PhaseOneCard
-import com.example.ui.components.PhaseOneStatusBadge
+import com.example.ui.components.StitchBadge
+import com.example.ui.components.StitchBadgeTone
+import com.example.ui.components.StitchBidiUtils
+import com.example.ui.components.StitchCard
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
@@ -92,21 +100,19 @@ import com.example.viewmodel.TraderUiState
 /**
  * Rebuilt Native New Sale (POS) Catalog Screen for Small Trader (التاجر الصغير).
  *
- * Implements Phase 1 UX Architecture:
- * 1. Calm Top Instrument Bar: Combines Arabic-normalized product/barcode search,
- *    clear query shortcut, and camera scanner trigger into a single 48dp tactile capsule,
- *    paired with borderless category pills and a pinned "+ Custom" item trigger.
- * 2. Exception-Based Catalog Ledger: Healthy items display only title, unit, and tabular price
- *    with a quiet circular "+" affordance. Redundant "In stock" labels are stripped so that
- *    low-stock and out-of-stock items stand out immediately by exception.
- * 3. Single-Axis Selection Geometry: Selected items tint the row calmly, display the live
- *    line calculation (`38.00 ₪ × 2 = 76.00 ₪`), and replace the price with a tactile stepper
- *    (`- qty +`) featuring 48dp minimum accessible touch targets.
- * 4. State-Responsive Checkout Dock: Remains a quiet 48dp status bar when the basket is empty,
- *    and elevates into a high-contrast checkout bar with an expandable line-item drawer as soon
- *    as products are added.
- * 5. Adaptive POS Support: Scales fluidly on Compact phones and Wide tablet viewports while
- *    preserving 100% of test tags and financial guards.
+ * Implements Google Stitch Canonical Direction (ST-06, ST-07, ST-53 / DESIGN_LOCK.md):
+ * 1. Unified Search & Scanner: 48dp tactile search field with camera scanner trigger,
+ *    clearing shortcut, and horizontal scrolling category pills.
+ * 2. Dense Product Cards: Standard 12dp Stitch cards with 8dp spacing and 16dp gutters.
+ *    Long Arabic titles wrap cleanly across 2 lines without clipping on narrow 360dp screens.
+ * 3. Exception-Based Stock: Stock badges appear strictly by exception (out-of-stock, low-stock),
+ *    eliminating visual noise for healthy items.
+ * 4. Zero Add -> Tactile Stepper: Unselected products feature a clear 48dp (+) add button;
+ *    selected products reveal an inline 48dp accessible stepper (- qty +) with clear math.
+ * 5. Bounded Sticky Review Dock: Derived units & net total in a sticky bottom dock;
+ *    expandable drawer is bounded in height and scrolls rather than covering the catalog.
+ * 6. Full RTL & Theme Adaptability: Adheres to semantic color tokens for flawless Light and Dark theme,
+ *    Western Arabic digits, and RTL directional isolation.
  */
 @Composable
 fun NewSaleScreen(
@@ -151,8 +157,8 @@ fun NewSaleScreen(
                     )
 
                     HorizontalDivider(
-                        thickness = 0.5.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)
+                        thickness = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant
                     )
 
                     if (state.filteredProducts.isEmpty()) {
@@ -178,9 +184,9 @@ fun NewSaleScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surface)
                                 .testTag("product_catalog_list"),
-                            contentPadding = PaddingValues(vertical = 4.dp)
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             items(state.filteredProducts, key = { it.id }) { product ->
                                 val qtyInBasket = state.quantityInBasket(product.id)
@@ -193,11 +199,6 @@ fun NewSaleScreen(
                                     onAdd = { onAddProduct(product) },
                                     onDecrement = { onDecrementProduct(product.id) }
                                 )
-                                HorizontalDivider(
-                                    thickness = 0.5.dp,
-                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-                                    modifier = Modifier.padding(horizontal = 16.dp)
-                                )
                             }
                         }
                     }
@@ -205,7 +206,7 @@ fun NewSaleScreen(
 
                 VerticalDivider(
                     thickness = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)
+                    color = MaterialTheme.colorScheme.outlineVariant
                 )
 
                 Column(
@@ -237,8 +238,8 @@ fun NewSaleScreen(
                 )
 
                 HorizontalDivider(
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)
+                    thickness = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant
                 )
 
                 if (state.filteredProducts.isEmpty()) {
@@ -264,9 +265,9 @@ fun NewSaleScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surface)
                             .testTag("product_catalog_list"),
-                        contentPadding = PaddingValues(vertical = 4.dp)
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(state.filteredProducts, key = { it.id }) { product ->
                             val qtyInBasket = state.quantityInBasket(product.id)
@@ -278,11 +279,6 @@ fun NewSaleScreen(
                                 showBarcode = showBarcodeInRows,
                                 onAdd = { onAddProduct(product) },
                                 onDecrement = { onDecrementProduct(product.id) }
-                            )
-                            HorizontalDivider(
-                                thickness = 0.5.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-                                modifier = Modifier.padding(horizontal = 16.dp)
                             )
                         }
                     }
@@ -307,6 +303,13 @@ fun NewSaleScreen(
     }
 }
 
+/**
+ * ST-06 / ST-07 Unified POS Instrument Header:
+ * - Search bar with Western digit normalization and clear query shortcut.
+ * - Embedded 48dp camera barcode scanner trigger.
+ * - Horizontal scrolling category pills with active pale blue highlights.
+ * - Pinned '+ Custom' item button.
+ */
 @Composable
 private fun PosSearchAndCategoryHeader(
     state: TraderUiState,
@@ -332,35 +335,35 @@ private fun PosSearchAndCategoryHeader(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 8.dp, bottom = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Unified Search & Barcode Capsule (48dp height, 48dp scanner button)
+            // Unified Search & Barcode Capsule (48dp height, 10dp radius per DESIGN_LOCK)
             val searchContainerColor = if (isSearchFocused || hasActiveQuery) {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.90f)
+                MaterialTheme.colorScheme.surfaceVariant
             } else {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
             }
             val searchBorderColor = when {
                 isSearchFocused -> MaterialTheme.colorScheme.primary
-                hasActiveQuery -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-                else -> Color.Transparent
+                hasActiveQuery -> MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                else -> MaterialTheme.colorScheme.outlineVariant
             }
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-                    .height(48.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(10.dp))
                     .background(searchContainerColor)
                     .border(
                         width = if (isSearchFocused) 1.5.dp else 1.dp,
                         color = searchBorderColor,
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(10.dp)
                     ),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Spacer(modifier = Modifier.width(14.dp))
+                Spacer(modifier = Modifier.width(12.dp))
                 Icon(
                     imageVector = Icons.Default.Search,
                     contentDescription = null,
@@ -369,14 +372,14 @@ private fun PosSearchAndCategoryHeader(
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
-                    modifier = Modifier.size(19.dp)
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(8.dp))
 
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxHeight(),
+                        .padding(vertical = 6.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
                     if (state.searchQuery.isEmpty()) {
@@ -449,6 +452,7 @@ private fun PosSearchAndCategoryHeader(
                         .background(MaterialTheme.colorScheme.outlineVariant)
                 )
 
+                // 48dp tactile camera scanner button
                 IconButton(
                     onClick = onOpenScanner,
                     modifier = Modifier
@@ -457,114 +461,98 @@ private fun PosSearchAndCategoryHeader(
                 ) {
                     Icon(
                         imageVector = Icons.Default.QrCodeScanner,
-                        contentDescription = lang.tr("إدخال أو مسح باركود", "Enter or Scan Barcode"),
+                        contentDescription = lang.tr("مسح الباركود بالكاميرا", "Scan barcode"),
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             }
 
-            // Borderless Category Strip + Pinned Custom Quick Item Action
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(end = 12.dp),
+            // Category Filter Pills & Custom Item Trigger (ST-06 horizontal scroll)
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                LazyRow(
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(start = 16.dp, end = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    items(ProductCategory.entries, key = { it.name }) { category ->
-                        val isSelected = state.selectedCategory == category
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .clip(RoundedCornerShape(18.dp))
-                                .clickable(
-                                    role = Role.Tab,
-                                    onClick = { onSelectCategory(category) }
-                                )
-                                .testTag("category_chip_${category.name}")
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(18.dp),
-                                color = if (isSelected) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-                                },
-                                modifier = Modifier.height(34.dp)
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.padding(horizontal = 14.dp)
-                                ) {
-                                    Text(
-                                        text = category.label(lang),
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) {
-                                            MaterialTheme.colorScheme.onPrimary
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(22.dp)
-                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f))
-                )
-
-                Spacer(modifier = Modifier.width(6.dp))
-
-                // Pinned Custom Item Trigger (48dp touch height, 34dp visual capsule)
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .heightIn(min = 48.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .clickable(
-                            role = Role.Button,
-                            onClick = onOpenCustomItem
-                        )
-                        .testTag("sale_custom_item_chip")
-                ) {
+                // Pinned Quick Custom Item Chip
+                item {
                     Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.70f),
-                        border = BorderStroke(
-                            width = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant
-                        ),
-                        modifier = Modifier.height(34.dp)
+                        onClick = onOpenCustomItem,
+                        shape = RoundedCornerShape(9999.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("sale_custom_item_chip")
                     ) {
                         Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 11.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Add,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(15.dp)
+                                modifier = Modifier.size(16.dp)
                             )
-                            Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = lang.tr("مادة حرة", "Custom"),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                text = lang.tr("صنف حر", "Custom"),
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                // Category Filter Pills
+                items(ProductCategory.entries.toTypedArray(), key = { it.name }) { category ->
+                    val isSelected = state.selectedCategory == category
+                    val pillBg = if (isSelected) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surface
+                    }
+                    val pillBorder = if (isSelected) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    }
+                    val pillTextColor = if (isSelected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+
+                    Surface(
+                        onClick = { onSelectCategory(category) },
+                        shape = RoundedCornerShape(9999.dp),
+                        color = pillBg,
+                        border = BorderStroke(1.dp, pillBorder),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("category_chip_${category.name}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (category == ProductCategory.ALL && isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.Storefront,
+                                    contentDescription = null,
+                                    tint = pillTextColor,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Text(
+                                text = category.label(lang),
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                ),
+                                color = pillTextColor
                             )
                         }
                     }
@@ -605,7 +593,7 @@ private fun PosSearchAndCategoryHeader(
                             )
                             Text(
                                 text = bannerMsg,
-                                style = MaterialTheme.typography.labelLarge,
+                                style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = if (isError) financial.debit else financial.income,
                                 maxLines = 2,
@@ -619,6 +607,9 @@ private fun PosSearchAndCategoryHeader(
     }
 }
 
+/**
+ * Zero-Result State with Clean Cross-Category Recovery (ST-06).
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ZeroResultCatalogState(
@@ -646,7 +637,7 @@ private fun ZeroResultCatalogState(
                 text = if (searchQuery.isNotBlank()) {
                     lang.tr(
                         "لا توجد أصناف مطابقة لـ «${searchQuery.trim()}»",
-                        "No products matching \"${searchQuery.trim()}\""
+                        "No products matching «${searchQuery.trim()}»"
                     )
                 } else {
                     lang.tr("لا توجد أصناف في هذا القسم", "No products in this category")
@@ -723,11 +714,12 @@ private fun ZeroResultCatalogState(
 }
 
 /**
- * Exception-Based Retail POS Catalog Row:
- * - Unselected items display only product title, packaging unit, and tabular price with a
- *   quiet circular "+" affordance. Low stock and out of stock appear strictly by exception.
- * - Selected items tint the row calmly, display live line calculation (`38.00 ₪ × 2 = 76.00 ₪`),
- *   and replace the price with a single unified `- qty +` stepper pill with 48dp hit targets.
+ * Compact Dense Retail POS Product Row (ST-06 / ST-07 / ST-53):
+ * - Standard StitchCard (12dp radius, 1dp subtle border) matching Google Stitch design.
+ * - Arabic title wraps cleanly over 2 lines without clipping on narrow 360dp screens.
+ * - Unselected: Tabular price + quiet 48dp (+) add button. Stock shown strictly by exception.
+ * - Selected: Active pale tint + inline line calculation (e.g. 38.00 ₪ × 2 = 76.00 ₪) +
+ *   tactile 48dp stepper capsule (- qty +).
  */
 @Composable
 private fun ProductSaleCatalogRow(
@@ -744,45 +736,40 @@ private fun ProductSaleCatalogRow(
     val isOutOfStock = product.isStockTracked && product.stockCount <= 0
     val isMaxStockReached = product.isStockTracked && product.stockCount > 0 && quantityInBasket >= product.stockCount
 
-    val rowBackground = if (isSelected) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (isDarkTheme) 0.30f else 0.42f)
+    val cardBorder = if (isSelected) {
+        BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
     } else {
-        Color.Transparent
+        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     }
 
-    Row(
+    val cardBg = if (isSelected) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (isDarkTheme) 0.22f else 0.35f)
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = cardBg,
+        border = cardBorder,
         modifier = Modifier
             .fillMaxWidth()
-            .height(IntrinsicSize.Min)
-            .background(rowBackground)
-            .clickable(enabled = !isOutOfStock) {
-                onAdd()
-            }
-            .testTag("product_card_${product.id}"),
-        verticalAlignment = Alignment.CenterVertically
+            .defaultMinSize(minHeight = 64.dp)
+            .clickable(enabled = !isOutOfStock) { onAdd() }
+            .testTag("product_card_${product.id}")
     ) {
-        // Leading 3.5dp selection indicator bar
-        Box(
-            modifier = Modifier
-                .width(3.5.dp)
-                .fillMaxHeight()
-                .background(
-                    if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
-                )
-        )
-
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 12.5.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Start Column: Product Name + Unit / Contextual Line Total / Exception Stock State
+            // Product Information Column (RTL Start)
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(end = 12.dp),
+                    .padding(end = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 Text(
@@ -792,14 +779,14 @@ private fun ProductSaleCatalogRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     color = if (isOutOfStock) {
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     } else {
                         MaterialTheme.colorScheme.onSurface
                     }
                 )
 
                 if (isSelected) {
-                    // Active in basket: Show unit price × qty = line total & stock limit if reached
+                    // Active selection: Show line calculation & stock limits
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -810,25 +797,27 @@ private fun ProductSaleCatalogRow(
                             } else {
                                 "${WesternFormatters.formatIls(product.priceIls)} • ${product.unit(lang)}"
                             },
-                            style = MaterialTheme.typography.labelLarge,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                textDirection = TextDirection.Ltr
+                            ),
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            softWrap = false
                         )
 
                         if (isMaxStockReached) {
-                            Text(
+                            StitchBadge(
                                 text = lang.tr(
-                                    "• الحد الأقصى (${WesternFormatters.formatInt(product.stockCount)})",
-                                    "• Max (${WesternFormatters.formatInt(product.stockCount)})"
+                                    "الحد الأقصى (${WesternFormatters.formatInt(product.stockCount)})",
+                                    "Max (${WesternFormatters.formatInt(product.stockCount)})"
                                 ),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = financial.warning
+                                tone = StitchBadgeTone.WARNING
                             )
                         }
                     }
                 } else {
-                    // Unselected: Show packaging unit + exception-only stock status
+                    // Unselected: Packaging unit + exception-only stock status
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -837,7 +826,7 @@ private fun ProductSaleCatalogRow(
                             text = product.unit(lang),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-                                alpha = if (isOutOfStock) 0.6f else 0.9f
+                                alpha = if (isOutOfStock) 0.6f else 0.85f
                             )
                         )
 
@@ -849,24 +838,21 @@ private fun ProductSaleCatalogRow(
                             )
                         }
 
+                        // Stock Exceptions ONLY: Clean semantic badges for low/out of stock
                         when {
                             isOutOfStock -> {
-                                Text(
-                                    text = lang.tr("• نفد المخزون", "• Out of stock"),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = financial.debit
+                                StitchBadge(
+                                    text = lang.tr("نفد", "Out"),
+                                    tone = StitchBadgeTone.DANGER
                                 )
                             }
-                            product.isStockTracked && product.isLowStock -> {
-                                Text(
+                            product.isStockTracked && product.stockCount in 1..4 -> {
+                                StitchBadge(
                                     text = lang.tr(
-                                        "• متبقي ${WesternFormatters.formatInt(product.stockCount)}",
-                                        "• ${WesternFormatters.formatInt(product.stockCount)} left"
+                                        "متبقي ${WesternFormatters.formatInt(product.stockCount)}",
+                                        "Only ${WesternFormatters.formatInt(product.stockCount)} left"
                                     ),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = financial.warning
+                                    tone = StitchBadgeTone.WARNING
                                 )
                             }
                             !product.isStockTracked -> {
@@ -881,83 +867,68 @@ private fun ProductSaleCatalogRow(
                 }
             }
 
-            // End Column: Price + Quiet Add Trigger OR Unified Tactile Stepper Capsule
+            // Action / Stepper Column (RTL End)
             if (!isSelected) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
                         text = WesternFormatters.formatIls(product.priceIls),
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            textDirection = TextDirection.Ltr
+                        ),
                         fontWeight = FontWeight.Bold,
                         color = if (isOutOfStock) {
                             MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
                         } else {
                             MaterialTheme.colorScheme.onSurface
-                        }
+                        },
+                        maxLines = 1,
+                        softWrap = false
                     )
 
                     if (isOutOfStock) {
-                        PhaseOneStatusBadge(
-                            text = lang.tr("نفد", "Out"),
-                            textColor = financial.debit,
-                            containerColor = financial.debitContainer,
-                            modifier = Modifier.padding(start = 2.dp)
+                        StitchBadge(
+                            text = lang.tr("نفدت الكمية", "Out of Stock"),
+                            tone = StitchBadgeTone.DANGER
                         )
                     } else {
-                        // 48dp accessible hit area with a subtle 30dp circular "+" affordance inside
-                        Box(
-                            contentAlignment = Alignment.Center,
+                        // 48dp tactile (+) Add trigger
+                        Surface(
+                            onClick = onAdd,
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.primary,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
                             modifier = Modifier
                                 .size(48.dp)
-                                .clip(CircleShape)
-                                .clickable(
-                                    role = Role.Button,
-                                    onClick = onAdd
-                                )
                                 .testTag("add_product_${product.id}")
                         ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f),
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.Add,
-                                        contentDescription = lang.tr("إضافة للسلة", "Add to basket"),
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(17.dp)
-                                    )
-                                }
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = lang.tr("إضافة للسلة", "Add to basket"),
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
                     }
                 }
             } else {
-                // Unified Single-Axis Stepper Pill (- qty +) with 48dp hit targets
+                // Tactile Stepper Capsule (- qty +) with min 48dp touch targets
                 Surface(
-                    shape = RoundedCornerShape(24.dp),
+                    shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(
-                        width = 1.dp,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
-                    ),
-                    shadowElevation = 1.dp
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
+                        IconButton(
+                            onClick = onDecrement,
                             modifier = Modifier
                                 .size(48.dp)
-                                .clip(CircleShape)
-                                .clickable(
-                                    role = Role.Button,
-                                    onClick = onDecrement
-                                )
                                 .testTag("dec_product_${product.id}")
                         ) {
                             Icon(
@@ -968,7 +939,7 @@ private fun ProductSaleCatalogRow(
                                 },
                                 contentDescription = lang.tr("إنقاص", "Decrease"),
                                 tint = if (quantityInBasket == 1) {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                    MaterialTheme.colorScheme.error
                                 } else {
                                     MaterialTheme.colorScheme.onSurface
                                 },
@@ -983,45 +954,30 @@ private fun ProductSaleCatalogRow(
                             color = MaterialTheme.colorScheme.primary,
                             textAlign = TextAlign.Center,
                             modifier = Modifier
-                                .widthIn(min = 24.dp)
+                                .widthIn(min = 26.dp)
                                 .padding(horizontal = 2.dp)
-                                .testTag("qty_product_${product.id}")
+                                .testTag("qty_product_${product.id}"),
+                            maxLines = 1,
+                            softWrap = false
                         )
 
-                        Box(
-                            contentAlignment = Alignment.Center,
+                        IconButton(
+                            onClick = onAdd,
+                            enabled = !isMaxStockReached,
                             modifier = Modifier
                                 .size(48.dp)
-                                .clip(CircleShape)
-                                .clickable(
-                                    enabled = !isMaxStockReached,
-                                    role = Role.Button,
-                                    onClick = onAdd
-                                )
                                 .testTag("inc_product_${product.id}")
                         ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = if (isMaxStockReached) {
-                                    MaterialTheme.colorScheme.surfaceVariant
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = lang.tr("زيادة", "Increase"),
+                                tint = if (isMaxStockReached) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
                                 } else {
                                     MaterialTheme.colorScheme.primary
                                 },
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.Add,
-                                        contentDescription = lang.tr("زيادة", "Increase"),
-                                        tint = if (isMaxStockReached) {
-                                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                        } else {
-                                            MaterialTheme.colorScheme.onPrimary
-                                        },
-                                        modifier = Modifier.size(17.dp)
-                                    )
-                                }
-                            }
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }
@@ -1030,6 +986,13 @@ private fun ProductSaleCatalogRow(
     }
 }
 
+/**
+ * Sticky Bottom Basket Dock & Bounded Expandable Drawer (ST-07):
+ * - Quiet 48dp bar when empty with draft access.
+ * - Elevated floating dock when active with item count and subtotal.
+ * - Expandable drawer bounded to 240dp to prevent full catalog occlusion.
+ * - Primary button 'مراجعة السلة' invokes onProceedToPayment (navigates to Invoice Review).
+ */
 @Composable
 private fun BasketStickyBottomSheet(
     state: TraderUiState,
@@ -1049,17 +1012,13 @@ private fun BasketStickyBottomSheet(
     val linkedCustomer = state.selectedCustomer
 
     if (!hasItems) {
-        // Quiet, flat 48dp status bar when basket is empty
+        // Quiet, flat 48dp status bar when basket is empty (ST-06)
         Surface(
             color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 0.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
-                HorizontalDivider(
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant
-                )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1076,10 +1035,7 @@ private fun BasketStickyBottomSheet(
                                 "Account: ${linkedCustomer.name(lang)} • Basket empty"
                             )
                         } else {
-                            lang.tr(
-                                "السلة فارغة",
-                                "Basket empty"
-                            )
+                            lang.tr("السلة فارغة", "Basket empty")
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1094,85 +1050,110 @@ private fun BasketStickyBottomSheet(
                     ) {
                         Text(
                             text = WesternFormatters.formatIls(0.0),
-                            style = MaterialTheme.typography.labelLarge,
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                textDirection = TextDirection.Ltr
+                            ),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false,
                             modifier = Modifier.testTag("basket_subtotal_text")
                         )
 
                         Text(
-                            text = lang.tr("متابعة الدفع", "Continue"),
+                            text = lang.tr("مراجعة السلة", "Review Basket"),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                            maxLines = 1,
+                            softWrap = false,
                             modifier = Modifier.testTag("review_invoice_button")
                         )
                     }
                 }
-                if (state.savedDrafts.isNotEmpty()) {
+
+                // Point-of-sale draft recovery button
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.Start,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     TextButton(
                         onClick = onOpenSaleOptions,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
                             .testTag("open_saved_drafts_button")
-                    ) { Text(lang.tr("المسودات", "Saved drafts")) }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.BookmarkBorder,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (state.savedDrafts.isNotEmpty()) {
+                                lang.tr(
+                                    "المسودات (${WesternFormatters.formatInt(state.savedDrafts.size)})",
+                                    "Saved drafts (${WesternFormatters.formatInt(state.savedDrafts.size)})"
+                                )
+                            } else {
+                                lang.tr("المسودات والخيارات", "Drafts & Options")
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
         }
         return
     }
 
-    // Active Basket & Checkout Dock
+    // Active Basket & Checkout Dock (ST-07)
     Surface(
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 3.dp,
         shadowElevation = 8.dp,
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.85f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Expandable editable basket drawer
+            // Expandable Basket Item Drawer (Bounded to 240dp max)
             AnimatedVisibility(
                 visible = isExpanded,
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = lang.tr(
-                                    "سلة البيع (${WesternFormatters.formatInt(state.basket.size)} أصناف • ${WesternFormatters.formatInt(state.basketItemCount)} وحدات)",
-                                    "Active Basket (${WesternFormatters.formatInt(state.basket.size)} items • ${WesternFormatters.formatInt(state.basketItemCount)} units)"
-                                ),
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            if (linkedCustomer != null) {
-                                Text(
-                                    text = lang.tr(
-                                        "الزبون: ${linkedCustomer.name(lang)}",
-                                        "Customer: ${linkedCustomer.name(lang)}"
-                                    ),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
+                        Text(
+                            text = lang.tr(
+                                "محتويات السلة (${WesternFormatters.formatInt(state.basket.size)} أصناف)",
+                                "Basket Items (${WesternFormatters.formatInt(state.basket.size)} lines)"
+                            ),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
                         TextButton(
                             onClick = onClearBasket,
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                             modifier = Modifier
                                 .heightIn(min = 48.dp)
                                 .testTag("clear_basket_button")
@@ -1185,23 +1166,22 @@ private fun BasketStickyBottomSheet(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = lang.tr("إفراغ", "Clear"),
-                                style = MaterialTheme.typography.labelLarge,
+                                text = lang.tr("إفراغ السلة", "Clear"),
+                                style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.error
                             )
                         }
                     }
 
                     HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 4.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                        color = MaterialTheme.colorScheme.outlineVariant
                     )
 
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 220.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                            .heightIn(max = minOf(240.dp, (LocalConfiguration.current.screenHeightDp * 0.25f).dp)),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         items(state.basket, key = { "basket_${it.product.id}" }) { item ->
                             val atMaxStock = item.product.isStockTracked && item.quantity >= item.product.stockCount
@@ -1222,7 +1202,7 @@ private fun BasketStickyBottomSheet(
                                         text = item.product.name(lang),
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
+                                        maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
@@ -1237,9 +1217,13 @@ private fun BasketStickyBottomSheet(
                                                 )
                                             }
                                         },
-                                        style = MaterialTheme.typography.bodySmall,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            textDirection = TextDirection.Ltr
+                                        ),
                                         fontWeight = FontWeight.Medium,
-                                        color = if (atMaxStock) financial.warning else MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = if (atMaxStock) financial.warning else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
 
@@ -1256,7 +1240,7 @@ private fun BasketStickyBottomSheet(
                                         Icon(
                                             imageVector = Icons.Default.DeleteOutline,
                                             contentDescription = lang.tr("حذف الصنف", "Remove item"),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            tint = MaterialTheme.colorScheme.error,
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
@@ -1267,19 +1251,11 @@ private fun BasketStickyBottomSheet(
                                             .size(48.dp)
                                             .testTag("basket_dec_${item.product.id}")
                                     ) {
-                                        Surface(
-                                            shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.surfaceVariant,
-                                            modifier = Modifier.size(30.dp)
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Remove,
-                                                    contentDescription = lang.tr("إنقاص", "Decrease"),
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                        }
+                                        Icon(
+                                            imageVector = Icons.Default.Remove,
+                                            contentDescription = lang.tr("إنقاص", "Decrease"),
+                                            modifier = Modifier.size(16.dp)
+                                        )
                                     }
 
                                     Text(
@@ -1287,7 +1263,9 @@ private fun BasketStickyBottomSheet(
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold,
                                         textAlign = TextAlign.Center,
-                                        modifier = Modifier.widthIn(min = 20.dp)
+                                        modifier = Modifier.widthIn(min = 20.dp),
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
 
                                     IconButton(
@@ -1297,28 +1275,16 @@ private fun BasketStickyBottomSheet(
                                             .size(48.dp)
                                             .testTag("basket_inc_${item.product.id}")
                                     ) {
-                                        Surface(
-                                            shape = CircleShape,
-                                            color = if (atMaxStock) {
-                                                MaterialTheme.colorScheme.surfaceVariant
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = lang.tr("زيادة", "Increase"),
+                                            tint = if (atMaxStock) {
+                                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
                                             } else {
                                                 MaterialTheme.colorScheme.primary
                                             },
-                                            modifier = Modifier.size(30.dp)
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Add,
-                                                    contentDescription = lang.tr("زيادة", "Increase"),
-                                                    tint = if (atMaxStock) {
-                                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                                    } else {
-                                                        MaterialTheme.colorScheme.onPrimary
-                                                    },
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                        }
+                                            modifier = Modifier.size(16.dp)
+                                        )
                                     }
                                 }
                             }
@@ -1327,154 +1293,324 @@ private fun BasketStickyBottomSheet(
 
                     if (hasDiscount) {
                         HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 4.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            color = MaterialTheme.colorScheme.outlineVariant
                         )
                         Text(
                             text = lang.tr(
                                 "المجموع الفرعي ${WesternFormatters.formatIls(state.basketSubtotalIls)} • خصم -${WesternFormatters.formatIls(state.calculatedDiscountIls)}",
                                 "Subtotal ${WesternFormatters.formatIls(state.basketSubtotalIls)} • Discount -${WesternFormatters.formatIls(state.calculatedDiscountIls)}"
                             ),
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                textDirection = TextDirection.Ltr
+                            ),
                             color = financial.income,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
 
                     HorizontalDivider(
-                        modifier = Modifier.padding(top = 6.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                        color = MaterialTheme.colorScheme.outlineVariant
                     )
                 }
             }
 
-            // Primary Checkout Dock Row (Minimum 48dp hit area)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable(
-                            role = Role.Button,
-                            onClick = onToggleExpand
-                        )
-                        .padding(end = 8.dp)
-                        .testTag("toggle_basket_drawer_button")
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.size(40.dp)
+            // Primary Checkout Dock Container (ST-07)
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val fontScale = LocalDensity.current.fontScale
+                val isCompactOrLargeFont = maxWidth < 380.dp || fontScale > 1.15f
+
+                if (isCompactOrLargeFont) {
+                    // Stacked 2-tier layout: Summary + Quiet Options on top, Full-width Review below
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = WesternFormatters.formatInt(state.basketItemCount),
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(10.dp))
-
-                    Column {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Basket summary drawer trigger
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable(
+                                        role = Role.Button,
+                                        onClick = onToggleExpand
+                                    )
+                                    .padding(end = 4.dp)
+                                    .testTag("toggle_basket_drawer_button")
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = WesternFormatters.formatInt(state.basketItemCount),
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.primary,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(1.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                    ) {
+                                        Text(
+                                            text = when {
+                                                hasDiscount -> lang.tr("الصافي بعد الخصم", "Net after discount")
+                                                linkedCustomer != null -> linkedCustomer.name(lang)
+                                                else -> lang.tr(
+                                                    "${WesternFormatters.formatInt(state.basketItemCount)} قطع في السلة",
+                                                    "${WesternFormatters.formatInt(state.basketItemCount)} units in basket"
+                                                )
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (hasDiscount) financial.income else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Icon(
+                                            imageVector = if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                                            contentDescription = lang.tr("عرض أو إخفاء السلة", "Toggle basket details"),
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    Text(
+                                        text = WesternFormatters.formatIls(state.basketNetTotalIls),
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            textDirection = TextDirection.Ltr
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("basket_subtotal_text")
+                                    )
+                                }
+                            }
+
+                            // Secondary Quiet Options button
+                            TextButton(
+                                onClick = onOpenSaleOptions,
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("open_sale_options_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = lang.tr("خيارات", "Options"),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+
+                        // Full-width Primary Review CTA (min 48dp, content never clipped)
+                        Button(
+                            onClick = onProceedToPayment,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .testTag("review_invoice_button")
                         ) {
                             Text(
-                                text = when {
-                                    hasDiscount -> lang.tr("الصافي بعد الخصم", "Net after discount")
-                                    linkedCustomer != null -> linkedCustomer.name(lang)
-                                    else -> lang.tr(
-                                        "${WesternFormatters.formatInt(state.basket.size)} أصناف في السلة",
-                                        "${WesternFormatters.formatInt(state.basket.size)} items in basket"
-                                    )
-                                },
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (hasDiscount) financial.income else MaterialTheme.colorScheme.onSurfaceVariant,
+                                text = lang.tr("مراجعة السلة", "Review Basket"),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                softWrap = false
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
                             Icon(
-                                imageVector = if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
-                                contentDescription = lang.tr("عرض أو إخفاء السلة", "Toggle basket details"),
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
-                        Text(
-                            text = WesternFormatters.formatIls(state.basketNetTotalIls),
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.testTag("basket_subtotal_text")
-                        )
+                    }
+                } else {
+                    // Single-row layout for standard viewports
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable(
+                                    role = Role.Button,
+                                    onClick = onToggleExpand
+                                )
+                                .padding(end = 8.dp)
+                                .testTag("toggle_basket_drawer_button")
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = WesternFormatters.formatInt(state.basketItemCount),
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            Column(
+                                modifier = Modifier.weight(1f, fill = false)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Text(
+                                        text = when {
+                                            hasDiscount -> lang.tr("الصافي بعد الخصم", "Net after discount")
+                                            linkedCustomer != null -> linkedCustomer.name(lang)
+                                            else -> lang.tr(
+                                                "${WesternFormatters.formatInt(state.basketItemCount)} قطع في السلة",
+                                                "${WesternFormatters.formatInt(state.basketItemCount)} units in basket"
+                                            )
+                                        },
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (hasDiscount) financial.income else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Icon(
+                                        imageVector = if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                                        contentDescription = lang.tr("عرض أو إخفاء السلة", "Toggle basket details"),
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Text(
+                                    text = WesternFormatters.formatIls(state.basketNetTotalIls),
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        textDirection = TextDirection.Ltr
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.testTag("basket_subtotal_text")
+                                )
+                            }
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            TextButton(
+                                onClick = onOpenSaleOptions,
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("open_sale_options_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = lang.tr("خيارات", "Options"),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+
+                            Button(
+                                onClick = onProceedToPayment,
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("review_invoice_button")
+                            ) {
+                                Text(
+                                    text = lang.tr("مراجعة السلة", "Review Basket"),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
                     }
                 }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    TextButton(
-                        onClick = onOpenSaleOptions,
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-                        modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .testTag("open_sale_options_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = lang.tr("خيارات", "Options"),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    Button(
-                        onClick = onProceedToPayment,
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        ),
-                        modifier = Modifier
-                            .height(48.dp)
-                            .testTag("review_invoice_button")
-                    ) {
-                        Text(
-                            text = lang.tr("متابعة الدفع", "Continue to Payment"),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = null,
-                            modifier = Modifier.size(17.dp)
-                        )
-                    }
-                }
-            }
-        }
+            }        }
     }
 }
 
-
+/**
+ * Adaptive Wide Screen POS Cart Pane (840dp+):
+ * - Persistent right-hand cart panel for tablet viewports.
+ * - Standard StitchCard styling with 12dp radii and clear status badges.
+ */
 @Composable
 private fun WidePersistentCartPane(
     state: TraderUiState,
@@ -1528,7 +1664,9 @@ private fun WidePersistentCartPane(
                 TextButton(
                     onClick = onClearBasket,
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    modifier = Modifier.testTag("clear_basket_button")
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("clear_basket_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.DeleteOutline,
@@ -1546,7 +1684,7 @@ private fun WidePersistentCartPane(
             }
         }
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         if (!hasItems) {
             Box(
@@ -1578,11 +1716,8 @@ private fun WidePersistentCartPane(
 
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                        border = BorderStroke(
-                            0.5.dp,
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                        ),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -1663,7 +1798,7 @@ private fun WidePersistentCartPane(
             }
         }
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -1713,9 +1848,13 @@ private fun WidePersistentCartPane(
                 )
                 Text(
                     text = WesternFormatters.formatIls(state.basketNetTotalIls),
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        textDirection = TextDirection.Ltr
+                    ),
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    softWrap = false,
                     modifier = Modifier.testTag("basket_subtotal_text")
                 )
             }
@@ -1728,7 +1867,7 @@ private fun WidePersistentCartPane(
         ) {
             OutlinedButton(
                 onClick = onOpenSaleOptions,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(10.dp),
                 enabled = hasItems,
                 modifier = Modifier
                     .weight(1f)
@@ -1749,7 +1888,7 @@ private fun WidePersistentCartPane(
 
             Button(
                 onClick = onProceedToPayment,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(10.dp),
                 enabled = hasItems,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -1761,7 +1900,7 @@ private fun WidePersistentCartPane(
                     .testTag("review_invoice_button")
             ) {
                 Text(
-                    text = lang.tr("متابعة الدفع", "Continue to Payment"),
+                    text = lang.tr("مراجعة السلة", "Review Basket"),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold
                 )

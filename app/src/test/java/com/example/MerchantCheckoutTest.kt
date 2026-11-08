@@ -94,7 +94,7 @@ class MerchantCheckoutTest {
         assertFalse(viewModel.uiState.value.isCashSufficient)
 
         // Tap Exact Button ("بالضبط")
-        composeTestRule.onNodeWithTag("cash_exact_button").assertIsDisplayed().performClick()
+        composeTestRule.onNodeWithTag("cash_exact_button").performScrollTo().assertIsDisplayed().performClick()
         composeTestRule.waitForIdle()
 
         // VERIFY: Tender input is pre-filled, but sale is NOT completed
@@ -374,10 +374,11 @@ class MerchantCheckoutTest {
 
         // 3. Verify toggle for invoice details expands thermal receipt paper
         composeTestRule.onNodeWithTag("toggle_invoice_details_button")
+            .performScrollTo()
             .assertIsDisplayed()
             .performClick()
         composeTestRule.waitForIdle()
 
-        composeTestRule.onNodeWithTag("thermal_receipt_paper").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("thermal_receipt_paper").performScrollTo().assertIsDisplayed()
     }
 }

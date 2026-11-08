@@ -19,26 +19,26 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
 private val LightColorScheme = lightColorScheme(
-    primary = CobaltPrimaryLight,
-    onPrimary = OnCobaltPrimaryLight,
-    primaryContainer = CobaltPrimaryContainerLight,
-    onPrimaryContainer = OnCobaltPrimaryContainerLight,
-    inversePrimary = CobaltInversePrimaryLight,
-    secondary = SlateSecondaryLight,
-    onSecondary = OnSlateSecondaryLight,
-    secondaryContainer = SlateSecondaryContainerLight,
-    onSecondaryContainer = OnSlateSecondaryContainerLight,
-    tertiary = SteelTertiaryLight,
-    onTertiary = OnSteelTertiaryLight,
-    tertiaryContainer = SteelTertiaryContainerLight,
-    onTertiaryContainer = OnSteelTertiaryContainerLight,
+    primary = PrimaryBlueLight,
+    onPrimary = OnPrimaryBlueLight,
+    primaryContainer = PrimaryBlueContainerLight,
+    onPrimaryContainer = OnPrimaryBlueContainerLight,
+    inversePrimary = PrimaryInverseLight,
+    secondary = SecondarySlateLight,
+    onSecondary = OnSecondarySlateLight,
+    secondaryContainer = SecondarySlateContainerLight,
+    onSecondaryContainer = OnSecondarySlateContainerLight,
+    tertiary = TertiarySteelLight,
+    onTertiary = OnTertiarySteelLight,
+    tertiaryContainer = TertiarySteelContainerLight,
+    onTertiaryContainer = OnTertiarySteelContainerLight,
     background = CanvasBackgroundLight,
     onBackground = OnCanvasBackgroundLight,
     surface = CardSurfaceLight,
     onSurface = OnCardSurfaceLight,
     surfaceVariant = SurfaceVariantLight,
     onSurfaceVariant = OnSurfaceVariantLight,
-    surfaceTint = CobaltPrimaryLight,
+    surfaceTint = PrimaryBlueLight,
     inverseSurface = InverseSurfaceLight,
     inverseOnSurface = InverseOnSurfaceLight,
     error = ErrorLight,
@@ -98,8 +98,8 @@ private val DarkColorScheme = darkColorScheme(
 
 val AppShapes = Shapes(
     extraSmall = RoundedCornerShape(6.dp),
-    small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(12.dp),
+    small = RoundedCornerShape(10.dp),      // Buttons & Inputs (10dp)
+    medium = RoundedCornerShape(12.dp),     // Cards & Modals (12dp)
     large = RoundedCornerShape(16.dp),
     extraLarge = RoundedCornerShape(22.dp)
 )

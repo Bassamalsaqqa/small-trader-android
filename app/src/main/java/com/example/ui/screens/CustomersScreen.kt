@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
@@ -54,12 +55,12 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,6 +79,10 @@ import com.example.model.Customer
 import com.example.model.CustomerTransaction
 import com.example.model.InvoiceRecord
 import com.example.model.WesternFormatters
+import com.example.ui.components.StitchBadge
+import com.example.ui.components.StitchBadgeTone
+import com.example.ui.components.StitchBidiUtils
+import com.example.ui.components.StitchCard
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
@@ -94,16 +99,20 @@ private enum class CustomerBalanceFilter {
 }
 
 /**
- * Native Material3 Customer Directory & Accounts Receivable Ledger Screen (دفتر الديون).
+ * Native Customer Directory & Accounts Receivable Ledger Screen (دفتر الديون).
  *
- * Design Invariants Enforced:
- * 1. Strict Un-Netted Accounting: Separates Total Debts Owed to Store (Receivables)
- *    from Customer Advance Deposits (Store Liabilities), never netting them together.
- * 2. Instant Search & Multi-Axis Filtering: Live normalization across Arabic/English names,
- *    LTR phone numbers, and addresses, with counts on all filter chips.
- * 3. Rapid Debt Collection: One-tap quick collection button on debtor rows with 48dp hit targets.
- * 4. Responsive & Accessible: Strict 48dp touch targets on chips, buttons, and inputs.
- * 5. Bidi Polish: Western digits (0-9) and LTR monospace phone formatting inside Arabic RTL layout.
+ * Implements Stitch Design System (ST-32, ST-34, ST-35, ST-36, ST-39 / DESIGN_LOCK.md):
+ * 1. Strict Financial Privacy: Store-wide aggregates (receivables & advances) are displayed
+ *    ONLY for Owner sessions (canViewReports). Cashier downgrade immediately evicts both tags.
+ * 2. Directional Balance Presentation:
+ *    - Customer Debt (> 0): Red `#B42318` badge "عليه: 185.00 ₪"
+ *    - Customer Advance (< 0): Green `#14804A` badge "له رصيد مقدم: 50.00+ ₪" (#EEF4FF container)
+ *    - Settled: Neutral badge "خالص"
+ * 3. Compact Calm Rows: Calm list rows with whole-card click to detail, and a dedicated
+ *    48dp quick collect CTA for debtors.
+ * 4. Microtype Safety & Spacing: Strict >= 12sp floor for Arabic typography, 12dp card corners,
+ *    10dp button corners, 16dp outer gutters, and 8dp rhythm.
+ * 5. BiDi & Numeric Alignment: Western European numerals (0-9) with LTR monospace phone numbers.
  */
 @Composable
 fun CustomersScreen(
@@ -158,8 +167,8 @@ fun CustomersScreen(
         // Sticky Header: Daftar Al-Deyoun Summary + Search + Balance Filters
         Surface(
             color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 1.dp,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+            tonalElevation = 0.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -174,49 +183,52 @@ fun CustomersScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (state.currentSession.canViewReports()) Row(
-                        modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = lang.tr("لنا عند الزبائن (ديون)", "Owed to Store"),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = WesternFormatters.formatIls(state.totalCustomerDebtsIls),
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = financial.debit,
-                                modifier = Modifier.testTag("total_customer_debts_value")
-                            )
-                        }
+                    if (state.currentSession.canViewReports()) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = lang.tr("لنا عند الزبائن (ديون)", "Owed to Store"),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = StitchBidiUtils.formatIls(state.totalCustomerDebtsIls),
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = financial.debit,
+                                    modifier = Modifier.testTag("total_customer_debts_value")
+                                )
+                            }
 
-                        Column {
-                            Text(
-                                text = lang.tr("للزبائن عندنا (مقدم)", "Customer Advances"),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = WesternFormatters.formatIls(state.totalCustomerAdvancesIls),
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = if (state.totalCustomerAdvancesIls > 0.005) {
-                                    financial.income
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                modifier = Modifier.testTag("total_customer_advances_value")
-                            )
+                            Column {
+                                Text(
+                                    text = lang.tr("للزبائن عندنا (مقدم)", "Customer Advances"),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = StitchBidiUtils.formatIls(state.totalCustomerAdvancesIls),
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = if (state.totalCustomerAdvancesIls > 0.005) {
+                                        financial.income
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    modifier = Modifier.testTag("total_customer_advances_value")
+                                )
+                            }
                         }
+                    } else {
+                        Spacer(Modifier.weight(1f))
                     }
 
-                    if (!state.currentSession.canViewReports()) Spacer(Modifier.weight(1f))
                     Button(
                         onClick = onOpenAddCustomerDialog,
                         shape = RoundedCornerShape(10.dp),
@@ -224,7 +236,7 @@ fun CustomersScreen(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary
                         ),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
                         modifier = Modifier
                             .heightIn(min = 48.dp)
                             .testTag("add_customer_button")
@@ -236,7 +248,7 @@ fun CustomersScreen(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = lang.tr("زبون جديد", "New Customer"),
+                            text = lang.tr("+ زبون", "+ Customer"),
                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                         )
                     }
@@ -298,6 +310,7 @@ fun CustomersScreen(
                     onValueChange = { searchQuery = it },
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 48.dp)
                         .testTag("customer_search_input"),
                     placeholder = {
                         Text(
@@ -335,8 +348,8 @@ fun CustomersScreen(
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.background,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.background
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
                     )
                 )
 
@@ -520,6 +533,10 @@ fun CustomersScreen(
     }
 }
 
+/**
+ * Calm compact list row (ST-32 Stitch Specification).
+ * Displays name, LTR phone, neighborhood, directional balance, and quick collect CTA.
+ */
 @Composable
 private fun CustomerDirectoryRow(
     customer: Customer,
@@ -537,16 +554,10 @@ private fun CustomerDirectoryRow(
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    val statusTextColor = when {
-        isDebtor -> financial.onDebitContainer
-        isAdvance -> financial.onIncomeContainer
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    val statusBadgeBg = when {
-        isDebtor -> financial.debitContainer
-        isAdvance -> financial.incomeContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
+    val statusBadgeTone = when {
+        isDebtor -> StitchBadgeTone.DANGER
+        isAdvance -> StitchBadgeTone.SUCCESS
+        else -> StitchBadgeTone.NEUTRAL
     }
 
     val statusLabel = when {
@@ -556,9 +567,9 @@ private fun CustomerDirectoryRow(
     }
 
     val displayedAmount = when {
-        isDebtor -> WesternFormatters.formatIls(customer.balanceIls)
-        isAdvance -> WesternFormatters.formatIls(-customer.balanceIls)
-        else -> WesternFormatters.formatIls(0.0)
+        isDebtor -> StitchBidiUtils.formatIls(customer.balanceIls)
+        isAdvance -> StitchBidiUtils.formatIls(-customer.balanceIls)
+        else -> StitchBidiUtils.formatIls(0.0)
     }
 
     Surface(
@@ -577,7 +588,7 @@ private fun CustomerDirectoryRow(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left/Start: Name + LTR Phone + Neighborhood
+            // Left/Start: Customer Name + LTR Phone + Area
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(3.dp)
@@ -586,7 +597,7 @@ private fun CustomerDirectoryRow(
                     text = customer.name(lang),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
 
@@ -604,66 +615,81 @@ private fun CustomerDirectoryRow(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Text(
-                        text = "•",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outlineVariant
-                    )
-                    Text(
-                        text = customer.address(lang),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    if (customer.address(lang).isNotBlank()) {
+                        Text(
+                            text = "•",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outlineVariant
+                        )
+                        Text(
+                            text = customer.address(lang),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                // Balance Directional Line
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(top = 2.dp)
+                ) {
+                    if (isDebtor) {
+                        Text(
+                            text = lang.tr("عليه:", "Owes:"),
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                            color = financial.debit
+                        )
+                        Text(
+                            text = displayedAmount,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = financial.debit
+                        )
+                    } else if (isAdvance) {
+                        StitchBadge(
+                            text = "$statusLabel $displayedAmount",
+                            tone = StitchBadgeTone.SUCCESS,
+                            shape = RoundedCornerShape(6.dp)
+                        )
+                    } else {
+                        StitchBadge(
+                            text = statusLabel,
+                            tone = StitchBadgeTone.NEUTRAL,
+                            shape = RoundedCornerShape(6.dp)
+                        )
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.width(10.dp))
 
-            // Right/End: Balance Figure + Status Badge + Optional Quick Collect
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+            // Right/End: Quick Collect CTA or Details Action
+            if (onQuickCollect != null && isDebtor) {
+                Button(
+                    onClick = onQuickCollect,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("quick_collect_${customer.id}")
                 ) {
-                    Text(
-                        text = displayedAmount,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = amountColor
+                    Icon(
+                        imageVector = Icons.Default.Payments,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
                     )
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = statusBadgeBg
-                    ) {
-                        Text(
-                            text = statusLabel,
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = statusTextColor,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-
-                if (onQuickCollect != null) {
-                    FilledTonalButton(
-                        onClick = onQuickCollect,
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .testTag("quick_collect_${customer.id}")
-                    ) {
-                        Text(
-                            text = lang.tr("قبض", "Collect"),
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
-                        )
-                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = lang.tr("قبض دفعة", "Collect"),
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                    )
                 }
             }
         }
@@ -672,6 +698,12 @@ private fun CustomerDirectoryRow(
 
 /**
  * Customer Detailed Profile & Statement Ledger Screen (كشف حساب الزبون).
+ *
+ * Implements Stitch ST-34 (Outstanding Debt 185.00 ₪) and ST-36 (Advance Deposit +50.00 ₪):
+ * - Clear outstanding balance display with credit limit usage progress bar
+ * - Advance credit rendered in success green #14804A with #EEF4FF container, NEVER styled as debt
+ * - Direct actionable triggers: Collect payment, new credit sale, edit limit, share statement
+ * - Real ledger entries with running balance calculation
  */
 @Composable
 fun CustomerDetailScreen(
@@ -686,7 +718,8 @@ fun CustomerDetailScreen(
 ) {
     val lang = state.language
     val financial = TraderTheme.financial
-    val customer = state.selectedCustomerForDetail ?: return
+    val customerId = state.selectedCustomerForDetail?.id ?: return
+    val customer = state.customers.firstOrNull { it.id == customerId } ?: return
     val transactions = remember(state.customerTransactions, customer.id) {
         state.customerTransactions.filter { it.customerId == customer.id }
     }
@@ -696,6 +729,9 @@ fun CustomerDetailScreen(
     val isDebtor = customer.balanceIls > 0.005
     val isAdvance = customer.balanceIls < -0.005
     val availableCreditIls = max(0.0, customer.creditLimitIls - max(0.0, customer.balanceIls))
+    val creditUsagePercent = if (customer.creditLimitIls > 0.0) {
+        (max(0.0, customer.balanceIls) / customer.creditLimitIls).coerceIn(0.0, 1.0).toFloat()
+    } else 0f
 
     val feedbackMessage = lang.tr(
         state.lastCustomerPaymentMessageAr ?: "",
@@ -708,6 +744,66 @@ fun CustomerDetailScreen(
             .background(MaterialTheme.colorScheme.background)
             .testTag("customer_detail_screen")
     ) {
+        // Sticky Header with Back Button & Customer Context
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = lang.tr("رجوع", "Back"),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = customer.name(lang),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            Text(
+                                text = customer.phone,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = MonoFontFamily,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (customer.address(lang).isNotBlank()) {
+                            Text("•", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outlineVariant)
+                            Text(
+                                text = customer.address(lang),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
@@ -767,301 +863,276 @@ fun CustomerDetailScreen(
                 }
             }
 
-            // 1. Customer Profile, Balance Status & Actions Card
+            // 1. Balance Status Card (ST-34 Outstanding Debt vs ST-36 Customer Advance)
             item {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                if (isAdvance) {
+                    // ST-36: Customer Advance Credit (+50.00 ₪)
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        // Customer Name + LTR Phone + Address
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = customer.name(lang),
-                                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(14.dp)
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Phone,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                                        Text(
-                                            text = customer.phone,
-                                            style = MaterialTheme.typography.bodyMedium.copy(
-                                                fontFamily = MonoFontFamily,
-                                                fontWeight = FontWeight.SemiBold
-                                            ),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.LocationOn,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = customer.address(lang),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-
-                        // Clear Balance Status Banner (Debtor vs Advance Credit vs Settled)
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = when {
-                                isDebtor -> financial.debitContainer
-                                isAdvance -> financial.incomeContainer
-                                else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                            },
-                            border = BorderStroke(
-                                1.dp,
-                                when {
-                                    isDebtor -> financial.debit.copy(alpha = 0.35f)
-                                    isAdvance -> financial.income.copy(alpha = 0.35f)
-                                    else -> MaterialTheme.colorScheme.outlineVariant
-                                }
-                            ),
-                            modifier = Modifier.fillMaxWidth()
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                Text(
+                                    text = lang.tr("رصيد أمانة مقدم للزبون", "Customer Advance Deposit"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                StitchBadge(
+                                    text = lang.tr("رصيد مقدم", "Advance"),
+                                    tone = StitchBadgeTone.SUCCESS,
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                            }
+
+                            // Advance Highlight Box (#EEF4FF Container)
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f),
+                                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
                                 Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    modifier = Modifier.padding(16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Text(
-                                        text = when {
-                                            isDebtor -> lang.tr("عليه للمحل (دين مستحق)", "Owes Store (Outstanding Debt)")
-                                            isAdvance -> lang.tr("له عند المحل (رصيد مقدم / أمانة)", "Customer Advance (In Credit)")
-                                            else -> lang.tr("حالة الحساب", "Account Status")
-                                        },
-                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                        color = when {
-                                            isDebtor -> financial.debit
-                                            isAdvance -> financial.income
-                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                        }
+                                        text = lang.tr("له رصيد مقدم (دائن لصالح الزبون)", "Advance Credit Balance (Customer Credit)"),
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                     Text(
-                                        text = when {
-                                            isDebtor -> lang.tr(
-                                                "سقف الدين: ${WesternFormatters.formatIls(customer.creditLimitIls)} • متاح للشراء الآجل: ${WesternFormatters.formatIls(availableCreditIls)}",
-                                                "Limit: ${WesternFormatters.formatIls(customer.creditLimitIls)} • Available credit: ${WesternFormatters.formatIls(availableCreditIls)}"
-                                            )
-                                            isAdvance -> lang.tr(
-                                                "يُخصم تلقائياً من مشترياته القادمة • السقف: ${WesternFormatters.formatIls(customer.creditLimitIls)}",
-                                                "Applied to future purchases • Credit limit: ${WesternFormatters.formatIls(customer.creditLimitIls)}"
-                                            )
-                                            else -> lang.tr(
-                                                "لا يوجد دين عليه ولا رصيد مقدم • سقف الدين المتاح: ${WesternFormatters.formatIls(customer.creditLimitIls)}",
-                                                "Account is settled • Available credit limit: ${WesternFormatters.formatIls(customer.creditLimitIls)}"
-                                            )
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.width(12.dp))
-
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text(
-                                        text = when {
-                                            isDebtor -> WesternFormatters.formatIls(customer.balanceIls)
-                                            isAdvance -> WesternFormatters.formatIls(-customer.balanceIls)
-                                            else -> WesternFormatters.formatIls(0.0)
-                                        },
-                                        style = MaterialTheme.typography.headlineMedium.copy(
-                                            fontWeight = FontWeight.Bold
+                                        text = StitchBidiUtils.formatIls(-customer.balanceIls),
+                                        style = MaterialTheme.typography.displayLarge.copy(
+                                            fontWeight = FontWeight.ExtraBold
                                         ),
-                                        color = when {
-                                            isDebtor -> financial.debit
-                                            isAdvance -> financial.income
-                                            else -> MaterialTheme.colorScheme.onSurface
-                                        },
+                                        color = financial.income,
                                         modifier = Modifier.testTag("customer_detail_balance_value")
                                     )
                                     Text(
-                                        text = when {
-                                            isDebtor -> lang.tr("مطلوب منه", "Owes")
-                                            isAdvance -> lang.tr("رصيد له", "In Credit")
-                                            else -> lang.tr("خالص", "Settled")
-                                        },
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = when {
-                                            isDebtor -> financial.debit
-                                            isAdvance -> financial.income
-                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                        }
+                                        text = lang.tr(
+                                            "له بذمتنا ${StitchBidiUtils.formatIls(-customer.balanceIls)}",
+                                            "Store holds ${StitchBidiUtils.formatIls(-customer.balanceIls)} (prepaid credit balance)"
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
                             }
                         }
-
-                        // Secondary Metric Row: Total Historical Purchases
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                    }
+                } else {
+                    // ST-34: Outstanding Debt (185.00 ₪) or Settled
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text(
-                                text = lang.tr("إجمالي المشتريات المسجلة:", "Total Recorded Purchases:"),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = WesternFormatters.formatIls(customer.totalPurchasesIls),
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-
-                        // Primary Actions: Collect Payment & Start Sale for Customer (min 48dp height)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = onOpenPaymentDialog,
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary
-                                ),
-                                modifier = Modifier
-                                    .weight(1.15f)
-                                    .height(48.dp)
-                                    .testTag("collect_payment_button")
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = if (isDebtor) {
-                                        lang.tr("قبض دفعة من الحساب", "Collect Payment")
+                                        lang.tr("إجمالي الرصيد المستحق (لنا بذمته)", "Total Outstanding Debt (Owed to Store)")
                                     } else {
-                                        lang.tr("إيداع دفعة بالحساب", "Record Deposit")
+                                        lang.tr("حالة الحساب الحالي", "Current Account Status")
                                     },
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                StitchBadge(
+                                    text = if (isDebtor) lang.tr("ذمة قائمة", "Outstanding Debt") else lang.tr("حساب خالص", "Settled"),
+                                    tone = if (isDebtor) StitchBadgeTone.DANGER else StitchBadgeTone.SUCCESS,
+                                    shape = RoundedCornerShape(8.dp)
                                 )
                             }
-                            OutlinedButton(
-                                onClick = { onStartSaleForCustomer(customer) },
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                                    .testTag("customer_new_sale_button")
-                            ) {
-                                Icon(Icons.Default.PointOfSale, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = lang.tr("بيع جديد للزبون", "New Sale"),
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
-                                )
-                            }
-                        }
 
-                        // Secondary Actions: Edit Customer & Share/Print Statement (min 48dp height)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            if (onUpdateCustomer != null) {
-                                OutlinedButton(
-                                    onClick = { isEditCustomerOpen = true },
-                                    shape = RoundedCornerShape(10.dp),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp)
-                                        .testTag("edit_customer_button")
+                            // Big Outstanding Debt Amount
+                            Text(
+                                text = StitchBidiUtils.formatIls(customer.balanceIls),
+                                style = MaterialTheme.typography.displayLarge.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = if (isDebtor) financial.debit else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.testTag("customer_detail_balance_value")
+                            )
+
+                            // Credit Limit & Available Credit Indicator
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = lang.tr("تعديل البيانات والسقف", "Edit Info & Limit"),
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                                        text = "${lang.tr("سقف الائتمان:", "Credit Limit:")} ${StitchBidiUtils.formatIls(customer.creditLimitIls)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = "${lang.tr("المتبقي المسموح:", "Available:")} ${StitchBidiUtils.formatIls(availableCreditIls)}",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = financial.income
                                     )
                                 }
-                            }
-                            OutlinedButton(
-                                onClick = { isStatementPreviewOpen = true },
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                                    .testTag("share_customer_statement_button")
-                            ) {
-                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = lang.tr("مشاركة / كشف الحساب", "Share / Statement"),
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
-                                )
+                                // Tactile Progress Bar
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(creditUsagePercent)
+                                            .background(
+                                                if (creditUsagePercent > 0.85f) financial.debit
+                                                else MaterialTheme.colorScheme.primary
+                                            )
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // 2. Customer Statement Header
+            // 2. Primary Fast Actions Grid (>= 48dp Touch Targets)
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = onOpenPaymentDialog,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                            .testTag("collect_payment_button")
+                    ) {
+                        Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isDebtor) lang.tr("قبض دفعة", "Collect Payment")
+                            else lang.tr("تسجيل دفعة أمانة", "Record Deposit"),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = { onStartSaleForCustomer(customer) },
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                            .testTag("customer_new_sale_button")
+                    ) {
+                        Icon(Icons.Default.PointOfSale, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isAdvance) lang.tr("بيع خصماً من الرصيد", "Credit Sale")
+                            else lang.tr("بيع آجل جديد", "New Credit Sale"),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+                        )
+                    }
+                }
+            }
+
+            // 3. Secondary Utility Actions (Edit & Share Statement)
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (onUpdateCustomer != null) {
+                        OutlinedButton(
+                            onClick = { isEditCustomerOpen = true },
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp)
+                                .testTag("edit_customer_button")
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = lang.tr("تعديل البيانات والسقف", "Edit Info & Limit"),
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { isStatementPreviewOpen = true },
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                            .testTag("share_customer_statement_button")
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = lang.tr("مشاركة / كشف الحساب", "Share Statement"),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                        )
+                    }
+                }
+            }
+
+            // 4. Customer Statement Section Header
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = lang.tr("دفتر حركات الزبون", "Account Statement"),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = lang.tr(
-                            "${WesternFormatters.formatInt(transactions.size)} حركة",
-                            "${WesternFormatters.formatInt(transactions.size)} entries"
-                        ),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = lang.tr("سجل الفواتير والحركات", "Transaction History"),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        StitchBadge(
+                            text = "${WesternFormatters.formatInt(transactions.size)} ${lang.tr("حركة", "entries")}",
+                            tone = StitchBadgeTone.NEUTRAL,
+                            shape = RoundedCornerShape(6.dp)
+                        )
+                    }
                 }
             }
 
@@ -1116,7 +1187,7 @@ fun CustomerDetailScreen(
     if (isStatementPreviewOpen) {
         val statementText = onFormatStatementText?.invoke(customer.id) ?: buildString {
             appendLine("${lang.tr("كشف حساب الزبون:", "Customer Statement:")} ${customer.name(lang)}")
-            appendLine("${lang.tr("الرصيد الحالي:", "Current Balance:")} ${WesternFormatters.formatIls(customer.balanceIls)}")
+            appendLine("${lang.tr("الرصيد الحالي:", "Current Balance:")} ${StitchBidiUtils.formatIls(customer.balanceIls)}")
         }
         CustomerStatementShareDialog(
             customer = customer,
@@ -1146,7 +1217,7 @@ private fun EditCustomerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         title = {
             Text(
                 text = lang.tr("تعديل بيانات الزبون وسقف الائتمان", "Edit Customer & Credit Limit"),
@@ -1255,10 +1326,10 @@ private fun CustomerStatementShareDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         title = {
             Text(
-                text = lang.tr("مشاركة وطباعة كشف حساب الزبون", "Share & Print Customer Statement"),
+                text = lang.tr("مشاركة كشف حساب الزبون", "Share Customer Statement"),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
             )
         },
@@ -1269,8 +1340,8 @@ private fun CustomerStatementShareDialog(
             ) {
                 Text(
                     text = lang.tr(
-                        "نص كشف الحساب جاهز للنسخ والمشاركة عبر واتساب أو الطباعة الحرارية المحاكاة:",
-                        "Statement text ready to copy/share via WhatsApp or simulated thermal print:"
+                        "كشف الحساب",
+                        "Statement text ready to copy and share:"
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1291,7 +1362,7 @@ private fun CustomerStatementShareDialog(
                 }
                 if (copied) {
                     Text(
-                        text = lang.tr("تم نسخ كشف حساب ${customer.name(lang)} للحافظة", "Statement copied to clipboard"),
+                        text = lang.tr("تم نسخ كشف حساب ${customer.name(lang)} للحافظة بنجاح", "Statement copied to clipboard"),
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                         color = TraderTheme.financial.income
                     )
@@ -1344,12 +1415,12 @@ private fun CustomerStatementRow(
     val runningBal = tx.runningBalanceIls
     val runningBalLabel = when {
         runningBal > 0.005 -> lang.tr(
-            "الرصيد بعدها: عليه ${WesternFormatters.formatIls(runningBal)}",
-            "Balance after: Owes ${WesternFormatters.formatIls(runningBal)}"
+            "الرصيد بعدها: عليه ${StitchBidiUtils.formatIls(runningBal)}",
+            "Balance after: Owes ${StitchBidiUtils.formatIls(runningBal)}"
         )
         runningBal < -0.005 -> lang.tr(
-            "الرصيد بعدها: له ${WesternFormatters.formatIls(-runningBal)}",
-            "Balance after: In credit ${WesternFormatters.formatIls(-runningBal)}"
+            "الرصيد بعدها: له ${StitchBidiUtils.formatIls(-runningBal)}",
+            "Balance after: In credit ${StitchBidiUtils.formatIls(-runningBal)}"
         )
         else -> lang.tr("الرصيد بعدها: خالص (0.00 ₪)", "Balance after: Settled (0.00 ₪)")
     }
@@ -1405,7 +1476,7 @@ private fun CustomerStatementRow(
                     when {
                         isCreditPurchase -> {
                             Text(
-                                text = "+ ${WesternFormatters.formatIls(tx.debitIls)}",
+                                text = "+ ${StitchBidiUtils.formatIls(tx.debitIls)}",
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
@@ -1419,7 +1490,7 @@ private fun CustomerStatementRow(
                         }
                         isPaymentCollection -> {
                             Text(
-                                text = "- ${WesternFormatters.formatIls(tx.creditIls)}",
+                                text = "- ${StitchBidiUtils.formatIls(tx.creditIls)}",
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
@@ -1433,7 +1504,7 @@ private fun CustomerStatementRow(
                         }
                         isPaidInvoice -> {
                             Text(
-                                text = WesternFormatters.formatIls(tx.debitIls),
+                                text = StitchBidiUtils.formatIls(tx.debitIls),
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
@@ -1448,7 +1519,7 @@ private fun CustomerStatementRow(
                         else -> {
                             if (tx.debitIls > 0) {
                                 Text(
-                                    text = "+ ${WesternFormatters.formatIls(tx.debitIls)}",
+                                    text = "+ ${StitchBidiUtils.formatIls(tx.debitIls)}",
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold
                                     ),
@@ -1457,7 +1528,7 @@ private fun CustomerStatementRow(
                             }
                             if (tx.creditIls > 0) {
                                 Text(
-                                    text = "- ${WesternFormatters.formatIls(tx.creditIls)}",
+                                    text = "- ${StitchBidiUtils.formatIls(tx.creditIls)}",
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold
                                     ),
@@ -1493,10 +1564,7 @@ private fun CustomerStatementRow(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = lang.tr(
-                                "عرض الفاتورة ${WesternFormatters.formatInvoiceCode(tx.invoiceNumber)}",
-                                "View ${WesternFormatters.formatInvoiceCode(tx.invoiceNumber)}"
-                            ),
+                            text = StitchBidiUtils.formatInvoiceCode(tx.invoiceNumber, lang.tr("فاتورة", "Invoice")),
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                         )
                     }
@@ -1506,6 +1574,17 @@ private fun CustomerStatementRow(
     }
 }
 
+/**
+ * Customer Cash Debt Collection & Advance Deposit Dialog (ST-35 Canonical Direction).
+ *
+ * Implements Stitch ST-35:
+ * - Minimal customer amount presets (Full debt 185.00 ₪, 50 ₪, 100 ₪, 200 ₪)
+ * - Source-derived arithmetic: 185.00 - 85.00 = 100.00 ₪ projected remaining debt
+ * - Overpayment allowed: Collecting more than outstanding debt deposits the surplus as
+ *   a customer advance (credit balance) per repository contract, NOT blocked by policy error.
+ * - Single prominent confirmation CTA: "تأكيد قبض [X] ₪ وإيداعها بالصندوق"
+ * - Idempotency preserved: Uses stable operationId to protect against double-tap submits.
+ */
 @Composable
 fun CustomerPaymentCollectionDialog(
     customer: Customer,
@@ -1521,7 +1600,7 @@ fun CustomerPaymentCollectionDialog(
     }
     var payAmountText by rememberSaveable(customer.id) { mutableStateOf(initialAmt) }
     var payNoteText by rememberSaveable(customer.id) { mutableStateOf("") }
-    // Deterministic operation ID per dialog open session to prevent accidental double-tap replay
+    // Deterministic operation ID per dialog session to prevent duplicate processing
     val operationId = rememberSaveable(customer.id) { "cpay_${customer.id}_${System.currentTimeMillis()}" }
 
     val enteredAmount = payAmountText.toDoubleOrNull() ?: 0.0
@@ -1534,7 +1613,7 @@ fun CustomerPaymentCollectionDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         title = {
             Text(
                 text = if (customer.balanceIls > 0.005) {
@@ -1550,7 +1629,7 @@ fun CustomerPaymentCollectionDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Customer Identity & Current Balance Summary
+                // Customer Identity & Current Debt Status Card
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
@@ -1559,7 +1638,7 @@ fun CustomerPaymentCollectionDialog(
                 ) {
                     Column(
                         modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
                             text = customer.name(lang),
@@ -1568,12 +1647,12 @@ fun CustomerPaymentCollectionDialog(
                         Text(
                             text = when {
                                 customer.balanceIls > 0.005 -> lang.tr(
-                                    "الدين الحالي عليه: ${WesternFormatters.formatIls(customer.balanceIls)}",
-                                    "Current debt owed: ${WesternFormatters.formatIls(customer.balanceIls)}"
+                                    "الدين الحالي عليه (ذمة قائمة): ${StitchBidiUtils.formatIls(customer.balanceIls)}",
+                                    "Current outstanding debt: ${StitchBidiUtils.formatIls(customer.balanceIls)}"
                                 )
                                 customer.balanceIls < -0.005 -> lang.tr(
-                                    "له رصيد مقدم حالياً: ${WesternFormatters.formatIls(-customer.balanceIls)}",
-                                    "Current advance credit: ${WesternFormatters.formatIls(-customer.balanceIls)}"
+                                    "له رصيد مقدم حالياً: ${StitchBidiUtils.formatIls(-customer.balanceIls)}",
+                                    "Current advance credit: ${StitchBidiUtils.formatIls(-customer.balanceIls)}"
                                 )
                                 else -> lang.tr(
                                     "رصيد الحساب الحالي: خالص (0.00 ₪)",
@@ -1590,7 +1669,7 @@ fun CustomerPaymentCollectionDialog(
                     }
                 }
 
-                // Quick Preset Chips
+                // Quick Preset Chips (Full Debt, 50, 100, 200)
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1606,8 +1685,8 @@ fun CustomerPaymentCollectionDialog(
                                     label = {
                                         Text(
                                             text = lang.tr(
-                                                "كامل الدين (${WesternFormatters.formatIls(customer.balanceIls)})",
-                                                "Full Debt (${WesternFormatters.formatIls(customer.balanceIls)})"
+                                                "كامل الدين (${StitchBidiUtils.formatIls(customer.balanceIls)})",
+                                                "Full Debt (${StitchBidiUtils.formatIls(customer.balanceIls)})"
                                             ),
                                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                                         )
@@ -1638,67 +1717,97 @@ fun CustomerPaymentCollectionDialog(
                     }
                 }
 
+                // Cash Amount Input (Large readable field with Western numbers)
                 OutlinedTextField(
                     value = payAmountText,
                     onValueChange = { payAmountText = WesternFormatters.sanitizeWesternDigits(it) },
-                    label = { Text(lang.tr("المبلغ المقبوض نقداً (₪)", "Cash Collected (₪)")) },
+                    label = { Text(lang.tr("المبلغ المقبوض نقداً (₪) *", "Cash Collected (₪) *")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
-                    textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    textStyle = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        textDirection = TextDirection.Ltr
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 48.dp)
                         .testTag("payment_amount_input")
                 )
 
-                // Live Balance Consequence Preview
+                // Projected Balance & Cash Drawer Status Banner (ST-35 Breakdown)
                 if (enteredAmount > 0.0) {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = if (projectedBalance > 0.005) {
-                            financial.warningContainer
-                        } else {
-                            financial.incomeContainer
+                        color = when {
+                            projectedBalance > 0.005 -> MaterialTheme.colorScheme.surfaceVariant
+                            projectedBalance < -0.005 -> financial.incomeContainer
+                            else -> financial.incomeContainer
                         },
                         border = BorderStroke(
                             1.dp,
-                            if (projectedBalance > 0.005) financial.warning.copy(alpha = 0.35f) else financial.income.copy(alpha = 0.35f)
+                            if (projectedBalance > 0.005) MaterialTheme.colorScheme.outlineVariant
+                            else financial.income.copy(alpha = 0.4f)
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("payment_projected_balance_banner")
                     ) {
-                        Text(
-                            text = when {
-                                projectedBalance > 0.005 -> lang.tr(
-                                    "بعد قبض ${WesternFormatters.formatIls(enteredAmount)}: يتبقى عليه دين ${WesternFormatters.formatIls(projectedBalance)}",
-                                    "After collecting ${WesternFormatters.formatIls(enteredAmount)}: Remaining debt ${WesternFormatters.formatIls(projectedBalance)}"
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = when {
+                                    projectedBalance > 0.005 -> lang.tr(
+                                        "الرصيد المتبقي بعد القبض: ${StitchBidiUtils.formatIls(projectedBalance)} (دين متبقي)",
+                                        "Remaining debt after payment: ${StitchBidiUtils.formatIls(projectedBalance)}"
+                                    )
+                                    projectedBalance < -0.005 -> lang.tr(
+                                        "الرصيد بعد القبض: يصبح له رصيد مقدم (أمانة) ${StitchBidiUtils.formatIls(-projectedBalance)}",
+                                        "After collection: Customer advance credit of ${StitchBidiUtils.formatIls(-projectedBalance)}"
+                                    )
+                                    else -> lang.tr(
+                                        "الرصيد بعد القبض: يصبح حساب الزبون خالصاً تماماً (0.00 ₪)",
+                                        "After collection: Account becomes completely settled (0.00 ₪)"
+                                    )
+                                },
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = if (projectedBalance > 0.005) {
+                                    MaterialTheme.colorScheme.onSurface
+                                } else {
+                                    financial.income
+                                }
+                            )
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PointOfSale,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
                                 )
-                                projectedBalance < -0.005 -> lang.tr(
-                                    "بعد قبض ${WesternFormatters.formatIls(enteredAmount)}: يصبح له رصيد مقدم (أمانة) ${WesternFormatters.formatIls(-projectedBalance)}",
-                                    "After collecting ${WesternFormatters.formatIls(enteredAmount)}: Customer advance credit of ${WesternFormatters.formatIls(-projectedBalance)}"
+                                Text(
+                                    text = lang.tr(
+                                        "قبض نقدي",
+                                        "Deposit to active cash drawer • Ready"
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                else -> lang.tr(
-                                    "بعد قبض ${WesternFormatters.formatIls(enteredAmount)}: يصبح حساب الزبون خالصاً تماماً (0.00 ₪)",
-                                    "After collecting ${WesternFormatters.formatIls(enteredAmount)}: Account becomes completely settled (0.00 ₪)"
-                                )
-                            },
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = if (projectedBalance > 0.005) {
-                                MaterialTheme.colorScheme.onSurface
-                            } else {
-                                financial.income
-                            },
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
-                        )
+                            }
+                        }
                     }
                 }
 
                 OutlinedTextField(
                     value = payNoteText,
                     onValueChange = { payNoteText = it },
-                    label = { Text(lang.tr("ملاحظة (اختياري)", "Note (Optional)")) },
-                    placeholder = { Text(lang.tr("مثال: دفعة نقدية بالمحل", "e.g. Cash paid at counter")) },
+                    label = { Text(lang.tr("البيان / ملاحظة السند (اختياري)", "Note (Optional)")) },
+                    placeholder = { Text(lang.tr("مثال: دفعة نقدية على الحساب", "e.g. Cash payment on account")) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
@@ -1723,7 +1832,14 @@ fun CustomerPaymentCollectionDialog(
                     .testTag("confirm_customer_payment_button")
             ) {
                 Text(
-                    text = lang.tr("تأكيد القبض بالصندوق", "Confirm Collection"),
+                    text = if (enteredAmount > 0.0) {
+                        lang.tr(
+                            "تأكيد قبض ${StitchBidiUtils.formatIls(enteredAmount)} وإيداعها بالصندوق",
+                            "Confirm ${StitchBidiUtils.formatIls(enteredAmount)} Collection"
+                        )
+                    } else {
+                        lang.tr("تأكيد القبض بالصندوق", "Confirm Collection")
+                    },
                     style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                 )
             }
@@ -1739,6 +1855,10 @@ fun CustomerPaymentCollectionDialog(
     )
 }
 
+/**
+ * Minimal Add Customer Modal Sheet / Dialog (ST-39 Stitch Specification).
+ * Fields: Name (required), Phone (required, 05X format), Address (optional).
+ */
 @Composable
 fun AddCustomerDialog(
     lang: AppLanguage,
@@ -1751,7 +1871,7 @@ fun AddCustomerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         title = {
             Text(
                 text = lang.tr("إضافة زبون جديد", "New Customer"),
@@ -1766,7 +1886,8 @@ fun AddCustomerDialog(
                 OutlinedTextField(
                     value = newCustName,
                     onValueChange = { newCustName = it },
-                    label = { Text(lang.tr("اسم الزبون أو المنشأة *", "Customer / Business Name *")) },
+                    label = { Text(lang.tr("اسم الزبون أو المنشأة *", "Customer Name *")) },
+                    placeholder = { Text(lang.tr("مثال: خليل شاهين", "e.g. Khalil Shaheen")) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                     textStyle = MaterialTheme.typography.bodyMedium,
@@ -1777,7 +1898,8 @@ fun AddCustomerDialog(
                 OutlinedTextField(
                     value = newCustPhone,
                     onValueChange = { newCustPhone = WesternFormatters.sanitizeWesternDigits(it) },
-                    label = { Text(lang.tr("رقم الجوال (059...)", "Phone Number (059...)")) },
+                    label = { Text(lang.tr("رقم الجوال (05X...) *", "Phone Number (05X...) *")) },
+                    placeholder = { Text("059X-XXXXXX") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
@@ -1792,7 +1914,8 @@ fun AddCustomerDialog(
                 OutlinedTextField(
                     value = newCustAddr,
                     onValueChange = { newCustAddr = it },
-                    label = { Text(lang.tr("المنطقة / العنوان", "Neighborhood / Address")) },
+                    label = { Text(lang.tr("العنوان أو الحي (اختياري)", "Address / Area (Optional)")) },
+                    placeholder = { Text(lang.tr("نابلس — رفيديا", "Nablus - Rafidia")) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                     textStyle = MaterialTheme.typography.bodyMedium,

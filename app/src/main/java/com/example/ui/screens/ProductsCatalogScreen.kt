@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -67,6 +68,9 @@ import com.example.model.Product
 import com.example.model.ProductCategory
 import com.example.model.StockMovement
 import com.example.model.WesternFormatters
+import com.example.ui.components.StitchBadge
+import com.example.ui.components.StitchBadgeTone
+import com.example.ui.components.StitchBidiUtils
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
@@ -158,8 +162,68 @@ fun ProductsCatalogScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (state.currentSession.canManageSuppliers()) {
-                    OutlinedButton(onClick = onOpenPurchases, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                        Text(lang.tr("المشتريات", "Purchases"))
+                    val pendingReceiptBillsCount = remember(state.purchaseBills) {
+                        state.purchaseBills.count { !it.isReceived && it.expectedProductId != null && it.expectedQuantity > 0 }
+                    }
+                    Surface(
+                        onClick = onOpenPurchases,
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("open_purchases_banner")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Inventory2,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                                Column {
+                                    Text(
+                                        text = lang.tr("فواتير المشتريات والتوريد", "Purchases & Inward Goods"),
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = lang.tr("سجل فواتير الموردين ومتابعة استلام البضائع", "Supplier bills & goods receipt"),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            if (pendingReceiptBillsCount > 0) {
+                                StitchBadge(
+                                    text = lang.tr(
+                                        "${WesternFormatters.formatInt(pendingReceiptBillsCount)} بانتظار الاستلام",
+                                        "$pendingReceiptBillsCount awaiting receipt"
+                                    ),
+                                    tone = StitchBadgeTone.WARNING
+                                )
+                            }
+                        }
                     }
                 }
                 // Action Row: + New Product (Owner/Manager) & Warehouse / Lot / Stock Count Preview
@@ -382,6 +446,7 @@ fun ProductsCatalogScreen(
                     CatalogDirectoryRow(
                         product = product,
                         lang = lang,
+                        canManageInventory = canManageInventory,
                         onClick = { onProductClick(product) }
                     )
                 }
@@ -416,6 +481,7 @@ fun ProductsCatalogScreen(
 private fun CatalogDirectoryRow(
     product: Product,
     lang: AppLanguage,
+    canManageInventory: Boolean = false,
     onClick: () -> Unit
 ) {
     val isOutOfStock = product.isStockTracked && product.stockCount <= 0
@@ -530,6 +596,14 @@ private fun CatalogDirectoryRow(
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
+                if (canManageInventory && product.isStockTracked && product.costIls >= 0.0) {
+                    Text(
+                        text = "${lang.tr("التكلفة:", "Cost:")} ${WesternFormatters.formatIls(product.costIls)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
                 Surface(
                     shape = RoundedCornerShape(6.dp),
                     color = stockBadgeBg
@@ -584,6 +658,13 @@ fun ProductDetailScreen(
             .subtract(BigDecimal(product.costIls.toString()))
             .setScale(2, RoundingMode.HALF_UP)
             .toDouble()
+    }
+    val marginPercent = remember(product.priceIls, unitMarginIls) {
+        if (product.priceIls > 0.0) {
+            (unitMarginIls / product.priceIls) * 100.0
+        } else {
+            0.0
+        }
     }
 
     Column(
@@ -827,7 +908,7 @@ fun ProductDetailScreen(
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
-                                            text = "${lang.tr("الهامش:", "Margin:")} ${WesternFormatters.formatIls(unitMarginIls)}",
+                                            text = "${lang.tr("الهامش:", "Margin:")} ${WesternFormatters.formatIls(unitMarginIls)} (${String.format(java.util.Locale.US, "%.1f", marginPercent)}%)",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = if (unitMarginIls >= 0) {
                                                 TraderTheme.financial.income

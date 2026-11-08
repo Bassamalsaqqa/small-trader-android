@@ -9,20 +9,36 @@ import androidx.compose.ui.unit.sp
 import com.example.R
 
 /**
- * Typography & Tabular Numeral System for Small Trader (التاجر الصغير).
+ * Typography Scale & Font Architecture for Small Trader (التاجر الصغير).
  *
- * Design Philosophy:
- * - Cairo provides balanced, open Arabic counters and crisp Western numerals (0–9).
- * - [TabularFontfeature] ("tnum") aligns monetary figures, quantities, and balances vertically
- *   in Cairo without making prices look like raw terminal/code output.
- * - [MonoFontFamily] (JetBrains Mono) is reserved strictly for technical identifiers
- *   (EAN-13 barcodes, invoice/voucher codes, and thermal receipt columns).
- * - Generous line heights prevent clipping of Arabic ascenders/descenders and support
- *   dynamic system font scaling cleanly.
+ * Canonical Font: IBM Plex Sans Arabic (400 Regular, 500 Medium, 600 SemiBold, 700 Bold).
+ *
+ * Design Constraints:
+ * 1. Primary Font: Official IBM Plex Sans Arabic distribution, licensed under SIL OFL 1.1.
+ * 2. Arabic Microtype Guard: Minimum font size 12sp; never render Arabic text below 12sp
+ *    to preserve diacritics, open glyph counters, and legibility on mobile viewports.
+ * 3. Tabular Lining Numerals: fontFeatureSettings = "tnum" aligns monetary figures, quantities,
+ *    and balances vertically in Western European digits (0–9).
+ * 4. Technical Identifiers: MonoFontFamily (JetBrains Mono) is strictly reserved for technical
+ *    barcodes (EAN-13), voucher codes, and thermal column receipts.
+ * 5. Caller Compatibility: CairoFontFamily and MonoFontFamily are preserved as public symbols
+ *    so existing callers and tests remain fully compatible.
  */
 
 const val TabularNumsFeature = "tnum"
 
+val IbmPlexSansArabicFontFamily = FontFamily(
+    Font(R.font.ibm_plex_sans_arabic_regular, FontWeight.Normal),
+    Font(R.font.ibm_plex_sans_arabic_medium, FontWeight.Medium),
+    Font(R.font.ibm_plex_sans_arabic_semibold, FontWeight.SemiBold),
+    Font(R.font.ibm_plex_sans_arabic_bold, FontWeight.Bold)
+)
+
+// Compatibility for the initial prototype spelling.
+val IbmpPlexSansArabicFontFamily = IbmPlexSansArabicFontFamily
+val DefaultAppFontFamily = IbmPlexSansArabicFontFamily
+
+// Public compatibility aliases for legacy callers and tests
 val CairoFontFamily = FontFamily(
     Font(R.font.cairo, FontWeight.Normal),
     Font(R.font.cairo, FontWeight.Medium),
@@ -38,101 +54,101 @@ val MonoFontFamily = FontFamily(
 
 val Typography = Typography(
     displayLarge = TextStyle(
-        fontFamily = CairoFontFamily,
+        fontFamily = DefaultAppFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 28.sp,
         lineHeight = 36.sp,
         fontFeatureSettings = TabularNumsFeature
     ),
     displayMedium = TextStyle(
-        fontFamily = CairoFontFamily,
+        fontFamily = DefaultAppFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 24.sp,
         lineHeight = 32.sp,
         fontFeatureSettings = TabularNumsFeature
     ),
     headlineLarge = TextStyle(
-        fontFamily = CairoFontFamily,
-        fontWeight = FontWeight.Bold,
-        fontSize = 21.sp,
-        lineHeight = 29.sp,
+        fontFamily = DefaultAppFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 22.sp,
+        lineHeight = 28.sp,
         fontFeatureSettings = TabularNumsFeature
     ),
     headlineMedium = TextStyle(
-        fontFamily = CairoFontFamily,
-        fontWeight = FontWeight.Bold,
-        fontSize = 19.sp,
-        lineHeight = 26.sp,
+        fontFamily = DefaultAppFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 20.sp,
+        lineHeight = 28.sp,
         fontFeatureSettings = TabularNumsFeature
     ),
     headlineSmall = TextStyle(
-        fontFamily = CairoFontFamily,
-        fontWeight = FontWeight.Bold,
-        fontSize = 17.5.sp,
-        lineHeight = 24.sp,
+        fontFamily = DefaultAppFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 18.sp,
+        lineHeight = 26.sp,
         fontFeatureSettings = TabularNumsFeature
     ),
     titleLarge = TextStyle(
-        fontFamily = CairoFontFamily,
-        fontWeight = FontWeight.Bold,
-        fontSize = 17.sp,
-        lineHeight = 24.sp,
+        fontFamily = DefaultAppFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 18.sp,
+        lineHeight = 26.sp,
         fontFeatureSettings = TabularNumsFeature
     ),
     titleMedium = TextStyle(
-        fontFamily = CairoFontFamily,
-        fontWeight = FontWeight.SemiBold,
+        fontFamily = DefaultAppFontFamily,
+        fontWeight = FontWeight.Medium,
         fontSize = 16.sp,
-        lineHeight = 23.sp,
+        lineHeight = 24.sp,
         fontFeatureSettings = TabularNumsFeature
     ),
     titleSmall = TextStyle(
-        fontFamily = CairoFontFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 14.5.sp,
-        lineHeight = 21.sp,
-        fontFeatureSettings = TabularNumsFeature
-    ),
-    bodyLarge = TextStyle(
-        fontFamily = CairoFontFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize = 15.sp,
+        fontFamily = DefaultAppFontFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 14.sp,
         lineHeight = 22.sp,
         fontFeatureSettings = TabularNumsFeature
     ),
+    bodyLarge = TextStyle(
+        fontFamily = DefaultAppFontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
+        fontFeatureSettings = TabularNumsFeature
+    ),
     bodyMedium = TextStyle(
-        fontFamily = CairoFontFamily,
+        fontFamily = DefaultAppFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
         lineHeight = 20.sp,
         fontFeatureSettings = TabularNumsFeature
     ),
     bodySmall = TextStyle(
-        fontFamily = CairoFontFamily,
+        fontFamily = DefaultAppFontFamily,
         fontWeight = FontWeight.Normal,
-        fontSize = 12.5.sp,
+        fontSize = 12.sp,
         lineHeight = 18.sp,
         fontFeatureSettings = TabularNumsFeature
     ),
     labelLarge = TextStyle(
-        fontFamily = CairoFontFamily,
+        fontFamily = DefaultAppFontFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 13.5.sp,
-        lineHeight = 19.sp,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
         fontFeatureSettings = TabularNumsFeature
     ),
     labelMedium = TextStyle(
-        fontFamily = CairoFontFamily,
+        fontFamily = DefaultAppFontFamily,
         fontWeight = FontWeight.Medium,
-        fontSize = 12.5.sp,
+        fontSize = 13.sp,
         lineHeight = 18.sp,
         fontFeatureSettings = TabularNumsFeature
     ),
     labelSmall = TextStyle(
-        fontFamily = CairoFontFamily,
+        fontFamily = DefaultAppFontFamily,
         fontWeight = FontWeight.Medium,
         fontSize = 12.sp,
-        lineHeight = 17.sp,
+        lineHeight = 16.sp,
         fontFeatureSettings = TabularNumsFeature
     )
 )

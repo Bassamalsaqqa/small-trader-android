@@ -1,33 +1,36 @@
 package com.example.ui.screens
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddShoppingCart
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.QrCodeScanner
-import androidx.compose.material.icons.filled.ShoppingBag
+import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,31 +38,35 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.model.AppLanguage
 import com.example.model.InvoiceRecord
 import com.example.model.Product
 import com.example.model.WesternFormatters
-import com.example.ui.theme.MonoFontFamily
+import com.example.ui.components.StitchBadge
+import com.example.ui.components.StitchBadgeTone
+import com.example.ui.components.StitchBidiUtils
+import com.example.ui.components.StitchCard
+import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
 
 /**
- * Calm, Native-First Home Screen for Small Trader (التاجر الصغير).
+ * Stitch Canonical Home Screen for Small Trader (التاجر الصغير).
  *
- * Implements Merchant Workspace Concept A:
- * 1. Single Dominant Register Action: Dominant "Resume Sale" when an active basket exists,
- *    or dominant "New Sale" when empty. No competing hero buttons or paragraph fluff.
- * 2. Dedicated 48dp Secondary POS Actions: Direct Scan Barcode and Custom Item actions.
- * 3. Authorized Purchase Affordance: Distinct, concise 'شراء جديد' button for authorized
- *    roles without receive-stock conflation.
- * 4. High-Signal Owner Pulse: Single Today's Sales figure with date/invoice scope and quiet
- *    Reports drill-down. Strictly hidden for cashiers. No cash/float noise (lives in Reports).
- * 5. Short Activity & Attention List: Maximum 3 rows total (e.g. 1 navigation-only stock alert
- *    summary + 2 recent invoices). No stock mutation (+10 eliminated), no pills jungle,
- *    and no redundant operation chips (reachable via shell navigation).
+ * Implements Google Stitch Design (ST-01-AR-LIGHT-OWNER-NORMAL-v02):
+ * 1. Store Identity: Shell already owns the top app bar header, avoiding duplication.
+ * 2. Dominant Register Action: Dominant "Resume Sale" when an active basket exists,
+ *    or dominant "New Sale" when empty (min 52dp height, 10dp radius, #255FD6).
+ * 3. Dedicated 48dp Secondary POS Actions: Direct Scan Barcode and Custom Item actions.
+ * 4. Concise Purchase Action: Utilitarian 'المشتريات' action for authorized roles (no marketing slop).
+ * 5. Owner Pulse Metric: Single dated sales figure with date scope and invoice count pill.
+ *    No physical or book cash footer (honoring Lead Reconciliation). Strictly hidden for cashiers.
+ * 6. Compact Attention List: Low stock summary row (navigates to catalog, strictly NO restock mutation)
+ *    and up to 2 recent invoices with honest partial settlement tracking.
+ * 7. BiDi Safety: Alphanumeric codes format cleanly as "فاتورة INV-1042" with 48dp touch targets.
  */
 @Composable
 fun HomeScreen(
@@ -92,13 +99,13 @@ fun HomeScreen(
             .fillMaxSize()
             .testTag("home_screen_list"),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. Dominant Register Section: Single Active Main Action + Secondary Scanner/Custom Row
+        // 1. Dominant Register Section: Hero Action + Tactile 48dp Secondary Quick Actions
         item {
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (hasActiveBasket) {
                     // Dominant Full-Width Resume Sale Action
@@ -108,40 +115,47 @@ fun HomeScreen(
                             .fillMaxWidth()
                             .heightIn(min = 56.dp)
                             .testTag("home_resume_review_button"),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary
                         ),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
                     ) {
-                        Column(
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.ShoppingBag,
+                                    imageVector = Icons.Default.PointOfSale,
                                     contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(24.dp)
                                 )
-                                Text(
-                                    text = lang.tr("متابعة البيع", "Resume Sale"),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = lang.tr(
+                                            "متابعة البيع (${state.basketItemCount})",
+                                            "Resume Sale (${state.basketItemCount})"
+                                        ),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = lang.tr("السلة الحالية غير مكتملة", "Active sale in progress"),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
+                                    )
+                                }
                             }
+
                             Text(
-                                text = if (lang == AppLanguage.AR) {
-                                    "${WesternFormatters.formatInt(state.basketItemCount)} أصناف • ${WesternFormatters.formatIls(state.basketNetTotalIls)}"
-                                } else {
-                                    "${WesternFormatters.formatInt(state.basketItemCount)} items • ${WesternFormatters.formatIls(state.basketNetTotalIls)}"
-                                },
-                                style = MaterialTheme.typography.titleMedium,
+                                text = WesternFormatters.formatIls(state.basketNetTotalIls),
+                                style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -152,9 +166,9 @@ fun HomeScreen(
                         onClick = onStartNewSale,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 56.dp)
+                            .heightIn(min = 52.dp)
                             .testTag("hero_new_sale_button"),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary
@@ -162,8 +176,8 @@ fun HomeScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
                     ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 imageVector = Icons.Default.AddShoppingCart,
@@ -179,192 +193,280 @@ fun HomeScreen(
                     }
                 }
 
-                // Secondary 48dp POS Tools Row: Scan Barcode & Quick Custom Item
+                // Tactile 48dp Secondary POS Actions: Direct Scan Barcode & Custom Item
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedButton(
+                    Surface(
                         onClick = onOpenScanner,
                         modifier = Modifier
                             .weight(1f)
                             .heightIn(min = 48.dp)
                             .testTag("hero_scan_barcode_button"),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.QrCodeScanner,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = lang.tr("مسح باركود", "Scan Barcode"),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.QrCodeScanner,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Text(
+                                text = lang.tr("مسح باركود", "Scan Barcode"),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
 
-                    OutlinedButton(
+                    Surface(
                         onClick = onOpenCustomItem,
                         modifier = Modifier
                             .weight(1f)
                             .heightIn(min = 48.dp)
                             .testTag("home_quick_custom_item_button"),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.PointOfSale,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = lang.tr("صنف حر", "Custom Item"),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-
-                // Quiet Add Items Affordance when Active Basket Exists
-                if (hasActiveBasket) {
-                    TextButton(
-                        onClick = onStartNewSale,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 44.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AddShoppingCart,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = lang.tr("إضافة أصناف أخرى للسلة", "Add more items to cart"),
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Text(
+                                text = lang.tr("صنف سريع", "Custom Item"),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // 2. Authorized Purchase Action: Concise Full-Width Button without Receive-Stock Conflation
-        if (canManageSuppliers) {
-            item {
-                FilledTonalButton(
-                    onClick = onOpenPurchase,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp)
-                        .testTag("home_purchase_button"),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.LocalShipping,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = lang.tr("شراء جديد", "New Purchase"),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            }
-        }
-
-        // 3. Owner-Only Financial Pulse: Single Today's Sales Figure with Scope & Quiet Reports Drill-Down
+        // 2. High-Signal Owner Pulse: Dated Sales Metric Card (Authorized Only, Strictly No Cash Footer)
         if (canViewReports) {
             item {
                 Surface(
-                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onNavigateToReports,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("home_reports_button"),
                     shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = lang.tr(
+                                    "مبيعات اليوم (${state.todayDate})",
+                                    "Today's Sales (${state.todayDate})"
+                                ),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            StitchBadge(
+                                text = "${WesternFormatters.formatInt(state.todayInvoiceCount)} ${lang.tr("فاتورة", "invoices")}",
+                                tone = StitchBadgeTone.NEUTRAL
+                            )
+                        }
+
+                        Text(
+                            text = WesternFormatters.formatIls(state.todaySalesTotalIls),
+                            style = MaterialTheme.typography.displayMedium.copy(fontSize = 30.sp),
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3. Authorized Purchase Affordance (Owner / Manager Only, Concise Utilitarian Action)
+        if (canManageSuppliers) {
+            item {
+                Surface(
+                    onClick = onOpenPurchase,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 52.dp)
+                        .testTag("home_purchase_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                            modifier = Modifier.weight(1f)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.LocalShipping,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+
                             Text(
-                                text = if (lang == AppLanguage.AR) {
-                                    "مبيعات اليوم • ${WesternFormatters.formatInt(state.todayInvoiceCount)} فاتورة"
-                                } else {
-                                    "Today's Sales • ${WesternFormatters.formatInt(state.todayInvoiceCount)} invoices"
-                                },
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = WesternFormatters.formatIls(state.todaySalesTotalIls),
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.Bold,
+                                text = lang.tr("المشتريات", "Purchases"),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
 
-                        TextButton(
-                            onClick = onNavigateToReports,
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("home_reports_button"),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = lang.tr("التقارير", "Reports"),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
             }
         }
 
-        // 4. Short Activity & Attention List (Max 3 Rows Total)
+        // 4. Compact Stock Summary Row (Navigates to Catalog, Strictly NO Restock Mutation)
+        if (state.lowStockProducts.isNotEmpty()) {
+            item {
+                Surface(
+                    onClick = onNavigateToCatalog,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 52.dp)
+                        .testTag("home_catalog_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = TraderTheme.financial.warningContainer,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.WarningAmber,
+                                        contentDescription = null,
+                                        tint = TraderTheme.financial.warning,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = if (lang == AppLanguage.AR) {
+                                        "نواقص المخزون: ${WesternFormatters.formatInt(state.lowStockProducts.size)} أصناف"
+                                    } else {
+                                        "${WesternFormatters.formatInt(state.lowStockProducts.size)} items low in stock"
+                                    },
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = state.lowStockProducts.take(2).joinToString(if (lang == AppLanguage.AR) "، " else ", ") { it.name(lang) } +
+                                            if (state.lowStockProducts.size > 2) "..." else "",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 5. Recent Invoices Section: Section Header + Clean Bordered Card
         item {
-            val hasStockAlert = state.lowStockProducts.isNotEmpty()
-            val maxInvoices = if (hasStockAlert) 2 else 3
-            val recentInvoices = state.invoices.take(maxInvoices)
+            val recentInvoices = state.invoices.sortedByDescending { it.timestamp }.take(2)
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Activity Header
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 2.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = lang.tr("النشاط الأخير", "Recent Activity"),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
+                        text = lang.tr("العمليات الأخيرة", "Recent Transactions"),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
+
                     TextButton(
                         onClick = onViewAllInvoices,
                         modifier = Modifier
@@ -373,7 +475,7 @@ fun HomeScreen(
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = lang.tr("كل الفواتير", "All Invoices"),
+                            text = lang.tr("عرض الكل", "View All"),
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary
@@ -381,75 +483,36 @@ fun HomeScreen(
                     }
                 }
 
-                // Row 1 (if stock alert): Navigation-Only Stock Summary Row (NO MUTATION)
-                if (hasStockAlert) {
-                    Surface(
-                        onClick = onNavigateToCatalog,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 48.dp)
-                            .testTag("home_catalog_button"),
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.WarningAmber,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(20.dp)
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (recentInvoices.isNotEmpty()) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            recentInvoices.forEachIndexed { index, invoice ->
+                                RecentInvoiceRow(
+                                    invoice = invoice,
+                                    lang = lang,
+                                    onClick = { onOpenInvoice(invoice) }
                                 )
-                                Text(
-                                    text = if (lang == AppLanguage.AR) {
-                                        "${WesternFormatters.formatInt(state.lowStockProducts.size)} أصناف منخفضة في المخزون"
-                                    } else {
-                                        "${WesternFormatters.formatInt(state.lowStockProducts.size)} items low in stock"
-                                    },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                if (index < recentInvoices.lastIndex) {
+                                    HorizontalDivider(
+                                        color = MaterialTheme.colorScheme.outlineVariant,
+                                        thickness = 1.dp
+                                    )
+                                }
                             }
-
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
                         }
-                    }
-                }
-
-                // Invoices (Max 2 if stock alert, max 3 if no stock alert -> Max 3 rows total)
-                if (recentInvoices.isNotEmpty()) {
-                    recentInvoices.forEach { invoice ->
-                        RecentInvoiceRow(
-                            invoice = invoice,
-                            lang = lang,
-                            onClick = { onOpenInvoice(invoice) }
+                    } else {
+                        Text(
+                            text = lang.tr("لا توجد فواتير مسجلة اليوم بعد.", "No invoices recorded yet today."),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(16.dp)
                         )
                     }
-                } else if (!hasStockAlert) {
-                    Text(
-                        text = lang.tr("لا توجد فواتير مسجلة اليوم بعد.", "No invoices recorded yet today."),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    )
                 }
             }
         }
@@ -458,7 +521,7 @@ fun HomeScreen(
 
 /**
  * Clean, Single-Row Representation of a Recent Invoice.
- * Avoids multi-tier border slabs and badges while preserving financial clarity.
+ * Preserves public compatibility for ReceiptScreen and legacy callers.
  */
 @Composable
 fun RecentInvoiceCard(
@@ -466,11 +529,17 @@ fun RecentInvoiceCard(
     lang: AppLanguage,
     onClick: () -> Unit
 ) {
-    RecentInvoiceRow(
-        invoice = invoice,
-        lang = lang,
-        onClick = onClick
-    )
+    StitchCard(
+        onClick = onClick,
+        modifier = Modifier.testTag("recent_invoice_${invoice.invoiceNumber}"),
+        contentPadding = PaddingValues(0.dp)
+    ) {
+        RecentInvoiceRow(
+            invoice = invoice,
+            lang = lang,
+            onClick = onClick
+        )
+    }
 }
 
 @Composable
@@ -479,23 +548,39 @@ fun RecentInvoiceRow(
     lang: AppLanguage,
     onClick: () -> Unit
 ) {
-    val customerTitle = invoice.customerNote.ifBlank {
-        lang.tr("زبون نقدي", "Walk-in Customer")
+    val isPartial = invoice.cashReceivedIls > 0.005 && !invoice.isPaidInFull
+    val statusTone = when {
+        invoice.isPaidInFull -> StitchBadgeTone.SUCCESS
+        isPartial -> StitchBadgeTone.WARNING
+        else -> StitchBadgeTone.DANGER
     }
-    val paymentLabel = when {
-        invoice.isPaidInFull -> lang.tr("نقداً", "Cash")
-        invoice.cashReceivedIls > 0.005 -> lang.tr("جزئي", "Partial")
+    val statusLabel = when {
+        invoice.isPaidInFull -> lang.tr("مدفوع", "Paid")
+        isPartial -> lang.tr("سداد جزئي", "Partial")
         else -> lang.tr("ذمة", "Credit")
+    }
+
+    val customerTitle = invoice.customerNote.ifBlank {
+        lang.tr("زبون نقدي", "Walk-in")
+    }
+
+    val subtitle = if (isPartial) {
+        if (lang == AppLanguage.AR) {
+            "مسدد ${WesternFormatters.formatIls(invoice.cashReceivedIls)} • متبقي ${WesternFormatters.formatIls(invoice.remainingDebitIls)}"
+        } else {
+            "Paid ${WesternFormatters.formatIls(invoice.cashReceivedIls)} • Due ${WesternFormatters.formatIls(invoice.remainingDebitIls)}"
+        }
+    } else {
+        "$customerTitle • ${if (invoice.isPaidInFull) lang.tr("نقداً", "Cash") else lang.tr("ذمة", "Credit")}"
     }
 
     Surface(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp)
+            .heightIn(min = 56.dp)
             .testTag("recent_invoice_${invoice.invoiceNumber}"),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+        color = MaterialTheme.colorScheme.surface
     ) {
         Row(
             modifier = Modifier
@@ -504,49 +589,64 @@ fun RecentInvoiceRow(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(end = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f)
             ) {
-                Text(
-                    text = customerTitle,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Receipt,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Text(
-                        text = WesternFormatters.formatInvoiceCode(invoice.invoiceNumber),
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFontFamily),
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Medium
+                        text = StitchBidiUtils.formatInvoiceCode(invoice.invoiceNumber, lang.tr("فاتورة", "Invoice")),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "•",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = paymentLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
 
-            Text(
-                text = WesternFormatters.formatIls(invoice.netTotalIls),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+                modifier = Modifier.padding(start = 8.dp)
+            ) {
+                Text(
+                    text = WesternFormatters.formatIls(invoice.netTotalIls),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                StitchBadge(
+                    text = statusLabel,
+                    tone = statusTone
+                )
+            }
         }
     }
 }

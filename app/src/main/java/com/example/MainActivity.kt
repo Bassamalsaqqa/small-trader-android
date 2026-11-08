@@ -138,8 +138,14 @@ fun SmallTraderApp(
                                 traderViewModel::openPaymentCollectionForCustomer, traderViewModel::dismissCustomerFeedback) },
                             suppliers = { SuppliersScreen(state, traderViewModel::selectSupplierForDetail,
                                 { traderViewModel.openReceivePurchaseDialog(true) }, traderViewModel::dismissSupplierFeedback, traderViewModel::saveSupplier) })
-                        TraderScreen.PURCHASES -> PurchasesScreen(state,
-                            { traderViewModel.openReceivePurchaseDialog(true) }, traderViewModel::selectSupplierForDetail)
+                        TraderScreen.PURCHASES -> PurchasesScreen(
+                            state = state,
+                            onNewPurchase = { traderViewModel.openReceivePurchaseDialog(true) },
+                            onSupplier = traderViewModel::selectSupplierForDetail,
+                            onConfirmPhysicalGoodsReceipt = { billId, productId, qty, note ->
+                                traderViewModel.confirmPhysicalGoodsReceipt(billId, productId, qty, note)
+                            }
+                        )
                         TraderScreen.HOME -> {
                             HomeScreen(
                                 state = state,
@@ -180,7 +186,7 @@ fun SmallTraderApp(
                                 onOpenScanner = { traderViewModel.setScannerSheetOpen(true) },
                                 onOpenCustomItem = { traderViewModel.openCustomItemDialog(true) },
                                 onProceedToInvoiceReview = {
-                                    traderViewModel.navigateTo(TraderScreen.CASH_PAYMENT)
+                                    traderViewModel.navigateTo(TraderScreen.INVOICE_REVIEW)
                                 },
                                 onOpenSaleOptions = { traderViewModel.navigateTo(TraderScreen.INVOICE_REVIEW) }
                             )
