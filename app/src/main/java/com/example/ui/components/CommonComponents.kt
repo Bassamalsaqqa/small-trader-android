@@ -18,7 +18,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
@@ -737,181 +744,165 @@ fun SmallTraderBottomBar(
         else -> 80.dp
     }
 
-    NavigationBar(
-        windowInsets = WindowInsets.navigationBars,
-        containerColor = MaterialTheme.colorScheme.surface,
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
         tonalElevation = 3.dp,
+        shadowElevation = 4.dp,
         modifier = Modifier
             .fillMaxWidth()
             .height(navBarHeight)
     ) {
-        // Slot 1: الرئيسية (Home)
-        val isHomeSelected = state.currentScreen == TraderScreen.HOME
-        val homeLabel = lang.tr("الرئيسية", "Home")
-        NavigationBarItem(
-            selected = isHomeSelected,
-            onClick = { onSelectScreen(TraderScreen.HOME) },
-            icon = {
-                Icon(
-                    imageVector = Icons.Default.Home,
-                    contentDescription = homeLabel,
-                    modifier = Modifier.size(24.dp)
-                )
-            },
-            label = {
-                Text(
-                    text = homeLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    maxLines = 2,
-                    softWrap = true
-                )
-            },
-            alwaysShowLabel = true,
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = MaterialTheme.colorScheme.primary,
-                selectedTextColor = MaterialTheme.colorScheme.primary,
-                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-            ),
+        Row(
             modifier = Modifier
-                .weight(1f)
-                .testTag("nav_home_tab")
-        )
-
-        // Slot 2: المبيعات (Sales / Invoices)
-        val isSalesSelected = state.currentScreen == TraderScreen.INVOICES_HISTORY
-        val salesLabel = lang.tr("المبيعات", "Sales")
-        NavigationBarItem(
-            selected = isSalesSelected,
-            onClick = { onSelectScreen(TraderScreen.INVOICES_HISTORY) },
-            icon = {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
-                    contentDescription = salesLabel,
-                    modifier = Modifier.size(24.dp)
-                )
-            },
-            label = {
-                Text(
-                    text = salesLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    maxLines = 2,
-                    softWrap = true
-                )
-            },
-            alwaysShowLabel = true,
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = MaterialTheme.colorScheme.primary,
-                selectedTextColor = MaterialTheme.colorScheme.primary,
-                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-            ),
-            modifier = Modifier
-                .weight(1f)
-                .testTag("nav_invoices_tab")
-        )
-
-        // Slot 3: Quick Action [+] Center Elevated Button (Stitch ST-01 / ST-03)
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .heightIn(min = 64.dp),
-            contentAlignment = Alignment.Center
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .selectableGroup(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(
-                onClick = onOpenQuickActions,
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary,
-                shadowElevation = 4.dp,
+            // Slot 1: رئيسية (Home)
+            val isHomeSelected = state.currentScreen == TraderScreen.HOME
+            SmallTraderNavSlot(
+                selected = isHomeSelected,
+                onClick = { onSelectScreen(TraderScreen.HOME) },
+                icon = Icons.Default.Home,
+                label = lang.tr("رئيسية", "Home"),
+                contentDescription = lang.tr("الرئيسية", "Home"),
+                tabTestTag = "nav_home_tab",
+                labelTestTag = "nav_home_label",
+                modifier = Modifier.weight(1f)
+            )
+
+            // Slot 2: مبيعات (Sales / Invoices)
+            val isSalesSelected = state.currentScreen == TraderScreen.INVOICES_HISTORY
+            SmallTraderNavSlot(
+                selected = isSalesSelected,
+                onClick = { onSelectScreen(TraderScreen.INVOICES_HISTORY) },
+                icon = Icons.AutoMirrored.Filled.ReceiptLong,
+                label = lang.tr("مبيعات", "Sales"),
+                contentDescription = lang.tr("المبيعات", "Sales"),
+                tabTestTag = "nav_invoices_tab",
+                labelTestTag = "nav_invoices_label",
+                modifier = Modifier.weight(1f)
+            )
+
+            // Slot 3: Quick Action [+] Center Elevated Button (Stitch ST-01 / ST-03)
+            Box(
                 modifier = Modifier
-                    .size(48.dp)
-                    .offset(y = (-4).dp)
-                    .testTag("nav_quick_add")
+                    .weight(0.65f)
+                    .fillMaxHeight()
+                    .testTag("nav_quick_add_container"),
+                contentAlignment = Alignment.Center
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = lang.tr("إجراء سريع", "Quick action"),
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(28.dp)
-                    )
+                Surface(
+                    onClick = onOpenQuickActions,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("nav_quick_add")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = lang.tr("إجراء سريع جديد", "Quick action"),
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
                 }
             }
+
+            // Slot 4: مخزون (Inventory / Stock)
+            val isInventorySelected = state.currentScreen == TraderScreen.PRODUCTS_CATALOG
+            SmallTraderNavSlot(
+                selected = isInventorySelected,
+                onClick = { onSelectScreen(TraderScreen.PRODUCTS_CATALOG) },
+                icon = Icons.Default.Inventory2,
+                label = lang.tr("مخزون", "Stock"),
+                contentDescription = lang.tr("المخزون", "Inventory"),
+                tabTestTag = "nav_inventory_tab",
+                labelTestTag = "nav_inventory_label",
+                modifier = Modifier.weight(1f)
+            )
+
+            // Slot 5: حسابات (Accounts / People)
+            val isPeopleSelected = state.currentScreen == TraderScreen.PEOPLE || state.currentScreen == TraderScreen.PURCHASES
+            SmallTraderNavSlot(
+                selected = isPeopleSelected,
+                onClick = { onSelectScreen(TraderScreen.PEOPLE) },
+                icon = Icons.Default.People,
+                label = lang.tr("حسابات", "People"),
+                contentDescription = lang.tr("الحسابات", "People"),
+                tabTestTag = "nav_people_tab",
+                labelTestTag = "nav_people_label",
+                modifier = Modifier.weight(1f)
+            )
         }
+    }
+}
 
-        // Slot 4: المخزون (Inventory)
-        val isInventorySelected = state.currentScreen == TraderScreen.PRODUCTS_CATALOG
-        val inventoryLabel = lang.tr("المخزون", "Inventory")
-        NavigationBarItem(
-            selected = isInventorySelected,
-            onClick = { onSelectScreen(TraderScreen.PRODUCTS_CATALOG) },
-            icon = {
+@Composable
+private fun SmallTraderNavSlot(
+    selected: Boolean,
+    onClick: () -> Unit,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    contentDescription: String,
+    tabTestTag: String,
+    labelTestTag: String,
+    modifier: Modifier = Modifier
+) {
+    val selectedColor = MaterialTheme.colorScheme.primary
+    val unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val color = if (selected) selectedColor else unselectedColor
+
+    Surface(
+        onClick = onClick,
+        color = androidx.compose.ui.graphics.Color.Transparent,
+        modifier = modifier
+            .fillMaxHeight()
+            .testTag(tabTestTag)
+            .semantics(mergeDescendants = true) {
+                this.contentDescription = contentDescription
+                this.selected = selected
+                this.role = androidx.compose.ui.semantics.Role.Tab
+            }
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 0.dp, vertical = 4.dp)
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(if (selected) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent)
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            ) {
                 Icon(
-                    imageVector = Icons.Default.Inventory2,
-                    contentDescription = inventoryLabel,
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = color,
                     modifier = Modifier.size(24.dp)
                 )
-            },
-            label = {
-                Text(
-                    text = inventoryLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    maxLines = 2,
-                    softWrap = true
-                )
-            },
-            alwaysShowLabel = true,
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = MaterialTheme.colorScheme.primary,
-                selectedTextColor = MaterialTheme.colorScheme.primary,
-                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-            ),
-            modifier = Modifier
-                .weight(1f)
-                .testTag("nav_inventory_tab")
-        )
-
-        // Slot 5: الحسابات (Accounts / People)
-        val isPeopleSelected = state.currentScreen == TraderScreen.PEOPLE || state.currentScreen == TraderScreen.PURCHASES
-        val peopleLabel = lang.tr("الحسابات", "People")
-        NavigationBarItem(
-            selected = isPeopleSelected,
-            onClick = { onSelectScreen(TraderScreen.PEOPLE) },
-            icon = {
-                Icon(
-                    imageVector = Icons.Default.People,
-                    contentDescription = peopleLabel,
-                    modifier = Modifier.size(24.dp)
-                )
-            },
-            label = {
-                Text(
-                    text = peopleLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    maxLines = 2,
-                    softWrap = true
-                )
-            },
-            alwaysShowLabel = true,
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = MaterialTheme.colorScheme.primary,
-                selectedTextColor = MaterialTheme.colorScheme.primary,
-                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-            ),
-            modifier = Modifier
-                .weight(1f)
-                .testTag("nav_people_tab")
-        )
+            }
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = color,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(labelTestTag)
+            )
+        }
     }
 }
 

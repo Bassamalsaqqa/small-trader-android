@@ -634,122 +634,265 @@ class NativeVisualEvidenceTest {
     }
 
     // =========================================================================
-    // 17. Navigation Bar Multi-Scale & Density Verification (17, 18, 19)
+    // 17. Navigation Bar Multi-Scale & Density Verification (17, 18, 19, Matrix)
     // =========================================================================
 
-    @Test
-    @Config(sdk = [35], qualifiers = "ar-rEG-w360dp-h780dp-xhdpi")
-    fun capture_17_nav_360dp_font2_ar_stress() {
+    private fun verifyNavigationBarBottomScaffold(
+        scenario: String,
+        fontScale: Float,
+        language: AppLanguage,
+        isDark: Boolean,
+        screenWidthDp: Int,
+        screenHeightDp: Int,
+        saveFileName: String? = null
+    ) {
         val repo = OfflineDemoTraderRepository()
         val viewModel = TraderViewModel(repo)
+        viewModel.setLanguage(language)
+        if (isDark) {
+            viewModel.toggleTheme()
+        }
+
         val navTags = listOf("nav_home_tab", "nav_invoices_tab", "nav_quick_add", "nav_inventory_tab", "nav_people_tab")
+        val labelTags = listOf("nav_home_label", "nav_invoices_label", "nav_inventory_label", "nav_people_label")
 
         composeTestRule.setContent {
             val currentDensity = LocalDensity.current
             CompositionLocalProvider(
                 LocalDensity provides Density(
                     density = currentDensity.density,
-                    fontScale = 2.0f
+                    fontScale = fontScale
                 )
             ) {
-                SmallTraderTheme(darkTheme = false, isRtl = true) {
-                    SmallTraderBottomBar(
-                        state = viewModel.uiState.value,
-                        onSelectScreen = {},
-                        onOpenQuickActions = {}
-                    )
+                SmallTraderTheme(darkTheme = isDark, isRtl = language.isRtl) {
+                    androidx.compose.material3.Scaffold(
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                        bottomBar = {
+                            SmallTraderBottomBar(
+                                state = viewModel.uiState.value,
+                                onSelectScreen = {},
+                                onOpenQuickActions = {}
+                            )
+                        }
+                    ) { _ ->
+                        androidx.compose.foundation.layout.Box(
+                            modifier = androidx.compose.ui.Modifier.fillMaxSize()
+                        )
+                    }
                 }
             }
         }
         composeTestRule.waitForIdle()
 
+        // 1. Minimum touch bounds >= 48dp and positioned cleanly within bottom scaffold shell
+        val boundsList = mutableListOf<androidx.compose.ui.unit.DpRect>()
         for (tag in navTags) {
             val node = composeTestRule.onNodeWithTag(tag)
             node.assertExists()
             node.assertIsDisplayed()
             val bounds = node.getBoundsInRoot()
+            boundsList.add(bounds)
             val w = bounds.right - bounds.left
             val h = bounds.bottom - bounds.top
-            assertTrue("Tag $tag at fontScale 2.0 height ($h) must be >= 48.dp", h >= 48.dp)
-            assertTrue("Tag $tag at fontScale 2.0 width ($w) must be >= 48.dp", w >= 48.dp)
-            val unclipped = node.getUnclippedBoundsInRoot()
-            assertTrue("Tag $tag at fontScale 2.0 must not be clipped at bottom", unclipped.bottom <= bounds.bottom + 2.dp)
+            assertTrue("[$scenario $tag scale=$fontScale] height ($h) must be >= 48.dp", h >= 48.dp)
+            assertTrue("[$scenario $tag scale=$fontScale] width ($w) must be >= 48.dp", w >= 48.dp)
+            assertTrue("[$scenario $tag scale=$fontScale] bottom must be within screen height ($screenHeightDp dp)", bounds.bottom <= screenHeightDp.dp + 2.dp)
+            assertTrue("[$scenario $tag scale=$fontScale] top must not clip top of screen (at bottom scaffold)", bounds.top >= 0.dp)
         }
-        captureViewToPng("17_nav_360dp_font2_ar_stress.png")
+
+        // 2. No overlaps between adjacent navigation items
+        val sortedByLeft = boundsList.sortedBy { it.left.value }
+        for (i in 0 until sortedByLeft.size - 1) {
+            val current = sortedByLeft[i]
+            val next = sortedByLeft[i + 1]
+            assertTrue(
+                "[$scenario scale=$fontScale] Navigation items must not overlap: right (${current.right}) <= next left (${next.left})",
+                current.right <= next.left + 1.dp
+            )
+        }
+
+        // 3. Label TextLayoutResult: No visual overflow AND no mid-word break (strictly 1 line)
+        for (labelTag in labelTags) {
+            val results = mutableListOf<TextLayoutResult>()
+            composeTestRule.onNodeWithTag(labelTag, useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(results) }
+            assertTrue("[$scenario $labelTag scale=$fontScale] TextLayoutResult must be available", results.isNotEmpty())
+            val layout = results.first()
+            println("DEBUG_LAYOUT: tag=$labelTag hasOverflow=${layout.hasVisualOverflow} lineCount=${layout.lineCount} size=${layout.size} multiH=${layout.multiParagraph.height} multiW=${layout.multiParagraph.width}")
+            assertFalse(
+                "[$scenario $labelTag scale=$fontScale] Label must NOT have visual overflow (size=${layout.size}, multiW=${layout.multiParagraph.width}, multiH=${layout.multiParagraph.height})",
+                layout.hasVisualOverflow
+            )
+            assertEquals(
+                "[$scenario $labelTag scale=$fontScale] Label must remain on a single line (no midword break)",
+                1,
+                layout.lineCount
+            )
+        }
+
+        if (saveFileName != null) {
+            captureViewToPng(saveFileName)
+        }
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "ar-rEG-w360dp-h780dp-xhdpi")
+    fun capture_17_nav_360dp_font2_ar_stress() {
+        verifyNavigationBarBottomScaffold(
+            scenario = "17_nav_360dp_font2_ar_stress",
+            fontScale = 2.0f,
+            language = AppLanguage.AR,
+            isDark = false,
+            screenWidthDp = 360,
+            screenHeightDp = 780,
+            saveFileName = "17_nav_360dp_font2_ar_stress.png"
+        )
     }
 
     @Test
     @Config(sdk = [35], qualifiers = "en-rUS-w393dp-h852dp-xxhdpi")
     fun capture_18_nav_393dp_font1_5_en() {
-        val repo = OfflineDemoTraderRepository()
-        val viewModel = TraderViewModel(repo)
-        viewModel.setLanguage(AppLanguage.EN)
-        val navTags = listOf("nav_home_tab", "nav_invoices_tab", "nav_quick_add", "nav_inventory_tab", "nav_people_tab")
-
-        composeTestRule.setContent {
-            val currentDensity = LocalDensity.current
-            CompositionLocalProvider(
-                LocalDensity provides Density(
-                    density = currentDensity.density,
-                    fontScale = 1.5f
-                )
-            ) {
-                SmallTraderTheme(darkTheme = false, isRtl = false) {
-                    SmallTraderBottomBar(
-                        state = viewModel.uiState.value,
-                        onSelectScreen = {},
-                        onOpenQuickActions = {}
-                    )
-                }
-            }
-        }
-        composeTestRule.waitForIdle()
-
-        for (tag in navTags) {
-            val node = composeTestRule.onNodeWithTag(tag)
-            node.assertExists()
-            node.assertIsDisplayed()
-            val bounds = node.getBoundsInRoot()
-            val w = bounds.right - bounds.left
-            val h = bounds.bottom - bounds.top
-            assertTrue("Tag $tag at fontScale 1.5 height ($h) must be >= 48.dp", h >= 48.dp)
-            assertTrue("Tag $tag at fontScale 1.5 width ($w) must be >= 48.dp", w >= 48.dp)
-            val unclipped = node.getUnclippedBoundsInRoot()
-            assertTrue("Tag $tag at fontScale 1.5 must not be clipped at bottom", unclipped.bottom <= bounds.bottom + 2.dp)
-        }
-        captureViewToPng("18_nav_393dp_font1_5_en.png")
+        verifyNavigationBarBottomScaffold(
+            scenario = "18_nav_393dp_font1_5_en",
+            fontScale = 1.5f,
+            language = AppLanguage.EN,
+            isDark = false,
+            screenWidthDp = 393,
+            screenHeightDp = 852,
+            saveFileName = "18_nav_393dp_font1_5_en.png"
+        )
     }
 
     @Test
     @Config(sdk = [35], qualifiers = "ar-rEG-w393dp-h852dp-xxhdpi")
     fun capture_19_nav_393dp_font1_ar() {
+        verifyNavigationBarBottomScaffold(
+            scenario = "19_nav_393dp_font1_ar",
+            fontScale = 1.0f,
+            language = AppLanguage.AR,
+            isDark = false,
+            screenWidthDp = 393,
+            screenHeightDp = 852,
+            saveFileName = "19_nav_393dp_font1_ar.png"
+        )
+    }
+
+    private fun runDynamicMatrixTest(
+        scenarioPrefix: String,
+        screenWidthDp: Int,
+        screenHeightDp: Int
+    ) {
         val repo = OfflineDemoTraderRepository()
         val viewModel = TraderViewModel(repo)
+
         val navTags = listOf("nav_home_tab", "nav_invoices_tab", "nav_quick_add", "nav_inventory_tab", "nav_people_tab")
+        val labelTags = listOf("nav_home_label", "nav_invoices_label", "nav_inventory_label", "nav_people_label")
+
+        val currentFontScale = androidx.compose.runtime.mutableStateOf(1.0f)
+        val currentLang = androidx.compose.runtime.mutableStateOf(AppLanguage.AR)
+        val currentIsDark = androidx.compose.runtime.mutableStateOf(false)
 
         composeTestRule.setContent {
-            SmallTraderTheme(darkTheme = false, isRtl = true) {
-                SmallTraderBottomBar(
-                    state = viewModel.uiState.value,
-                    onSelectScreen = {},
-                    onOpenQuickActions = {}
+            val currentDensity = LocalDensity.current
+            val state by viewModel.uiState.collectAsState()
+            CompositionLocalProvider(
+                LocalDensity provides Density(
+                    density = currentDensity.density,
+                    fontScale = currentFontScale.value
                 )
+            ) {
+                SmallTraderTheme(darkTheme = currentIsDark.value, isRtl = currentLang.value.isRtl) {
+                    androidx.compose.material3.Scaffold(
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                        bottomBar = {
+                            SmallTraderBottomBar(
+                                state = state,
+                                onSelectScreen = {},
+                                onOpenQuickActions = {}
+                            )
+                        }
+                    ) { _ ->
+                        androidx.compose.foundation.layout.Box(
+                            modifier = androidx.compose.ui.Modifier.fillMaxSize()
+                        )
+                    }
+                }
             }
         }
-        composeTestRule.waitForIdle()
 
-        for (tag in navTags) {
-            val node = composeTestRule.onNodeWithTag(tag)
-            node.assertExists()
-            node.assertIsDisplayed()
-            val bounds = node.getBoundsInRoot()
-            val w = bounds.right - bounds.left
-            val h = bounds.bottom - bounds.top
-            assertTrue("Tag $tag at fontScale 1.0 height ($h) must be >= 48.dp", h >= 48.dp)
-            assertTrue("Tag $tag at fontScale 1.0 width ($w) must be >= 48.dp", w >= 48.dp)
-            val unclipped = node.getUnclippedBoundsInRoot()
-            assertTrue("Tag $tag at fontScale 1.0 must not be clipped at bottom", unclipped.bottom <= bounds.bottom + 2.dp)
+        for (fontScale in listOf(1.0f, 1.5f, 2.0f)) {
+            for (lang in listOf(AppLanguage.AR, AppLanguage.EN)) {
+                for (isDark in listOf(false, true)) {
+                    val scenario = "${scenarioPrefix}_${lang.name.lowercase()}_scale${fontScale}_dark$isDark"
+                    composeTestRule.runOnIdle {
+                        currentFontScale.value = fontScale
+                        currentLang.value = lang
+                        currentIsDark.value = isDark
+                        viewModel.setLanguage(lang)
+                        if (viewModel.uiState.value.isDarkTheme != isDark) {
+                            viewModel.toggleTheme()
+                        }
+                    }
+                    composeTestRule.waitForIdle()
+
+                    // 1. Minimum touch bounds >= 48dp and within bottom shell viewport
+                    val boundsList = mutableListOf<androidx.compose.ui.unit.DpRect>()
+                    for (tag in navTags) {
+                        val node = composeTestRule.onNodeWithTag(tag)
+                        node.assertExists()
+                        node.assertIsDisplayed()
+                        val bounds = node.getBoundsInRoot()
+                        boundsList.add(bounds)
+                        val w = bounds.right - bounds.left
+                        val h = bounds.bottom - bounds.top
+                        assertTrue("[$scenario $tag scale=$fontScale] height ($h) must be >= 48.dp", h >= 48.dp)
+                        assertTrue("[$scenario $tag scale=$fontScale] width ($w) must be >= 48.dp", w >= 48.dp)
+                        assertTrue("[$scenario $tag scale=$fontScale] bottom must be within screen height ($screenHeightDp dp)", bounds.bottom <= screenHeightDp.dp + 2.dp)
+                        assertTrue("[$scenario $tag scale=$fontScale] top must not clip top of screen", bounds.top >= 0.dp)
+                    }
+
+                    // 2. No overlaps between adjacent navigation items
+                    val sortedByLeft = boundsList.sortedBy { it.left.value }
+                    for (i in 0 until sortedByLeft.size - 1) {
+                        val current = sortedByLeft[i]
+                        val next = sortedByLeft[i + 1]
+                        assertTrue(
+                            "[$scenario scale=$fontScale] Navigation items must not overlap: right (${current.right}) <= next left (${next.left})",
+                            current.right <= next.left + 1.dp
+                        )
+                    }
+
+                    // 3. Label TextLayoutResult: No visual overflow AND no mid-word break (strictly 1 line)
+                    for (labelTag in labelTags) {
+                        val results = mutableListOf<TextLayoutResult>()
+                        composeTestRule.onNodeWithTag(labelTag, useUnmergedTree = true)
+                            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(results) }
+                        assertTrue("[$scenario $labelTag scale=$fontScale] TextLayoutResult must be available", results.isNotEmpty())
+                        val layout = results.first()
+                        assertFalse(
+                            "[$scenario $labelTag scale=$fontScale] Label must NOT have visual overflow (size=${layout.size}, multiW=${layout.multiParagraph.width}, multiH=${layout.multiParagraph.height})",
+                            layout.hasVisualOverflow
+                        )
+                        assertEquals(
+                            "[$scenario $labelTag scale=$fontScale] Label must remain on a single line (no midword break)",
+                            1,
+                            layout.lineCount
+                        )
+                    }
+                }
+            }
         }
-        captureViewToPng("19_nav_393dp_font1_ar.png")
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "ar-rEG-w360dp-h780dp-xhdpi")
+    fun matrix_20_nav_360dp_full_matrix_stress() {
+        runDynamicMatrixTest("matrix_360dp", 360, 780)
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "en-rUS-w393dp-h852dp-xxhdpi")
+    fun matrix_21_nav_393dp_full_matrix_stress() {
+        runDynamicMatrixTest("matrix_393dp", 393, 852)
     }
 }

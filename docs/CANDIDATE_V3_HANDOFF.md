@@ -9,19 +9,22 @@
 
 ## 1. Canonical Candidate APK Deliverable
 
-The canonical review APK is preserved locally and matches the last valid build output:
+The canonical review APK is placed outside the build path under `app/round2/validation/` alongside the full evidence suite:
 
 | Attribute | Value |
 | :--- | :--- |
-| **Local Canonical Review Path** | `round2/validation/small-trader-round2-v3-review.apk` |
-| **Build Output Mirror** | `app/build/outputs/apk/debug/app-debug.apk` |
-| **Size (Bytes)** | `19,628,852` bytes |
-| **SHA-256 Digest** | `3c2d23f14a22f1ce6b63f55e88ef920fac5e4158dc69407a4db24b6c19f1b6cc` |
-| **Signature Status** | Valid Android APK Signature Scheme v2 (Debug certificate, **not production signing**) |
-| **Certificate SHA-256** | `f0995a82c2051d776a9307fcd75bb7d5862576714f1bd500885be2da0ca3e683` (`CN=Android Debug, O=Android, C=US`) |
-| **Historical Original APK** | `round2/validation/small-trader-round2-review.apk` (`19,628,852` bytes, SHA-256 `36844ab096c034b82fd5c4dd5d6df17b9b2411ea2b3cb60c140d60126e6259c4`) |
+| **Local Canonical Review Path** | `app/round2/validation/small-trader-candidate-benchmark.apk` |
+| **Build Output Mirror** | `app/build/outputs/apk/benchmark/app-benchmark.apk` |
+| **Size (Bytes)** | `2,132,291` bytes |
+| **SHA-256 Digest** | `07907c8c84c35eba03a0f3c9524eb8f0ac2455708ace685222ca13548409f9cb` |
+| **AndroidManifest.xml SHA-256** | `cec768c60a8942c2b662bfd0e18f76d873128bb19df1cd483ae8d0c4e0aeb5de` |
+| **Signature Status** | Valid Android APK Signature Scheme v2 (Debug certificate `CN=Android Debug, O=Android, C=US`) |
+| **Certificate SHA-256** | `f0995a82c2051d776a9307fcd75bb7d5862576714f1bd500885be2da0ca3e683` |
+| **Actual Evidence Folder** | `app/round2/validation/native-renders-v03/` |
+| **Baseline Release APK (`0a965c0`)** | `app/round2/artifacts/baseline_0a965c0/app-release.apk` (`2,246,979` bytes, SHA-256 `e8a87c6db5b6b011d8bacab4aadfb724f357e463bcc654c115f8d6792fbb49ea`) |
+| **Baseline Debug APK (`0a965c0`)** | `app/round2/artifacts/baseline_0a965c0/app-debug.apk` (`19,576,028` bytes, SHA-256 `ad22db34b92bcf7caee196b6d21ea4f5a342371946312a02506a721d7b3dcba2`) |
 
-*(Note on historical size reports: An earlier review note cited 19,602,512 bytes from a pre-mipmap interim artifact; the verified canonical Candidate v3 APK size is exactly 19,628,852 bytes.)*
+*(Note on APK sizes: Absolute sizes are recorded without claiming causal size gain between candidate benchmark and baseline release APKs due to differing build configurations.)*
 
 ---
 
