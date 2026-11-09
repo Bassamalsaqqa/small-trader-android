@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AppLanguage
 import com.example.model.PurchaseBill
+import com.example.model.StockMovement
 import com.example.model.Supplier
 import com.example.model.WesternFormatters
 import com.example.ui.components.StitchBadge
@@ -110,7 +111,8 @@ fun PurchasesScreen(
     state: TraderUiState,
     onNewPurchase: () -> Unit,
     onSupplier: (Supplier) -> Unit,
-    onConfirmPhysicalGoodsReceipt: ((String, String, Int, String) -> Boolean)? = null
+    onConfirmPhysicalGoodsReceipt: ((String, String, Int, String) -> Boolean)? = null,
+    onConfirmPhysicalGoodsReceiptResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String) -> Result<StockMovement>)? = null
 ) {
     if (!state.currentSession.canManageSuppliers()) return
     val lang = state.language
@@ -138,7 +140,8 @@ fun PurchasesScreen(
             lang = lang,
             onBack = { selectedBillId = null },
             onSupplier = { supplier -> selectedBillId = null; onSupplier(supplier) },
-            onConfirmPhysicalGoodsReceipt = onConfirmPhysicalGoodsReceipt
+            onConfirmPhysicalGoodsReceipt = onConfirmPhysicalGoodsReceipt,
+            onConfirmPhysicalGoodsReceiptResult = onConfirmPhysicalGoodsReceiptResult
         )
         }
     } else {
@@ -720,7 +723,8 @@ private fun PurchaseBillDetailView(
     lang: AppLanguage,
     onBack: () -> Unit,
     onSupplier: (Supplier) -> Unit,
-    onConfirmPhysicalGoodsReceipt: ((String, String, Int, String) -> Boolean)?
+    onConfirmPhysicalGoodsReceipt: ((String, String, Int, String) -> Boolean)?,
+    onConfirmPhysicalGoodsReceiptResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String) -> Result<StockMovement>)? = null
 ) {
     var isGrnDialogOpen by rememberSaveable { mutableStateOf(false) }
 
@@ -728,8 +732,9 @@ private fun PurchaseBillDetailView(
     val linkedProduct = remember(state.products, bill.expectedProductId) {
         state.products.firstOrNull { it.id == bill.expectedProductId }
     }
-    val hasLinkedSku = bill.expectedProductId != null && bill.expectedQuantity > 0
-    val canReceiveGoods = !bill.isReceived && hasLinkedSku && state.currentSession.canManageInventory() && onConfirmPhysicalGoodsReceipt != null
+    val hasLinkedSku = bill.effectiveLines.isNotEmpty() || (bill.expectedProductId != null && bill.expectedQuantity > 0)
+    val canReceiveGoods = !bill.isReceived && hasLinkedSku && state.currentSession.canManageInventory() &&
+        (onConfirmPhysicalGoodsReceiptResult != null || onConfirmPhysicalGoodsReceipt != null)
 
     Column(
         modifier = Modifier
@@ -1238,19 +1243,36 @@ private fun PurchaseBillDetailView(
 
     // Direct PhysicalGoodsReceiptDialog reuse via internal visibility in SuppliersScreen
     if (isGrnDialogOpen && hasLinkedSku) {
-        PhysicalGoodsReceiptDialog(
-            bill = bill,
-            products = state.products,
-            lang = lang,
-            onDismiss = { isGrnDialogOpen = false },
-            errorMessage = if (state.isSupplierActionError) lang.tr(state.lastSupplierActionMessageAr.orEmpty(), state.lastSupplierActionMessageEn.orEmpty()).takeIf { it.isNotBlank() } else null,
-            onConfirmGrn = { productId, receivedQty, batchNote ->
-                val success = onConfirmPhysicalGoodsReceipt?.invoke(bill.id, productId, receivedQty, batchNote) == true
-                if (success) {
-                    isGrnDialogOpen = false
+        if (onConfirmPhysicalGoodsReceiptResult != null) {
+            PhysicalGoodsReceiptDialog(
+                bill = bill,
+                products = state.products,
+                lang = lang,
+                onDismiss = { isGrnDialogOpen = false },
+                errorMessage = if (state.isSupplierActionError) lang.tr(state.lastSupplierActionMessageAr.orEmpty(), state.lastSupplierActionMessageEn.orEmpty()).takeIf { it.isNotBlank() } else null,
+                onConfirmGrnResult = { operationId, productId, receivedQty, batchNote ->
+                    val res = onConfirmPhysicalGoodsReceiptResult(bill.id, productId, receivedQty, batchNote, operationId)
+                    if (res.isSuccess) {
+                        isGrnDialogOpen = false
+                    }
+                    res
                 }
-                success
-            }
-        )
+            )
+        } else {
+            PhysicalGoodsReceiptDialog(
+                bill = bill,
+                products = state.products,
+                lang = lang,
+                onDismiss = { isGrnDialogOpen = false },
+                errorMessage = if (state.isSupplierActionError) lang.tr(state.lastSupplierActionMessageAr.orEmpty(), state.lastSupplierActionMessageEn.orEmpty()).takeIf { it.isNotBlank() } else null,
+                onConfirmGrn = { productId, receivedQty, batchNote ->
+                    val success = onConfirmPhysicalGoodsReceipt?.invoke(bill.id, productId, receivedQty, batchNote) == true
+                    if (success) {
+                        isGrnDialogOpen = false
+                    }
+                    success
+                }
+            )
+        }
     }
 }

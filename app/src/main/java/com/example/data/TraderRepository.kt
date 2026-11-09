@@ -751,8 +751,8 @@ class OfflineDemoTraderRepository : TraderRepository {
             if (line.quantity <= 0) {
                 return Result.failure(IllegalArgumentException("Line ${lineIdx + 1}: Quantity must be greater than zero (was ${line.quantity})."))
             }
-            if (line.unitCostIls < 0.0) {
-                return Result.failure(IllegalArgumentException("Line ${lineIdx + 1}: Explicit unit cost cannot be negative (was ${line.unitCostIls})."))
+            if (line.unitCostIls < 0.0 || line.unitCostIls.isNaN() || line.unitCostIls.isInfinite()) {
+                return Result.failure(IllegalArgumentException("Line ${lineIdx + 1}: Explicit unit cost must be a valid non-negative number (was ${line.unitCostIls})."))
             }
             validatedLines.add(
                 line.copy(
@@ -763,8 +763,28 @@ class OfflineDemoTraderRepository : TraderRepository {
             )
         }
 
+        // Duplicate SKU policy: deterministic aggregation per SKU preserving total cost & quantity
+        val aggregatedLines = validatedLines.groupBy { it.productId }.map { (_, skuLines) ->
+            if (skuLines.size == 1) {
+                skuLines.first()
+            } else {
+                val totalQty = skuLines.sumOf { it.quantity }
+                val totalCost = skuLines.fold(BigDecimal.ZERO) { acc, l ->
+                    acc.add(BigDecimal(l.unitCostIls.toString()).multiply(BigDecimal(l.quantity.toString())))
+                }
+                val avgUnitCost = if (totalQty > 0) {
+                    totalCost.divide(BigDecimal(totalQty.toString()), 4, RoundingMode.HALF_UP).toDouble()
+                } else 0.0
+                skuLines.first().copy(
+                    quantity = totalQty,
+                    unitCostIls = avgUnitCost,
+                    receivedQuantity = 0
+                )
+            }
+        }
+
         // Derive authoritative total strictly from structured lines with entered cost
-        val totalExact = validatedLines.fold(BigDecimal.ZERO) { acc, line ->
+        val totalExact = aggregatedLines.fold(BigDecimal.ZERO) { acc, line ->
             acc.add(BigDecimal(line.unitCostIls.toString()).multiply(BigDecimal(line.quantity.toString())))
         }.setScale(2, RoundingMode.HALF_UP)
 
@@ -772,7 +792,7 @@ class OfflineDemoTraderRepository : TraderRepository {
             return Result.failure(IllegalArgumentException("Authoritative purchase total must be greater than zero."))
         }
 
-        if (paidNowIls < 0.0) {
+        if (paidNowIls < 0.0 || paidNowIls.isNaN() || paidNowIls.isInfinite()) {
             return Result.failure(IllegalArgumentException("المبلغ المدفوع فوراً لا يمكن أن يكون سالباً | Paid-now amount cannot be negative."))
         }
         val paidExact = BigDecimal(paidNowIls.toString()).setScale(2, RoundingMode.HALF_UP)
@@ -782,7 +802,7 @@ class OfflineDemoTraderRepository : TraderRepository {
 
         val payableAdded = totalExact.subtract(paidExact)
         val nextBillNum = (purchaseBills.maxOfOrNull { it.billNumber } ?: 300) + 1
-        val summaryStr = if (note.isNotBlank()) note else validatedLines.joinToString(" • ") { "${it.quantity}x ${it.productNameAr}" }
+        val summaryStr = if (note.isNotBlank()) note else aggregatedLines.joinToString(" • ") { "${it.quantity}x ${it.productNameAr}" }
 
         val bill = PurchaseBill(
             id = "pb_${System.currentTimeMillis()}_$nextBillNum",
@@ -793,9 +813,9 @@ class OfflineDemoTraderRepository : TraderRepository {
             paidIls = paidExact.toDouble(),
             itemsSummary = summaryStr,
             isReceived = false, // Physical stock receipt requires separate GRN
-            lines = validatedLines,
-            expectedProductId = validatedLines.firstOrNull()?.productId,
-            expectedQuantity = validatedLines.sumOf { it.quantity },
+            lines = aggregatedLines,
+            expectedProductId = aggregatedLines.firstOrNull()?.productId,
+            expectedQuantity = aggregatedLines.sumOf { it.quantity },
             receivedQuantity = 0
         )
 
@@ -864,7 +884,8 @@ class OfflineDemoTraderRepository : TraderRepository {
             )
         }
 
-        val targetLineIndex = effectiveLines.indexOfFirst { it.productId == productId }
+        val targetLineIndex = effectiveLines.indexOfFirst { it.productId == productId && it.pendingQuantity > 0 }
+            .takeIf { it != -1 } ?: effectiveLines.indexOfFirst { it.productId == productId }
         if (targetLineIndex == -1) {
             val validSkus = effectiveLines.joinToString(", ") { it.productId }
             return Result.failure(

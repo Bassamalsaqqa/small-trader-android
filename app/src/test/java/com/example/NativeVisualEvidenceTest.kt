@@ -36,6 +36,21 @@ import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.NewSaleScreen
 import com.example.ui.screens.PeopleHubScreen
 import com.example.ui.screens.SuppliersScreen
+import com.example.ui.screens.PaySupplierDialog
+import com.example.ui.screens.PhysicalGoodsReceiptDialog
+import com.example.ui.screens.ReceivePurchaseBillDialog
+import com.example.ui.components.SmallTraderBottomBar
+import com.example.model.Supplier
+import com.example.model.PurchaseBill
+import com.example.model.PurchaseLineItem
+import com.example.model.StockMovement
+import com.example.model.SupplierPayment
+import com.example.viewmodel.TraderUiState
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assertTextContains
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import com.example.ui.theme.SmallTraderTheme
 import com.example.viewmodel.TraderViewModel
 import org.junit.Assert.assertTrue
@@ -616,5 +631,125 @@ class NativeVisualEvidenceTest {
         assertTrue("Reports action right bound must be within 360dp width (was ${reportsActionBounds.right})", reportsActionBounds.right <= 360.dp)
         assertTrue("KPI title left bound must be non-negative (was ${kpiTitleBounds.left})", kpiTitleBounds.left >= 0.dp)
         assertTrue("Reports action left bound must be non-negative (was ${reportsActionBounds.left})", reportsActionBounds.left >= 0.dp)
+    }
+
+    // =========================================================================
+    // 17. Navigation Bar Multi-Scale & Density Verification (17, 18, 19)
+    // =========================================================================
+
+    @Test
+    @Config(sdk = [35], qualifiers = "ar-rEG-w360dp-h780dp-xhdpi")
+    fun capture_17_nav_360dp_font2_ar_stress() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        val navTags = listOf("nav_home_tab", "nav_invoices_tab", "nav_quick_add", "nav_inventory_tab", "nav_people_tab")
+
+        composeTestRule.setContent {
+            val currentDensity = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(
+                    density = currentDensity.density,
+                    fontScale = 2.0f
+                )
+            ) {
+                SmallTraderTheme(darkTheme = false, isRtl = true) {
+                    SmallTraderBottomBar(
+                        state = viewModel.uiState.value,
+                        onSelectScreen = {},
+                        onOpenQuickActions = {}
+                    )
+                }
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        for (tag in navTags) {
+            val node = composeTestRule.onNodeWithTag(tag)
+            node.assertExists()
+            node.assertIsDisplayed()
+            val bounds = node.getBoundsInRoot()
+            val w = bounds.right - bounds.left
+            val h = bounds.bottom - bounds.top
+            assertTrue("Tag $tag at fontScale 2.0 height ($h) must be >= 48.dp", h >= 48.dp)
+            assertTrue("Tag $tag at fontScale 2.0 width ($w) must be >= 48.dp", w >= 48.dp)
+            val unclipped = node.getUnclippedBoundsInRoot()
+            assertTrue("Tag $tag at fontScale 2.0 must not be clipped at bottom", unclipped.bottom <= bounds.bottom + 2.dp)
+        }
+        captureViewToPng("17_nav_360dp_font2_ar_stress.png")
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "en-rUS-w393dp-h852dp-xxhdpi")
+    fun capture_18_nav_393dp_font1_5_en() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        viewModel.setLanguage(AppLanguage.EN)
+        val navTags = listOf("nav_home_tab", "nav_invoices_tab", "nav_quick_add", "nav_inventory_tab", "nav_people_tab")
+
+        composeTestRule.setContent {
+            val currentDensity = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(
+                    density = currentDensity.density,
+                    fontScale = 1.5f
+                )
+            ) {
+                SmallTraderTheme(darkTheme = false, isRtl = false) {
+                    SmallTraderBottomBar(
+                        state = viewModel.uiState.value,
+                        onSelectScreen = {},
+                        onOpenQuickActions = {}
+                    )
+                }
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        for (tag in navTags) {
+            val node = composeTestRule.onNodeWithTag(tag)
+            node.assertExists()
+            node.assertIsDisplayed()
+            val bounds = node.getBoundsInRoot()
+            val w = bounds.right - bounds.left
+            val h = bounds.bottom - bounds.top
+            assertTrue("Tag $tag at fontScale 1.5 height ($h) must be >= 48.dp", h >= 48.dp)
+            assertTrue("Tag $tag at fontScale 1.5 width ($w) must be >= 48.dp", w >= 48.dp)
+            val unclipped = node.getUnclippedBoundsInRoot()
+            assertTrue("Tag $tag at fontScale 1.5 must not be clipped at bottom", unclipped.bottom <= bounds.bottom + 2.dp)
+        }
+        captureViewToPng("18_nav_393dp_font1_5_en.png")
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "ar-rEG-w393dp-h852dp-xxhdpi")
+    fun capture_19_nav_393dp_font1_ar() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        val navTags = listOf("nav_home_tab", "nav_invoices_tab", "nav_quick_add", "nav_inventory_tab", "nav_people_tab")
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                SmallTraderBottomBar(
+                    state = viewModel.uiState.value,
+                    onSelectScreen = {},
+                    onOpenQuickActions = {}
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        for (tag in navTags) {
+            val node = composeTestRule.onNodeWithTag(tag)
+            node.assertExists()
+            node.assertIsDisplayed()
+            val bounds = node.getBoundsInRoot()
+            val w = bounds.right - bounds.left
+            val h = bounds.bottom - bounds.top
+            assertTrue("Tag $tag at fontScale 1.0 height ($h) must be >= 48.dp", h >= 48.dp)
+            assertTrue("Tag $tag at fontScale 1.0 width ($w) must be >= 48.dp", w >= 48.dp)
+            val unclipped = node.getUnclippedBoundsInRoot()
+            assertTrue("Tag $tag at fontScale 1.0 must not be clipped at bottom", unclipped.bottom <= bounds.bottom + 2.dp)
+        }
+        captureViewToPng("19_nav_393dp_font1_ar.png")
     }
 }

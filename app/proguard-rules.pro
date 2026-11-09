@@ -8,14 +8,8 @@
 -keepattributes SourceFile,LineNumberTable
 -keepattributes *Annotation*
 
-# Preserve domain models against serialization, bundle reflection, and state serialization
--keep class com.example.model.** { *; }
--keepclassmembers class com.example.model.** { *; }
--keepclassmembers enum com.example.model.** { *; }
-
-# Preserve ViewModel state classes
--keep class com.example.viewmodel.** { *; }
--keepclassmembers class com.example.viewmodel.** { *; }
-
-# Keep data and UI components
--keep class com.example.ui.** { *; }
+# Keep standard enum methods across model enums
+-keepclassmembers enum * {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}

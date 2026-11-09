@@ -144,6 +144,9 @@ fun SmallTraderApp(
                             onSupplier = traderViewModel::selectSupplierForDetail,
                             onConfirmPhysicalGoodsReceipt = { billId, productId, qty, note ->
                                 traderViewModel.confirmPhysicalGoodsReceipt(billId, productId, qty, note)
+                            },
+                            onConfirmPhysicalGoodsReceiptResult = { billId, productId, qty, note, operationId ->
+                                traderViewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, operationId)
                             }
                         )
                         TraderScreen.HOME -> {

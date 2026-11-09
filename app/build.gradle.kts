@@ -26,20 +26,11 @@ android {
   // and updating Android apps in AI Studio.
   signingConfigs {
     create("release") {
-      val envPath = System.getenv("KEYSTORE_PATH")
-      val defaultFile = file("${rootDir}/my-upload-key.jks")
-      val fallbackFile = file("${rootDir}/debug.keystore")
-      val chosenFile = if (envPath != null && file(envPath).exists()) {
-        file(envPath)
-      } else if (defaultFile.exists()) {
-        defaultFile
-      } else {
-        fallbackFile
-      }
-      storeFile = chosenFile
-      storePassword = if (chosenFile == fallbackFile) "android" else System.getenv("STORE_PASSWORD")
-      keyAlias = if (chosenFile == fallbackFile) "androiddebugkey" else "upload"
-      keyPassword = if (chosenFile == fallbackFile) "android" else System.getenv("KEY_PASSWORD")
+      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
+      storeFile = file(keystorePath)
+      storePassword = System.getenv("STORE_PASSWORD")
+      keyAlias = "upload"
+      keyPassword = System.getenv("KEY_PASSWORD")
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
@@ -57,7 +48,17 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
-      signingConfig = signingConfigs.getByName("release")
+      val allowInsecureDebugSign = project.findProperty("smalltrader.allowInsecureDebugSigningForRelease")?.toString()?.toBoolean() == true
+      signingConfig = if (allowInsecureDebugSign) {
+        signingConfigs.getByName("debugConfig")
+      } else {
+        signingConfigs.getByName("release")
+      }
+    }
+    create("benchmark") {
+      initWith(getByName("release"))
+      matchingFallbacks += listOf("release")
+      signingConfig = signingConfigs.getByName("debugConfig")
     }
     debug {
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in

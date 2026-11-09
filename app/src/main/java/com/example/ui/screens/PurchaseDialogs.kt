@@ -49,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDirection
@@ -127,6 +128,7 @@ fun PaySupplierDialog(
                         color = MaterialTheme.colorScheme.errorContainer,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .semantics(mergeDescendants = true) { }
                             .testTag("supplier_pay_inline_error")
                     ) {
                         Row(
@@ -368,6 +370,7 @@ fun PhysicalGoodsReceiptDialog(
                         color = MaterialTheme.colorScheme.errorContainer,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .semantics(mergeDescendants = true) { }
                             .testTag("goods_receipt_inline_error")
                     ) {
                         Text(
@@ -521,7 +524,7 @@ fun PhysicalGoodsReceiptDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (!isSubmittingGrn && canConfirm && isQtyValid && expectedProduct != null) {
+                    if (!isSubmittingGrn && canConfirm && expectedProduct != null) {
                         isSubmittingGrn = true
                         grnInlineError = null
                         val result = onConfirmGrnResult(submissionId, expectedProduct.id, receivingQty, batchNote)
@@ -650,6 +653,8 @@ fun ReceivePurchaseBillDialog(
 
     val trackedProducts = remember(state.products) { state.products.filter { it.isStockTracked } }
 
+    val structuredLines = remember { mutableStateListOf<PurchaseLineItem>() }
+
     val totalVal = purchaseTotal.toDoubleOrNull() ?: 0.0
     val paidVal = if (purchasePaid.isBlank()) 0.0 else (purchasePaid.toDoubleOrNull() ?: -1.0)
     val isPaidValid = paidVal >= 0.0 && paidVal <= totalVal + 0.001
@@ -686,6 +691,7 @@ fun ReceivePurchaseBillDialog(
                         color = MaterialTheme.colorScheme.errorContainer,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .semantics(mergeDescendants = true) { }
                             .testTag("purchase_bill_inline_error")
                     ) {
                         Text(
@@ -780,7 +786,8 @@ fun ReceivePurchaseBillDialog(
                                     }
                                 },
                                 label = { Text(p.name(lang)) },
-                                shape = RoundedCornerShape(8.dp)
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.testTag("chip_product_${p.id}")
                             )
                         }
                     }
@@ -830,6 +837,114 @@ fun ReceivePurchaseBillDialog(
                                     .weight(1f)
                                     .testTag("purchase_bill_unit_cost_input")
                             )
+                        }
+
+                        val candidateProd = trackedProducts.firstOrNull { it.id == linkedProductId }
+                        val canAddCandidate = candidateProd != null && (linkedQuantityText.toIntOrNull() ?: 0) > 0 && (unitCostText.toDoubleOrNull() ?: 0.0) > 0.0
+                        OutlinedButton(
+                            onClick = {
+                                val p = candidateProd ?: return@OutlinedButton
+                                val q = linkedQuantityText.toIntOrNull() ?: 0
+                                val c = unitCostText.toDoubleOrNull() ?: p.costIls
+                                if (q > 0 && c > 0.0) {
+                                    val existingIdx = structuredLines.indexOfFirst { it.productId == p.id }
+                                    if (existingIdx != -1) {
+                                        val existing = structuredLines[existingIdx]
+                                        structuredLines[existingIdx] = existing.copy(
+                                            quantity = existing.quantity + q,
+                                            unitCostIls = c
+                                        )
+                                    } else {
+                                        structuredLines.add(
+                                            PurchaseLineItem(
+                                                productId = p.id,
+                                                productNameAr = p.nameAr,
+                                                productNameEn = p.nameEn,
+                                                quantity = q,
+                                                unitCostIls = c,
+                                                receivedQuantity = 0
+                                            )
+                                        )
+                                    }
+                                    val newTot = structuredLines.fold(BigDecimal.ZERO) { acc, l ->
+                                        acc.add(BigDecimal(l.unitCostIls.toString()).multiply(BigDecimal(l.quantity.toString())))
+                                    }.setScale(2, RoundingMode.HALF_UP)
+                                    purchaseTotal = newTot.toPlainString()
+                                    if (purchaseDesc.isBlank()) {
+                                        purchaseDesc = structuredLines.joinToString(" • ") { "${it.quantity}x ${it.name(lang)}" }
+                                    }
+                                    linkedProductId = null
+                                    linkedQuantityText = ""
+                                    unitCostText = ""
+                                    inlineError = null
+                                }
+                            },
+                            enabled = canAddCandidate,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("add_purchase_bill_line_button")
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.size(4.dp))
+                            Text(lang.tr("إضافة هذا الصنف للفاتورة", "Add This Item to Bill"))
+                        }
+                    }
+
+                    if (structuredLines.isNotEmpty()) {
+                        Card(
+                            shape = RoundedCornerShape(8.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("structured_purchase_lines_container")
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = lang.tr("الأصناف المسجلة في الفاتورة (${structuredLines.size}):", "Recorded Bill Items (${structuredLines.size}):"),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                                )
+                                structuredLines.forEachIndexed { idx, line ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                line.name(lang),
+                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                                            )
+                                            Text(
+                                                "${line.quantity} × ${WesternFormatters.formatIls(line.unitCostIls)} = ${WesternFormatters.formatIls(line.totalCostIls)}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = {
+                                                structuredLines.removeAt(idx)
+                                                if (structuredLines.isNotEmpty()) {
+                                                    val newTot = structuredLines.fold(BigDecimal.ZERO) { acc, l ->
+                                                        acc.add(BigDecimal(l.unitCostIls.toString()).multiply(BigDecimal(l.quantity.toString())))
+                                                    }.setScale(2, RoundingMode.HALF_UP)
+                                                    purchaseTotal = newTot.toPlainString()
+                                                }
+                                            },
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .testTag("btn_remove_line_${line.productId}")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.DeleteOutline,
+                                                contentDescription = "Remove",
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -898,23 +1013,27 @@ fun ReceivePurchaseBillDialog(
                         isSubmitting = true
                         inlineError = null
 
-                        if (linkedProductId != null && onConfirmStructuredBill != null) {
+                        val linesToSubmit = if (structuredLines.isNotEmpty()) {
+                            structuredLines.toList()
+                        } else if (linkedProductId != null) {
                             val prod = trackedProducts.firstOrNull { it.id == linkedProductId }
                             val unitCost = unitCostText.toDoubleOrNull() ?: (if (linkedQty > 0) totalVal / linkedQty else 0.0)
-                            if (prod == null || linkedQty <= 0 || unitCost <= 0.0) {
-                                isSubmitting = false
-                                inlineError = lang.tr("يُرجى إدخال كمية وتكلفة وحدة صحيحة للصنف المربوط", "Please enter valid quantity and unit cost")
-                                return@Button
-                            }
-                            val line = PurchaseLineItem(
-                                productId = prod.id,
-                                productNameAr = prod.nameAr,
-                                productNameEn = prod.nameEn,
-                                quantity = linkedQty,
-                                unitCostIls = unitCost,
-                                receivedQuantity = 0
-                            )
-                            val res = onConfirmStructuredBill(selectedSupplierId, listOf(line), paidVal, purchaseDesc.trim())
+                            if (prod != null && linkedQty > 0 && unitCost > 0.0) {
+                                listOf(
+                                    PurchaseLineItem(
+                                        productId = prod.id,
+                                        productNameAr = prod.nameAr,
+                                        productNameEn = prod.nameEn,
+                                        quantity = linkedQty,
+                                        unitCostIls = unitCost,
+                                        receivedQuantity = 0
+                                    )
+                                )
+                            } else emptyList()
+                        } else emptyList()
+
+                        if (linesToSubmit.isNotEmpty() && onConfirmStructuredBill != null) {
+                            val res = onConfirmStructuredBill(selectedSupplierId, linesToSubmit, paidVal, purchaseDesc.trim())
                             isSubmitting = false
                             if (res.isSuccess) {
                                 onDismiss()

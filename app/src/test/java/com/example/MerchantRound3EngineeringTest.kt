@@ -13,6 +13,10 @@ import com.example.model.UserRole
 import com.example.model.UserSession
 import com.example.viewmodel.TraderViewModel
 import com.example.viewmodel.TraderUiState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -521,41 +525,299 @@ class MerchantRound3EngineeringTest {
     }
 
     // =========================================================================
-    // 10. Search Performance Benchmark (p95 Measurement)
+    // 10. Search Performance Benchmark (10k & 50k Real filteredProducts Path)
     // =========================================================================
 
     @Test
-    fun searchPerformanceBenchmark_precomputedTokensBenchmark() {
+    fun searchPerformanceBenchmark_10k_and_50k_bilingualCatalog_candidateVsOriginal9336da6() {
+        val categories = ProductCategory.values()
+        val arabicNames = listOf("زيت زيتون بكر ممتاز", "زعتر بلدي مجفف", "طحين قمح بلدي فاخر", "قهوة عربية بالهيل", "شاي أسود سيلاني فاخر", "جبنة بيضاء نابلسية", "حليب طازج كامل الدسم", "بسكوت بالتمر والسمسم", "أرز بسمتي هندي طويل", "سكر أبيض ناعم", "عدس مجروش أحمر", "حمص حب بلدي ممتاز")
+        val englishNames = listOf("Extra Virgin Olive Oil", "Local Dried Thyme", "Fine Local Wheat Flour", "Arabic Coffee with Cardamom", "Ceylon Black Tea", "Nablus White Cheese", "Fresh Whole Milk", "Date & Sesame Biscuits", "Indian Long Basmati Rice", "Fine White Sugar", "Crushed Red Lentils", "Premium Chickpeas")
+        val unitsAr = listOf("لتر", "كغم", "علبة", "كيس", "قطعة")
+        val unitsEn = listOf("L", "kg", "Can", "Bag", "Piece")
+
+        fun generateCatalog(count: Int): List<Product> {
+            return (0 until count).map { i ->
+                val cat = categories[i % categories.size]
+                val nameIdx = i % arabicNames.size
+                Product(
+                    id = "p_synth_$i",
+                    nameAr = "${arabicNames[nameIdx]} #$i",
+                    nameEn = "${englishNames[nameIdx]} #$i",
+                    category = cat,
+                    barcode = "729000${(100000 + i)}",
+                    priceIls = 10.0 + (i % 50),
+                    costIls = 7.0 + (i % 35),
+                    unitAr = unitsAr[i % unitsAr.size],
+                    unitEn = unitsEn[i % unitsEn.size],
+                    stockCount = 20 + (i % 100),
+                    minStockThreshold = 8,
+                    accentHex = 0xFF4A6572
+                )
+            }
+        }
+
+        fun baseline9336da6Filter(products: List<Product>, category: ProductCategory, query: String): List<Product> {
+            fun normalize(raw: String): String = Product.normalizeKey(raw)
+            val q = normalize(com.example.model.WesternFormatters.sanitizeWesternDigits(query.trim()))
+            return products.filter { product ->
+                val matchesCategory = category == ProductCategory.ALL || product.category == category
+                val matchesQuery = if (q.isEmpty()) true else {
+                    normalize(product.nameAr).contains(q) ||
+                    normalize(product.nameEn).contains(q) ||
+                    normalize(product.unitAr).contains(q) ||
+                    normalize(product.unitEn).contains(q) ||
+                    product.barcode.contains(q)
+                }
+                matchesCategory && matchesQuery
+            }
+        }
+
+        val testQueries = listOf("زيت", "زعتر", "oil", "rice", "طحين", "قهوة", "شاي", "جبنة", "حليب", "بسكوت", "901", "729", "نابلسية", "Cardamom")
+
+        for (catalogSize in listOf(10_000, 50_000)) {
+            val setupStart = System.currentTimeMillis()
+            val catalog = generateCatalog(catalogSize)
+            val setupTimeMs = System.currentTimeMillis() - setupStart
+
+            val state = TraderUiState(products = catalog)
+
+            // Warmup JIT
+            repeat(50) {
+                val q = testQueries[it % testQueries.size]
+                val s = state.copy(searchQuery = q)
+                val dummy = s.filteredProducts.size
+            }
+
+            // Correctness check across all test queries: Candidate results must equal 9336da6 baseline
+            for (q in testQueries) {
+                val candidateFiltered = state.copy(searchQuery = q).filteredProducts
+                val baselineFiltered = baseline9336da6Filter(catalog, ProductCategory.ALL, q)
+                assertEquals(
+                    "Catalog $catalogSize: query '$q' result size must match baseline",
+                    baselineFiltered.size,
+                    candidateFiltered.size
+                )
+                assertEquals(
+                    "Catalog $catalogSize: query '$q' first 5 IDs must match baseline",
+                    baselineFiltered.take(5).map { it.id },
+                    candidateFiltered.take(5).map { it.id }
+                )
+            }
+
+            val iterations = if (catalogSize == 10_000) 200 else 60
+            val candidateTimingsNanos = LongArray(iterations)
+            val baselineTimingsNanos = LongArray(iterations)
+
+            for (i in 0 until iterations) {
+                val q = testQueries[i % testQueries.size]
+                val queryState = state.copy(searchQuery = q)
+
+                // Measure Candidate
+                val startCand = System.nanoTime()
+                val candMatches = queryState.filteredProducts.size
+                val candDuration = System.nanoTime() - startCand
+                candidateTimingsNanos[i] = candDuration
+
+                // Measure 9336da6 baseline
+                val startBase = System.nanoTime()
+                val baseMatches = baseline9336da6Filter(catalog, ProductCategory.ALL, q).size
+                val baseDuration = System.nanoTime() - startBase
+                baselineTimingsNanos[i] = baseDuration
+
+                assertEquals(baseMatches, candMatches)
+            }
+
+            candidateTimingsNanos.sort()
+            baselineTimingsNanos.sort()
+
+            val candP50 = candidateTimingsNanos[(iterations * 0.50).toInt()] / 1_000.0
+            val candP95 = candidateTimingsNanos[(iterations * 0.95).toInt()] / 1_000.0
+            val candP99 = candidateTimingsNanos[(iterations * 0.99).toInt()] / 1_000.0
+
+            val baseP50 = baselineTimingsNanos[(iterations * 0.50).toInt()] / 1_000.0
+            val baseP95 = baselineTimingsNanos[(iterations * 0.95).toInt()] / 1_000.0
+            val baseP99 = baselineTimingsNanos[(iterations * 0.99).toInt()] / 1_000.0
+
+            println("BENCHMARK_SEARCH_COMPARISON: catalog=$catalogSize items, setupTime=${setupTimeMs}ms, iterations=$iterations")
+            println("  Candidate: p50=${candP50}µs | p95=${candP95}µs | p99=${candP99}µs")
+            println("  Baseline (9336da6): p50=${baseP50}µs | p95=${baseP95}µs | p99=${baseP99}µs")
+            println("  Speedup factor at p50: ${String.format("%.2f", baseP50 / candP50)}x")
+            assertTrue("Candidate p95 must be faster than baseline p95", candP95 < baseP95)
+        }
+    }
+
+    // =========================================================================
+    // 11. Atomic Sync & Search Invalidation Tests
+    // =========================================================================
+
+    @Test
+    fun atomicSync_verifiesSingleAtomicEmission() {
         val repo = OfflineDemoTraderRepository()
         val viewModel = TraderViewModel(repo)
-
-        // Warmup JIT
-        repeat(500) {
-            viewModel.updateSearchQuery("زيت")
-            viewModel.updateSearchQuery("oil")
-            viewModel.updateSearchQuery("901")
+        var emissions = 0
+        val job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined).launch {
+            viewModel.uiState.collect { emissions++ }
         }
+        val beforeEmissions = emissions
 
-        val queries = listOf("زيت", "زعتر", "oil", "rice", "طحين", "قهوة", "شاي", "جبنة", "حليب", "بسكوت", "901", "729")
-        val sampleSize = 5000
-        val timingsNanos = LongArray(sampleSize)
+        // Mutate repository to cause state delta
+        val addRes = repo.createCustomer("عميل جديد للفحص", "0599123456", "نابلس")
+        assertTrue("Customer creation must succeed", addRes.isSuccess)
 
-        for (i in 0 until sampleSize) {
-            val q = queries[i % queries.size]
-            val start = System.nanoTime()
-            viewModel.updateSearchQuery(q)
-            val matchCount = viewModel.uiState.value.allCategoriesMatchCount
-            val duration = System.nanoTime() - start
-            timingsNanos[i] = duration
-            assertTrue(matchCount >= 0)
-        }
+        viewModel.syncFromRepository()
+        // Must emit at most 1 update, never intermediate empty lists or multi-step flickers
+        assertEquals("syncFromRepository must perform a single atomic state transition", beforeEmissions + 1, emissions)
+        assertEquals("Repository updates must be reflected in state", 1, viewModel.uiState.value.customers.count { it.phone == "0599123456" })
+        job.cancel()
+    }
 
-        timingsNanos.sort()
-        val p50Micros = timingsNanos[(sampleSize * 0.50).toInt()] / 1_000.0
-        val p95Micros = timingsNanos[(sampleSize * 0.95).toInt()] / 1_000.0
-        val p99Micros = timingsNanos[(sampleSize * 0.99).toInt()] / 1_000.0
+    @Test
+    fun searchCache_invalidationOnQueryCategoryOrProductsChange() {
+        val repo = OfflineDemoTraderRepository()
+        val products = repo.getProducts()
+        val state = TraderUiState(products = products, searchQuery = "زيت", selectedCategory = ProductCategory.ALL)
 
-        println("BENCHMARK_SEARCH: sample=$sampleSize queries | p50=${p50Micros}µs | p95=${p95Micros}µs | p99=${p99Micros}µs")
-        assertTrue("p95 search latency must be under 2000µs (2.0ms)", p95Micros < 2000.0)
+        val firstRun = state.filteredProducts
+        val secondRun = state.filteredProducts
+        assertTrue("Subsequent reads of filteredProducts must return the cached instance", firstRun === secondRun)
+
+        // Invalidate on query change
+        val newQueryState = state.copy(searchQuery = "زعتر")
+        val queryChangedRun = newQueryState.filteredProducts
+        assertFalse("Different query must compute fresh result", firstRun === queryChangedRun)
+
+        // Invalidate on category change
+        val newCategoryState = state.copy(selectedCategory = ProductCategory.PANTRY)
+        val categoryChangedRun = newCategoryState.filteredProducts
+        assertFalse("Different category must compute fresh result", firstRun === categoryChangedRun)
+
+        // Invalidate on products change
+        val extraProd = Product(
+            id = "p_temp",
+            nameAr = "زيت إضافي",
+            nameEn = "Extra Oil",
+            category = ProductCategory.ALL,
+            barcode = "999",
+            priceIls = 10.0,
+            costIls = 8.0,
+            unitAr = "لتر",
+            unitEn = "L",
+            stockCount = 10,
+            accentHex = 0
+        )
+        val newProductsState = state.copy(products = products + extraProd)
+        val productsChangedRun = newProductsState.filteredProducts
+        assertFalse("Updated products list must compute fresh result", firstRun === productsChangedRun)
+    }
+
+    @Test
+    fun grnReplay_firstFailureDoesNotCache_editedRetryWithSameIdSucceeds() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        val bill = viewModel.uiState.value.purchaseBills.first { it.expectedProductId != null && it.pendingQuantity > 0 }
+        val stableOpId = "grn_stable_retry_${System.currentTimeMillis()}"
+
+        // Step 1: Submit invalid quantity (excessive > pending)
+        val failResult = repo.confirmPhysicalGoodsReceipt(
+            billId = bill.id,
+            productId = bill.expectedProductId!!,
+            receivedQty = bill.pendingQuantity + 999,
+            batchNote = "Invalid qty",
+            operator = viewModel.uiState.value.currentSession,
+            operationId = stableOpId
+        )
+        assertTrue("Excessive quantity must fail", failResult.isFailure)
+
+        // Step 2: Retry with the EXACT same stableOpId with corrected valid quantity
+        val successResult = repo.confirmPhysicalGoodsReceipt(
+            billId = bill.id,
+            productId = bill.expectedProductId!!,
+            receivedQty = bill.pendingQuantity,
+            batchNote = "Corrected qty",
+            operator = viewModel.uiState.value.currentSession,
+            operationId = stableOpId
+        )
+        assertTrue("Retry with same operationId after prior failure must succeed (failed op was not cached)", successResult.isSuccess)
+        assertEquals(stableOpId, successResult.getOrNull()?.id)
+
+        // Step 3: Identical replay returns cached result without double mutation
+        val stockBeforeReplay = repo.getProducts().first { it.id == bill.expectedProductId }.stockCount
+        val replayResult = repo.confirmPhysicalGoodsReceipt(
+            billId = bill.id,
+            productId = bill.expectedProductId!!,
+            receivedQty = bill.pendingQuantity,
+            batchNote = "Corrected qty",
+            operator = viewModel.uiState.value.currentSession,
+            operationId = stableOpId
+        )
+        assertTrue("Replay must succeed with cached result", replayResult.isSuccess)
+        val stockAfterReplay = repo.getProducts().first { it.id == bill.expectedProductId }.stockCount
+        assertEquals("Replay must not double increment stock", stockBeforeReplay, stockAfterReplay)
+    }
+
+    @Test
+    fun supplierPayment_overpaymentPreservesNegativeBalanceAsStoreCredit() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        val supplier = viewModel.uiState.value.suppliers.first { it.balanceOwedIls > 0 }
+        val startingOwed = supplier.balanceOwedIls
+        val overpaymentAmount = startingOwed + 250.0 // 250 ILS store advance
+
+        val payResult = repo.recordSupplierPayment(
+            supplierId = supplier.id,
+            amountIls = overpaymentAmount,
+            note = "Overpayment advance",
+            operator = viewModel.uiState.value.currentSession,
+            paymentId = "pay_over_${System.currentTimeMillis()}"
+        )
+        assertTrue("Overpayment disbursement must succeed", payResult.isSuccess)
+        val updatedSup = repo.getSuppliers().first { it.id == supplier.id }
+        assertEquals(-250.0, updatedSup.balanceOwedIls, 0.001)
+    }
+
+    @Test
+    fun structuredPurchase_duplicateSkuAggregatesCorrectly_rejectsInvalidCostOrQty() {
+        val repo = OfflineDemoTraderRepository()
+        val supplier = repo.getSuppliers().first()
+
+        // 1. Rejects NaN / Infinity unit cost
+        val nanLine = PurchaseLineItem(
+            productId = "p_olive_oil",
+            productNameAr = "زيت",
+            productNameEn = "Oil",
+            quantity = 5,
+            unitCostIls = Double.NaN
+        )
+        val nanRes = repo.recordStructuredPurchaseBill(supplier.id, listOf(nanLine), 0.0, repo.getCurrentSession())
+        assertTrue("NaN cost must be rejected", nanRes.isFailure)
+
+        val infLine = nanLine.copy(unitCostIls = Double.POSITIVE_INFINITY)
+        val infRes = repo.recordStructuredPurchaseBill(supplier.id, listOf(infLine), 0.0, repo.getCurrentSession())
+        assertTrue("Infinity cost must be rejected", infRes.isFailure)
+
+        // 2. Duplicate SKU aggregation policy
+        val lineA = PurchaseLineItem(
+            productId = "p_olive_oil",
+            productNameAr = "زيت زيتون",
+            productNameEn = "Olive Oil",
+            quantity = 5,
+            unitCostIls = 20.0
+        )
+        val lineB = PurchaseLineItem(
+            productId = "p_olive_oil",
+            productNameAr = "زيت زيتون",
+            productNameEn = "Olive Oil",
+            quantity = 15,
+            unitCostIls = 24.0
+        )
+        // Total expected = 5*20 + 15*24 = 100 + 360 = 460 ILS, totalQty = 20, avg cost = 23.0
+        val dupRes = repo.recordStructuredPurchaseBill(supplier.id, listOf(lineA, lineB), 0.0, repo.getCurrentSession())
+        assertTrue("Duplicate SKU aggregation must succeed", dupRes.isSuccess)
+        val bill = dupRes.getOrNull()!!
+        assertEquals("Authoritative total must be exactly 460.00 ILS", 460.00, bill.totalIls, 0.001)
+        assertEquals("Duplicate SKU must be aggregated into 1 line", 1, bill.lines.size)
+        assertEquals(20, bill.lines.first().quantity)
+        assertEquals(23.0, bill.lines.first().unitCostIls, 0.001)
     }
 }
