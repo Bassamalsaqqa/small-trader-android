@@ -6,6 +6,8 @@ import com.example.model.AppLanguage
 import com.example.model.Product
 import com.example.model.ProductCategory
 import com.example.ui.screens.PurchasesFilter
+import com.example.model.PurchaseLineItem
+import com.example.model.StockMovement
 import com.example.model.TraderScreen
 import com.example.model.UserRole
 import com.example.model.UserSession
@@ -18,6 +20,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.util.UUID
 
 /**
  * PR #3 Engineering & Architectural Regression Tests.
@@ -279,5 +282,280 @@ class MerchantRound3EngineeringTest {
         // Navigating back to NEW_SALE must resume existing basket without clearing
         viewModel.navigateTo(TraderScreen.NEW_SALE)
         assertEquals("Basket must be preserved when resuming sale", 1, viewModel.uiState.value.basketItemCount)
+    }
+
+    // =========================================================================
+    // 7. GRN Replay Protection & Stable Operation ID Verification
+    // =========================================================================
+
+    @Test
+    fun grnReplay_identicalOperationReturnsRecordedResult_conflictingOperationRejected() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        val initialStock = viewModel.uiState.value.products.first { it.id == "p_rice_medium" }.stockCount
+
+        val stableOpId = "op_test_grn_${UUID.randomUUID()}"
+
+        // Step 1: Submit first GRN with stable operation ID
+        val res1 = viewModel.confirmPhysicalGoodsReceiptResult(
+            billId = "pb_03",
+            productId = "p_rice_medium",
+            receivedQty = 5,
+            batchNote = "Delivery Batch 1",
+            operationId = stableOpId
+        )
+        assertTrue("First GRN submission must succeed", res1.isSuccess)
+        val movement1 = res1.getOrNull()
+        assertNotNull(movement1)
+        assertEquals(5, movement1!!.delta)
+        val stockAfterFirst = viewModel.uiState.value.products.first { it.id == "p_rice_medium" }.stockCount
+        assertEquals(initialStock + 5, stockAfterFirst)
+
+        // Step 2: Retry with IDENTICAL operation ID and identical payload -> returns recorded result, does NOT double increment
+        val resRetry = viewModel.confirmPhysicalGoodsReceiptResult(
+            billId = "pb_03",
+            productId = "p_rice_medium",
+            receivedQty = 5,
+            batchNote = "Delivery Batch 1",
+            operationId = stableOpId
+        )
+        assertTrue("Idempotent retry with same operationId must succeed", resRetry.isSuccess)
+        assertEquals("Must return recorded movement ID", movement1.id, resRetry.getOrNull()?.id)
+        val stockAfterRetry = viewModel.uiState.value.products.first { it.id == "p_rice_medium" }.stockCount
+        assertEquals("Stock must remain exactly identical (no double receipt)", stockAfterFirst, stockAfterRetry)
+
+        // Step 3: Conflict attempt with SAME operation ID but different payload (different qty 6) -> REJECTED
+        val resConflict = viewModel.confirmPhysicalGoodsReceiptResult(
+            billId = "pb_03",
+            productId = "p_rice_medium",
+            receivedQty = 6,
+            batchNote = "Conflicting quantity attempt",
+            operationId = stableOpId
+        )
+        assertTrue("Conflicting payload with existing operationId must fail", resConflict.isFailure)
+        val stockAfterConflict = viewModel.uiState.value.products.first { it.id == "p_rice_medium" }.stockCount
+        assertEquals("Stock must remain unchanged after conflicting attempt", stockAfterFirst, stockAfterConflict)
+    }
+
+    // =========================================================================
+    // 8. Supplier Payment Duplicate Guard & Idempotency
+    // =========================================================================
+
+    @Test
+    fun supplierPaymentReplay_identicalPaymentIdReturnsRecordedResult_conflictingPaymentRejected() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        val supplierBefore = viewModel.uiState.value.suppliers.first { it.id == "sup_01" }
+        val balanceBefore = supplierBefore.balanceOwedIls
+
+        val paymentId = "pay_test_${UUID.randomUUID()}"
+        val payAmount = 150.0
+
+        // Step 1: Record initial payment
+        val res1 = viewModel.paySupplierAmountResult(
+            supplierId = "sup_01",
+            amountIls = payAmount,
+            note = "Drawer disbursement",
+            paymentId = paymentId
+        )
+        assertTrue("First payment must succeed", res1.isSuccess)
+        val recordedPayment = res1.getOrNull()
+        assertNotNull(recordedPayment)
+        assertEquals(paymentId, recordedPayment!!.id)
+
+        val balanceAfter1 = viewModel.uiState.value.suppliers.first { it.id == "sup_01" }.balanceOwedIls
+        val expectedBalance = BigDecimal(balanceBefore.toString())
+            .subtract(BigDecimal(payAmount.toString()))
+            .setScale(2, RoundingMode.HALF_UP)
+            .toDouble()
+        assertEquals(expectedBalance, balanceAfter1, 0.001)
+
+        // Step 2: Retry with identical payment ID and identical payload -> returns recorded payment without double deducting
+        val resRetry = viewModel.paySupplierAmountResult(
+            supplierId = "sup_01",
+            amountIls = payAmount,
+            note = "Drawer disbursement",
+            paymentId = paymentId
+        )
+        assertTrue("Retry with same paymentId must succeed", resRetry.isSuccess)
+        assertEquals("Must return recorded payment ID", paymentId, resRetry.getOrNull()?.id)
+        val balanceAfterRetry = viewModel.uiState.value.suppliers.first { it.id == "sup_01" }.balanceOwedIls
+        assertEquals("Balance must not be double deducted", balanceAfter1, balanceAfterRetry, 0.001)
+
+        // Step 3: Conflict with SAME payment ID but different amount (250.0) -> REJECTED
+        val resConflict = viewModel.paySupplierAmountResult(
+            supplierId = "sup_01",
+            amountIls = 250.0,
+            note = "Conflicting amount",
+            paymentId = paymentId
+        )
+        assertTrue("Conflicting payment with existing ID must fail", resConflict.isFailure)
+        val balanceAfterConflict = viewModel.uiState.value.suppliers.first { it.id == "sup_01" }.balanceOwedIls
+        assertEquals("Balance must remain unchanged after conflict rejection", balanceAfter1, balanceAfterConflict, 0.001)
+    }
+
+    // =========================================================================
+    // 9. Structured Multi-Line Purchase & Domain Pre-Mutation Validation
+    // =========================================================================
+
+    @Test
+    fun linkedPurchaseDomainValidation_andMultiLineStructuredPurchase() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        val supplierBefore = viewModel.uiState.value.suppliers.first { it.id == "sup_01" }
+        val balanceBefore = supplierBefore.balanceOwedIls
+
+        // 1. Validation: Rejects invalid / missing SKU
+        val invalidSkuLine = PurchaseLineItem(
+            productId = "non_existent_sku",
+            productNameAr = "صنف وهمي",
+            quantity = 5,
+            unitCostIls = 20.0
+        )
+        val resInvalidSku = viewModel.recordStructuredPurchaseBill(
+            supplierId = "sup_01",
+            lines = listOf(invalidSkuLine),
+            paidNowIls = 0.0,
+            note = "Invalid SKU test"
+        )
+        assertTrue("Missing SKU must be rejected before mutation", resInvalidSku.isFailure)
+        assertEquals("Supplier balance must not mutate on invalid SKU", balanceBefore, viewModel.uiState.value.suppliers.first { it.id == "sup_01" }.balanceOwedIls, 0.001)
+
+        // 2. Validation: Rejects non-positive quantity
+        val zeroQtyLine = PurchaseLineItem(
+            productId = "p_olive_oil",
+            productNameAr = "زيت زيتون",
+            quantity = 0,
+            unitCostIls = 35.0
+        )
+        val resZeroQty = viewModel.recordStructuredPurchaseBill(
+            supplierId = "sup_01",
+            lines = listOf(zeroQtyLine),
+            paidNowIls = 0.0,
+            note = "Zero quantity test"
+        )
+        assertTrue("Zero quantity line must be rejected", resZeroQty.isFailure)
+
+        // 3. Structured Multi-Line Creation with Explicit Entered Unit Cost
+        // Line 1: 10 units @ 32.50 ILS = 325.00 ILS (entered cost different from catalog)
+        // Line 2: 4 units @ 45.00 ILS = 180.00 ILS
+        // Authoritative Total = 325.00 + 180.00 = 505.00 ILS
+        val validLine1 = PurchaseLineItem(
+            productId = "p_olive_oil",
+            productNameAr = "زيت زيتون بلدي",
+            quantity = 10,
+            unitCostIls = 32.50
+        )
+        val validLine2 = PurchaseLineItem(
+            productId = "p_zaatar_jenin",
+            productNameAr = "زعتر جنيني بلدي",
+            quantity = 4,
+            unitCostIls = 45.00
+        )
+
+        val resValidBill = viewModel.recordStructuredPurchaseBill(
+            supplierId = "sup_01",
+            lines = listOf(validLine1, validLine2),
+            paidNowIls = 105.00,
+            note = "Multi-line structured shipment"
+        )
+        assertTrue("Valid structured bill must succeed", resValidBill.isSuccess)
+        val createdBill = resValidBill.getOrNull()
+        assertNotNull(createdBill)
+        assertEquals("Authoritative total must derive exactly from structured lines with entered unit cost", 505.00, createdBill!!.totalIls, 0.001)
+        assertEquals(105.00, createdBill.paidIls, 0.001)
+        assertEquals(400.00, createdBill.remainingPayableIls, 0.001)
+        assertEquals(2, createdBill.lines.size)
+        assertFalse(createdBill.isReceived)
+        assertEquals(14, createdBill.pendingQuantity)
+
+        // Verify supplier balance increased by exactly remaining payable (400.00 ILS)
+        val expectedNewBalance = BigDecimal(balanceBefore.toString())
+            .add(BigDecimal("400.00"))
+            .setScale(2, RoundingMode.HALF_UP)
+            .toDouble()
+        assertEquals(expectedNewBalance, viewModel.uiState.value.suppliers.first { it.id == "sup_01" }.balanceOwedIls, 0.001)
+
+        // 4. Multi-line Partial Goods Receiving
+        val oilBefore = viewModel.uiState.value.products.first { it.id == "p_olive_oil" }.stockCount
+        val zaatarBefore = viewModel.uiState.value.products.first { it.id == "p_zaatar_jenin" }.stockCount
+
+        // Receive 6 of 10 olive oil
+        val grn1 = viewModel.confirmPhysicalGoodsReceiptResult(
+            billId = createdBill.id,
+            productId = "p_olive_oil",
+            receivedQty = 6,
+            batchNote = "First batch oil receipt"
+        )
+        assertTrue("Receiving 6 of 10 oil units must succeed", grn1.isSuccess)
+        val oilAfter1 = viewModel.uiState.value.products.first { it.id == "p_olive_oil" }.stockCount
+        assertEquals("Olive oil stock must increase by exactly 6", oilBefore + 6, oilAfter1)
+
+        val updatedBill1 = viewModel.uiState.value.purchaseBills.first { it.id == createdBill.id }
+        assertTrue(updatedBill1.isPartiallyReceived)
+        assertFalse(updatedBill1.isReceived)
+        assertEquals(8, updatedBill1.pendingQuantity) // 4 oil remaining + 4 zaatar
+
+        // Receive 4 of 4 zaatar (completing zaatar line)
+        val grn2 = viewModel.confirmPhysicalGoodsReceiptResult(
+            billId = createdBill.id,
+            productId = "p_zaatar_jenin",
+            receivedQty = 4,
+            batchNote = "Full zaatar delivery"
+        )
+        assertTrue("Receiving 4 zaatar units must succeed", grn2.isSuccess)
+        val zaatarAfter = viewModel.uiState.value.products.first { it.id == "p_zaatar_jenin" }.stockCount
+        assertEquals("Zaatar stock must increase by 4", zaatarBefore + 4, zaatarAfter)
+
+        // Receive remaining 4 olive oil (completing the entire bill)
+        val grn3 = viewModel.confirmPhysicalGoodsReceiptResult(
+            billId = createdBill.id,
+            productId = "p_olive_oil",
+            receivedQty = 4,
+            batchNote = "Final oil delivery"
+        )
+        assertTrue("Receiving remaining 4 oil units must succeed", grn3.isSuccess)
+        val updatedBillFinal = viewModel.uiState.value.purchaseBills.first { it.id == createdBill.id }
+        assertTrue("Bill must be marked received in full", updatedBillFinal.isReceived)
+        assertEquals(0, updatedBillFinal.pendingQuantity)
+    }
+
+    // =========================================================================
+    // 10. Search Performance Benchmark (p95 Measurement)
+    // =========================================================================
+
+    @Test
+    fun searchPerformanceBenchmark_precomputedTokensBenchmark() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+
+        // Warmup JIT
+        repeat(500) {
+            viewModel.updateSearchQuery("زيت")
+            viewModel.updateSearchQuery("oil")
+            viewModel.updateSearchQuery("901")
+        }
+
+        val queries = listOf("زيت", "زعتر", "oil", "rice", "طحين", "قهوة", "شاي", "جبنة", "حليب", "بسكوت", "901", "729")
+        val sampleSize = 5000
+        val timingsNanos = LongArray(sampleSize)
+
+        for (i in 0 until sampleSize) {
+            val q = queries[i % queries.size]
+            val start = System.nanoTime()
+            viewModel.updateSearchQuery(q)
+            val matchCount = viewModel.uiState.value.allCategoriesMatchCount
+            val duration = System.nanoTime() - start
+            timingsNanos[i] = duration
+            assertTrue(matchCount >= 0)
+        }
+
+        timingsNanos.sort()
+        val p50Micros = timingsNanos[(sampleSize * 0.50).toInt()] / 1_000.0
+        val p95Micros = timingsNanos[(sampleSize * 0.95).toInt()] / 1_000.0
+        val p99Micros = timingsNanos[(sampleSize * 0.99).toInt()] / 1_000.0
+
+        println("BENCHMARK_SEARCH: sample=$sampleSize queries | p50=${p50Micros}µs | p95=${p95Micros}µs | p99=${p99Micros}µs")
+        assertTrue("p95 search latency must be under 2000µs (2.0ms)", p95Micros < 2000.0)
     }
 }

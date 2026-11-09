@@ -11,6 +11,7 @@ import com.example.model.InvoiceRecord
 import com.example.model.Product
 import com.example.model.ProductCategory
 import com.example.model.PurchaseBill
+import com.example.model.PurchaseLineItem
 import com.example.model.SaleDraft
 import com.example.model.StockMovement
 import com.example.model.Supplier
@@ -512,6 +513,16 @@ object SampleCatalog {
             paidIls = 550.00,
             itemsSummary = "20 زجاجة زيت زيتون بلدي بكر ممتاز (1 لتر) — معصرة جنين",
             isReceived = true,
+            lines = listOf(
+                PurchaseLineItem(
+                    productId = "p_olive_oil",
+                    productNameAr = "زيت زيتون بلدي بكر ممتاز - معصرة جفنا الأولى",
+                    productNameEn = "Extra Virgin Baladi Olive Oil - Jifna First Press",
+                    quantity = 20,
+                    unitCostIls = 29.00,
+                    receivedQuantity = 20
+                )
+            ),
             expectedProductId = "p_olive_oil",
             expectedQuantity = 20,
             receivedQuantity = 20
@@ -525,6 +536,16 @@ object SampleCatalog {
             paidIls = 200.00,
             itemsSummary = "25 عبوة حليب طازج كامل الدسم (الجبريني) — توريد مبرد",
             isReceived = true,
+            lines = listOf(
+                PurchaseLineItem(
+                    productId = "p_jebrini_milk",
+                    productNameAr = "حليب طازج كامل الدسم (الجبريني)",
+                    productNameEn = "Fresh Full Cream Milk",
+                    quantity = 25,
+                    unitCostIls = 5.80,
+                    receivedQuantity = 25
+                )
+            ),
             expectedProductId = "p_jebrini_milk",
             expectedQuantity = 25,
             receivedQuantity = 25
@@ -538,6 +559,16 @@ object SampleCatalog {
             paidIls = 0.00,
             itemsSummary = "12 كيس أرز حبة متوسطة فاخر (5 كغم) — توريد مطاحن نابلس",
             isReceived = false,
+            lines = listOf(
+                PurchaseLineItem(
+                    productId = "p_rice_medium",
+                    productNameAr = "أرز حبة متوسطة فاخر",
+                    productNameEn = "Premium Medium Grain Rice",
+                    quantity = 12,
+                    unitCostIls = 26.50,
+                    receivedQuantity = 0
+                )
+            ),
             expectedProductId = "p_rice_medium",
             expectedQuantity = 12,
             receivedQuantity = 0

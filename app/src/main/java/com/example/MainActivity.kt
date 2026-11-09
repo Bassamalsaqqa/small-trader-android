@@ -394,10 +394,12 @@ fun SmallTraderApp(
                                 state = state,
                                 onBack = { traderViewModel.navigateBack() },
                                 onPaySupplier = { sup, amount -> traderViewModel.paySupplierAmount(sup.id, amount) },
+                                onPaySupplierResult = { sup, amount, paymentId -> traderViewModel.paySupplierAmountResult(sup.id, amount, paymentId = paymentId) },
                                 onOpenReceivePurchaseDialog = { traderViewModel.openReceivePurchaseDialog(true) },
                                 onDismissFeedback = traderViewModel::dismissSupplierFeedback,
                                 onSaveSupplier = traderViewModel::saveSupplier,
                                 onConfirmGoodsReceipt = traderViewModel::confirmPhysicalGoodsReceipt,
+                                onConfirmGoodsReceiptResult = { billId, productId, qty, note, opId -> traderViewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, opId) },
                                 launchPayment = state.pendingAction == MerchantAction.PAY,
                                 onLaunchConsumed = traderViewModel::consumeAction
                             )
@@ -619,6 +621,14 @@ fun SmallTraderApp(
                                 paidNowIls = paidNowIls,
                                 expectedProductId = expectedProductId,
                                 expectedQuantity = expectedQty
+                            )
+                        },
+                        onConfirmStructuredBill = { supplierId, lines, paidNowIls, note ->
+                            traderViewModel.recordStructuredPurchaseBill(
+                                supplierId = supplierId,
+                                lines = lines,
+                                paidNowIls = paidNowIls,
+                                note = note
                             )
                         }
                     )

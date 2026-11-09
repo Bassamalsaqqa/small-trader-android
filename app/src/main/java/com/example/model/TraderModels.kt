@@ -114,10 +114,11 @@ data class Product(
     val isLowStock: Boolean
         get() = isStockTracked && stockCount <= minStockThreshold
 
-    val normalizedNameAr: String by lazy { normalizeKey(nameAr) }
-    val normalizedNameEn: String by lazy { normalizeKey(nameEn) }
-    val normalizedUnitAr: String by lazy { normalizeKey(unitAr) }
-    val normalizedUnitEn: String by lazy { normalizeKey(unitEn) }
+    val normalizedSearchTokens: String = normalizeKey("$nameAr $nameEn $unitAr $unitEn $barcode")
+    val normalizedNameAr: String get() = normalizeKey(nameAr)
+    val normalizedNameEn: String get() = normalizeKey(nameEn)
+    val normalizedUnitAr: String get() = normalizeKey(unitAr)
+    val normalizedUnitEn: String get() = normalizeKey(unitEn)
 
     companion object {
         fun normalizeKey(raw: String): String {
@@ -254,6 +255,32 @@ data class Supplier(
     fun company(lang: AppLanguage): String = lang.tr(companyAr, companyEn)
 }
 
+data class PurchaseLineItem(
+    val productId: String,
+    val productNameAr: String = "",
+    val productNameEn: String = "",
+    val quantity: Int,
+    val unitCostIls: Double,
+    val receivedQuantity: Int = 0
+) {
+    fun name(lang: AppLanguage): String = lang.tr(productNameAr, productNameEn)
+
+    val totalCostIls: Double
+        get() = BigDecimal(unitCostIls.toString())
+            .multiply(BigDecimal(quantity.toString()))
+            .setScale(2, RoundingMode.HALF_UP)
+            .toDouble()
+
+    val pendingQuantity: Int
+        get() = (quantity - receivedQuantity).coerceAtLeast(0)
+
+    val isReceived: Boolean
+        get() = quantity > 0 && receivedQuantity >= quantity
+
+    val isPartiallyReceived: Boolean
+        get() = !isReceived && receivedQuantity > 0
+}
+
 data class PurchaseBill(
     val id: String,
     val billNumber: Int,
@@ -263,6 +290,7 @@ data class PurchaseBill(
     val paidIls: Double,
     val itemsSummary: String,
     val isReceived: Boolean = false, // Truthful accounting: text-only bills are pending physical goods inspection
+    val lines: List<PurchaseLineItem> = emptyList(),
     val expectedProductId: String? = null,
     val expectedQuantity: Int = 0,
     val receivedQuantity: Int = 0
@@ -274,11 +302,33 @@ data class PurchaseBill(
             .toDouble()
             .coerceAtLeast(0.0)
 
+    val effectiveLines: List<PurchaseLineItem>
+        get() = if (lines.isNotEmpty()) {
+            lines
+        } else if (!expectedProductId.isNullOrBlank() && expectedQuantity > 0) {
+            listOf(
+                PurchaseLineItem(
+                    productId = expectedProductId,
+                    productNameAr = itemsSummary,
+                    productNameEn = itemsSummary,
+                    quantity = expectedQuantity,
+                    unitCostIls = if (expectedQuantity > 0) (totalIls / expectedQuantity) else 0.0,
+                    receivedQuantity = receivedQuantity
+                )
+            )
+        } else {
+            emptyList()
+        }
+
     val pendingQuantity: Int
-        get() = (expectedQuantity - receivedQuantity).coerceAtLeast(0)
+        get() = if (lines.isNotEmpty()) {
+            lines.sumOf { it.pendingQuantity }
+        } else {
+            (expectedQuantity - receivedQuantity).coerceAtLeast(0)
+        }
 
     val isPartiallyReceived: Boolean
-        get() = !isReceived && receivedQuantity > 0 && pendingQuantity > 0
+        get() = !isReceived && (if (lines.isNotEmpty()) lines.any { it.receivedQuantity > 0 } else receivedQuantity > 0) && pendingQuantity > 0
 }
 
 data class SupplierPayment(

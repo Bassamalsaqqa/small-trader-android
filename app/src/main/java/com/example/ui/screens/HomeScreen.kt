@@ -21,6 +21,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddShoppingCart
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Payments
@@ -39,6 +41,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -108,6 +114,7 @@ fun HomeScreen(
     val canManageSuppliers = state.currentSession.canManageSuppliers()
     val hasActiveBasket = state.basketItemCount > 0
     val isDark = state.isDarkTheme
+    var isSummaryExpanded by rememberSaveable { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier
@@ -356,163 +363,242 @@ fun HomeScreen(
                             }
                         }
 
-                        // Bento 1: Primary Today's Total Sales Card (Tinted Mint/Emerald)
-                        val successBg = if (isDark) TraderTheme.financial.incomeContainer else Color(0xFFF0FDF4)
-                        val successBorder = if (isDark) TraderTheme.financial.income.copy(alpha = 0.35f) else Color(0xFFBBF7D0)
-                        val successText = if (isDark) TraderTheme.financial.income else Color(0xFF166534)
-
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = successBg,
-                            border = BorderStroke(1.dp, successBorder),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                        if (!isSummaryExpanded) {
+                            // Concise primary collapsed today summary
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isDark) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) else Color(0xFFF8FAFC),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text(
-                                        text = lang.tr("مبيعات اليوم الكلية", "Today's Total Sales"),
-                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-                                        color = successText,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Text(
-                                        text = WesternFormatters.formatIls(state.todaySalesTotalIls),
-                                        style = MaterialTheme.typography.headlineMedium.copy(fontSize = 24.sp),
-                                        fontWeight = FontWeight.Bold,
-                                        color = successText
-                                    )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text(
+                                            text = "${WesternFormatters.formatIls(state.todaySalesTotalIls)} • ${WesternFormatters.formatInt(state.todayInvoiceCount)} ${lang.tr("فاتورة", "invoices")}",
+                                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Text(
+                                            text = lang.tr(
+                                                "نقدي: ${WesternFormatters.formatIls(state.shiftCashSalesIls)} • آجل: ${WesternFormatters.formatIls(state.shiftCreditSalesIls)}",
+                                                "Cash: ${WesternFormatters.formatIls(state.shiftCashSalesIls)} • Credit: ${WesternFormatters.formatIls(state.shiftCreditSalesIls)}"
+                                            ),
+                                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    TextButton(
+                                        onClick = { isSummaryExpanded = true },
+                                        modifier = Modifier.testTag("home_summary_toggle")
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            Text(
+                                                text = lang.tr("تفاصيل", "Details"),
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                            )
+                                            Icon(
+                                                imageVector = Icons.Default.ExpandMore,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
                                 }
+                            }
+                        } else {
+                            // Bento 1: Primary Today's Total Sales Card (Tinted Mint/Emerald)
+                            val successBg = if (isDark) TraderTheme.financial.incomeContainer else Color(0xFFF0FDF4)
+                            val successBorder = if (isDark) TraderTheme.financial.income.copy(alpha = 0.35f) else Color(0xFFBBF7D0)
+                            val successText = if (isDark) TraderTheme.financial.income else Color(0xFF166534)
+
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = successBg,
+                                border = BorderStroke(1.dp, successBorder),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text(
+                                            text = lang.tr("مبيعات اليوم الكلية", "Today's Total Sales"),
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                                            color = successText,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = WesternFormatters.formatIls(state.todaySalesTotalIls),
+                                            style = MaterialTheme.typography.headlineMedium.copy(fontSize = 24.sp),
+                                            fontWeight = FontWeight.Bold,
+                                            color = successText
+                                        )
+                                    }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = successBorder.copy(alpha = 0.45f),
+                                        modifier = Modifier.padding(start = 8.dp)
+                                    ) {
+                                        Text(
+                                            text = "${WesternFormatters.formatInt(state.todayInvoiceCount)} ${lang.tr("فاتورة", "invoices")}",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = successText,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Bento Split Row: Cash Sales Received vs Deferred Credit Sales
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                // Split Card 1: Cash Sales Received (Clearly distinguished from drawer cash!)
+                                val cashBg = if (isDark) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else Color(0xFFEFF6FF)
+                                val cashBorder = if (isDark) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f) else Color(0xFFBFDBFE)
+                                val cashText = if (isDark) MaterialTheme.colorScheme.primary else Color(0xFF1E40AF)
 
                                 Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = successBorder.copy(alpha = 0.45f),
-                                    modifier = Modifier.padding(start = 8.dp)
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = cashBg,
+                                    border = BorderStroke(1.dp, cashBorder),
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    Text(
-                                        text = "${WesternFormatters.formatInt(state.todayInvoiceCount)} ${lang.tr("فاتورة", "invoices")}",
-                                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = successText,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        // Bento Split Row: Cash Sales Received vs Deferred Credit Sales
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Split Card 1: Cash Sales Received (Clearly distinguished from drawer cash!)
-                            val cashBg = if (isDark) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else Color(0xFFEFF6FF)
-                            val cashBorder = if (isDark) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f) else Color(0xFFBFDBFE)
-                            val cashText = if (isDark) MaterialTheme.colorScheme.primary else Color(0xFF1E40AF)
-
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = cashBg,
-                                border = BorderStroke(1.dp, cashBorder),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(10.dp),
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = lang.tr("المقبوض نقداً", "Cash Received"),
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                                                color = cashText,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Icon(
+                                                imageVector = Icons.Default.PointOfSale,
+                                                contentDescription = null,
+                                                tint = cashText,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                         Text(
-                                            text = lang.tr("المقبوض نقداً", "Cash Received"),
-                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-                                            color = cashText,
-                                            fontWeight = FontWeight.Medium,
+                                            text = WesternFormatters.formatIls(state.shiftCashSalesIls),
+                                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
+                                            fontWeight = FontWeight.Bold,
+                                            color = cashText
+                                        )
+                                        Text(
+                                            text = lang.tr("مبيعات نقدية لليوم", "Today's cash sales"),
+                                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                            color = cashText.copy(alpha = 0.75f),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
-                                        Icon(
-                                            imageVector = Icons.Default.PointOfSale,
-                                            contentDescription = null,
-                                            tint = cashText,
-                                            modifier = Modifier.size(16.dp)
-                                        )
                                     }
-                                    Text(
-                                        text = WesternFormatters.formatIls(state.shiftCashSalesIls),
-                                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
-                                        fontWeight = FontWeight.Bold,
-                                        color = cashText
-                                    )
-                                    Text(
-                                        text = lang.tr("مبيعات نقدية لليوم", "Today's cash sales"),
-                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                        color = cashText.copy(alpha = 0.75f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
                                 }
-                            }
 
-                            // Split Card 2: Deferred Credit Sales
-                            val creditBg = if (isDark) TraderTheme.financial.warningContainer else Color(0xFFFFF5DF)
-                            val creditBorder = if (isDark) TraderTheme.financial.warning.copy(alpha = 0.35f) else Color(0xFFFDE68A)
-                            val creditText = if (isDark) TraderTheme.financial.warning else Color(0xFF92400E)
+                                // Split Card 2: Deferred Credit Sales
+                                val creditBg = if (isDark) TraderTheme.financial.warningContainer else Color(0xFFFFF5DF)
+                                val creditBorder = if (isDark) TraderTheme.financial.warning.copy(alpha = 0.35f) else Color(0xFFFDE68A)
+                                val creditText = if (isDark) TraderTheme.financial.warning else Color(0xFF92400E)
 
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = creditBg,
-                                border = BorderStroke(1.dp, creditBorder),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(10.dp),
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = creditBg,
+                                    border = BorderStroke(1.dp, creditBorder),
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = lang.tr("ذمم مؤجلة (آجل)", "Credit Sales"),
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                                                color = creditText,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Icon(
+                                                imageVector = Icons.Default.MenuBook,
+                                                contentDescription = null,
+                                                tint = creditText,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                         Text(
-                                            text = lang.tr("ذمم مؤجلة (آجل)", "Credit Sales"),
-                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-                                            color = creditText,
-                                            fontWeight = FontWeight.Medium,
+                                            text = WesternFormatters.formatIls(state.shiftCreditSalesIls),
+                                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
+                                            fontWeight = FontWeight.Bold,
+                                            color = creditText
+                                        )
+                                        Text(
+                                            text = lang.tr("فواتير ذمة لليوم", "Today's credit sales"),
+                                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                            color = creditText.copy(alpha = 0.75f),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
+                                    }
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(
+                                    onClick = { isSummaryExpanded = false },
+                                    modifier = Modifier.testTag("home_summary_toggle")
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Text(
+                                            text = lang.tr("طي الملخص", "Collapse"),
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                        )
                                         Icon(
-                                            imageVector = Icons.Default.MenuBook,
+                                            imageVector = Icons.Default.ExpandLess,
                                             contentDescription = null,
-                                            tint = creditText,
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }
-                                    Text(
-                                        text = WesternFormatters.formatIls(state.shiftCreditSalesIls),
-                                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
-                                        fontWeight = FontWeight.Bold,
-                                        color = creditText
-                                    )
-                                    Text(
-                                        text = lang.tr("فواتير ذمة لليوم", "Today's credit sales"),
-                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                        color = creditText.copy(alpha = 0.75f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
                                 }
                             }
                         }

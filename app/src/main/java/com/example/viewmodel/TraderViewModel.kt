@@ -22,6 +22,7 @@ import com.example.model.PrinterStatus
 import com.example.model.Product
 import com.example.model.ProductCategory
 import com.example.model.PurchaseBill
+import com.example.model.PurchaseLineItem
 import com.example.model.SaleDraft
 import com.example.model.StockMovement
 import com.example.model.Supplier
@@ -146,11 +147,7 @@ data class TraderUiState(
 ) {
     private fun matchesSearchQuery(product: Product, normalizedQuery: String): Boolean {
         if (normalizedQuery.isEmpty()) return true
-        return product.normalizedNameAr.contains(normalizedQuery) ||
-            product.normalizedNameEn.contains(normalizedQuery) ||
-            product.normalizedUnitAr.contains(normalizedQuery) ||
-            product.normalizedUnitEn.contains(normalizedQuery) ||
-            product.barcode.contains(normalizedQuery)
+        return product.normalizedSearchTokens.contains(normalizedQuery)
     }
 
     val filteredProducts: List<Product>
@@ -465,9 +462,9 @@ class TraderViewModel(
     private var bannerJob: Job? = null
     private var customItemCounter = 1
 
-    fun syncProductsAndInventory() {
+    private fun syncProductsAndInventory() {
+        val updatedProducts = repository.getProducts()
         _uiState.update { current ->
-            val updatedProducts = repository.getProducts()
             current.copy(
                 products = updatedProducts,
                 stockMovements = repository.getStockMovements(),
@@ -478,9 +475,9 @@ class TraderViewModel(
         }
     }
 
-    fun syncCustomers() {
+    private fun syncCustomers() {
+        val updatedCustomers = repository.getCustomers()
         _uiState.update { current ->
-            val updatedCustomers = repository.getCustomers()
             current.copy(
                 customers = updatedCustomers,
                 customerTransactions = repository.getCustomerTransactions(),
@@ -491,9 +488,9 @@ class TraderViewModel(
         }
     }
 
-    fun syncSuppliersAndPurchases() {
+    private fun syncSuppliersAndPurchases() {
+        val updatedSuppliers = repository.getSuppliers()
         _uiState.update { current ->
-            val updatedSuppliers = repository.getSuppliers()
             current.copy(
                 suppliers = updatedSuppliers,
                 purchaseBills = repository.getPurchaseBills(),
@@ -505,21 +502,37 @@ class TraderViewModel(
         }
     }
 
-    fun syncExpenses() {
+    private fun syncExpenses() {
         _uiState.update { current ->
             current.copy(expenses = repository.getExpenses())
         }
     }
 
     fun syncFromRepository() {
-        syncProductsAndInventory()
-        syncCustomers()
-        syncSuppliersAndPurchases()
-        syncExpenses()
+        val updatedProducts = repository.getProducts()
+        val updatedCustomers = repository.getCustomers()
+        val updatedSuppliers = repository.getSuppliers()
         _uiState.update { current ->
             current.copy(
+                products = updatedProducts,
+                stockMovements = repository.getStockMovements(),
                 invoices = repository.getInvoices(),
-                businessInfo = repository.getBusinessInfo()
+                customers = updatedCustomers,
+                customerTransactions = repository.getCustomerTransactions(),
+                suppliers = updatedSuppliers,
+                purchaseBills = repository.getPurchaseBills(),
+                supplierPayments = repository.getSupplierPayments(),
+                expenses = repository.getExpenses(),
+                businessInfo = repository.getBusinessInfo(),
+                selectedProductForDetail = current.selectedProductForDetail?.let { sel ->
+                    updatedProducts.firstOrNull { it.id == sel.id } ?: sel
+                },
+                selectedCustomerForDetail = current.selectedCustomerForDetail?.let { sel ->
+                    updatedCustomers.firstOrNull { it.id == sel.id } ?: sel
+                },
+                selectedSupplierForDetail = current.selectedSupplierForDetail?.let { sel ->
+                    updatedSuppliers.firstOrNull { it.id == sel.id } ?: sel
+                }
             )
         }
     }
@@ -1517,37 +1530,82 @@ class TraderViewModel(
         }
     }
 
-    fun paySupplierAmount(
+    fun recordStructuredPurchaseBill(
+        supplierId: String,
+        lines: List<PurchaseLineItem>,
+        paidNowIls: Double,
+        note: String = ""
+    ): Result<PurchaseBill> {
+        val session = _uiState.value.currentSession
+        val result = repository.recordStructuredPurchaseBill(supplierId, lines, paidNowIls, session, note)
+        if (result.isSuccess) {
+            val created = result.getOrNull()
+            val updatedSuppliers = repository.getSuppliers()
+            val updatedBills = repository.getPurchaseBills()
+            val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
+            _uiState.update { state ->
+                state.copy(
+                    suppliers = updatedSuppliers,
+                    purchaseBills = updatedBills,
+                    selectedSupplierForDetail = updatedSup ?: state.selectedSupplierForDetail,
+                    lastSupplierActionMessageAr = "تم اعتماد فاتورة الشراء #${created?.billNumber ?: ""} بنجاح",
+                    lastSupplierActionMessageEn = "Purchase bill #${created?.billNumber ?: ""} recorded successfully",
+                    isSupplierActionError = false
+                )
+            }
+        } else {
+            val rawErr = result.exceptionOrNull()?.message ?: "Purchase bill rejected"
+            val parts = rawErr.split(" | ", limit = 2)
+            val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+            val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+            _uiState.update {
+                it.copy(
+                    lastSupplierActionMessageAr = errAr,
+                    lastSupplierActionMessageEn = errEn,
+                    isSupplierActionError = true
+                )
+            }
+            showBanner(errAr, errEn, isError = true)
+        }
+        return result
+    }
+
+    fun paySupplierAmountResult(
         supplierId: String,
         amountIls: Double,
-        note: String = "سداد نقدي للمورد من الصندوق"
-    ): Boolean {
+        note: String = "سداد نقدي للمورد من الصندوق",
+        paymentId: String = ""
+    ): Result<SupplierPayment> {
         val session = _uiState.value.currentSession
-        val result = repository.recordSupplierPayment(supplierId, amountIls, note, session)
-        return if (result.isSuccess) {
-            syncSuppliersAndPurchases()
+        val result = repository.recordSupplierPayment(supplierId, amountIls, note, session, paymentId)
+        if (result.isSuccess) {
+            val updatedSuppliers = repository.getSuppliers()
+            val updatedBills = repository.getPurchaseBills()
+            val updatedPayments = repository.getSupplierPayments()
+            val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
+            val paidStr = WesternFormatters.formatIls(amountIls)
+            val newOwed = updatedSup?.balanceOwedIls ?: 0.0
+            val msgAr = when {
+                newOwed > 0.005 -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatIls(newOwed)}"
+                newOwed < -0.005 -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatIls(-newOwed)}"
+                else -> "تم صرف $paidStr للمورد — أصبح حساب المورد خالصاً (0.00 ₪)"
+            }
+            val msgEn = when {
+                newOwed > 0.005 -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatIls(newOwed)}"
+                newOwed < -0.005 -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatIls(-newOwed)}"
+                else -> "Paid $paidStr to supplier — Supplier account settled (0.00 ₪)"
+            }
             _uiState.update { state ->
-                val updatedSup = state.suppliers.firstOrNull { it.id == supplierId }
-                val paidStr = WesternFormatters.formatIls(amountIls)
-                val newOwed = updatedSup?.balanceOwedIls ?: 0.0
-                val msgAr = when {
-                    newOwed > 0.005 -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatIls(newOwed)}"
-                    newOwed < -0.005 -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatIls(-newOwed)}"
-                    else -> "تم صرف $paidStr للمورد — أصبح حساب المورد خالصاً (0.00 ₪)"
-                }
-                val msgEn = when {
-                    newOwed > 0.005 -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatIls(newOwed)}"
-                    newOwed < -0.005 -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatIls(-newOwed)}"
-                    else -> "Paid $paidStr to supplier — Supplier account settled (0.00 ₪)"
-                }
                 state.copy(
-                    selectedSupplierForDetail = updatedSup,
+                    suppliers = updatedSuppliers,
+                    purchaseBills = updatedBills,
+                    supplierPayments = updatedPayments,
+                    selectedSupplierForDetail = updatedSup ?: state.selectedSupplierForDetail,
                     lastSupplierActionMessageAr = msgAr,
                     lastSupplierActionMessageEn = msgEn,
                     isSupplierActionError = false
                 )
             }
-            true
         } else {
             val rawErr = result.exceptionOrNull()?.message ?: "Supplier disbursement rejected"
             val parts = rawErr.split(" | ", limit = 2)
@@ -1561,9 +1619,16 @@ class TraderViewModel(
                 )
             }
             showBanner(errAr, errEn, isError = true)
-            false
         }
+        return result
     }
+
+    fun paySupplierAmount(
+        supplierId: String,
+        amountIls: Double,
+        note: String = "سداد نقدي للمورد من الصندوق",
+        paymentId: String = ""
+    ): Boolean = paySupplierAmountResult(supplierId, amountIls, note, paymentId).isSuccess
 
     // Expenses & Cash Outflow
     fun openAddExpenseDialog(open: Boolean) {
@@ -2094,27 +2159,33 @@ class TraderViewModel(
         }
     }
 
-    fun confirmPhysicalGoodsReceipt(
+    fun confirmPhysicalGoodsReceiptResult(
         billId: String,
         productId: String,
         receivedQty: Int,
-        batchNote: String = ""
-    ): Boolean {
+        batchNote: String = "",
+        operationId: String = ""
+    ): Result<StockMovement> {
         val session = _uiState.value.currentSession
-        val result = repository.confirmPhysicalGoodsReceipt(billId, productId, receivedQty, batchNote, session)
-        return if (result.isSuccess) {
+        val result = repository.confirmPhysicalGoodsReceipt(billId, productId, receivedQty, batchNote, session, operationId)
+        if (result.isSuccess) {
             val movement = result.getOrNull()
-            syncProductsAndInventory()
-            syncSuppliersAndPurchases()
-            val prod = _uiState.value.products.firstOrNull { it.id == productId }
+            val updatedProducts = repository.getProducts()
+            val updatedSuppliers = repository.getSuppliers()
+            val updatedBills = repository.getPurchaseBills()
+            val prod = updatedProducts.firstOrNull { it.id == productId }
             _uiState.update { state ->
                 state.copy(
+                    products = updatedProducts,
+                    stockMovements = repository.getStockMovements(),
+                    suppliers = updatedSuppliers,
+                    purchaseBills = updatedBills,
+                    supplierPayments = repository.getSupplierPayments(),
                     lastSupplierActionMessageAr = "تم اعتماد سند الاستلام المخزني (+${WesternFormatters.formatInt(receivedQty)} من «${prod?.nameAr ?: ""}») — المخزون الحالي: ${WesternFormatters.formatInt(movement?.resultingStock ?: 0)}",
                     lastSupplierActionMessageEn = "Physical Goods Receipt confirmed (+${WesternFormatters.formatInt(receivedQty)} of \"${prod?.nameEn ?: ""}\") — Stock: ${WesternFormatters.formatInt(movement?.resultingStock ?: 0)}",
                     isSupplierActionError = false
                 )
             }
-            true
         } else {
             val rawErr = result.exceptionOrNull()?.message ?: "Goods receipt rejected"
             val parts = rawErr.split(" | ", limit = 2)
@@ -2128,9 +2199,17 @@ class TraderViewModel(
                 )
             }
             showBanner(errAr, errEn, isError = true)
-            false
         }
+        return result
     }
+
+    fun confirmPhysicalGoodsReceipt(
+        billId: String,
+        productId: String,
+        receivedQty: Int,
+        batchNote: String = "",
+        operationId: String = ""
+    ): Boolean = confirmPhysicalGoodsReceiptResult(billId, productId, receivedQty, batchNote, operationId).isSuccess
 
     fun updateStartingDrawerCash(openingIls: Double): Boolean {
         val session = _uiState.value.currentSession
