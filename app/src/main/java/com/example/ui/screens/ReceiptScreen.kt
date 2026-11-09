@@ -133,7 +133,7 @@ private enum class InvoiceHistoryFilter {
 fun ReceiptScreen(
     state: TraderUiState,
     onPrintReceipt: () -> Unit,
-    onOpenPrinterSettings: () -> Unit,
+    onOpenPrinterSettings: () -> Unit = {},
     onStartNewSale: () -> Unit,
     onBackToHome: () -> Unit,
     onShareReceipt: ((InvoiceRecord) -> String)? = null,
@@ -199,64 +199,73 @@ fun ReceiptScreen(
             // 1. Quiet Outcome Hero (Newly Completed Sale vs Historical Document)
             if (state.isNewlyCompletedSale) {
                 val isCash = receipt.isPaidInFull
-                Column(
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 8.dp, bottom = 4.dp)
-                        .testTag("receipt_completion_banner"),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .testTag("receipt_completion_banner")
                 ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = TraderTheme.financial.incomeContainer,
-                        modifier = Modifier.size(60.dp)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = TraderTheme.financial.income,
-                                modifier = Modifier.size(34.dp)
+                        Surface(
+                            shape = CircleShape,
+                            color = TraderTheme.financial.incomeContainer,
+                            modifier = Modifier.size(56.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = TraderTheme.financial.income,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = if (isCash) {
+                                lang.tr("تم تسجيل البيع بنجاح", "Sale Completed Successfully")
+                            } else {
+                                lang.tr("تم تسجيل البيع الآجل بالذمة", "Credit Invoice Posted")
+                            },
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center
+                        )
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            StitchBadge(
+                                text = StitchBidiUtils.formatInvoiceCode(receipt.invoiceNumber),
+                                tone = StitchBadgeTone.PRIMARY
+                            )
+                            Text(
+                                text = "•",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            StitchBadge(
+                                text = when (receipt.paymentStatus) {
+                                    InvoicePaymentStatus.PAID_CASH -> lang.tr("نقداً", "Cash")
+                                    InvoicePaymentStatus.PARTIAL -> lang.tr("سداد جزئي", "Partial")
+                                    InvoicePaymentStatus.ON_CREDIT -> lang.tr("ذمة آجلة", "On Credit")
+                                },
+                                tone = when (receipt.paymentStatus) {
+                                    InvoicePaymentStatus.PAID_CASH -> StitchBadgeTone.SUCCESS
+                                    InvoicePaymentStatus.PARTIAL -> StitchBadgeTone.WARNING
+                                    InvoicePaymentStatus.ON_CREDIT -> StitchBadgeTone.DANGER
+                                }
                             )
                         }
-                    }
-
-                    Text(
-                        text = if (isCash) {
-                            lang.tr("تم تسجيل البيع بنجاح", "Sale Completed Successfully")
-                        } else {
-                            lang.tr("تم تسجيل البيع الآجل بالذمة", "Credit Invoice Posted")
-                        },
-                        style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        StitchBadge(
-                            text = StitchBidiUtils.formatInvoiceCode(receipt.invoiceNumber),
-                            tone = StitchBadgeTone.PRIMARY
-                        )
-                        Text(
-                            text = "•",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        StitchBadge(
-                            text = when (receipt.paymentStatus) {
-                                InvoicePaymentStatus.PAID_CASH -> lang.tr("نقداً", "Cash")
-                                InvoicePaymentStatus.PARTIAL -> lang.tr("سداد جزئي", "Partial")
-                                InvoicePaymentStatus.ON_CREDIT -> lang.tr("ذمة آجلة", "On Credit")
-                            },
-                            tone = when (receipt.paymentStatus) {
-                                InvoicePaymentStatus.PAID_CASH -> StitchBadgeTone.SUCCESS
-                                InvoicePaymentStatus.PARTIAL -> StitchBadgeTone.WARNING
-                                InvoicePaymentStatus.ON_CREDIT -> StitchBadgeTone.DANGER
-                            }
-                        )
                     }
                 }
             } else {
@@ -797,38 +806,40 @@ fun ReceiptScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Warning,
-                                        contentDescription = null,
-                                        tint = TraderTheme.financial.warning,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = when {
-                                            printer == null -> lang.tr("لا توجد طابعة متصلة", "No printer paired")
-                                            else -> lang.tr("طابعة محاكاة غير متصلة", "Simulated printer disconnected")
-                                        },
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        ),
-                                        color = TraderTheme.financial.warning
-                                    )
-                                }
-                                TextButton(onClick = onOpenPrinterSettings) {
-                                    Text(
-                                        text = lang.tr("إعداد الطابعة", "Printer Setup"),
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                                    )
-                                }
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = TraderTheme.financial.warning,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = when {
+                                        state.printerStatus == PrinterStatus.ERROR ->
+                                            lang.tr(
+                                                "تعذرت محاكاة الطباعة — اضغط زر الطباعة أدناه لإعادة المحاولة",
+                                                "Thermal print simulation failed — tap print button below to retry"
+                                            )
+                                        printer == null ->
+                                            lang.tr(
+                                                "لا توجد طابعة مقترنة (يتم ضبط الطابعة حصرياً من شاشة الإعدادات)",
+                                                "No printer paired (configure printer exclusively in Settings)"
+                                            )
+                                        else ->
+                                            lang.tr(
+                                                "طابعة المحاكاة غير متصلة (يتم ضبط الطابعة من شاشة الإعدادات)",
+                                                "Simulated printer disconnected (configure in Settings)"
+                                            )
+                                    },
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = TraderTheme.financial.warning
+                                )
                             }
                         }
                     } else if (state.printerStatus == PrinterStatus.PRINTED_SUCCESS) {
@@ -839,53 +850,32 @@ fun ReceiptScreen(
                         )
                     }
 
-                    // Secondary Action Buttons (48dp height minimum touch targets)
+                    // Secondary Action Buttons (Accessible >= 48dp touch targets, icon-only print to prevent text wrapping)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Simulated Bluetooth Print
+                        // Simulated Bluetooth Print (Icon-only >= 48dp, retaining print semantics & testTag)
+                        val printContentDesc = when {
+                            state.printerStatus == PrinterStatus.ERROR -> lang.tr("إعادة محاولة الطباعة", "Retry Print")
+                            receipt.printCount == 0 -> lang.tr("طباعة إيصال", "Print Receipt")
+                            else -> lang.tr("إعادة طباعة", "Reprint")
+                        }
+
                         Button(
                             onClick = onPrintReceipt,
                             shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(0.dp),
                             modifier = Modifier
-                                .weight(1.35f)
+                                .weight(1f)
                                 .heightIn(min = 48.dp)
                                 .testTag("print_bluetooth_receipt_button")
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Print,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = when {
-                                    state.printerStatus == PrinterStatus.ERROR -> lang.tr("إعادة المحاولة", "Retry Print")
-                                    receipt.printCount == 0 -> lang.tr("طباعة إيصال", "Print Receipt")
-                                    else -> lang.tr("إعادة طباعة", "Reprint")
-                                },
-                                style = MaterialTheme.typography.labelLarge
-                            )
-                        }
-
-                        // Printer Settings
-                        OutlinedButton(
-                            onClick = onOpenPrinterSettings,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("receipt_printer_settings_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.SettingsBluetooth,
-                                contentDescription = lang.tr("إعدادات الطابعة", "Printer Settings"),
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "${state.receiptPaperWidthMm}mm",
-                                style = MaterialTheme.typography.labelMedium.copy(fontFamily = MonoFontFamily)
+                                contentDescription = printContentDesc,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
@@ -912,14 +902,16 @@ fun ReceiptScreen(
                                 }
                             },
                             shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(0.dp),
                             modifier = Modifier
+                                .weight(1f)
                                 .heightIn(min = 48.dp)
                                 .testTag("share_receipt_button")
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Share,
                                 contentDescription = lang.tr("مشاركة الوثيقة", "Share Document"),
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
@@ -943,14 +935,16 @@ fun ReceiptScreen(
                                 }
                             },
                             shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(0.dp),
                             modifier = Modifier
+                                .weight(1f)
                                 .heightIn(min = 48.dp)
                                 .testTag("copy_receipt_text_button")
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ContentCopy,
                                 contentDescription = lang.tr("نسخ النص", "Copy Text"),
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
@@ -1549,6 +1543,35 @@ private fun buildPlainTextDocument(
     return sb.toString().trim()
 }
 
+/**
+ * Calculates the actual settled (paid) monetary portion of an invoice record.
+ *
+ * For fully paid invoices (isPaidInFull == true or remainingDebitIls <= 0.005),
+ * the settled amount equals netTotalIls.
+ * For partial or credit invoices, the settled amount is netTotalIls minus remainingDebitIls,
+ * clamped to zero and rounded to 2 decimal places using HALF_UP.
+ * This represents the true accounting settlement (net minus remaining debt),
+ * avoiding conflation of cash tender (which may include change returned) with actual settled debt.
+ */
+fun computeInvoiceSettledPaidPortion(inv: InvoiceRecord): Double {
+    val net = BigDecimal(inv.netTotalIls.toString())
+    val debt = if (inv.isPaidInFull || inv.remainingDebitIls <= 0.005) {
+        BigDecimal.ZERO
+    } else {
+        BigDecimal(inv.remainingDebitIls.toString())
+    }
+    return net.subtract(debt).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP).toDouble()
+}
+
+/**
+ * Calculates the total settled paid amount for a list of invoice records.
+ */
+fun calculateFilteredInvoicesPaidTotalIls(invoices: List<InvoiceRecord>): Double {
+    return invoices.fold(BigDecimal.ZERO) { acc, inv ->
+        acc.add(BigDecimal(computeInvoiceSettledPaidPortion(inv).toString()))
+    }.setScale(2, RoundingMode.HALF_UP).toDouble()
+}
+
 @Composable
 fun InvoicesHistoryScreen(
     state: TraderUiState,
@@ -1597,18 +1620,24 @@ fun InvoicesHistoryScreen(
     }
 
     val filteredPaidTotalIls = remember(filteredInvoices) {
-        filteredInvoices.filter { it.isPaidInFull }
-            .fold(BigDecimal.ZERO) { acc, inv -> acc.add(BigDecimal(inv.netTotalIls.toString())) }
-            .setScale(2, RoundingMode.HALF_UP)
-            .toDouble()
+        calculateFilteredInvoicesPaidTotalIls(filteredInvoices)
     }
 
     val filteredCreditTotalIls = remember(filteredInvoices) {
-        filteredInvoices.filter { !it.isPaidInFull }
+        filteredInvoices.filter { !it.isPaidInFull && it.remainingDebitIls > 0.005 }
             .fold(BigDecimal.ZERO) { acc, inv -> acc.add(BigDecimal(inv.remainingDebitIls.toString())) }
             .setScale(2, RoundingMode.HALF_UP)
             .toDouble()
     }
+
+    val filteredTotalIls = remember(filteredInvoices) {
+        filteredInvoices.fold(BigDecimal.ZERO) { acc, inv ->
+            acc.add(BigDecimal(inv.netTotalIls.toString()))
+        }.setScale(2, RoundingMode.HALF_UP).toDouble()
+    }
+
+    val canViewReports = state.currentSession.canViewReports()
+    val isFiltered = selectedFilter != InvoiceHistoryFilter.ALL || searchQuery.isNotBlank()
 
     Column(
         modifier = Modifier
@@ -1616,19 +1645,23 @@ fun InvoicesHistoryScreen(
             .background(MaterialTheme.colorScheme.background)
             .testTag("invoices_history_screen")
     ) {
-        // Sticky Search, Status Filters & Summary Header
+        // Generous Attractive Card Hero (R2-SALES-HISTORY Canonical Pattern)
         Surface(
+            shape = RoundedCornerShape(14.dp),
             color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 0.dp,
-            modifier = Modifier.fillMaxWidth()
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            shadowElevation = 1.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Compact Summary Bar: Paid Cash vs Credit Invoices + New Sale button
+                // Header Top Row: Title, Store Identity & New Sale Action
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1636,72 +1669,222 @@ fun InvoicesHistoryScreen(
                 ) {
                     Row(
                         modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Column {
-                            Text(
-                                text = lang.tr("مبيعات اليوم", "Today's Sales"),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = WesternFormatters.formatIls(state.todaySalesTotalIls),
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
                         }
-
-                        if (filteredCreditTotalIls > 0.005) {
-                            Column {
-                                Text(
-                                    text = lang.tr("متبقي ذمم بالعرض", "Unpaid in View"),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = WesternFormatters.formatIls(filteredCreditTotalIls),
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    color = TraderTheme.financial.debit
-                                )
-                            }
-                        } else {
-                            Column {
-                                Text(
-                                    text = lang.tr("مسددة بالعرض", "Paid in View"),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = WesternFormatters.formatIls(filteredPaidTotalIls),
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    color = TraderTheme.financial.income
-                                )
-                            }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = lang.tr("سجل فواتير البيع", "Sales Invoices"),
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${state.businessInfo.name(lang)} • ${lang.tr("الوردية الحالية", "Current Shift")}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
 
                     FilledTonalButton(
                         onClick = onStartNewSale,
                         shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        modifier = Modifier.heightIn(min = 48.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Add,
                             contentDescription = null,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = lang.tr("بيع جديد", "New Sale"),
-                            style = MaterialTheme.typography.labelLarge
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
                         )
+                    }
+                }
+
+                // Shift & Sales Summary Box (Tonal well with filter-responsive & permission-guarded totals)
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        // Row 1: Invoice Count (Truthfully scoped) & Sales/View Total
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val countText = if (isFiltered) {
+                                lang.tr(
+                                    "${WesternFormatters.formatInt(filteredInvoices.size)} فاتورة بالعرض",
+                                    "${WesternFormatters.formatInt(filteredInvoices.size)} invoices in view"
+                                )
+                            } else if (canViewReports) {
+                                lang.tr(
+                                    "${WesternFormatters.formatInt(state.todayInvoiceCount)} فواتير مسجلة اليوم",
+                                    "${WesternFormatters.formatInt(state.todayInvoiceCount)} invoices recorded today"
+                                )
+                            } else {
+                                lang.tr(
+                                    "${WesternFormatters.formatInt(state.invoices.size)} فاتورة مسجلة",
+                                    "${WesternFormatters.formatInt(state.invoices.size)} invoices recorded"
+                                )
+                            }
+
+                            Text(
+                                text = countText,
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val totalLabel = if (isFiltered) {
+                                    lang.tr("إجمالي المعروض: ", "Total in View: ")
+                                } else if (canViewReports) {
+                                    lang.tr("مبيعات اليوم: ", "Today's Sales: ")
+                                } else {
+                                    lang.tr("الإجمالي: ", "Total: ")
+                                }
+                                val totalValue = if (isFiltered || !canViewReports) {
+                                    WesternFormatters.formatIls(filteredTotalIls)
+                                } else {
+                                    WesternFormatters.formatIls(state.todaySalesTotalIls)
+                                }
+
+                                Text(
+                                    text = totalLabel,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = totalValue,
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = MonoFontFamily
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        // Row 2: Financial Breakdown (Truthful labels, responsive to filter or shift scope, guarded by permission)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isFiltered || !canViewReports) {
+                                // Filter-responsive ledger totals (Operational scope visible to all roles)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = TraderTheme.financial.income,
+                                        modifier = Modifier.size(8.dp)
+                                    ) {}
+                                    Text(
+                                        text = "${lang.tr("مسدد بالعرض:", "Paid in View:")} ${WesternFormatters.formatIls(filteredPaidTotalIls)}",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontFamily = MonoFontFamily,
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        color = TraderTheme.financial.income
+                                    )
+                                }
+
+                                if (filteredCreditTotalIls > 0.005) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = TraderTheme.financial.warning,
+                                            modifier = Modifier.size(8.dp)
+                                        ) {}
+                                        Text(
+                                            text = "${lang.tr("متبقي ذمم بالعرض:", "Unpaid in View:")} ${WesternFormatters.formatIls(filteredCreditTotalIls)}",
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                fontFamily = MonoFontFamily,
+                                                fontWeight = FontWeight.SemiBold
+                                            ),
+                                            color = TraderTheme.financial.warning
+                                        )
+                                    }
+                                }
+                            } else {
+                                // Owner / Manager Default Unfiltered View: Real shift sales properties (truthfully labeled)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = TraderTheme.financial.income,
+                                        modifier = Modifier.size(8.dp)
+                                    ) {}
+                                    Text(
+                                        text = "${lang.tr("مبيعات نقدية (وردية):", "Shift Cash Sales:")} ${WesternFormatters.formatIls(state.shiftCashSalesIls)}",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontFamily = MonoFontFamily,
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        color = TraderTheme.financial.income
+                                    )
+                                }
+
+                                if (state.shiftCreditSalesIls > 0.005) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = TraderTheme.financial.warning,
+                                            modifier = Modifier.size(8.dp)
+                                        ) {}
+                                        Text(
+                                            text = "${lang.tr("ذمم آجلة (وردية):", "Shift Credit Sales:")} ${WesternFormatters.formatIls(state.shiftCreditSalesIls)}",
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                fontFamily = MonoFontFamily,
+                                                fontWeight = FontWeight.SemiBold
+                                            ),
+                                            color = TraderTheme.financial.warning
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -1761,7 +1944,9 @@ fun InvoicesHistoryScreen(
                                     )
                                 )
                             },
-                            modifier = Modifier.testTag("invoice_filter_ALL")
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("invoice_filter_ALL")
                         )
                     }
                     item {
@@ -1776,7 +1961,9 @@ fun InvoicesHistoryScreen(
                                     )
                                 )
                             },
-                            modifier = Modifier.testTag("invoice_filter_PAID")
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("invoice_filter_PAID")
                         )
                     }
                     item {
@@ -1791,7 +1978,9 @@ fun InvoicesHistoryScreen(
                                     )
                                 )
                             },
-                            modifier = Modifier.testTag("invoice_filter_PARTIAL")
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("invoice_filter_PARTIAL")
                         )
                     }
                     item {
@@ -1806,14 +1995,14 @@ fun InvoicesHistoryScreen(
                                     )
                                 )
                             },
-                            modifier = Modifier.testTag("invoice_filter_CREDIT")
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("invoice_filter_CREDIT")
                         )
                     }
                 }
             }
         }
-
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
 
         // Invoices List
         LazyColumn(

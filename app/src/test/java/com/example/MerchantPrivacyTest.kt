@@ -254,8 +254,9 @@ class MerchantPrivacyTest {
         composeTestRule.onNodeWithTag("product_detail_cost_section").assertIsDisplayed()
 
         // Step B: Owner opens full product edit dialog
+        composeTestRule.onNodeWithTag("product_detail_list")
+            .performScrollToNode(hasTestTag("edit_product_button"))
         composeTestRule.onNodeWithTag("edit_product_button")
-            .performScrollTo()
             .performClick()
 
         composeTestRule.waitForIdle()
@@ -282,6 +283,8 @@ class MerchantPrivacyTest {
         composeTestRule.onNodeWithTag("confirm_save_product_button").assertDoesNotExist()
 
         // Cost section on detail card is restored for authorized Owner
+        composeTestRule.onNodeWithTag("product_detail_list")
+            .performScrollToNode(hasTestTag("product_detail_cost_section"))
         composeTestRule.onNodeWithTag("product_detail_cost_section").assertIsDisplayed()
     }
 

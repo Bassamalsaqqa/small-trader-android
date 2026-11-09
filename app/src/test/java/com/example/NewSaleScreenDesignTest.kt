@@ -26,7 +26,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35])
+@Config(sdk = [35], qualifiers = "ar-rEG-w393dp-h852dp-xxhdpi")
 class NewSaleScreenDesignTest {
 
     @get:Rule

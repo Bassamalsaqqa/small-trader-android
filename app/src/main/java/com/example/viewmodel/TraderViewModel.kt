@@ -568,10 +568,6 @@ class TraderViewModel(
                     target in TraderUiState.ROOT_DESTINATIONS -> {
                         listOf(TraderScreen.HOME)
                     }
-                    target in TraderUiState.ACCOUNT_SETTINGS_DESTINATIONS &&
-                        state.currentScreen in TraderUiState.ACCOUNT_SETTINGS_DESTINATIONS -> {
-                        state.screenHistory.ifEmpty { listOf(TraderScreen.HOME) }
-                    }
                     target in state.screenHistory -> {
                         state.screenHistory.takeWhile { it != target }
                     }

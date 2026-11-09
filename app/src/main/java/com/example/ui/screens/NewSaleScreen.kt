@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
@@ -327,16 +328,68 @@ private fun PosSearchAndCategoryHeader(
     val hasActiveQuery = state.searchQuery.isNotEmpty()
 
     Surface(
+        shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 0.dp,
-        modifier = Modifier.fillMaxWidth()
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shadowElevation = 1.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp, bottom = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // Hero Title & Context Row (Strictly Card-Contained, responsive to 2.0x font scaling)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.PointOfSale,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = lang.tr("نقطة البيع (بيع جديد)", "New Sale (POS)"),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${state.businessInfo.name(lang)} • ${lang.tr("الكاشير:", "Cashier:")} ${state.currentSession.name}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                StitchBadge(
+                    text = lang.tr(
+                        "${WesternFormatters.formatInt(state.filteredProducts.size)} صنفاً",
+                        "${WesternFormatters.formatInt(state.filteredProducts.size)} items"
+                    ),
+                    tone = StitchBadgeTone.PRIMARY
+                )
+            }
+
             // Unified Search & Barcode Capsule (48dp height, 10dp radius per DESIGN_LOCK)
             val searchContainerColor = if (isSearchFocused || hasActiveQuery) {
                 MaterialTheme.colorScheme.surfaceVariant
@@ -352,7 +405,6 @@ private fun PosSearchAndCategoryHeader(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
                     .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(searchContainerColor)
@@ -471,7 +523,7 @@ private fun PosSearchAndCategoryHeader(
             // Category Filter Pills & Custom Item Trigger (ST-06 horizontal scroll)
             LazyRow(
                 modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 16.dp),
+                contentPadding = PaddingValues(0.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -577,7 +629,7 @@ private fun PosSearchAndCategoryHeader(
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 2.dp)
+                            .padding(vertical = 2.dp)
                             .testTag("sale_feedback_banner")
                     ) {
                         Row(

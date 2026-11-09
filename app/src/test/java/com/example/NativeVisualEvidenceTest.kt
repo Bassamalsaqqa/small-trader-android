@@ -1,5 +1,8 @@
 package com.example
 
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.performScrollToNode
+
 import androidx.compose.ui.test.assertIsDisplayed
 
 import androidx.compose.foundation.layout.fillMaxSize
@@ -66,7 +69,14 @@ class NativeVisualEvidenceTest {
     @get:Rule
     val composeTestRule = createAndroidComposeRule<ComponentActivity>()
 
-    private val outputDir = File(System.getenv("TRADER_VISUAL_OUTPUT_DIR") ?: "build/native-renders")
+    private val outputDir: File
+        get() {
+            val configured = System.getenv("TRADER_VISUAL_OUTPUT_DIR") ?: "round2/validation/native-renders-v03"
+            val direct = File(configured)
+            return if (direct.isAbsolute) direct
+            else if (File("..", "round2").exists()) File("..", configured)
+            else direct
+        }
 
     private fun captureViewToPng(fileName: String, expectedWidth: Int? = null, expectedHeight: Int? = null): File {
         composeTestRule.waitForIdle()
@@ -451,4 +461,160 @@ class NativeVisualEvidenceTest {
         assertTrue("Full App 2.0x font: CTA bottom must be within viewport (<= 780dp)", ctaBounds.bottom <= 780.dp)
     }
 
+
+    @Test
+    @Config(sdk = [35], qualifiers = "ar-rEG-w393dp-h852dp-xxhdpi")
+    fun capture_10_invoicesHistory_ar_light_393dp() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        viewModel.navigateTo(TraderScreen.INVOICES_HISTORY)
+
+        composeTestRule.setContent {
+            SmallTraderApp(traderViewModel = viewModel)
+        }
+
+        composeTestRule.onNodeWithTag("invoices_history_screen").assertIsDisplayed()
+        captureViewToPng("10_invoices_history_ar_light_393dp.png")
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "ar-rEG-w393dp-h852dp-xxhdpi")
+    fun capture_11_inventoryCatalog_ar_light_393dp() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        viewModel.navigateTo(TraderScreen.PRODUCTS_CATALOG)
+
+        composeTestRule.setContent {
+            SmallTraderApp(traderViewModel = viewModel)
+        }
+
+        composeTestRule.onNodeWithTag("products_catalog_screen").assertIsDisplayed()
+        captureViewToPng("11_inventory_catalog_ar_light_393dp.png")
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "ar-rEG-w393dp-h852dp-xxhdpi")
+    fun capture_12_productDetail_ar_light_393dp() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        val product = viewModel.uiState.value.products.first { it.id == "p_olive_oil" }
+        viewModel.selectProductForDetail(product)
+
+        composeTestRule.setContent {
+            SmallTraderApp(traderViewModel = viewModel)
+        }
+
+        composeTestRule.onNodeWithTag("product_detail_screen").assertIsDisplayed()
+        captureViewToPng("12_product_detail_ar_light_393dp.png")
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "ar-rEG-w393dp-h852dp-xxhdpi")
+    fun capture_13_peopleHubPager_ar_light_393dp() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        viewModel.navigateTo(TraderScreen.PEOPLE)
+
+        composeTestRule.setContent {
+            SmallTraderApp(traderViewModel = viewModel)
+        }
+
+        composeTestRule.onNodeWithTag("people_hub_segmented_control").assertIsDisplayed()
+        captureViewToPng("13_people_hub_pager_ar_light_393dp.png")
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "ar-rEG-w393dp-h852dp-xxhdpi")
+    fun capture_14_settings_ar_light_393dp() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        viewModel.navigateTo(TraderScreen.BUSINESS_SETTINGS)
+
+        composeTestRule.setContent {
+            SmallTraderApp(traderViewModel = viewModel)
+        }
+
+        composeTestRule.onNodeWithTag("business_settings_screen").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("settings_phone_text").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("settings_tax_id_text").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("settings_theme_chip").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("settings_language_chip").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("settings_open_printer_button").assertIsDisplayed()
+        captureViewToPng("14_settings_ar_light_393dp.png")
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "ar-rEG-w393dp-h852dp-xxhdpi")
+    fun capture_15_profile_ar_light_393dp() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        viewModel.navigateTo(TraderScreen.USER_PROFILE)
+
+        composeTestRule.setContent {
+            SmallTraderApp(traderViewModel = viewModel)
+        }
+
+        composeTestRule.onNodeWithTag("user_profile_screen").assertIsDisplayed()
+        captureViewToPng("15_profile_ar_light_393dp.png")
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "ar-rEG-w360dp-h780dp-xhdpi")
+    fun capture_16_fullApp_home_360dp_font2_stress() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+
+        composeTestRule.setContent {
+            val currentDensity = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(
+                    density = currentDensity.density,
+                    fontScale = 2.0f
+                )
+            ) {
+                SmallTraderApp(traderViewModel = viewModel)
+            }
+        }
+
+        captureViewToPng("16_full_app_home_360dp_font2_stress.png")
+        composeTestRule.onNodeWithTag("hero_new_sale_button").assertIsDisplayed()
+
+        // Explicit text bounds & overflow assertions for adaptive 2.0x Home KPI header & full date:
+        composeTestRule.onNodeWithTag("home_reports_button").assertExists()
+        composeTestRule.onNodeWithTag("home_screen_list").performScrollToNode(hasTestTag("home_reports_button"))
+        composeTestRule.onNodeWithTag("home_reports_button").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("home_date_text", useUnmergedTree = true).assertExists()
+        composeTestRule.onNodeWithTag("home_date_text", useUnmergedTree = true).assertIsDisplayed()
+
+        val dateBounds = composeTestRule.onNodeWithTag("home_date_text", useUnmergedTree = true).getBoundsInRoot()
+        assertTrue("Date text right bound must be within 360dp screen width (was ${dateBounds.right})", dateBounds.right <= 360.dp)
+        assertTrue("Date text left bound must be non-negative (was ${dateBounds.left})", dateBounds.left >= 0.dp)
+
+        // Verify date layout has no visual overflow or clipping under 2.0x font scaling:
+        val nodeConfig = composeTestRule.onNodeWithTag("home_date_text", useUnmergedTree = true).fetchSemanticsNode().config
+        if (nodeConfig.contains(SemanticsActions.GetTextLayoutResult)) {
+            val dateLayoutResults = mutableListOf<TextLayoutResult>()
+            nodeConfig[SemanticsActions.GetTextLayoutResult].action?.invoke(dateLayoutResults)
+            if (dateLayoutResults.isNotEmpty()) {
+                val layout = dateLayoutResults[0]
+                org.junit.Assert.assertFalse(
+                    "Home date text must not have visual overflow under 2.0x font scaling",
+                    layout.hasVisualOverflow
+                )
+            }
+        }
+
+        // Verify Reports action and KPI header title on narrow 360dp screen:
+        composeTestRule.onNodeWithTag("home_kpi_title_text", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_kpi_reports_action", useUnmergedTree = true).assertIsDisplayed()
+
+        val kpiTitleBounds = composeTestRule.onNodeWithTag("home_kpi_title_text", useUnmergedTree = true).getBoundsInRoot()
+        val reportsActionBounds = composeTestRule.onNodeWithTag("home_kpi_reports_action", useUnmergedTree = true).getBoundsInRoot()
+
+        assertTrue("KPI title right bound must be within 360dp width (was ${kpiTitleBounds.right})", kpiTitleBounds.right <= 360.dp)
+        assertTrue("Reports action right bound must be within 360dp width (was ${reportsActionBounds.right})", reportsActionBounds.right <= 360.dp)
+        assertTrue("KPI title left bound must be non-negative (was ${kpiTitleBounds.left})", kpiTitleBounds.left >= 0.dp)
+        assertTrue("Reports action left bound must be non-negative (was ${reportsActionBounds.left})", reportsActionBounds.left >= 0.dp)
+    }
 }

@@ -1,5 +1,8 @@
 package com.example
 
+import com.example.ui.screens.computeInvoiceSettledPaidPortion
+import com.example.ui.screens.calculateFilteredInvoicesPaidTotalIls
+
 import com.example.data.OfflineDemoTraderRepository
 import com.example.data.SampleCatalog
 import com.example.model.AppLanguage
@@ -903,7 +906,9 @@ class ExampleUnitTest {
         assertEquals(TraderScreen.BUSINESS_SETTINGS, viewModel.uiState.value.currentScreen)
         assertFalse(viewModel.uiState.value.isRootDestination)
         assertTrue(viewModel.uiState.value.isAccountOrSettingsDestination)
-        assertEquals(listOf(TraderScreen.HOME), viewModel.uiState.value.screenHistory)
+        assertEquals(listOf(TraderScreen.HOME, TraderScreen.USER_PROFILE), viewModel.uiState.value.screenHistory)
+        assertTrue(viewModel.navigateBack())
+        assertEquals(TraderScreen.USER_PROFILE, viewModel.uiState.value.currentScreen)
         assertTrue(viewModel.navigateBack())
         assertEquals(TraderScreen.HOME, viewModel.uiState.value.currentScreen)
 
@@ -2048,5 +2053,67 @@ class ExampleUnitTest {
                 )
             }
         }
+    }
+
+    @Test
+    fun invoiceLedger_filteredPaidTotalCalculatesSettlementNetMinusDebt_forCashPartialAndCredit() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        val invoices = viewModel.uiState.value.invoices
+
+        // Seeded invoices verify three distinct payment settlement modes:
+        // 1. Fully Paid Cash (#1042): netTotal = 85.00, cashReceived = 100.00, changeReturned = 15.00, isPaidInFull = true, remainingDebt = 0.0
+        val paidCash = invoices.first { it.invoiceNumber == 1042 }
+        assertTrue(paidCash.isPaidInFull)
+        assertEquals(85.00, paidCash.netTotalIls, 0.001)
+        assertEquals(100.00, paidCash.cashReceivedIls, 0.001)
+        assertEquals(15.00, paidCash.changeReturnedIls, 0.001)
+        assertEquals(0.0, paidCash.remainingDebitIls, 0.001)
+
+        // 2. Partial Payment (#1036): netTotal = 158.00, cashReceived = 58.00, changeReturned = 0.0, isPaidInFull = false, remainingDebt = 100.0
+        val partial = invoices.first { it.invoiceNumber == 1036 }
+        assertFalse(partial.isPaidInFull)
+        assertEquals(158.00, partial.netTotalIls, 0.001)
+        assertEquals(58.00, partial.cashReceivedIls, 0.001)
+        assertEquals(100.00, partial.remainingDebitIls, 0.001)
+
+        // 3. Full Credit (#1038): netTotal = 90.00, cashReceived = 0.0, changeReturned = 0.0, isPaidInFull = false, remainingDebt = 90.0
+        val fullCredit = invoices.first { it.invoiceNumber == 1038 }
+        assertFalse(fullCredit.isPaidInFull)
+        assertEquals(90.00, fullCredit.netTotalIls, 0.001)
+        assertEquals(0.0, fullCredit.cashReceivedIls, 0.001)
+        assertEquals(90.00, fullCredit.remainingDebitIls, 0.001)
+
+        // Exercises actual production settlement helpers extracted from ReceiptScreen.kt:
+        // Verify per-invoice settlement vs cash tender:
+        // For #1042: settled amount is 85.00 (not tender 100.00 including change!)
+        assertEquals(85.00, computeInvoiceSettledPaidPortion(paidCash), 0.001)
+        // For #1036: settled amount is 58.00 (158 - 100 debt)
+        assertEquals(58.00, computeInvoiceSettledPaidPortion(partial), 0.001)
+        // For #1038: settled amount is 0.00 (90 - 90 debt)
+        assertEquals(0.00, computeInvoiceSettledPaidPortion(fullCredit), 0.001)
+
+        // Across all seeded invoices in view using actual production calculateFilteredInvoicesPaidTotalIls:
+        val totalNet = invoices.fold(java.math.BigDecimal.ZERO) { acc, inv ->
+            acc.add(java.math.BigDecimal(inv.netTotalIls.toString()))
+        }.setScale(2, java.math.RoundingMode.HALF_UP).toDouble()
+
+        val totalPaidInView = calculateFilteredInvoicesPaidTotalIls(invoices)
+
+        val totalCreditInView = invoices.filter { !it.isPaidInFull && it.remainingDebitIls > 0.005 }
+            .fold(java.math.BigDecimal.ZERO) { acc, inv ->
+                acc.add(java.math.BigDecimal(inv.remainingDebitIls.toString()))
+            }.setScale(2, java.math.RoundingMode.HALF_UP).toDouble()
+
+        // Conservation invariant: Paid in View + Unpaid in View MUST strictly equal Total in View
+        assertEquals(
+            "Paid in view ($totalPaidInView) + Credit in view ($totalCreditInView) must equal total net ($totalNet)",
+            totalNet,
+            totalPaidInView + totalCreditInView,
+            0.001
+        )
+
+        // Partial invoice paid portion (58.00) is included in totalPaidInView
+        assertTrue(totalPaidInView >= 58.00)
     }
 }

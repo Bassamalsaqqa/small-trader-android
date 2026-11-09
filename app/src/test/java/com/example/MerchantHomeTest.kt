@@ -6,6 +6,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -38,7 +40,7 @@ import org.robolectric.annotation.Config
  * 5. Viewport Robustness: Uses performScrollTo() for lazy list offscreen nodes.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35])
+@Config(sdk = [35], qualifiers = "ar-rEG-w393dp-h852dp-xxhdpi")
 class MerchantHomeTest {
 
     @get:Rule
@@ -192,8 +194,9 @@ class MerchantHomeTest {
         }
 
         // 2. Low stock summary row exists, uses performScrollTo for lazy column visibility, and navigates to catalog
+        composeTestRule.onNodeWithTag("home_screen_list")
+            .performScrollToNode(hasTestTag("home_catalog_button"))
         composeTestRule.onNodeWithTag("home_catalog_button")
-            .performScrollTo()
             .assertIsDisplayed()
             .performClick()
 
@@ -250,13 +253,15 @@ class MerchantHomeTest {
         composeTestRule.waitForIdle()
 
         // Owner View: Named Purchase button 'شراء جديد' is displayed
+        composeTestRule.onNodeWithTag("home_screen_list")
+            .performScrollToNode(hasTestTag("home_purchase_button"))
         composeTestRule.onNodeWithTag("home_purchase_button")
-            .performScrollTo()
             .assertIsDisplayed()
 
         // Owner View: Reports navigation action is displayed
+        composeTestRule.onNodeWithTag("home_screen_list")
+            .performScrollToNode(hasTestTag("home_reports_button"))
         composeTestRule.onNodeWithTag("home_reports_button")
-            .performScrollTo()
             .assertIsDisplayed()
 
         // Owner View: Obsolete secondary expense chip expectation removed (accessible via shell)

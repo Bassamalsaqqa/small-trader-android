@@ -41,6 +41,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.filled.AccountBalanceWallet
@@ -134,11 +135,11 @@ import com.example.viewmodel.TraderUiState
 fun SmallTraderTopBar(
     state: TraderUiState,
     onNavigateBack: () -> Unit,
-    onNavigateTo: (TraderScreen) -> Unit = {},
+    onNavigateTo: (TraderScreen) -> Unit,
     onToggleLanguage: () -> Unit,
     onToggleTheme: () -> Unit = {},
-    onOpenScanner: () -> Unit,
-    onOpenPrinter: () -> Unit
+    onOpenScanner: () -> Unit = {},
+    onOpenPrinter: () -> Unit = {}
 ) {
     val lang = state.language
     var accountOpen by remember { mutableStateOf(false) }
@@ -154,20 +155,54 @@ fun SmallTraderTopBar(
         }
     }
 
-    TopAppBar(
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            titleContentColor = MaterialTheme.colorScheme.onSurface
-        ),
-        title = {
-            if (state.currentScreen == TraderScreen.HOME) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        shadowElevation = 2.dp,
+        shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("small_trader_top_bar")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(TopAppBarDefaults.windowInsets)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Navigation Icon: Back button when not root destination
+            if (!state.isRootDestination) {
+                IconButton(
+                    onClick = onNavigateBack,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("top_bar_back_button")
                 ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = lang.tr("رجوع", "Back"),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+
+            // Header / Title / Identity Area (Flexible weight, adaptive height, no clipping at font2 360dp)
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (state.currentScreen == TraderScreen.HOME) {
                     Surface(
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                         modifier = Modifier.size(38.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -179,7 +214,10 @@ fun SmallTraderTopBar(
                             )
                         }
                     }
-                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Column(
+                        modifier = Modifier.weight(1f, fill = false),
+                        verticalArrangement = Arrangement.spacedBy(1.dp)
+                    ) {
                         Text(
                             text = state.businessInfo.name(lang),
                             style = MaterialTheme.typography.titleMedium.copy(
@@ -197,79 +235,96 @@ fun SmallTraderTopBar(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                }
-            } else {
-                Text(
-                    text = lang.tr(
-                        when (state.currentScreen) {
-                            TraderScreen.PEOPLE -> "الحسابات"
-                            TraderScreen.PURCHASES -> "المشتريات"
-                            TraderScreen.NEW_SALE -> "بيع جديد"
-                            TraderScreen.INVOICES_HISTORY -> "المبيعات"
-                            TraderScreen.PRODUCTS_CATALOG -> "المخزون"
-                            TraderScreen.CASH_PAYMENT -> "الدفع"
-                            TraderScreen.INVOICE_REVIEW -> "مراجعة البيع"
-                            TraderScreen.CUSTOMERS -> "الزبائن"
-                            TraderScreen.CUSTOMER_DETAIL -> "حساب الزبون"
-                            TraderScreen.SUPPLIERS -> "الموردون"
-                            TraderScreen.SUPPLIER_DETAIL -> "حساب المورد"
-                            TraderScreen.EXPENSES -> "المصاريف"
-                            TraderScreen.FINANCIAL_REPORTS -> "التقارير والصندوق"
-                            TraderScreen.USER_PROFILE -> "الملف والصلاحيات"
-                            TraderScreen.BUSINESS_SETTINGS -> "إعدادات المتجر"
-                            TraderScreen.PRODUCT_DETAIL -> "تفاصيل الصنف"
-                            TraderScreen.RECEIPT -> "إيصال البيع"
-                            else -> "التاجر الصغير"
-                        },
-                        when (state.currentScreen) {
-                            TraderScreen.PEOPLE -> "Accounts"
-                            TraderScreen.PURCHASES -> "Purchases"
-                            TraderScreen.NEW_SALE -> "New Sale"
-                            TraderScreen.INVOICES_HISTORY -> "Sales"
-                            TraderScreen.PRODUCTS_CATALOG -> "Inventory"
-                            TraderScreen.CASH_PAYMENT -> "Payment"
-                            TraderScreen.INVOICE_REVIEW -> "Sale Review"
-                            TraderScreen.CUSTOMERS -> "Customers"
-                            TraderScreen.CUSTOMER_DETAIL -> "Customer Account"
-                            TraderScreen.SUPPLIERS -> "Suppliers"
-                            TraderScreen.SUPPLIER_DETAIL -> "Supplier Account"
-                            TraderScreen.EXPENSES -> "Expenses"
-                            TraderScreen.FINANCIAL_REPORTS -> "Reports & Cash"
-                            TraderScreen.USER_PROFILE -> "Profile & Role"
-                            TraderScreen.BUSINESS_SETTINGS -> "Settings"
-                            TraderScreen.PRODUCT_DETAIL -> "Product Detail"
-                            TraderScreen.RECEIPT -> "Receipt"
-                            else -> "Small Trader"
-                        }
-                    ),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        },
-        navigationIcon = {
-            if (!state.isRootDestination) {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier
-                        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-                        .testTag("top_bar_back_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = lang.tr("رجوع", "Back")
-                    )
+                } else {
+                    Column(
+                        modifier = Modifier.weight(1f, fill = false),
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = lang.tr(
+                                when (state.currentScreen) {
+                                    TraderScreen.PEOPLE -> "الحسابات"
+                                    TraderScreen.PURCHASES -> "المشتريات"
+                                    TraderScreen.NEW_SALE -> "بيع جديد"
+                                    TraderScreen.INVOICES_HISTORY -> "المبيعات"
+                                    TraderScreen.PRODUCTS_CATALOG -> "المخزون"
+                                    TraderScreen.CASH_PAYMENT -> "الدفع"
+                                    TraderScreen.INVOICE_REVIEW -> "مراجعة البيع"
+                                    TraderScreen.CUSTOMERS -> "الزبائن"
+                                    TraderScreen.CUSTOMER_DETAIL -> "حساب الزبون"
+                                    TraderScreen.SUPPLIERS -> "الموردون"
+                                    TraderScreen.SUPPLIER_DETAIL -> "حساب المورد"
+                                    TraderScreen.EXPENSES -> "المصاريف"
+                                    TraderScreen.FINANCIAL_REPORTS -> "التقارير والصندوق"
+                                    TraderScreen.USER_PROFILE -> "الملف والصلاحيات"
+                                    TraderScreen.BUSINESS_SETTINGS -> "إعدادات المتجر"
+                                    TraderScreen.PRODUCT_DETAIL -> "تفاصيل الصنف"
+                                    TraderScreen.RECEIPT -> "إيصال البيع"
+                                    else -> "التاجر الصغير"
+                                },
+                                when (state.currentScreen) {
+                                    TraderScreen.PEOPLE -> "Accounts"
+                                    TraderScreen.PURCHASES -> "Purchases"
+                                    TraderScreen.NEW_SALE -> "New Sale"
+                                    TraderScreen.INVOICES_HISTORY -> "Sales"
+                                    TraderScreen.PRODUCTS_CATALOG -> "Inventory"
+                                    TraderScreen.CASH_PAYMENT -> "Payment"
+                                    TraderScreen.INVOICE_REVIEW -> "Sale Review"
+                                    TraderScreen.CUSTOMERS -> "Customers"
+                                    TraderScreen.CUSTOMER_DETAIL -> "Customer Account"
+                                    TraderScreen.SUPPLIERS -> "Suppliers"
+                                    TraderScreen.SUPPLIER_DETAIL -> "Supplier Account"
+                                    TraderScreen.EXPENSES -> "Expenses"
+                                    TraderScreen.FINANCIAL_REPORTS -> "Reports & Cash"
+                                    TraderScreen.USER_PROFILE -> "Profile & Role"
+                                    TraderScreen.BUSINESS_SETTINGS -> "Settings"
+                                    TraderScreen.PRODUCT_DETAIL -> "Product Detail"
+                                    TraderScreen.RECEIPT -> "Receipt"
+                                    else -> "Small Trader"
+                                }
+                            ),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
-        },
-        actions = {
-            Box(
-                modifier = Modifier
-                    .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-                    .padding(end = 4.dp),
-                contentAlignment = Alignment.Center
+
+            // Actions Area: Language Toggle (>= 48dp) + Accessible Avatar (>= 48dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                // ALWAYS easily reachable >=48dp AR/EN language button invoking existing onToggleLanguage
+                Surface(
+                    onClick = onToggleLanguage,
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+                    modifier = Modifier
+                        .size(48.dp)
+                        .semantics {
+                            contentDescription = lang.tr(
+                                "تبديل لغة الواجهة إلى الإنجليزية",
+                                "Switch interface language to Arabic"
+                            )
+                        }
+                        .testTag("top_bar_language_button")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = if (lang == AppLanguage.AR) "EN" else "عربي",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 13.sp
+                            )
+                        )
+                    }
+                }
+
+                // Accessible Avatar button
                 Surface(
                     onClick = { accountOpen = true },
                     shape = CircleShape,
@@ -277,7 +332,9 @@ fun SmallTraderTopBar(
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier
                         .size(48.dp)
-                        .semantics { contentDescription = lang.tr("الحساب والإعدادات", "Account and settings") }
+                        .semantics {
+                            contentDescription = lang.tr("الحساب والإعدادات", "Account and settings")
+                        }
                         .testTag("top_bar_account_button")
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -293,296 +350,362 @@ fun SmallTraderTopBar(
                 }
             }
         }
-    )
+    }
 
     if (accountOpen) {
-        ModalBottomSheet(
+        AccountBottomSheet(
+            state = state,
             onDismissRequest = { accountOpen = false },
-            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-            containerColor = MaterialTheme.colorScheme.surface
+            onNavigateTo = { destination ->
+                accountOpen = false
+                onNavigateTo(destination)
+            },
+            onToggleTheme = onToggleTheme,
+            onToggleLanguage = onToggleLanguage
+        )
+    }
+}
+
+/**
+ * Focused Account & Fast Settings Modal Bottom Sheet (Round 2 Design System).
+ *
+ * Contains:
+ * 1. Sheet header with explicit >=48dp dismiss X button and system-back dismissal.
+ * 2. Real identity card (User name, role badge, store name and icon).
+ * 3. 4 role-gated navigation rows:
+ *    - Profile & Role (USER_PROFILE)
+ *    - Store Settings (BUSINESS_SETTINGS)
+ *    - Reports & Cash Drawer (FINANCIAL_REPORTS, Owner/Manager gated)
+ *    - Operating Expenses (EXPENSES, Owner/Manager gated)
+ *
+ * Selecting any destination dismisses the sheet before navigation.
+ * No duplicate operational menus, no printer configuration (solely in Settings),
+ * and no tutorial/invented version subtitles.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AccountBottomSheet(
+    state: TraderUiState,
+    onDismissRequest: () -> Unit,
+    onNavigateTo: (TraderScreen) -> Unit,
+    onToggleTheme: () -> Unit = {},
+    onToggleLanguage: () -> Unit = {}
+) {
+    val lang = state.language
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    val initials = remember(state.currentSession.name) {
+        val parts = state.currentSession.name.trim().split(" ").filter { it.isNotBlank() }
+        when {
+            parts.size >= 2 -> "${parts[0].first()}${parts[1].first()}"
+            parts.isNotEmpty() && parts[0].length >= 2 -> parts[0].take(2)
+            parts.isNotEmpty() -> parts[0].take(1)
+            else -> "أك"
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismissRequest,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        modifier = Modifier.testTag("account_bottom_sheet")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 24.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Column(
+            // Header Row: Title & Subtitle + Explicit Dismiss X (>= 48dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = lang.tr("الحساب والإعدادات السريعة", "Account & Quick Access"),
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp
+                        )
+                    )
+                    Text(
+                        text = lang.tr("إدارة الجلسة والوصول المباشر للمتجر", "Session management & direct store access"),
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                IconButton(
+                    onClick = onDismissRequest,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("account_sheet_close_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = lang.tr("إغلاق", "Close"),
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            )
+
+            // Identity Header Card (Truthful session identity, role badge, store info)
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp)
-                    .padding(bottom = 28.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .testTag("account_sheet_identity_card")
             ) {
-                // Identity Header Card
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+                        modifier = Modifier.size(48.dp)
                     ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier.size(46.dp)
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = initials,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            )
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = state.currentSession.name,
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                            ) {
                                 Text(
-                                    text = initials,
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
+                                    text = state.currentSession.role.label(lang),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    ),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
                         }
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = state.currentSession.name,
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp
-                                    )
-                                )
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer
-                                ) {
-                                    Text(
-                                        text = state.currentSession.role.label(lang),
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                                        ),
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
-                                }
-                            }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Store,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(15.dp)
+                            )
                             Text(
                                 text = state.businessInfo.name(lang),
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                HorizontalDivider(
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
-
-                fun go(screen: TraderScreen) {
-                    accountOpen = false
-                    onNavigateTo(screen)
-                }
-
-                // Profile and Roles
-                TextButton(
-                    onClick = { go(TraderScreen.USER_PROFILE) },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.AccountCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Text(
-                            text = lang.tr("الملف والصلاحيات", "Profile and role"),
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp)
-                        )
-                    }
-                }
-
-                // Store Settings
-                TextButton(
-                    onClick = { go(TraderScreen.BUSINESS_SETTINGS) },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Text(
-                            text = lang.tr("إعدادات المتجر", "Store settings"),
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp)
-                        )
-                    }
-                }
-
-                // Reports and Cash Drawer (Role guarded)
-                if (state.currentSession.canViewReports()) {
-                    TextButton(
-                        onClick = { go(TraderScreen.FINANCIAL_REPORTS) },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.PointOfSale, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Text(
-                                text = lang.tr("التقارير والصندوق", "Reports and cash drawer"),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp)
-                            )
-                        }
-                    }
-                }
-
-                // Expenses (Role guarded)
-                if (state.currentSession.canManageExpenses()) {
-                    TextButton(
-                        onClick = { go(TraderScreen.EXPENSES) },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Text(
-                                text = lang.tr("المصاريف", "Expenses"),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp)
-                            )
-                        }
-                    }
-                }
-
-                HorizontalDivider(
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
-
-                // Language toggle
-                TextButton(
-                    onClick = onToggleLanguage,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Language, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Text(
-                            text = lang.tr("اللغة: English", "Language: العربية"),
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp)
-                        )
-                    }
-                }
-
-                // Appearance toggle
-                TextButton(
-                    onClick = onToggleTheme,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            if (state.isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = if (state.isDarkTheme) lang.tr("المظهر: فاتح", "Appearance: Light") else lang.tr("المظهر: داكن", "Appearance: Dark"),
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp)
-                        )
-                    }
-                }
-
-                // Receipt Printer simulation point of use
-                TextButton(
-                    onClick = {
-                        accountOpen = false
-                        onOpenPrinter()
-                    },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Print, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Text(
-                            text = lang.tr("معاينة الطابعة • محاكاة", "Printer preview • simulation"),
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp)
-                        )
-                    }
-                }
-
-                HorizontalDivider(
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
-
-                // Diagnostics / About
-                var showAbout by remember { mutableStateOf(false) }
-                TextButton(
-                    onClick = { showAbout = !showAbout },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = lang.tr("عن التطبيق والتشخيص", "About & diagnostics"),
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp)
-                        )
-                        Icon(
-                            imageVector = if (showAbout) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                if (showAbout) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = lang.tr("التاجر الصغير — نموذج العرض الأولي", "Small Trader — Prototype Demo"),
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                            )
-                            Text(
-                                text = lang.tr(
-                                    "تخزين مؤقت بالذاكرة • الجلسة: ${state.currentSession.id} (${state.currentSession.role.label(lang)})",
-                                    "In-memory session storage • Session: ${state.currentSession.id} (${state.currentSession.role.label(lang)})"
-                                ),
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
                 }
             }
+
+            // Section: Destination Navigation List (4 Role-gated rows in grouped card)
+            Text(
+                text = lang.tr("الأقسام والعمليات", "Sections & Operations"),
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                ),
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+            )
+
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column {
+                    // Row 1: Profile & Permissions
+                    AccountNavigationRow(
+                        icon = Icons.Default.AccountCircle,
+                        iconContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        title = lang.tr("الملف الشخصي والصلاحيات", "Profile & Permissions"),
+                        subtitle = lang.tr("بيانات الدخول، وتحديد صلاحيات الكاشير", "Login details & cashier permissions"),
+                        testTag = "account_sheet_profile_row",
+                        onClick = { onNavigateTo(TraderScreen.USER_PROFILE) }
+                    )
+
+                    HorizontalDivider(
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                    )
+
+                    // Row 2: General Store Settings
+                    AccountNavigationRow(
+                        icon = Icons.Default.Settings,
+                        iconContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        iconTint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        title = lang.tr("إعدادات المتجر العامة", "General Store Settings"),
+                        subtitle = lang.tr("الرقم الضريبي، سياسات الفواتير والهوية", "Tax number, invoice policies & identity"),
+                        testTag = "account_sheet_settings_row",
+                        onClick = { onNavigateTo(TraderScreen.BUSINESS_SETTINGS) }
+                    )
+
+                    // Row 3: Financial Reports & Cash Drawer (Role guarded)
+                    if (state.currentSession.canViewReports()) {
+                        HorizontalDivider(
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                        )
+                        AccountNavigationRow(
+                            icon = Icons.Default.PointOfSale,
+                            iconContainerColor = TraderTheme.financial.incomeContainer.copy(alpha = 0.5f),
+                            iconTint = TraderTheme.financial.income,
+                            title = lang.tr("التقارير المالية وحركة الصندوق", "Financial Reports & Cash Drawer"),
+                            subtitle = lang.tr("ملخص اليوم، جرد النقد، وإغلاق الوردية", "Daily summary, cash count & shift close"),
+                            testTag = "account_sheet_reports_row",
+                            onClick = { onNavigateTo(TraderScreen.FINANCIAL_REPORTS) }
+                        )
+                    }
+
+                    // Row 4: Operating Expenses (Role guarded)
+                    if (state.currentSession.canManageExpenses()) {
+                        HorizontalDivider(
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                        )
+                        AccountNavigationRow(
+                            icon = Icons.Default.AccountBalanceWallet,
+                            iconContainerColor = TraderTheme.financial.debitContainer.copy(alpha = 0.5f),
+                            iconTint = TraderTheme.financial.debit,
+                            title = lang.tr("المصاريف وسندات الصرف", "Expenses & Payment Vouchers"),
+                            subtitle = lang.tr("تسجيل النثريات، المشتريات والمدفوعات", "Petty cash, purchases & pay-outs"),
+                            testTag = "account_sheet_expenses_row",
+                            onClick = { onNavigateTo(TraderScreen.EXPENSES) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccountNavigationRow(
+    icon: ImageVector,
+    iconContainerColor: Color,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        color = Color.Transparent,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 54.dp)
+            .testTag(testTag)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = iconContainerColor,
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = iconTint,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }

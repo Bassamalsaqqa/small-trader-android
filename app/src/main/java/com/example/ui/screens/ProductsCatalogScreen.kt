@@ -2,13 +2,13 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,11 +24,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddShoppingCart
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.LocalShipping
+import androidx.compose.material.icons.filled.Payments
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
@@ -46,13 +51,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -107,16 +113,16 @@ fun ProductsCatalogScreen(
     var isCreateProductOpen by rememberSaveable { mutableStateOf(false) }
     var isStockTransferPreviewOpen by rememberSaveable { mutableStateOf(false) }
 
-    androidx.compose.runtime.LaunchedEffect(canManageInventory) {
+    LaunchedEffect(canManageInventory) {
         if (!canManageInventory) {
             isCreateProductOpen = false
             isStockTransferPreviewOpen = false
         }
     }
-    androidx.compose.runtime.LaunchedEffect(launchCreate) {
+    LaunchedEffect(launchCreate) {
         if (launchCreate && canManageInventory) { isCreateProductOpen = true; onLaunchConsumed() }
     }
-    androidx.compose.runtime.LaunchedEffect(launchLowStock) {
+    LaunchedEffect(launchLowStock) {
         if (launchLowStock) {
             stockFilter = CatalogStockFilter.LOW_OR_OUT
             onLowStockConsumed()
@@ -149,62 +155,139 @@ fun ProductsCatalogScreen(
             .background(MaterialTheme.colorScheme.background)
             .testTag("products_catalog_screen")
     ) {
-        // Sticky Search, Category Browsing (all categories) & Stock Status Filter Header
+        // Contained Hero & Filter Surface Card (R2-INVENTORY Stitch Specification)
         Surface(
+            shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 0.dp,
-            modifier = Modifier.fillMaxWidth()
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                // Title, Live Pulse & Quick Add Action Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = lang.tr("إدارة المخزون والمنتجات", "Inventory & Products"),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (lowOrOutCount > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .background(TraderTheme.financial.warning, shape = RoundedCornerShape(4.dp))
+                                )
+                            }
+                            Text(
+                                text = if (lowOrOutCount > 0) {
+                                    lang.tr(
+                                        "${WesternFormatters.formatInt(state.products.size)} صنفاً مسجلاً — ${WesternFormatters.formatInt(lowOrOutCount)} بحاجة لإعادة طلب",
+                                        "${WesternFormatters.formatInt(state.products.size)} registered — ${WesternFormatters.formatInt(lowOrOutCount)} need reorder"
+                                    )
+                                } else {
+                                    lang.tr(
+                                        "${WesternFormatters.formatInt(state.products.size)} صنفاً مسجلاً — المخزون مكتمل",
+                                        "${WesternFormatters.formatInt(state.products.size)} registered — stock full"
+                                    )
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (canManageInventory && onSaveProduct != null) {
+                        Button(
+                            onClick = { isCreateProductOpen = true },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("add_product_button")
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = lang.tr("إضافة صنف", "Add Product"),
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+
+                // Secondary Utility: Warehouses, Transfer & Expiry Preview
+                OutlinedButton(
+                    onClick = { isStockTransferPreviewOpen = true },
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 44.dp)
+                        .testTag("open_stock_transfer_preview_button")
+                ) {
+                    Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = lang.tr("المستودعات والجرد والصلاحية", "Warehouses, Counts & Expiry"),
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // Inward Goods / Purchases Banner (Strictly guarded for Supplier Managers)
                 if (state.currentSession.canManageSuppliers()) {
                     val pendingReceiptBillsCount = remember(state.purchaseBills) {
                         state.purchaseBills.count { !it.isReceived && it.expectedProductId != null && it.expectedQuantity > 0 }
                     }
                     Surface(
                         onClick = onOpenPurchases,
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .defaultMinSize(minHeight = 48.dp)
+                            .defaultMinSize(minHeight = 44.dp)
                             .testTag("open_purchases_banner")
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.Inventory2,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
+                                Icon(
+                                    imageVector = Icons.Default.Inventory2,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
                                 Column {
                                     Text(
                                         text = lang.tr("فواتير المشتريات والتوريد", "Purchases & Inward Goods"),
-                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
@@ -226,49 +309,8 @@ fun ProductsCatalogScreen(
                         }
                     }
                 }
-                // Action Row: + New Product (Owner/Manager) & Warehouse / Lot / Stock Count Preview
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (canManageInventory && onSaveProduct != null) {
-                        Button(
-                            onClick = { isCreateProductOpen = true },
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("add_product_button")
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = lang.tr("تعريف صنف جديد", "New Product"),
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
 
-                    OutlinedButton(
-                        onClick = { isStockTransferPreviewOpen = true },
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 48.dp)
-                            .testTag("open_stock_transfer_preview_button")
-                    ) {
-                        Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = lang.tr("المستودعات والجرد والصلاحية", "Warehouses, Counts & Expiry"),
-                            style = MaterialTheme.typography.labelLarge,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-
-                // Search by product name, unit, or barcode
+                // Integrated Search Field
                 OutlinedTextField(
                     value = state.searchQuery,
                     onValueChange = onSearchChange,
@@ -296,7 +338,10 @@ fun ProductsCatalogScreen(
                     },
                     trailingIcon = {
                         if (state.searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { onSearchChange("") }) {
+                            IconButton(
+                                onClick = { onSearchChange("") },
+                                modifier = Modifier.size(48.dp)
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.Clear,
                                     contentDescription = lang.tr("مسح البحث", "Clear search")
@@ -307,7 +352,7 @@ fun ProductsCatalogScreen(
                     shape = RoundedCornerShape(10.dp)
                 )
 
-                // All Product Categories (Horizontally scrollable so no category is cut off)
+                // Category Browsing Filter Chips
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -327,7 +372,7 @@ fun ProductsCatalogScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-        item {
+                    item {
                         FilterChip(
                             selected = stockFilter == CatalogStockFilter.ALL,
                             onClick = { stockFilter = CatalogStockFilter.ALL },
@@ -349,7 +394,7 @@ fun ProductsCatalogScreen(
                             label = {
                                 Text(
                                     lang.tr(
-                                        "بحاجة لتزويد (${WesternFormatters.formatInt(lowOrOutCount)})",
+                                        "نواقص (${WesternFormatters.formatInt(lowOrOutCount)})",
                                         "Needs Restock (${WesternFormatters.formatInt(lowOrOutCount)})"
                                     )
                                 )
@@ -395,9 +440,35 @@ fun ProductsCatalogScreen(
             }
         }
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+        // Section Title & Items Count
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = lang.tr("قائمة الأصناف المعروضة", "Catalog Products"),
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = lang.tr(
+                    "${WesternFormatters.formatInt(displayedProducts.size)} صنف",
+                    "${WesternFormatters.formatInt(displayedProducts.size)} items"
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
 
-        // Scannable Product Directory List
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+        )
+
+        // Scannable Product Directory List (Lower area preserved as approved)
         if (displayedProducts.isEmpty()) {
             Box(
                 modifier = Modifier
@@ -439,7 +510,7 @@ fun ProductsCatalogScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(displayedProducts, key = { it.id }) { product ->
@@ -456,15 +527,15 @@ fun ProductsCatalogScreen(
 
     if (canManageInventory && isCreateProductOpen && onSaveProduct != null) {
         createDraft.SaveableStateProvider("product_${state.products.size}") {
-        ProductEditorDialog(
-            initialProduct = null,
-            lang = lang,
-            onDismiss = { isCreateProductOpen = false },
-            onConfirmSave = { pid, nameAr, cat, unitAr, barcode, price, cost, minThreshold, initialStock, warehouse, lot, expiry, isWeighted ->
-                onSaveProduct(pid, nameAr, cat, unitAr, barcode, price, cost, minThreshold, initialStock, warehouse, lot, expiry, isWeighted)
-                isCreateProductOpen = false
-            }
-        )
+            ProductEditorDialog(
+                initialProduct = null,
+                lang = lang,
+                onDismiss = { isCreateProductOpen = false },
+                onConfirmSave = { pid, nameAr, cat, unitAr, barcode, price, cost, minThreshold, initialStock, warehouse, lot, expiry, isWeighted ->
+                    onSaveProduct(pid, nameAr, cat, unitAr, barcode, price, cost, minThreshold, initialStock, warehouse, lot, expiry, isWeighted)
+                    isCreateProductOpen = false
+                }
+            )
         }
     }
 
@@ -641,7 +712,7 @@ fun ProductDetailScreen(
     var isAdjustStockOpen by rememberSaveable(product.id) { mutableStateOf(false) }
     var isEditProductOpen by rememberSaveable(product.id) { mutableStateOf(false) }
 
-    androidx.compose.runtime.LaunchedEffect(canManageInventory) {
+    LaunchedEffect(canManageInventory) {
         if (!canManageInventory) {
             isEditPriceOpen = false
             isAdjustStockOpen = false
@@ -667,18 +738,23 @@ fun ProductDetailScreen(
         }
     }
 
+    val isOutOfStock = product.isStockTracked && product.stockCount <= 0
+    val isLowStock = product.isStockTracked && product.stockCount > 0 && product.isLowStock
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .testTag("product_detail_screen")
     ) {
+
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .fillMaxWidth()
+                .testTag("product_detail_list"),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Feedback Banner after Price or Stock Update
             if (feedbackMessage != null) {
@@ -752,73 +828,109 @@ fun ProductDetailScreen(
                 }
             }
 
-            // 1. Product Identity, Pricing & Stock Status Card
+            // Card 1: Product Concise Identity Card
             item {
-                Card(
+                Surface(
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Category & Stock-Tracking Mode Badges
+                        // Category Chip & Unit Row
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = product.category.label(lang),
-                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = if (product.isStockTracked) {
-                                    MaterialTheme.colorScheme.surfaceVariant
-                                } else {
-                                    MaterialTheme.colorScheme.secondaryContainer
-                                }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(
-                                    text = if (product.isStockTracked) {
-                                        lang.tr("صنف مخزني متتبع", "Stock-Tracked Good")
-                                    } else {
-                                        lang.tr("مادة / خدمة بدون جرد", "Non-Stock Item")
-                                    },
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                                ) {
+                                    Text(
+                                        text = product.category.label(lang),
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Text(
+                                        text = product.unit(lang),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                if (product.isWeightedDisplayOnly) {
+                                    StitchBadge(
+                                        text = lang.tr("صنف وزني", "Weighted Item"),
+                                        tone = StitchBadgeTone.PRIMARY
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
                                     color = if (product.isStockTracked) {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                        MaterialTheme.colorScheme.surfaceVariant
                                     } else {
-                                        MaterialTheme.colorScheme.onSecondaryContainer
-                                    },
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                )
+                                        MaterialTheme.colorScheme.secondaryContainer
+                                    }
+                                ) {
+                                    Text(
+                                        text = if (product.isStockTracked) {
+                                            lang.tr("صنف مخزني", "Stock Item")
+                                        } else {
+                                            lang.tr("بدون جرد", "Non-Stock")
+                                        },
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = if (product.isStockTracked) {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        } else {
+                                            MaterialTheme.colorScheme.onSecondaryContainer
+                                        },
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
                             }
                         }
 
                         // Full Product Name
                         Text(
                             text = product.name(lang),
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
 
-                        // Unit, Barcode, Warehouse & Lot/Expiry Row
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        // Barcode Row
+                        if (product.barcode.isNotBlank()) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(
-                                    text = "${lang.tr("الوحدة / العبوة:", "Unit / Pack:")} ${product.unit(lang)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                Icon(
+                                    imageVector = Icons.Default.QrCodeScanner,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
                                 )
                                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                                     Text(
@@ -831,62 +943,66 @@ fun ProductDetailScreen(
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+            }
 
-                            if (product.isStockTracked) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "${lang.tr("الموقع:", "Warehouse:")} ${product.warehouse(lang)}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Text(
-                                        text = buildString {
-                                            append("${lang.tr("تشغيلة:", "Lot:")} ${product.lotBatchCode}")
-                                            if (!product.expiryDate.isNullOrBlank()) {
-                                                append(" • ${lang.tr("صلاحية:", "Exp:")} ${product.expiryDate}")
-                                            }
-                                            if (product.isWeightedDisplayOnly) {
-                                                append(" • ${lang.tr("صنف وزني", "Weighted")}")
-                                            }
-                                        },
-                                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFontFamily),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
+            // Card 2: Pricing & Profit Margins (Tonal Card, Guarded for Manager/Owner)
+            item {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Section Header
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Payments,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = lang.tr("التسعير وهامش الربح", "Pricing & Margin"),
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
                         }
 
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                        // Pricing & Availability Figures (Cost & Margin visible ONLY to Owner/Manager)
+                        // Price and Margin Figures
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.Top
                         ) {
-                            // Selling Price (Always visible)
+                            // Selling Price (Always visible to all roles)
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = lang.tr("سعر البيع", "Selling Price"),
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = WesternFormatters.formatIls(product.priceIls),
-                                    style = MaterialTheme.typography.headlineSmall.copy(
-                                        fontWeight = FontWeight.Bold
-                                    ),
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.testTag("product_detail_price_value")
                                 )
                             }
 
-                            // Cost Price & Margin (Strictly Owner / Manager only — hidden from Cashier)
+                            // Cost Price & Calculated Margin (Strictly Owner/Manager guarded)
                             if (canManageInventory) {
                                 Column(
                                     modifier = Modifier
@@ -895,161 +1011,218 @@ fun ProductDetailScreen(
                                 ) {
                                     Text(
                                         text = lang.tr("تكلفة الشراء", "Cost Price"),
-                                        style = MaterialTheme.typography.labelMedium,
+                                        style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
-                                    if (product.isStockTracked && product.costIls > 0.0) {
-                                        Text(
-                                            text = WesternFormatters.formatIls(product.costIls),
-                                            style = MaterialTheme.typography.titleMedium.copy(
-                                                fontWeight = FontWeight.SemiBold
-                                            ),
-                                            color = MaterialTheme.colorScheme.onSurface
+                                    Text(
+                                        text = WesternFormatters.formatIls(product.costIls),
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = buildString {
+                                            append(lang.tr("الهامش:", "Margin:"))
+                                            append(" +${WesternFormatters.formatIls(unitMarginIls)}")
+                                            append(" (${WesternFormatters.formatNumber(marginPercent)}%)")
+                                        },
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = if (unitMarginIls >= 0.0) TraderTheme.financial.income else TraderTheme.financial.debit,
+                                            fontWeight = FontWeight.SemiBold
                                         )
-                                        Text(
-                                            text = "${lang.tr("الهامش:", "Margin:")} ${WesternFormatters.formatIls(unitMarginIls)} (${String.format(java.util.Locale.US, "%.1f", marginPercent)}%)",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = if (unitMarginIls >= 0) {
-                                                TraderTheme.financial.income
-                                            } else {
-                                                TraderTheme.financial.debit
-                                            }
-                                        )
-                                    } else {
-                                        Text(
-                                            text = lang.tr("غير مقيد بتكلفة", "No tracked cost"),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
+                                    )
                                 }
                             }
+                        }
 
-                            // Stock Availability
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                horizontalAlignment = Alignment.End
+                        // Price Edit Action (Authorized Manager/Owner only)
+                        if (canManageInventory) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                            OutlinedButton(
+                                onClick = { isEditPriceOpen = true },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .testTag("edit_product_price_button")
                             ) {
+                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = lang.tr("حالة المخزون", "Availability"),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = lang.tr("تعديل السعر وتحديث الهامش", "Edit Price & Margin"),
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
                                 )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                if (product.isStockTracked) {
-                                    val isOut = product.stockCount <= 0
-                                    val isLow = product.stockCount > 0 && product.isLowStock
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Card 3: Stock Status & Warehouse Location (Restrained Tonal Alert Card)
+            item {
+                val containerColor = when {
+                    isOutOfStock -> TraderTheme.financial.debitContainer.copy(alpha = 0.25f)
+                    isLowStock -> TraderTheme.financial.warningContainer.copy(alpha = 0.25f)
+                    else -> MaterialTheme.colorScheme.surface
+                }
+                val borderColor = when {
+                    isOutOfStock -> TraderTheme.financial.debit.copy(alpha = 0.35f)
+                    isLowStock -> TraderTheme.financial.warning.copy(alpha = 0.35f)
+                    else -> MaterialTheme.colorScheme.outlineVariant
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = containerColor,
+                    border = BorderStroke(1.dp, borderColor),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Section Header with Status Badge
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Inventory2,
+                                    contentDescription = null,
+                                    tint = when {
+                                        isOutOfStock -> TraderTheme.financial.debit
+                                        isLowStock -> TraderTheme.financial.warning
+                                        else -> MaterialTheme.colorScheme.primary
+                                    },
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = lang.tr("حالة المخزون والمستودع", "Stock & Warehouse"),
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            if (product.isStockTracked) {
+                                when {
+                                    isOutOfStock -> StitchBadge(lang.tr("نفد المخزون", "Out of Stock"), tone = StitchBadgeTone.DANGER)
+                                    isLowStock -> StitchBadge(lang.tr("نواقص المخزون", "Low Stock"), tone = StitchBadgeTone.WARNING)
+                                    else -> StitchBadge(lang.tr("متوفر", "In Stock"), tone = StitchBadgeTone.SUCCESS)
+                                }
+                            }
+                        }
+
+                        if (product.isStockTracked) {
+                            // Stock Count & Threshold
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = lang.tr("المخزون المتوفر حالياً", "Current Stock"),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                     Text(
                                         text = "${WesternFormatters.formatInt(product.stockCount)} ${product.unit(lang)}",
-                                        style = MaterialTheme.typography.titleMedium.copy(
-                                            fontWeight = FontWeight.Bold
-                                        ),
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                         color = when {
-                                            isOut -> TraderTheme.financial.debit
-                                            isLow -> TraderTheme.financial.warning
+                                            isOutOfStock -> TraderTheme.financial.debit
+                                            isLowStock -> TraderTheme.financial.warning
                                             else -> MaterialTheme.colorScheme.onSurface
                                         },
                                         modifier = Modifier.testTag("product_detail_stock_value")
                                     )
+                                }
+
+                                Column(horizontalAlignment = Alignment.End) {
                                     Text(
-                                        text = when {
-                                            isOut -> lang.tr("نفد من المستودع (حد التنبيه: ${product.minStockThreshold})", "Out of stock (Min: ${product.minStockThreshold})")
-                                            isLow -> lang.tr("مخزون منخفض (الحد الأدنى: ${product.minStockThreshold})", "Low stock (Min: ${product.minStockThreshold})")
-                                            else -> lang.tr("متوفر (حد التنبيه: ${product.minStockThreshold})", "Available (Min: ${product.minStockThreshold})")
-                                        },
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = when {
-                                            isOut -> TraderTheme.financial.debit
-                                            isLow -> TraderTheme.financial.warning
-                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                        }
-                                    )
-                                } else {
-                                    Text(
-                                        text = lang.tr("بدون جرد كميات", "Non-stock item"),
-                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.testTag("product_detail_stock_value")
-                                    )
-                                    Text(
-                                        text = lang.tr("يباع مباشرة", "Direct sale line"),
+                                        text = lang.tr("حد إعادة الطلب (الإنذار)", "Reorder Threshold"),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                    Text(
+                                        text = "${WesternFormatters.formatInt(product.minStockThreshold)} ${product.unit(lang)}",
+                                        style = MaterialTheme.typography.titleSmall.copy(
+                                            fontFamily = MonoFontFamily,
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
                                 }
                             }
-                        }
 
-                        // Non-Stock Item Clarification Banner
-                        if (!product.isStockTracked) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("non_stock_item_explanation")
-                            ) {
-                                Text(
-                                    text = lang.tr(
-                                        "هذا البند مخصص للخدمات أو المواد السريعة غير المقيدة بجرد مستودعي — يباع في نقطة البيع دون خصم رصيد مخزني.",
-                                        "This line is a non-stock service or quick item — it can be sold at POS without deducting physical inventory."
-                                    ),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(10.dp)
-                                )
-                            }
-                        }
-
-                        // Authorized Management Controls (Strictly hidden from Cashiers!)
-                        if (canManageInventory) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            // Storage Location
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                OutlinedButton(
-                                    onClick = { isEditPriceOpen = true },
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp)
-                                        .testTag("edit_product_price_button")
-                                ) {
-                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(lang.tr("تعديل السعر", "Edit Price"))
-                                }
-
-                                if (product.isStockTracked) {
-                                    Button(
-                                        onClick = { isAdjustStockOpen = true },
-                                        shape = RoundedCornerShape(10.dp),
-                                        modifier = Modifier
-                                            .weight(1.15f)
-                                            .height(48.dp)
-                                            .testTag("adjust_product_stock_button")
-                                    ) {
-                                        Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(lang.tr("تسوية وتعديل المخزون", "Adjust Stock"))
-                                    }
-                                }
+                                Text(
+                                    text = lang.tr("الموقع والمكان:", "Storage Location:"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = product.warehouse(lang),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
                             }
 
-                            if (onSaveProduct != null) {
-                                OutlinedButton(
-                                    onClick = { isEditProductOpen = true },
+                            // Stock Adjustment Action (Strictly Owner/Manager guarded)
+                            if (canManageInventory) {
+                                HorizontalDivider(color = borderColor.copy(alpha = 0.5f))
+                                Button(
+                                    onClick = { isAdjustStockOpen = true },
                                     shape = RoundedCornerShape(10.dp),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(48.dp)
-                                        .testTag("edit_product_button")
+                                        .heightIn(min = 48.dp)
+                                        .testTag("adjust_product_stock_button")
                                 ) {
-                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text(lang.tr("تعديل بيانات الصنف، الباركود والمستودع", "Edit Product Details, Barcode & Warehouse"))
+                                    Text(
+                                        text = lang.tr("تسوية وتعديل المخزون", "Adjust Stock"),
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+                                    )
+                                }
+                            }
+                        } else {
+                            // Non-stock Item Content
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = lang.tr("بدون جرد كميات", "Non-stock item"),
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.testTag("product_detail_stock_value")
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("non_stock_item_explanation")
+                                ) {
+                                    Text(
+                                        text = lang.tr(
+                                            "هذا البند مخصص للخدمات أو المواد السريعة غير المقيدة بجرد مستودعي — يباع في نقطة البيع دون خصم رصيد مخزني.",
+                                            "This line is a non-stock service or quick item — it can be sold at POS without deducting physical inventory."
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(10.dp)
+                                    )
                                 }
                             }
                         }
@@ -1057,17 +1230,135 @@ fun ProductDetailScreen(
                 }
             }
 
-            // 2. Stock Movement History Section (For stock-tracked products)
+            // Card 4: Logistics & Batch Details (Progressive Disclosure)
+            if (product.isStockTracked || !product.expiryDate.isNullOrBlank() || product.warehouse(lang).isNotBlank()) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Section Header
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.LocalShipping,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = lang.tr("بيانات التوريد والدفعة", "Logistics & Batch Details"),
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            // Batch / Lot Code
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = lang.tr("رقم الدفعة (Batch):", "Lot / Batch Code:"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                    Text(
+                                        text = product.lotBatchCode.ifBlank { "—" },
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+
+                            // Expiry Date
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = lang.tr("تاريخ انتهاء الصلاحية:", "Expiry Date:"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = product.expiryDate ?: lang.tr("غير محدد", "Not specified"),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            // Warehouse
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = lang.tr("المستودع الرئيسي:", "Primary Warehouse:"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = product.warehouse(lang),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            // Edit Product Dialog Button (Manager/Owner only)
+                            if (canManageInventory && onSaveProduct != null) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                                OutlinedButton(
+                                    onClick = { isEditProductOpen = true },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 48.dp)
+                                        .testTag("edit_product_button")
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = lang.tr(
+                                            "تعديل بيانات الصنف، الباركود والمستودع",
+                                            "Edit Product Details, Barcode & Warehouse"
+                                        ),
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Stock Movement History Section (For stock-tracked products)
             if (product.isStockTracked) {
                 item {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = lang.tr("سجل حركات المخزون", "Stock Movement History"),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
@@ -1075,7 +1366,7 @@ fun ProductDetailScreen(
                                 "${WesternFormatters.formatInt(movements.size)} حركة",
                                 "${WesternFormatters.formatInt(movements.size)} entries"
                             ),
-                            style = MaterialTheme.typography.labelMedium,
+                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -1096,13 +1387,60 @@ fun ProductDetailScreen(
                                 ),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(16.dp)
+                                modifier = Modifier.padding(14.dp)
                             )
                         }
                     }
                 } else {
                     items(movements, key = { it.id }) { sm ->
                         StockMovementRow(sm = sm, lang = lang)
+                    }
+                }
+            }
+        }
+
+        // Sticky Bottom Action Bar (R2-PRODUCT-DETAIL 52dp Primary Action)
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            tonalElevation = 2.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = { onAddToBasket(product) },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 52.dp)
+                        .testTag("product_detail_add_to_basket_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AddShoppingCart,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = lang.tr("إضافة إلى سلة البيع", "Add to Basket"),
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                    ) {
+                        Text(
+                            text = WesternFormatters.formatIls(product.priceIls),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
                     }
                 }
             }

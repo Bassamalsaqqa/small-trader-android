@@ -1,4 +1,4 @@
-> **Merchant reset candidate:** this branch is stacked on unmerged Phase 1. Native Home / Sales / Inventory / People navigation, quick actions and checkout are ready for owner testing; UX acceptance is pending. See [candidate handoff](docs/android-merchant-ux-reset/HANDOFF.md), [final validation](docs/android-merchant-ux-reset/VALIDATION.md) and [Windows Pixel_8a_T3 acceptance](docs/android-merchant-ux-reset/WINDOWS_ACCEPTANCE.md). The older prototype description below remains historical context.
+> **Candidate v3 (Consolidated Working Prototype):** Native Arabic-first merchant workspace with Home, POS Sales, Invoices Ledger, Products Catalog, and People Hub. See **[Candidate v3 Handoff (`docs/CANDIDATE_V3_HANDOFF.md`)](docs/CANDIDATE_V3_HANDOFF.md)** for canonical APK artifacts, verified test totals (105 tests, 104 passed), lint audit, limitations, and owner Windows installation instructions. The prototype description below provides project background and architecture.
 
 # التاجر الصغير · Small Trader (Android POS & Merchant Ledger)
 
@@ -10,6 +10,7 @@ This repository is prepared for **local Android Studio development** and integra
 
 ## Quick Links
 
+- **[Candidate v3 Handoff (`docs/CANDIDATE_V3_HANDOFF.md`)](docs/CANDIDATE_V3_HANDOFF.md)** — Canonical APK digest, verified test totals (105 tests), lint report, bottom bar freeze status, and Windows owner installation steps.
 - **[Surface Coverage Matrix (`docs/SURFACE_COVERAGE.md`)](docs/SURFACE_COVERAGE.md)** — Exact classification of every screen, flow, and dialog: *Working Demo*, *Interactive Simulation*, *Shallow Preview*, or *Deferred to Backend / Hardware*.
 - **[Local Android Handoff Guide (`docs/LOCAL_ANDROID_HANDOFF.md`)](docs/LOCAL_ANDROID_HANDOFF.md)** — Architecture overview, financial invariants, hardware boundaries (CameraX/ML Kit & Bluetooth ESC/POS), verified `Bassamalsaqqa/account` (`routes/api-v1.php`) contracts vs future backend requirements, test evidence, and local cleanup priorities.
 
