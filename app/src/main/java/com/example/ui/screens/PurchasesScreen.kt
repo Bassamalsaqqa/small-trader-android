@@ -88,6 +88,7 @@ import com.example.viewmodel.TraderUiState
 enum class PurchasesFilter {
     ALL,
     AWAITING_RECEIPT,
+    OPEN_PAYABLES,
     UNPAID,
     PARTIALLY_PAID,
     RECEIVED,
@@ -184,6 +185,9 @@ private fun PurchasesListView(
     val totalOpenPayables = remember(state.purchaseBills) {
         state.purchaseBills.sumOf { it.remainingPayableIls }
     }
+    val countOpenPayables = remember(state.purchaseBills) {
+        state.purchaseBills.count { it.remainingPayableIls > 0.005 }
+    }
 
     // Active filtering & search logic
     val displayedBills = remember(state.purchaseBills, state.suppliers, searchQuery, selectedFilter) {
@@ -192,6 +196,7 @@ private fun PurchasesListView(
             val matchesFilter = when (selectedFilter) {
                 PurchasesFilter.ALL -> true
                 PurchasesFilter.AWAITING_RECEIPT -> !bill.isReceived && bill.expectedProductId != null && bill.expectedQuantity > 0
+                PurchasesFilter.OPEN_PAYABLES -> bill.remainingPayableIls > 0.005
                 PurchasesFilter.UNPAID -> bill.paidIls <= 0.005
                 PurchasesFilter.PARTIALLY_PAID -> bill.paidIls > 0.005 && bill.remainingPayableIls > 0.005
                 PurchasesFilter.RECEIVED -> bill.isReceived
@@ -305,11 +310,12 @@ private fun PurchasesListView(
                     // Card 2: Open supplier payables
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        color = if (selectedFilter == PurchasesFilter.OPEN_PAYABLES) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = BorderStroke(1.dp, if (selectedFilter == PurchasesFilter.OPEN_PAYABLES) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier
                             .weight(1f)
-                            .clickable { selectedFilter = PurchasesFilter.UNPAID }
+                            .clickable { selectedFilter = PurchasesFilter.OPEN_PAYABLES }
+                            .testTag("purchases_metric_open_payables")
                     ) {
                         Column(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -384,6 +390,14 @@ private fun PurchasesListView(
                             onClick = { selectedFilter = PurchasesFilter.AWAITING_RECEIPT },
                             label = { Text(lang.tr("بانتظار الاستلام (${WesternFormatters.formatInt(countAwaitingReceipt)})", "Awaiting Receipt (${WesternFormatters.formatInt(countAwaitingReceipt)})")) },
                             modifier = Modifier.testTag("purchases_filter_AWAITING_RECEIPT")
+                        )
+                    }
+                    item {
+                        FilterChip(
+                            selected = selectedFilter == PurchasesFilter.OPEN_PAYABLES,
+                            onClick = { selectedFilter = PurchasesFilter.OPEN_PAYABLES },
+                            label = { Text(lang.tr("ذمم معلقة (${WesternFormatters.formatInt(countOpenPayables)})", "Open Payables (${WesternFormatters.formatInt(countOpenPayables)})")) },
+                            modifier = Modifier.testTag("purchases_filter_OPEN_PAYABLES")
                         )
                     }
                     item {
@@ -1128,21 +1142,12 @@ private fun PurchaseBillDetailView(
                                 Column {
                                     Text(
                                         text = if (bill.isReceived) {
-                                            lang.tr("حالة الاستلام: تم استلام البضاعة في المستودع", "Status: Fully received into inventory")
+                                            lang.tr("تم الاستلام المخزني الفعلي وتحديث الرصيد", "Physically received into inventory")
                                         } else {
-                                            lang.tr("حالة الاستلام: بانتظار استلام الشحنة في المستودع", "Status: Awaiting physical inspection and receiving")
+                                            lang.tr("بانتظار الاستلام المخزني الفعلي", "Awaiting physical warehouse receipt")
                                         },
                                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
                                         color = if (bill.isReceived) TraderTheme.financial.income else TraderTheme.financial.warning
-                                    )
-                                    Text(
-                                        text = if (bill.isReceived) {
-                                            lang.tr("تم تحديث رصيد الصنف وسجل الحركات بنجاح.", "Product stock and ledger entries updated.")
-                                        } else {
-                                            lang.tr("لم يُسجل استلام مخزني حتى الآن لتفادي الزيادة الوهمية.", "Stock is not added until physical inspection is confirmed.")
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
@@ -1156,12 +1161,12 @@ private fun PurchaseBillDetailView(
                         ) {
                             Text(
                                 text = lang.tr(
-                                    "هذه الفاتورة قيد مالي عام وغير مربوطة بصنف مخزني محدد. لا يتطلب هذا القيد حركة استلام بضاعة في المستودع.",
-                                    "This bill is a financial expense record without a linked stock item. No physical receiving is required."
+                                    "قيد مالي عام غير خاضع للاستلام المخزني.",
+                                    "General financial record, no physical stock receiving."
                                 ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(12.dp)
+                                modifier = Modifier.padding(10.dp)
                             )
                         }
                     }
@@ -1240,9 +1245,11 @@ private fun PurchaseBillDetailView(
             onDismiss = { isGrnDialogOpen = false },
             errorMessage = if (state.isSupplierActionError) lang.tr(state.lastSupplierActionMessageAr.orEmpty(), state.lastSupplierActionMessageEn.orEmpty()).takeIf { it.isNotBlank() } else null,
             onConfirmGrn = { productId, receivedQty, batchNote ->
-                if (onConfirmPhysicalGoodsReceipt?.invoke(bill.id, productId, receivedQty, batchNote) == true) {
+                val success = onConfirmPhysicalGoodsReceipt?.invoke(bill.id, productId, receivedQty, batchNote) == true
+                if (success) {
                     isGrnDialogOpen = false
                 }
+                success
             }
         )
     }

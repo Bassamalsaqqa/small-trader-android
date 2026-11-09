@@ -730,30 +730,41 @@ fun SmallTraderBottomBar(
     onOpenQuickActions: () -> Unit = {}
 ) {
     val lang = state.language
+    val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
+    val navBarHeight = when {
+        fontScale >= 1.6f -> 96.dp
+        fontScale >= 1.3f -> 88.dp
+        else -> 80.dp
+    }
+
     NavigationBar(
         windowInsets = WindowInsets.navigationBars,
         containerColor = MaterialTheme.colorScheme.surface,
         tonalElevation = 3.dp,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(navBarHeight)
     ) {
         // Slot 1: الرئيسية (Home)
         val isHomeSelected = state.currentScreen == TraderScreen.HOME
+        val homeLabel = lang.tr("الرئيسية", "Home")
         NavigationBarItem(
             selected = isHomeSelected,
             onClick = { onSelectScreen(TraderScreen.HOME) },
             icon = {
                 Icon(
                     imageVector = Icons.Default.Home,
-                    contentDescription = null,
+                    contentDescription = homeLabel,
                     modifier = Modifier.size(24.dp)
                 )
             },
             label = {
                 Text(
-                    text = lang.tr("الرئيسية", "Home"),
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    text = homeLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    maxLines = 2,
+                    softWrap = true
                 )
             },
             alwaysShowLabel = true,
@@ -771,22 +782,24 @@ fun SmallTraderBottomBar(
 
         // Slot 2: المبيعات (Sales / Invoices)
         val isSalesSelected = state.currentScreen == TraderScreen.INVOICES_HISTORY
+        val salesLabel = lang.tr("المبيعات", "Sales")
         NavigationBarItem(
             selected = isSalesSelected,
             onClick = { onSelectScreen(TraderScreen.INVOICES_HISTORY) },
             icon = {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
-                    contentDescription = null,
+                    contentDescription = salesLabel,
                     modifier = Modifier.size(24.dp)
                 )
             },
             label = {
                 Text(
-                    text = lang.tr("المبيعات", "Sales"),
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    text = salesLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    maxLines = 2,
+                    softWrap = true
                 )
             },
             alwaysShowLabel = true,
@@ -832,22 +845,24 @@ fun SmallTraderBottomBar(
 
         // Slot 4: المخزون (Inventory)
         val isInventorySelected = state.currentScreen == TraderScreen.PRODUCTS_CATALOG
+        val inventoryLabel = lang.tr("المخزون", "Inventory")
         NavigationBarItem(
             selected = isInventorySelected,
             onClick = { onSelectScreen(TraderScreen.PRODUCTS_CATALOG) },
             icon = {
                 Icon(
                     imageVector = Icons.Default.Inventory2,
-                    contentDescription = null,
+                    contentDescription = inventoryLabel,
                     modifier = Modifier.size(24.dp)
                 )
             },
             label = {
                 Text(
-                    text = lang.tr("المخزون", "Inventory"),
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    text = inventoryLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    maxLines = 2,
+                    softWrap = true
                 )
             },
             alwaysShowLabel = true,
@@ -865,22 +880,24 @@ fun SmallTraderBottomBar(
 
         // Slot 5: الحسابات (Accounts / People)
         val isPeopleSelected = state.currentScreen == TraderScreen.PEOPLE || state.currentScreen == TraderScreen.PURCHASES
+        val peopleLabel = lang.tr("الحسابات", "People")
         NavigationBarItem(
             selected = isPeopleSelected,
             onClick = { onSelectScreen(TraderScreen.PEOPLE) },
             icon = {
                 Icon(
                     imageVector = Icons.Default.People,
-                    contentDescription = null,
+                    contentDescription = peopleLabel,
                     modifier = Modifier.size(24.dp)
                 )
             },
             label = {
                 Text(
-                    text = lang.tr("الحسابات", "People"),
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    text = peopleLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    maxLines = 2,
+                    softWrap = true
                 )
             },
             alwaysShowLabel = true,

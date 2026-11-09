@@ -1,7 +1,6 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -108,7 +107,7 @@ fun HomeScreen(
     val canViewReports = state.currentSession.canViewReports()
     val canManageSuppliers = state.currentSession.canManageSuppliers()
     val hasActiveBasket = state.basketItemCount > 0
-    val isDark = isSystemInDarkTheme()
+    val isDark = state.isDarkTheme
 
     LazyColumn(
         modifier = modifier
@@ -143,9 +142,9 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            // Storefront vector icon in royal blue (#255FD6) - Authentic parent brand mark
+                            // Storefront vector icon in royal blue (#255FD6) - Authentic parent brand mark (CircleShape)
                             Surface(
-                                shape = RoundedCornerShape(10.dp),
+                                shape = CircleShape,
                                 color = Color(0xFF255FD6).copy(alpha = 0.10f),
                                 border = BorderStroke(1.dp, Color(0xFF255FD6).copy(alpha = 0.20f)),
                                 modifier = Modifier.size(44.dp)
@@ -204,7 +203,97 @@ fun HomeScreen(
             }
         }
 
-        // 2. CALM ANALYTICS-LED KPI DASHBOARD (GUARDED FOR OWNER / MANAGER ONLY)
+        // 2. PRIMARY SELLING FLOW (Direct Merchant Action)
+        item {
+            if (hasActiveBasket) {
+                // Resume Sale Action when Basket has Items
+                Button(
+                    onClick = onReviewBasket,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 52.dp)
+                        .testTag("home_resume_review_button"),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PointOfSale,
+                                contentDescription = null,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                Text(
+                                    text = lang.tr(
+                                        "متابعة البيع (${state.basketItemCount})",
+                                        "Resume Sale (${state.basketItemCount})"
+                                    ),
+                                    style = MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp),
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = lang.tr("السلة الحالية غير مكتملة", "Active sale in progress"),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = WesternFormatters.formatIls(state.basketNetTotalIls),
+                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            } else {
+                // Calm Primary New Sale Action
+                Button(
+                    onClick = onStartNewSale,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 50.dp)
+                        .testTag("hero_new_sale_button"),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AddShoppingCart,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = lang.tr("بدء عملية بيع جديدة", "Start New Sale"),
+                            style = MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3. CALM ANALYTICS-LED KPI DASHBOARD (GUARDED FOR OWNER / MANAGER ONLY)
+// 2. CALM ANALYTICS-LED KPI DASHBOARD (GUARDED FOR OWNER / MANAGER ONLY)
         if (canViewReports) {
             item {
                 Surface(
@@ -433,95 +522,8 @@ fun HomeScreen(
         }
 
         // 3. RESTRAINED OPERATIONAL SALE ACTION (FAST SELLING PRESERVED)
-        item {
-            if (hasActiveBasket) {
-                // Resume Sale Action when Basket has Items
-                Button(
-                    onClick = onReviewBasket,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 52.dp)
-                        .testTag("home_resume_review_button"),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PointOfSale,
-                                contentDescription = null,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                                Text(
-                                    text = lang.tr(
-                                        "متابعة البيع (${state.basketItemCount})",
-                                        "Resume Sale (${state.basketItemCount})"
-                                    ),
-                                    style = MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp),
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = lang.tr("السلة الحالية غير مكتملة", "Active sale in progress"),
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
-                                )
-                            }
-                        }
 
-                        Text(
-                            text = WesternFormatters.formatIls(state.basketNetTotalIls),
-                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp),
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            } else {
-                // Calm Primary New Sale Action
-                Button(
-                    onClick = onStartNewSale,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 50.dp)
-                        .testTag("hero_new_sale_button"),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AddShoppingCart,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = lang.tr("بدء عملية بيع جديدة", "Start New Sale"),
-                            style = MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp),
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-
-        // 4. SECONDARY POS QUICK ACTIONS (TACTILE 48dp TARGETS)
+                // 4. SECONDARY POS QUICK ACTIONS (TACTILE 48dp TARGETS)
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),

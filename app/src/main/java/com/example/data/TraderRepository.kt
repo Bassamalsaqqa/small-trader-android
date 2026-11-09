@@ -76,7 +76,7 @@ interface TraderRepository {
     fun getPurchaseBills(): List<PurchaseBill>
     fun getSupplierPayments(): List<SupplierPayment>
     fun saveSupplier(supplierId: String?, name: String, company: String, phone: String, operator: UserSession): Result<Supplier>
-    fun recordPurchaseBill(supplierId: String, itemsSummary: String, totalIls: Double, paidNowIls: Double, operator: UserSession): Result<PurchaseBill>
+    fun recordPurchaseBill(supplierId: String, itemsSummary: String, totalIls: Double, paidNowIls: Double, operator: UserSession, expectedProductId: String? = null, expectedQuantity: Int = 0): Result<PurchaseBill>
     fun confirmPhysicalGoodsReceipt(billId: String, productId: String, receivedQty: Int, batchNote: String, operator: UserSession): Result<StockMovement>
     fun recordSupplierPayment(supplierId: String, amountIls: Double, note: String, operator: UserSession): Result<SupplierPayment>
 
@@ -629,7 +629,9 @@ class OfflineDemoTraderRepository : TraderRepository {
         itemsSummary: String,
         totalIls: Double,
         paidNowIls: Double,
-        operator: UserSession
+        operator: UserSession,
+        expectedProductId: String?,
+        expectedQuantity: Int
     ): Result<PurchaseBill> {
         if (!operator.canManageSuppliers()) {
             return Result.failure(SecurityException("غير مصرح: تسجيل فواتير الشراء متاح للمالك والمدير فقط | Permission denied: Purchase bill requires Owner or Manager"))
@@ -662,7 +664,10 @@ class OfflineDemoTraderRepository : TraderRepository {
             totalIls = totalExact.toDouble(),
             paidIls = paidExact.toDouble(),
             itemsSummary = itemsSummary,
-            isReceived = false // Text-only bills require physical itemized audit before marking goods received
+            isReceived = false, // Text-only bills require physical itemized audit before marking goods received
+            expectedProductId = expectedProductId,
+            expectedQuantity = expectedQuantity,
+            receivedQuantity = 0
         )
 
         val currentSup = suppliers[idx]
@@ -716,9 +721,10 @@ class OfflineDemoTraderRepository : TraderRepository {
                 IllegalArgumentException("الصنف المختار لا يطابق الصنف المحدد في فاتورة الشراء $billCode | Selected product ($productId) does not match bill $billCode expected SKU ($expectedProductId)")
             )
         }
-        if (receivedQty <= 0 || receivedQty != expectedQty) {
+        val pendingQty = bill.pendingQuantity
+        if (receivedQty <= 0 || receivedQty > pendingQty) {
             return Result.failure(
-                IllegalArgumentException("الكمية المدخلة ($receivedQty) لا تطابق الكمية المتوقعة في فاتورة الشراء $billCode ($expectedQty) | Received quantity ($receivedQty) must match bill $billCode expected quantity ($expectedQty)")
+                IllegalArgumentException("الكمية المدخلة ($receivedQty) يجب أن تكون أكبر من صفر ولا تتجاوز الكمية المتبقية ($pendingQty) في فاتورة الشراء $billCode | Received quantity ($receivedQty) must be positive and not exceed pending quantity ($pendingQty) for bill $billCode")
             )
         }
 
@@ -729,17 +735,24 @@ class OfflineDemoTraderRepository : TraderRepository {
             return Result.failure(IllegalStateException("لا يمكن تسجيل استلام مخزني لصنف غير خاضع للجرد | Cannot receive physical stock for a non-tracked item"))
         }
 
-        purchaseBills[billIdx] = bill.copy(isReceived = true)
+        val newReceivedTotal = bill.receivedQuantity + receivedQty
+        val isFullyReceived = newReceivedTotal >= bill.expectedQuantity
+        purchaseBills[billIdx] = bill.copy(
+            receivedQuantity = newReceivedTotal,
+            isReceived = isFullyReceived
+        )
         val newStock = prod.stockCount + receivedQty
         products[prodIdx] = prod.copy(stockCount = newStock)
         val noteSuffix = batchNote.trim().takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: ""
+        val receiptTypeAr = if (isFullyReceived) "سند استلام بضاعة مخزني" else "سند استلام جزئي (+${WesternFormatters.formatInt(receivedQty)}/${WesternFormatters.formatInt(bill.expectedQuantity)})"
+        val receiptTypeEn = if (isFullyReceived) "Physical Goods Receipt Note" else "Partial Goods Receipt (+$receivedQty/${bill.expectedQuantity})"
         val movement = StockMovement(
             id = "sm_grn_${System.currentTimeMillis()}",
             productId = productId,
             date = WesternFormatters.currentTimestamp(),
             delta = receivedQty,
-            reasonAr = "سند استلام بضاعة مخزني $billCode$noteSuffix",
-            reasonEn = "Physical Goods Receipt Note $billCode$noteSuffix",
+            reasonAr = "$receiptTypeAr $billCode$noteSuffix",
+            reasonEn = "$receiptTypeEn $billCode$noteSuffix",
             resultingStock = newStock
         )
         stockMovements.add(0, movement)

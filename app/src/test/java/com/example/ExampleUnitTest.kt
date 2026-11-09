@@ -1901,15 +1901,15 @@ class ExampleUnitTest {
         assertEquals(oliveOilBefore, repo.findProductById("p_olive_oil")!!.stockCount)
         assertFalse(repo.getPurchaseBills().first { it.id == "pb_03" }.isReceived)
 
-        // 3. Mismatched / partial quantity -> rejected with IllegalArgumentException, bill remains unreceived
+        // 3. Excessive quantity (> pendingQuantity 12) -> rejected with IllegalArgumentException, bill remains unreceived
         val mismatchedQtyResult = repo.confirmPhysicalGoodsReceipt(
             billId = "pb_03",
             productId = "p_rice_medium",
-            receivedQty = 5,
-            batchNote = "Partial mismatch",
+            receivedQty = 15,
+            batchNote = "Excessive qty",
             operator = manager
         )
-        assertTrue("Mismatched quantity must be rejected in bounded single-SKU GRN", mismatchedQtyResult.isFailure)
+        assertTrue("Excessive quantity (> 12 pending) must be rejected in bounded single-SKU GRN", mismatchedQtyResult.isFailure)
         assertTrue(mismatchedQtyResult.exceptionOrNull() is IllegalArgumentException)
         assertEquals(riceBefore, repo.findProductById("p_rice_medium")!!.stockCount)
         assertFalse(repo.getPurchaseBills().first { it.id == "pb_03" }.isReceived)

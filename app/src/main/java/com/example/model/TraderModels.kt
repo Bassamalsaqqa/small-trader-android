@@ -113,6 +113,28 @@ data class Product(
     fun warehouse(lang: AppLanguage): String = lang.tr(warehouseAr, warehouseEn)
     val isLowStock: Boolean
         get() = isStockTracked && stockCount <= minStockThreshold
+
+    val normalizedNameAr: String by lazy { normalizeKey(nameAr) }
+    val normalizedNameEn: String by lazy { normalizeKey(nameEn) }
+    val normalizedUnitAr: String by lazy { normalizeKey(unitAr) }
+    val normalizedUnitEn: String by lazy { normalizeKey(unitEn) }
+
+    companion object {
+        fun normalizeKey(raw: String): String {
+            if (raw.isEmpty()) return ""
+            val sb = StringBuilder(raw.length)
+            for (ch in raw.lowercase()) {
+                when (ch) {
+                    'أ', 'إ', 'آ', 'ٱ' -> sb.append('ا')
+                    'ة' -> sb.append('ه')
+                    'ى' -> sb.append('ي')
+                    in '\u064B'..'\u065F', '\u0670', '\u0640' -> { /* strip diacritics & tatweel */ }
+                    else -> sb.append(ch)
+                }
+            }
+            return sb.toString().trim()
+        }
+    }
 }
 
 data class BasketItem(
@@ -242,7 +264,8 @@ data class PurchaseBill(
     val itemsSummary: String,
     val isReceived: Boolean = false, // Truthful accounting: text-only bills are pending physical goods inspection
     val expectedProductId: String? = null,
-    val expectedQuantity: Int = 0
+    val expectedQuantity: Int = 0,
+    val receivedQuantity: Int = 0
 ) {
     val remainingPayableIls: Double
         get() = BigDecimal(totalIls.toString())
@@ -250,6 +273,12 @@ data class PurchaseBill(
             .setScale(2, RoundingMode.HALF_UP)
             .toDouble()
             .coerceAtLeast(0.0)
+
+    val pendingQuantity: Int
+        get() = (expectedQuantity - receivedQuantity).coerceAtLeast(0)
+
+    val isPartiallyReceived: Boolean
+        get() = !isReceived && receivedQuantity > 0 && pendingQuantity > 0
 }
 
 data class SupplierPayment(

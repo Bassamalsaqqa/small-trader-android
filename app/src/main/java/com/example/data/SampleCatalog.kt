@@ -513,7 +513,8 @@ object SampleCatalog {
             itemsSummary = "20 زجاجة زيت زيتون بلدي بكر ممتاز (1 لتر) — معصرة جنين",
             isReceived = true,
             expectedProductId = "p_olive_oil",
-            expectedQuantity = 20
+            expectedQuantity = 20,
+            receivedQuantity = 20
         ),
         PurchaseBill(
             id = "pb_02",
@@ -525,7 +526,8 @@ object SampleCatalog {
             itemsSummary = "25 عبوة حليب طازج كامل الدسم (الجبريني) — توريد مبرد",
             isReceived = true,
             expectedProductId = "p_jebrini_milk",
-            expectedQuantity = 25
+            expectedQuantity = 25,
+            receivedQuantity = 25
         ),
         PurchaseBill(
             id = "pb_03",
@@ -537,7 +539,8 @@ object SampleCatalog {
             itemsSummary = "12 كيس أرز حبة متوسطة فاخر (5 كغم) — توريد مطاحن نابلس",
             isReceived = false,
             expectedProductId = "p_rice_medium",
-            expectedQuantity = 12
+            expectedQuantity = 12,
+            receivedQuantity = 0
         )
     )
 

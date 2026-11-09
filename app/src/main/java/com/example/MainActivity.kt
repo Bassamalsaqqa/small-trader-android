@@ -611,12 +611,14 @@ fun SmallTraderApp(
                     ReceivePurchaseBillDialog(
                         state = state,
                         onDismiss = { traderViewModel.openReceivePurchaseDialog(false) },
-                        onConfirmBill = { supplierId, itemsSummary, totalIls, paidNowIls ->
+                        onConfirmBill = { supplierId, itemsSummary, totalIls, paidNowIls, expectedProductId, expectedQty ->
                             traderViewModel.recordPurchaseBill(
                                 supplierId = supplierId,
                                 itemsSummary = itemsSummary,
                                 totalIls = totalIls,
-                                paidNowIls = paidNowIls
+                                paidNowIls = paidNowIls,
+                                expectedProductId = expectedProductId,
+                                expectedQuantity = expectedQty
                             )
                         }
                     )
