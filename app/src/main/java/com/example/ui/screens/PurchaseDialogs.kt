@@ -44,8 +44,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -303,22 +306,23 @@ fun PhysicalGoodsReceiptDialog(
     lang: AppLanguage,
     onDismiss: () -> Unit,
     onConfirmGrnResult: (operationId: String, productId: String, receivedQty: Int, batchNote: String) -> Result<StockMovement>,
-    errorMessage: String? = null
+    errorMessage: String? = null,
+    onConfirmGrnResultWithLine: ((operationId: String, productId: String, receivedQty: Int, batchNote: String, lineId: String?) -> Result<StockMovement>)? = null
 ) {
     var submissionId by rememberSaveable(bill.id) { mutableStateOf(UUID.randomUUID().toString()) }
 
     // Multi-line support: select active line
     val lines = bill.effectiveLines
-    var selectedProductId by rememberSaveable(bill.id) {
-        mutableStateOf(lines.firstOrNull { (it.quantity - it.receivedQuantity) > 0 }?.productId ?: bill.expectedProductId ?: "")
+    var selectedLineId by rememberSaveable(bill.id) {
+        mutableStateOf(lines.firstOrNull { (it.quantity - it.receivedQuantity) > 0 }?.id ?: lines.firstOrNull()?.id ?: "")
     }
 
-    val selectedLine = remember(lines, selectedProductId) {
-        lines.firstOrNull { it.productId == selectedProductId } ?: lines.firstOrNull()
+    val selectedLine = remember(lines, selectedLineId) {
+        lines.firstOrNull { it.id == selectedLineId } ?: lines.firstOrNull()
     }
 
-    val expectedProduct = remember(products, selectedProductId) {
-        products.firstOrNull { it.id == selectedProductId && it.isStockTracked }
+    val expectedProduct = remember(products, selectedLine) {
+        products.firstOrNull { it.id == selectedLine?.productId && it.isStockTracked }
     }
 
     val pendingQty = if (selectedLine != null) {
@@ -328,7 +332,7 @@ fun PhysicalGoodsReceiptDialog(
     }
 
     val maxReceivableQty = if (pendingQty > 0) pendingQty else (selectedLine?.quantity ?: bill.expectedQuantity).coerceAtLeast(0)
-    var receivingQtyText by rememberSaveable(bill.id, selectedProductId) { mutableStateOf(maxReceivableQty.toString()) }
+    var receivingQtyText by rememberSaveable(bill.id, selectedLineId) { mutableStateOf(maxReceivableQty.toString()) }
     val receivingQty = receivingQtyText.toIntOrNull() ?: 0
     val isQtyValid = receivingQty > 0 && receivingQty <= maxReceivableQty
 
@@ -395,19 +399,20 @@ fun PhysicalGoodsReceiptDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        items(lines, key = { it.productId }) { line ->
+                        items(lines, key = { it.id }) { line ->
                             val linePending = (line.quantity - line.receivedQuantity).coerceAtLeast(0)
                             FilterChip(
-                                selected = line.productId == selectedProductId,
+                                selected = line.id == selectedLineId,
                                 onClick = {
-                                    selectedProductId = line.productId
+                                    selectedLineId = line.id
                                     val newMax = linePending.coerceAtLeast(0)
                                     receivingQtyText = newMax.toString()
                                 },
                                 label = {
                                     Text("${line.name(lang)} ($linePending)")
                                 },
-                                shape = RoundedCornerShape(8.dp)
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.testTag("grn_product_chip_${line.productId}")
                             )
                         }
                     }
@@ -527,7 +532,8 @@ fun PhysicalGoodsReceiptDialog(
                     if (!isSubmittingGrn && canConfirm && expectedProduct != null) {
                         isSubmittingGrn = true
                         grnInlineError = null
-                        val result = onConfirmGrnResult(submissionId, expectedProduct.id, receivingQty, batchNote)
+                        val result = onConfirmGrnResultWithLine?.invoke(submissionId, expectedProduct.id, receivingQty, batchNote, selectedLine?.id)
+                            ?: onConfirmGrnResult(submissionId, expectedProduct.id, receivingQty, batchNote)
                         isSubmittingGrn = false
                         if (result.isSuccess) {
                             onDismiss()
@@ -623,10 +629,49 @@ data class EnteredPurchaseLine(
 ) {
     val quantity: Int get() = quantityText.toIntOrNull() ?: 0
     val unitCost: Double get() = unitCostText.toDoubleOrNull() ?: 0.0
-    val lineTotal: BigDecimal get() = if (quantity > 0 && unitCost > 0.0) {
+    val lineTotal: BigDecimal get() = if (quantity > 0 && unitCost >= 0.0) {
         BigDecimal(unitCost.toString()).multiply(BigDecimal(quantity)).setScale(2, RoundingMode.HALF_UP)
     } else BigDecimal.ZERO
 }
+
+enum class PurchaseBillMode {
+    STRUCTURED,
+    FINANCIAL_ONLY
+}
+
+val PurchaseLineListSaver: Saver<SnapshotStateList<PurchaseLineItem>, Any> = listSaver(
+    save = { stateList ->
+        stateList.map { line ->
+            listOf(
+                line.productId,
+                line.productNameAr,
+                line.productNameEn,
+                line.quantity,
+                line.unitCostIls,
+                line.receivedQuantity,
+                line.id
+            )
+        }
+    },
+    restore = { rawList ->
+        val restored = mutableStateListOf<PurchaseLineItem>()
+        @Suppress("UNCHECKED_CAST")
+        (rawList as List<List<Any>>).forEach { items ->
+            restored.add(
+                PurchaseLineItem(
+                    productId = items[0] as String,
+                    productNameAr = items[1] as String,
+                    productNameEn = items[2] as String,
+                    quantity = (items[3] as Number).toInt(),
+                    unitCostIls = (items[4] as Number).toDouble(),
+                    receivedQuantity = (items[5] as Number).toInt(),
+                    id = items[6] as String
+                )
+            )
+        }
+        restored
+    }
+)
 
 @Composable
 fun ReceivePurchaseBillDialog(
@@ -639,11 +684,13 @@ fun ReceivePurchaseBillDialog(
     val suppliers = state.suppliers
     if (suppliers.isEmpty()) return
 
+    var billMode by rememberSaveable { mutableStateOf(PurchaseBillMode.STRUCTURED) }
+    var submissionId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
     var selectedSupplierId by rememberSaveable(state.selectedSupplierForDetail?.id) {
         mutableStateOf(state.selectedSupplierForDetail?.id ?: suppliers.first().id)
     }
     var purchaseDesc by rememberSaveable { mutableStateOf("") }
-    var purchaseTotal by rememberSaveable { mutableStateOf("") }
+    var freeformTotal by rememberSaveable { mutableStateOf("") }
     var purchasePaid by rememberSaveable { mutableStateOf("0") }
     var linkedProductId by rememberSaveable { mutableStateOf<String?>(null) }
     var linkedQuantityText by rememberSaveable { mutableStateOf("") }
@@ -653,13 +700,34 @@ fun ReceivePurchaseBillDialog(
 
     val trackedProducts = remember(state.products) { state.products.filter { it.isStockTracked } }
 
-    val structuredLines = remember { mutableStateListOf<PurchaseLineItem>() }
+    val structuredLines = rememberSaveable(saver = PurchaseLineListSaver) { mutableStateListOf<PurchaseLineItem>() }
 
-    val totalVal = purchaseTotal.toDoubleOrNull() ?: 0.0
+    val derivedTotal: BigDecimal = structuredLines.fold(BigDecimal.ZERO) { acc, l ->
+        acc.add(BigDecimal(l.unitCostIls.toString()).multiply(BigDecimal(l.quantity.toString())))
+    }.setScale(2, RoundingMode.HALF_UP)
+
+    val totalVal: Double = if (billMode == PurchaseBillMode.STRUCTURED) {
+        derivedTotal.toDouble()
+    } else {
+        freeformTotal.toDoubleOrNull() ?: 0.0
+    }
+
     val paidVal = if (purchasePaid.isBlank()) 0.0 else (purchasePaid.toDoubleOrNull() ?: -1.0)
-    val isPaidValid = paidVal >= 0.0 && paidVal <= totalVal + 0.001
-    val linkedQty = linkedQuantityText.toIntOrNull() ?: 0
-    val isFormValid = purchaseDesc.isNotBlank() && totalVal > 0.0 && isPaidValid
+    val isPaidValid = paidVal >= 0.0 && (totalVal == 0.0 || paidVal <= totalVal + 0.001)
+
+    val effectiveDesc = if (billMode == PurchaseBillMode.STRUCTURED) {
+        purchaseDesc.ifBlank {
+            structuredLines.joinToString(" • ") { "${it.quantity}x ${it.name(lang)}" }
+        }
+    } else {
+        purchaseDesc.trim()
+    }
+
+    val isFormValid = if (billMode == PurchaseBillMode.STRUCTURED) {
+        structuredLines.isNotEmpty() && totalVal > 0.0 && isPaidValid && effectiveDesc.isNotBlank()
+    } else {
+        effectiveDesc.isNotBlank() && totalVal > 0.0 && isPaidValid
+    }
 
     val payableAdded = if (totalVal > 0.0 && isPaidValid) {
         BigDecimal(totalVal.toString())
@@ -703,6 +771,33 @@ fun ReceivePurchaseBillDialog(
                     }
                 }
 
+                // Bill Mode Selector
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = billMode == PurchaseBillMode.STRUCTURED,
+                        onClick = {
+                            billMode = PurchaseBillMode.STRUCTURED
+                            inlineError = null
+                        },
+                        label = { Text(lang.tr("فاتورة أصناف مخزنية", "Itemized Stock Bill")) },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.testTag("purchase_bill_mode_structured")
+                    )
+                    FilterChip(
+                        selected = billMode == PurchaseBillMode.FINANCIAL_ONLY,
+                        onClick = {
+                            billMode = PurchaseBillMode.FINANCIAL_ONLY
+                            inlineError = null
+                        },
+                        label = { Text(lang.tr("قيد مالي فقط", "Financial-Only Bill")) },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.testTag("purchase_bill_mode_financial")
+                    )
+                }
+
                 // Supplier Picker
                 Text(
                     text = lang.tr("المورد:", "Supplier:"),
@@ -735,7 +830,15 @@ fun ReceivePurchaseBillDialog(
                         purchaseDesc = it
                         inlineError = null
                     },
-                    label = { Text(lang.tr("بيان الفاتورة / الأصناف *", "Bill Summary / Items *")) },
+                    label = {
+                        Text(
+                            if (billMode == PurchaseBillMode.STRUCTURED) {
+                                lang.tr("بيان الفاتورة (اختياري، يولد تلقائياً)", "Bill Summary (Optional, Auto-generated)")
+                            } else {
+                                lang.tr("بيان الفاتورة / الأصناف *", "Bill Summary / Items *")
+                            }
+                        )
+                    },
                     placeholder = { Text(lang.tr("مثال: توريد زيت زيتون وزعتر", "e.g. Olive Oil & Zaatar")) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
@@ -744,10 +847,9 @@ fun ReceivePurchaseBillDialog(
                         .testTag("purchase_bill_summary_input")
                 )
 
-                // Optional Linked Stock Product (Enables Structured GRN receiving)
-                if (trackedProducts.isNotEmpty()) {
+                if (billMode == PurchaseBillMode.STRUCTURED && trackedProducts.isNotEmpty()) {
                     Text(
-                        text = lang.tr("ربط صنف للاستلام المخزني (اختياري):", "Link product for stock GRN (optional):"),
+                        text = lang.tr("إضافة صنف لمخزون الفاتورة:", "Add item to bill inventory:"),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -755,18 +857,6 @@ fun ReceivePurchaseBillDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        item {
-                            FilterChip(
-                                selected = linkedProductId == null,
-                                onClick = {
-                                    linkedProductId = null
-                                    linkedQuantityText = ""
-                                    unitCostText = ""
-                                },
-                                label = { Text(lang.tr("بدون ربط مخزني", "No linked SKU")) },
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                        }
                         items(trackedProducts, key = { it.id }) { p ->
                             FilterChip(
                                 selected = linkedProductId == p.id,
@@ -776,13 +866,10 @@ fun ReceivePurchaseBillDialog(
                                         purchaseDesc = "توريد ${p.name(lang)}"
                                     }
                                     if (unitCostText.isBlank()) {
-                                        unitCostText = WesternFormatters.formatNumber(p.costIls)
+                                        unitCostText = WesternFormatters.formatNumber(p.costIls).removeSuffix(".00")
                                     }
-                                    val q = linkedQuantityText.toIntOrNull() ?: 0
-                                    val c = unitCostText.toDoubleOrNull() ?: 0.0
-                                    if (q > 0 && c > 0.0) {
-                                        val tot = BigDecimal(c.toString()).multiply(BigDecimal(q)).setScale(2, RoundingMode.HALF_UP)
-                                        purchaseTotal = tot.toPlainString()
+                                    if (linkedQuantityText.isBlank()) {
+                                        linkedQuantityText = "1"
                                     }
                                 },
                                 label = { Text(p.name(lang)) },
@@ -801,15 +888,9 @@ fun ReceivePurchaseBillDialog(
                                 value = linkedQuantityText,
                                 onValueChange = {
                                     linkedQuantityText = WesternFormatters.sanitizeWesternDigits(it)
-                                    val q = linkedQuantityText.toIntOrNull() ?: 0
-                                    val c = unitCostText.toDoubleOrNull() ?: 0.0
-                                    if (q > 0 && c > 0.0) {
-                                        val tot = BigDecimal(c.toString()).multiply(BigDecimal(q)).setScale(2, RoundingMode.HALF_UP)
-                                        purchaseTotal = tot.toPlainString()
-                                    }
                                     inlineError = null
                                 },
-                                label = { Text(lang.tr("الكمية المتوقعة", "Expected Qty")) },
+                                label = { Text(lang.tr("الكمية", "Quantity")) },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
                                 shape = RoundedCornerShape(10.dp),
@@ -821,12 +902,6 @@ fun ReceivePurchaseBillDialog(
                                 value = unitCostText,
                                 onValueChange = {
                                     unitCostText = WesternFormatters.sanitizeWesternDigits(it)
-                                    val q = linkedQuantityText.toIntOrNull() ?: 0
-                                    val c = unitCostText.toDoubleOrNull() ?: 0.0
-                                    if (q > 0 && c > 0.0) {
-                                        val tot = BigDecimal(c.toString()).multiply(BigDecimal(q)).setScale(2, RoundingMode.HALF_UP)
-                                        purchaseTotal = tot.toPlainString()
-                                    }
                                     inlineError = null
                                 },
                                 label = { Text(lang.tr("تكلفة الوحدة (₪)", "Unit Cost (₪)")) },
@@ -840,36 +915,29 @@ fun ReceivePurchaseBillDialog(
                         }
 
                         val candidateProd = trackedProducts.firstOrNull { it.id == linkedProductId }
-                        val canAddCandidate = candidateProd != null && (linkedQuantityText.toIntOrNull() ?: 0) > 0 && (unitCostText.toDoubleOrNull() ?: 0.0) > 0.0
+                        val candidateQty = linkedQuantityText.toIntOrNull() ?: 0
+                        val candidateCostDouble = unitCostText.toDoubleOrNull()
+                        val isCostEntered = unitCostText.isNotBlank() && candidateCostDouble != null && candidateCostDouble >= 0.0 && !candidateCostDouble.isNaN() && !candidateCostDouble.isInfinite()
+                        val canAddCandidate = candidateProd != null && candidateQty > 0 && isCostEntered
+
                         OutlinedButton(
                             onClick = {
                                 val p = candidateProd ?: return@OutlinedButton
-                                val q = linkedQuantityText.toIntOrNull() ?: 0
-                                val c = unitCostText.toDoubleOrNull() ?: p.costIls
-                                if (q > 0 && c > 0.0) {
-                                    val existingIdx = structuredLines.indexOfFirst { it.productId == p.id }
-                                    if (existingIdx != -1) {
-                                        val existing = structuredLines[existingIdx]
-                                        structuredLines[existingIdx] = existing.copy(
-                                            quantity = existing.quantity + q,
-                                            unitCostIls = c
+                                val q = candidateQty
+                                val c = candidateCostDouble ?: return@OutlinedButton
+                                if (q > 0 && c >= 0.0) {
+                                    // Preserve exact priced lines with unique line identity
+                                    structuredLines.add(
+                                        PurchaseLineItem(
+                                            productId = p.id,
+                                            productNameAr = p.nameAr,
+                                            productNameEn = p.nameEn,
+                                            quantity = q,
+                                            unitCostIls = c,
+                                            receivedQuantity = 0,
+                                            id = UUID.randomUUID().toString()
                                         )
-                                    } else {
-                                        structuredLines.add(
-                                            PurchaseLineItem(
-                                                productId = p.id,
-                                                productNameAr = p.nameAr,
-                                                productNameEn = p.nameEn,
-                                                quantity = q,
-                                                unitCostIls = c,
-                                                receivedQuantity = 0
-                                            )
-                                        )
-                                    }
-                                    val newTot = structuredLines.fold(BigDecimal.ZERO) { acc, l ->
-                                        acc.add(BigDecimal(l.unitCostIls.toString()).multiply(BigDecimal(l.quantity.toString())))
-                                    }.setScale(2, RoundingMode.HALF_UP)
-                                    purchaseTotal = newTot.toPlainString()
+                                    )
                                     if (purchaseDesc.isBlank()) {
                                         purchaseDesc = structuredLines.joinToString(" • ") { "${it.quantity}x ${it.name(lang)}" }
                                     }
@@ -906,7 +974,7 @@ fun ReceivePurchaseBillDialog(
                                 )
                                 structuredLines.forEachIndexed { idx, line ->
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
+                                        modifier = Modifier.fillMaxWidth().testTag("structured_purchase_line_${line.id}"),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
@@ -924,12 +992,6 @@ fun ReceivePurchaseBillDialog(
                                         IconButton(
                                             onClick = {
                                                 structuredLines.removeAt(idx)
-                                                if (structuredLines.isNotEmpty()) {
-                                                    val newTot = structuredLines.fold(BigDecimal.ZERO) { acc, l ->
-                                                        acc.add(BigDecimal(l.unitCostIls.toString()).multiply(BigDecimal(l.quantity.toString())))
-                                                    }.setScale(2, RoundingMode.HALF_UP)
-                                                    purchaseTotal = newTot.toPlainString()
-                                                }
                                             },
                                             modifier = Modifier
                                                 .size(32.dp)
@@ -949,13 +1011,40 @@ fun ReceivePurchaseBillDialog(
                     }
                 }
 
+                // Authoritative Total Field
                 OutlinedTextField(
-                    value = purchaseTotal,
-                    onValueChange = {
-                        purchaseTotal = WesternFormatters.sanitizeWesternDigits(it)
-                        inlineError = null
+                    value = if (billMode == PurchaseBillMode.STRUCTURED) {
+                        if (structuredLines.isNotEmpty()) derivedTotal.toPlainString() else ""
+                    } else {
+                        freeformTotal
                     },
-                    label = { Text(lang.tr("إجمالي الفاتورة (₪) *", "Bill Total (₪) *")) },
+                    onValueChange = {
+                        if (billMode == PurchaseBillMode.FINANCIAL_ONLY) {
+                            freeformTotal = WesternFormatters.sanitizeWesternDigits(it)
+                            inlineError = null
+                        }
+                    },
+                    readOnly = (billMode == PurchaseBillMode.STRUCTURED),
+                    label = {
+                        Text(
+                            if (billMode == PurchaseBillMode.STRUCTURED) {
+                                lang.tr("إجمالي الفاتورة (₪) [محسوب تلقائياً من الأصناف]", "Bill Total (₪) [Calculated from Lines]")
+                            } else {
+                                lang.tr("إجمالي الفاتورة (₪) *", "Bill Total (₪) *")
+                            }
+                        )
+                    },
+                    supportingText = if (billMode == PurchaseBillMode.STRUCTURED) {
+                        {
+                            Text(
+                                lang.tr(
+                                    "القيمة محسوبة ومطابقة لبنود الأصناف لمنع أي تباين مالي",
+                                    "Authoritative total derived strictly from line items"
+                                ),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    } else null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
@@ -1013,49 +1102,45 @@ fun ReceivePurchaseBillDialog(
                         isSubmitting = true
                         inlineError = null
 
-                        val linesToSubmit = if (structuredLines.isNotEmpty()) {
-                            structuredLines.toList()
-                        } else if (linkedProductId != null) {
-                            val prod = trackedProducts.firstOrNull { it.id == linkedProductId }
-                            val unitCost = unitCostText.toDoubleOrNull() ?: (if (linkedQty > 0) totalVal / linkedQty else 0.0)
-                            if (prod != null && linkedQty > 0 && unitCost > 0.0) {
-                                listOf(
-                                    PurchaseLineItem(
-                                        productId = prod.id,
-                                        productNameAr = prod.nameAr,
-                                        productNameEn = prod.nameEn,
-                                        quantity = linkedQty,
-                                        unitCostIls = unitCost,
-                                        receivedQuantity = 0
-                                    )
-                                )
-                            } else emptyList()
-                        } else emptyList()
-
-                        if (linesToSubmit.isNotEmpty() && onConfirmStructuredBill != null) {
-                            val res = onConfirmStructuredBill(selectedSupplierId, linesToSubmit, paidVal, purchaseDesc.trim())
-                            isSubmitting = false
-                            if (res.isSuccess) {
-                                onDismiss()
-                            } else {
-                                inlineError = res.exceptionOrNull()?.message ?: lang.tr("فشل قيد الفاتورة", "Failed to record bill")
+                        if (billMode == PurchaseBillMode.STRUCTURED) {
+                            if (structuredLines.isEmpty()) {
+                                isSubmitting = false
+                                inlineError = lang.tr("يُرجى إضافة صنف واحد على الأقل", "Please add at least one line item")
+                                return@Button
                             }
-                        } else if (onConfirmBill != null) {
-                            val success = onConfirmBill(
-                                selectedSupplierId,
-                                purchaseDesc.trim(),
-                                totalVal,
-                                paidVal,
-                                linkedProductId,
-                                if (linkedProductId != null) linkedQty else 0
-                            )
-                            isSubmitting = false
-                            if (success) {
-                                onDismiss()
-                            } else {
-                                inlineError = state.supplierActionMessage(lang).ifBlank {
-                                    lang.tr("فشل قيد الفاتورة، يُرجى المحاولة مرة أخرى", "Failed to record bill, please retry")
+                            if (onConfirmStructuredBill != null) {
+                                val res = onConfirmStructuredBill(selectedSupplierId, structuredLines.toList(), paidVal, effectiveDesc)
+                                isSubmitting = false
+                                if (res.isSuccess) {
+                                    onDismiss()
+                                } else {
+                                    inlineError = res.exceptionOrNull()?.message ?: lang.tr("فشل قيد الفاتورة", "Failed to record bill")
                                 }
+                            } else {
+                                isSubmitting = false
+                                inlineError = "Structured bill handler not provided"
+                            }
+                        } else {
+                            if (onConfirmBill != null) {
+                                val success = onConfirmBill(
+                                    selectedSupplierId,
+                                    effectiveDesc,
+                                    totalVal,
+                                    paidVal,
+                                    null,
+                                    0
+                                )
+                                isSubmitting = false
+                                if (success) {
+                                    onDismiss()
+                                } else {
+                                    inlineError = state.supplierActionMessage(lang).ifBlank {
+                                        lang.tr("فشل قيد الفاتورة، يُرجى المحاولة مرة أخرى", "Failed to record bill, please retry")
+                                    }
+                                }
+                            } else {
+                                isSubmitting = false
+                                inlineError = "Financial bill handler not provided"
                             }
                         }
                     }

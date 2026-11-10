@@ -1770,10 +1770,11 @@ class TraderViewModel(
         productId: String,
         receivedQty: Int,
         batchNote: String = "",
-        operationId: String = ""
+        operationId: String = "",
+        lineId: String? = null
     ): Result<StockMovement> {
         val session = _uiState.value.currentSession
-        val result = repository.confirmPhysicalGoodsReceipt(billId, productId, receivedQty, batchNote, session, operationId)
+        val result = repository.confirmPhysicalGoodsReceipt(billId, productId, receivedQty, batchNote, session, operationId, lineId)
         if (result.isSuccess) {
             val movement = result.getOrNull()
             val updatedProducts = repository.getProducts()
@@ -1814,8 +1815,9 @@ class TraderViewModel(
         productId: String,
         receivedQty: Int,
         batchNote: String = "",
-        operationId: String = ""
-    ): Boolean = confirmPhysicalGoodsReceiptResult(billId, productId, receivedQty, batchNote, operationId).isSuccess
+        operationId: String = "",
+        lineId: String? = null
+    ): Boolean = confirmPhysicalGoodsReceiptResult(billId, productId, receivedQty, batchNote, operationId, lineId).isSuccess
 
     fun updateStartingDrawerCash(openingIls: Double): Boolean {
         val session = _uiState.value.currentSession

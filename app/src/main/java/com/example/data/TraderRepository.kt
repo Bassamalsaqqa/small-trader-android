@@ -18,6 +18,7 @@ import com.example.model.UserSession
 import com.example.model.WesternFormatters
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.util.UUID
 
 /**
  * Bounded domain repository contract for Small Trader (التاجر الصغير).
@@ -79,7 +80,7 @@ interface TraderRepository {
     fun saveSupplier(supplierId: String?, name: String, company: String, phone: String, operator: UserSession): Result<Supplier>
     fun recordPurchaseBill(supplierId: String, itemsSummary: String, totalIls: Double, paidNowIls: Double, operator: UserSession, expectedProductId: String? = null, expectedQuantity: Int = 0): Result<PurchaseBill>
     fun recordStructuredPurchaseBill(supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, operator: UserSession, note: String = ""): Result<PurchaseBill>
-    fun confirmPhysicalGoodsReceipt(billId: String, productId: String, receivedQty: Int, batchNote: String, operator: UserSession, operationId: String = ""): Result<StockMovement>
+    fun confirmPhysicalGoodsReceipt(billId: String, productId: String, receivedQty: Int, batchNote: String, operator: UserSession, operationId: String = "", lineId: String? = null): Result<StockMovement>
     fun recordSupplierPayment(supplierId: String, amountIls: Double, note: String, operator: UserSession, paymentId: String = ""): Result<SupplierPayment>
 
     // Expenses
@@ -754,8 +755,10 @@ class OfflineDemoTraderRepository : TraderRepository {
             if (line.unitCostIls < 0.0 || line.unitCostIls.isNaN() || line.unitCostIls.isInfinite()) {
                 return Result.failure(IllegalArgumentException("Line ${lineIdx + 1}: Explicit unit cost must be a valid non-negative number (was ${line.unitCostIls})."))
             }
+            val lineId = if (line.id.isNotBlank()) line.id else UUID.randomUUID().toString()
             validatedLines.add(
                 line.copy(
+                    id = lineId,
                     productNameAr = prod.nameAr,
                     productNameEn = prod.nameEn,
                     receivedQuantity = 0
@@ -763,28 +766,8 @@ class OfflineDemoTraderRepository : TraderRepository {
             )
         }
 
-        // Duplicate SKU policy: deterministic aggregation per SKU preserving total cost & quantity
-        val aggregatedLines = validatedLines.groupBy { it.productId }.map { (_, skuLines) ->
-            if (skuLines.size == 1) {
-                skuLines.first()
-            } else {
-                val totalQty = skuLines.sumOf { it.quantity }
-                val totalCost = skuLines.fold(BigDecimal.ZERO) { acc, l ->
-                    acc.add(BigDecimal(l.unitCostIls.toString()).multiply(BigDecimal(l.quantity.toString())))
-                }
-                val avgUnitCost = if (totalQty > 0) {
-                    totalCost.divide(BigDecimal(totalQty.toString()), 4, RoundingMode.HALF_UP).toDouble()
-                } else 0.0
-                skuLines.first().copy(
-                    quantity = totalQty,
-                    unitCostIls = avgUnitCost,
-                    receivedQuantity = 0
-                )
-            }
-        }
-
-        // Derive authoritative total strictly from structured lines with entered cost
-        val totalExact = aggregatedLines.fold(BigDecimal.ZERO) { acc, line ->
+        // Derive authoritative total strictly from exact priced structured lines with entered cost
+        val totalExact = validatedLines.fold(BigDecimal.ZERO) { acc, line ->
             acc.add(BigDecimal(line.unitCostIls.toString()).multiply(BigDecimal(line.quantity.toString())))
         }.setScale(2, RoundingMode.HALF_UP)
 
@@ -802,7 +785,7 @@ class OfflineDemoTraderRepository : TraderRepository {
 
         val payableAdded = totalExact.subtract(paidExact)
         val nextBillNum = (purchaseBills.maxOfOrNull { it.billNumber } ?: 300) + 1
-        val summaryStr = if (note.isNotBlank()) note else aggregatedLines.joinToString(" • ") { "${it.quantity}x ${it.productNameAr}" }
+        val summaryStr = if (note.isNotBlank()) note else validatedLines.joinToString(" • ") { "${it.quantity}x ${it.productNameAr}" }
 
         val bill = PurchaseBill(
             id = "pb_${System.currentTimeMillis()}_$nextBillNum",
@@ -813,9 +796,9 @@ class OfflineDemoTraderRepository : TraderRepository {
             paidIls = paidExact.toDouble(),
             itemsSummary = summaryStr,
             isReceived = false, // Physical stock receipt requires separate GRN
-            lines = aggregatedLines,
-            expectedProductId = aggregatedLines.firstOrNull()?.productId,
-            expectedQuantity = aggregatedLines.sumOf { it.quantity },
+            lines = validatedLines,
+            expectedProductId = validatedLines.firstOrNull()?.productId,
+            expectedQuantity = validatedLines.sumOf { it.quantity },
             receivedQuantity = 0
         )
 
@@ -836,7 +819,8 @@ class OfflineDemoTraderRepository : TraderRepository {
         receivedQty: Int,
         batchNote: String,
         operator: UserSession,
-        operationId: String
+        operationId: String,
+        lineId: String?
     ): Result<StockMovement> {
         if (!operator.canManageInventory()) {
             return Result.failure(SecurityException("غير مصرح: استلام البضاعة المخزني متاح للمالك والمدير فقط | Permission denied: Goods receiving requires Owner or Manager"))
@@ -884,8 +868,20 @@ class OfflineDemoTraderRepository : TraderRepository {
             )
         }
 
-        val targetLineIndex = effectiveLines.indexOfFirst { it.productId == productId && it.pendingQuantity > 0 }
-            .takeIf { it != -1 } ?: effectiveLines.indexOfFirst { it.productId == productId }
+        val targetLineIndex = if (!lineId.isNullOrBlank()) {
+            val idx = effectiveLines.indexOfFirst { it.id == lineId }
+            if (idx == -1) {
+                return Result.failure(IllegalArgumentException("Line ID $lineId not found in bill $billCode"))
+            }
+            if (effectiveLines[idx].productId != productId) {
+                return Result.failure(IllegalArgumentException("Line ID $lineId productId (${effectiveLines[idx].productId}) does not match requested productId ($productId)"))
+            }
+            idx
+        } else {
+            effectiveLines.indexOfFirst { it.productId == productId && it.pendingQuantity > 0 }
+                .takeIf { it != -1 } ?: effectiveLines.indexOfFirst { it.productId == productId }
+        }
+
         if (targetLineIndex == -1) {
             val validSkus = effectiveLines.joinToString(", ") { it.productId }
             return Result.failure(

@@ -7,6 +7,7 @@ import java.text.DecimalFormatSymbols
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 enum class AppLanguage(val code: String, val isRtl: Boolean) {
     AR("ar", true),
@@ -261,7 +262,8 @@ data class PurchaseLineItem(
     val productNameEn: String = "",
     val quantity: Int,
     val unitCostIls: Double,
-    val receivedQuantity: Int = 0
+    val receivedQuantity: Int = 0,
+    val id: String = UUID.randomUUID().toString()
 ) {
     fun name(lang: AppLanguage): String = lang.tr(productNameAr, productNameEn)
 

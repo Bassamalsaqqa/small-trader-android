@@ -794,7 +794,7 @@ class MerchantRound3EngineeringTest {
         val infRes = repo.recordStructuredPurchaseBill(supplier.id, listOf(infLine), 0.0, repo.getCurrentSession())
         assertTrue("Infinity cost must be rejected", infRes.isFailure)
 
-        // 2. Duplicate SKU aggregation policy
+        // 2. Duplicate SKU policy: preserves exact priced lines without weighted rounding loss
         val lineA = PurchaseLineItem(
             productId = "p_olive_oil",
             productNameAr = "زيت زيتون",
@@ -809,13 +809,15 @@ class MerchantRound3EngineeringTest {
             quantity = 15,
             unitCostIls = 24.0
         )
-        // Total expected = 5*20 + 15*24 = 100 + 360 = 460 ILS, totalQty = 20, avg cost = 23.0
+        // Total expected = 5*20 + 15*24 = 100 + 360 = 460 ILS, preserving separate exact priced lines
         val dupRes = repo.recordStructuredPurchaseBill(supplier.id, listOf(lineA, lineB), 0.0, repo.getCurrentSession())
-        assertTrue("Duplicate SKU aggregation must succeed", dupRes.isSuccess)
+        assertTrue("Duplicate SKU structured bill must succeed", dupRes.isSuccess)
         val bill = dupRes.getOrNull()!!
         assertEquals("Authoritative total must be exactly 460.00 ILS", 460.00, bill.totalIls, 0.001)
-        assertEquals("Duplicate SKU must be aggregated into 1 line", 1, bill.lines.size)
-        assertEquals(20, bill.lines.first().quantity)
-        assertEquals(23.0, bill.lines.first().unitCostIls, 0.001)
+        assertEquals("Exact priced lines must be preserved without rounding loss", 2, bill.lines.size)
+        assertEquals(5, bill.lines[0].quantity)
+        assertEquals(20.0, bill.lines[0].unitCostIls, 0.001)
+        assertEquals(15, bill.lines[1].quantity)
+        assertEquals(24.0, bill.lines[1].unitCostIls, 0.001)
     }
 }
