@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.smalltrader.app/mobile/v1/bootstrap-response.json",
+  "title": "BootstrapResponse",
+  "type": "object",
+  "required": [
+    "company_id",
+    "company_name",
+    "base_currency",
+    "walk_in_customer_id",
+    "staff",
+    "offline_policy",
+    "catalog_snapshot_version"
+  ],
+  "properties": {
+    "company_id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "company_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "base_currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "walk_in_customer_id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "staff": {
+      "type": "object",
+      "required": ["id", "name", "role", "permissions"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string",
+          "enum": ["cashier", "manager", "admin"]
+        },
+        "permissions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "offline_policy": {
+      "type": "object",
+      "required": ["enabled", "cash_only", "max_offline_hours", "max_offline_sales_count", "max_offline_total_amount"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "cash_only": {
+          "type": "boolean"
+        },
+        "max_offline_hours": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_offline_sales_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_offline_total_amount": {
+          "type": "string",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "catalog_snapshot_version": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

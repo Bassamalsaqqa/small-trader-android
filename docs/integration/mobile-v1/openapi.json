@@ -1,0 +1,449 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Small Trader Mobile API v1",
+    "version": "1.0.0",
+    "description": "PROPOSED NOT LIVE: Native REST API specification for Small Trader Android client integration with Laravel backend (account baseline f8a0cf7012c4875bec7320d42e0f8dde58593b52, Android baseline 79c9bb348f7ad4840842aa077f1820f75745d2a0)."
+  },
+  "servers": [
+    {
+      "url": "https://api.smalltrader.app",
+      "description": "Staging server (PROPOSED NOT LIVE)"
+    }
+  ],
+  "paths": {
+    "/api/mobile/v1/auth/challenge": {
+      "post": {
+        "summary": "Request cryptographic authentication challenge",
+        "operationId": "authChallenge",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "schemas/auth-challenge-request.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Challenge issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/auth-challenge-response.json"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mobile/v1/auth/login": {
+      "post": {
+        "summary": "Authenticate device and staff credentials",
+        "operationId": "authLogin",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "schemas/auth-login-request.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authentication successful, token issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/auth-login-response.json"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials or challenge expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mobile/v1/auth/logout": {
+      "post": {
+        "summary": "Revoke active device session token",
+        "operationId": "authLogout",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "schemas/auth-logout-request.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logged out successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/auth-logout-response.json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mobile/v1/devices/{deviceId}/revoke": {
+      "post": {
+        "summary": "Revoke device and terminate all issued tokens",
+        "operationId": "deviceRevoke",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "schemas/device-revoke-request.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Device revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/device-revoke-response.json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mobile/v1/companies/{companyId}/bootstrap": {
+      "get": {
+        "summary": "Bootstrap tenant configuration, permissions, and offline policy",
+        "operationId": "bootstrapCompany",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bootstrap payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/bootstrap-response.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden (tenant mismatch or revoked membership)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mobile/v1/companies/{companyId}/products": {
+      "get": {
+        "summary": "Retrieve active sellable product catalog with exact decimal prices",
+        "operationId": "listProducts",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Product catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/product-catalog-response.json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mobile/v1/companies/{companyId}/customers": {
+      "get": {
+        "summary": "Retrieve customer directory including walk-in identifier",
+        "operationId": "listCustomers",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Customer directory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/customer-directory-response.json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mobile/v1/companies/{companyId}/sales/preview": {
+      "post": {
+        "summary": "Generate server-authoritative exact pricing preview and confirmation token",
+        "operationId": "previewSale",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "schemas/sale-preview-request.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pricing preview with confirmation token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/sale-preview-response.json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mobile/v1/companies/{companyId}/sales/commit": {
+      "post": {
+        "summary": "Atomically commit an online sale using reviewed preview token",
+        "operationId": "commitSale",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "schemas/sale-commit-request.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sale committed atomically",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/sale-commit-response.json"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict: same client event ID with altered payload digest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mobile/v1/companies/{companyId}/offline-events": {
+      "post": {
+        "summary": "Submit an offline-captured cash sale event for canonical reconciliation",
+        "operationId": "intakeOfflineEvent",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "schemas/offline-sale-intake-request.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Intake processed (posted or parked for manager resolution)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/offline-sale-intake-response.json"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict: same client event ID with altered payload digest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mobile/v1/companies/{companyId}/offline-events/{clientEventId}/status": {
+      "get": {
+        "summary": "Query status and official receipt reconciliation for a client event ID",
+        "operationId": "getEventStatus",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            }
+          },
+          {
+            "name": "clientEventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current status and official invoice reconciliation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/sale-event-status-response.json"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "Sanctum"
+      }
+    }
+  }
+}

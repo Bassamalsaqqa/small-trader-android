@@ -1,0 +1,29 @@
+{
+  "company_id": "c1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c",
+  "catalog_snapshot_version": "snap-20261110-v1",
+  "generated_at": "2026-11-10T12:00:00Z",
+  "products": [
+    {
+      "id": "f7d3a2b1-1234-4567-89ab-cdef01234567",
+      "sku": "SKU-OLIVE-OIL-1L",
+      "barcode": "6291041001234",
+      "name": "Extra Virgin Olive Oil 1L",
+      "unit_price": "25.00",
+      "tax_rate": "0.1600",
+      "is_tracked": true,
+      "available_quantity": "142.000",
+      "unit_of_measure": "bottle"
+    },
+    {
+      "id": "a9e8d7c6-b5a4-3210-fedc-ba9876543210",
+      "sku": "SKU-FLOUR-BULK",
+      "barcode": null,
+      "name": "Wheat Flour Bulk",
+      "unit_price": "4.50",
+      "tax_rate": "0.0000",
+      "is_tracked": true,
+      "available_quantity": "520.500",
+      "unit_of_measure": "kg"
+    }
+  ]
+}

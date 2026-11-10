@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.smalltrader.app/mobile/v1/offline-sale-intake-response.json",
+  "title": "OfflineSaleIntakeResponse",
+  "type": "object",
+  "required": ["client_event_id", "status", "payload_digest", "outcome", "processed_at"],
+  "properties": {
+    "client_event_id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["posted", "parked_conflict"]
+    },
+    "payload_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "outcome": {
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["posted_canonically", "parked_for_manager_resolution"]
+        },
+        "invoice_id": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "invoice_number": {
+          "type": ["string", "null"]
+        },
+        "payment_id": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "grand_total": {
+          "type": ["string", "null"],
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+        },
+        "conflict_code": {
+          "type": ["string", "null"],
+          "enum": [
+            null,
+            "OFFLINE_POLICY_DISABLED",
+            "PRICE_SNAPSHOT_MISMATCH",
+            "STOCK_EXHAUSTED",
+            "ACTOR_REVOKED",
+            "DEVICE_REVOKED",
+            "PAYLOAD_MISMATCH_CONFLICT"
+          ]
+        },
+        "conflict_reason": {
+          "type": ["string", "null"]
+        },
+        "resolution_instructions": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "processed_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

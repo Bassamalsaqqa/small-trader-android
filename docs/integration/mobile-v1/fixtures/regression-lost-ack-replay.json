@@ -1,0 +1,42 @@
+{
+  "scenario": "Network drops after server commit; client retries intake with identical event ID and identical digest. Server returns existing canonical outcome without regenerating invoice sequences.",
+  "first_submission": {
+    "client_event_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "payload_digest": "sha256:95d91224f0904b6dd13e1baee18aabaef28e4e5a080808c126632f7762b89a37",
+    "committed_at": "2026-11-10T12:02:10Z",
+    "result": {
+      "status": "posted",
+      "invoice_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "invoice_number": "INV-2026-00042",
+      "payment_id": "8c7b6a5d-4e3f-2a1b-0c9d-8e7f6a5b4c3d",
+      "grand_total": "58.00"
+    }
+  },
+  "lost_ack_event": "HTTP socket timeout on client; Android receives no response; client event status remains UNKNOWN_ACK in local Room database.",
+  "retry_submission": {
+    "client_event_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "payload_digest": "sha256:95d91224f0904b6dd13e1baee18aabaef28e4e5a080808c126632f7762b89a37"
+  },
+  "server_behavior": {
+    "db_lookup": "UNIQUE KEY match on (company_id, client_event_id)",
+    "digest_comparison": "hash_equals(stored.payload_digest, request.payload_digest) === true",
+    "regeneration_check": "NO new SalesInvoice, NO new CustomerPayment, NO new journal batch created",
+    "expected_status": 200,
+    "response": {
+      "client_event_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "status": "posted",
+      "payload_digest": "sha256:95d91224f0904b6dd13e1baee18aabaef28e4e5a080808c126632f7762b89a37",
+      "outcome": {
+        "action": "posted_canonically",
+        "invoice_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "invoice_number": "INV-2026-00042",
+        "payment_id": "8c7b6a5d-4e3f-2a1b-0c9d-8e7f6a5b4c3d",
+        "grand_total": "58.00",
+        "conflict_code": null,
+        "conflict_reason": null,
+        "resolution_instructions": null
+      },
+      "processed_at": "2026-11-10T12:02:10Z"
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "scenario": "Staff revoked while disconnected. Disconnected cash sale captured locally is parked for manager resolution; physical cash record is never silently dropped.",
+  "revocation_event": {
+    "actor_id": "550e8400-e29b-41d4-a716-446655440000",
+    "revocation_action": "Administrator terminated cashier staff account while device was offline",
+    "revoked_at": "2026-11-10T13:30:00Z"
+  },
+  "intake_submission": {
+    "client_event_id": "4ab96f75-6828-4673-c40d-3da74f77bfa7",
+    "device_id": "8e2b8bc6-f80c-4034-8c88-59368d1f2e10",
+    "captured_at": "2026-11-10T14:00:00Z",
+    "payload_digest": "sha256:3964814a1b8dbf68d3e0cfdae4f53063d1820f724fd16677aba534add6d5cfd5",
+    "event": {
+      "client_event_id": "4ab96f75-6828-4673-c40d-3da74f77bfa7",
+      "device_id": "8e2b8bc6-f80c-4034-8c88-59368d1f2e10",
+      "captured_at": "2026-11-10T14:00:00Z",
+      "customer_id": "b1e847c2-550a-4a24-9b88-874246011c34",
+      "currency": "ILS",
+      "catalog_snapshot_version": "snap-20261110-v1",
+      "local_receipt_number": "REC-OFF-00043",
+      "lines": [
+        {
+          "product_id": "f7d3a2b1-1234-4567-89ab-cdef01234567",
+          "quantity": "1.000",
+          "unit_price": "25.00",
+          "tax_rate": "0.1600",
+          "tax_amount": "4.00",
+          "line_total": "29.00"
+        }
+      ],
+      "payment": {
+        "mode": "cash",
+        "amount_tendered": "50.00",
+        "amount_settled": "29.00",
+        "change_returned": "21.00"
+      }
+    }
+  },
+  "expected_status": 200,
+  "expected_response": {
+    "client_event_id": "4ab96f75-6828-4673-c40d-3da74f77bfa7",
+    "status": "parked_conflict",
+    "payload_digest": "sha256:3964814a1b8dbf68d3e0cfdae4f53063d1820f724fd16677aba534add6d5cfd5",
+    "outcome": {
+      "action": "parked_for_manager_resolution",
+      "invoice_id": null,
+      "invoice_number": null,
+      "payment_id": null,
+      "grand_total": null,
+      "conflict_code": "ACTOR_REVOKED",
+      "conflict_reason": "Submitting operator account was revoked prior to synchronization.",
+      "resolution_instructions": "Review physical cash drawer reconciliation and manually approve or reject posting via Manager portal."
+    },
+    "processed_at": "2026-11-10T14:05:00Z"
+  }
+}

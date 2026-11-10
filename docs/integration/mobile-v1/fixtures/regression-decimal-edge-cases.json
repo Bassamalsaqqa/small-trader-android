@@ -1,0 +1,36 @@
+{
+  "scenario": "Exact arbitrary-precision decimal strings must preserve scales and prevent IEEE-754 binary floating point precision loss",
+  "test_cases": [
+    {
+      "name": "fractional_weighted_item",
+      "quantity": "0.333",
+      "unit_price": "19.99",
+      "subtotal": "6.65667",
+      "tax_rate": "0.1600",
+      "tax_amount": "1.065067200",
+      "line_total_exact": "7.721737200",
+      "line_total_rounded_bankers": "7.72",
+      "float_danger": "0.333 * 19.99 in binary float gives 6.6566700000000005, introducing rounding drift in financial ledgers"
+    },
+    {
+      "name": "high_precision_unit_cost",
+      "quantity": "10000.000",
+      "unit_price": "0.0125",
+      "line_total": "125.0000000",
+      "line_total_standard": "125.00"
+    },
+    {
+      "name": "large_transaction_total",
+      "quantity": "1000.000",
+      "unit_price": "98765.43",
+      "line_total": "98765430.00"
+    },
+    {
+      "name": "exact_three_cent_sum",
+      "line_1": "0.10",
+      "line_2": "0.20",
+      "exact_sum": "0.30",
+      "float_corrupted_sum": "0.30000000000000004"
+    }
+  ]
+}

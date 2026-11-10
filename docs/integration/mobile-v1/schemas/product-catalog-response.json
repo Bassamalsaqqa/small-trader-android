@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.smalltrader.app/mobile/v1/product-catalog-response.json",
+  "title": "ProductCatalogResponse",
+  "type": "object",
+  "required": ["company_id", "catalog_snapshot_version", "generated_at", "products"],
+  "properties": {
+    "company_id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "catalog_snapshot_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "products": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "sku",
+          "name",
+          "unit_price",
+          "tax_rate",
+          "is_tracked",
+          "available_quantity",
+          "unit_of_measure"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          },
+          "sku": {
+            "type": "string",
+            "minLength": 1
+          },
+          "barcode": {
+            "type": ["string", "null"]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "unit_price": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+          },
+          "tax_rate": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$"
+          },
+          "is_tracked": {
+            "type": "boolean"
+          },
+          "available_quantity": {
+            "type": "string",
+            "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+          },
+          "unit_of_measure": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

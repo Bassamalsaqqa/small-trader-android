@@ -1,0 +1,25 @@
+{
+  "company_id": "c1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c",
+  "company_name": "Al-Amal Retail Company",
+  "base_currency": "ILS",
+  "walk_in_customer_id": "b1e847c2-550a-4a24-9b88-874246011c34",
+  "staff": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Ahmad Cashier",
+    "role": "cashier",
+    "permissions": [
+      "sales.create",
+      "sales.read",
+      "customers.read",
+      "products.read"
+    ]
+  },
+  "offline_policy": {
+    "enabled": false,
+    "cash_only": true,
+    "max_offline_hours": 12,
+    "max_offline_sales_count": 50,
+    "max_offline_total_amount": "5000.00"
+  },
+  "catalog_snapshot_version": "snap-20261110-v1"
+}
