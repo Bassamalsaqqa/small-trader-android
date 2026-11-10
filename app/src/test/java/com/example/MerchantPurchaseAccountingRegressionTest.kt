@@ -438,15 +438,15 @@ class MerchantPurchaseAccountingRegressionTest {
 
     /**
      * P0 #3: ActivityScenario Android Activity Recreation.
-     * Verifies parent dialog open flag and state survival across Activity recreation.
+     * Verifies parent dialog open flag and state survival across Activity recreation on the actual MainActivity.
      */
     @Test
     fun regressionP0_3_activityScenario_activityRecreation_preservesDialogOpenFlag() {
         val scenario = ActivityScenario.launch(MainActivity::class.java)
 
         scenario.onActivity { activity ->
-            // Access TraderViewModel and open purchase dialog
-            val vm = TraderViewModel()
+            // Access actual MainActivity ViewModel and open purchase dialog
+            val vm = androidx.lifecycle.ViewModelProvider(activity)[TraderViewModel::class.java]
             vm.openReceivePurchaseDialog(true)
             assertTrue("Dialog open flag must be true in ViewModel state", vm.uiState.value.isReceivePurchaseDialogOpen)
         }
@@ -455,8 +455,10 @@ class MerchantPurchaseAccountingRegressionTest {
         scenario.recreate()
 
         scenario.onActivity { activity ->
-            // Activity recreated successfully without crashing
-            assertNotNull(activity)
+            // Verify recreated activity retains dialog state from retained ViewModel
+            assertNotNull("Recreated activity must not be null", activity)
+            val vm = androidx.lifecycle.ViewModelProvider(activity)[TraderViewModel::class.java]
+            assertTrue("Dialog open flag must survive Activity recreation on actual MainActivity", vm.uiState.value.isReceivePurchaseDialogOpen)
         }
         scenario.close()
     }
