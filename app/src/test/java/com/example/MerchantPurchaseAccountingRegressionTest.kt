@@ -1,6 +1,9 @@
 package com.example
 
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -15,8 +18,11 @@ import com.example.data.OfflineDemoTraderRepository
 import com.example.model.AppLanguage
 import com.example.model.PurchaseBill
 import com.example.model.PurchaseLineItem
+import com.example.model.Supplier
 import com.example.ui.screens.PurchaseBillMode
+import com.example.ui.screens.PurchasesScreen
 import com.example.ui.screens.ReceivePurchaseBillDialog
+import com.example.ui.screens.SupplierDetailScreen
 import com.example.ui.theme.SmallTraderTheme
 import com.example.viewmodel.TraderUiState
 import com.example.viewmodel.TraderViewModel
@@ -461,5 +467,285 @@ class MerchantPurchaseAccountingRegressionTest {
             assertTrue("Dialog open flag must survive Activity recreation on actual MainActivity", vm.uiState.value.isReceivePurchaseDialogOpen)
         }
         scenario.close()
+    }
+
+    /**
+     * P0: Genuine Compose -> real MainActivity/ViewModel -> repo regression (PurchasesScreen path).
+     * Creates two same-SKU lines (2x10 + 1x20 = 40), selects SECOND line, receives 1.
+     * Verifies exactly second line received 1, first 0, pending 2/0, stock +1, supplier payable unchanged.
+     * Re-opening GRN on fully received line verifies Confirm is DISABLED (no original quantity fallback).
+     */
+    @Test
+    fun regressionP0_grn_purchasesPath_composeToViewModelToRepo_secondLineSelected_exactSecondReceived_confirmDisabledWhenFullyReceived() {
+        val repo = OfflineDemoTraderRepository()
+        val supplier = repo.getSuppliers().first()
+        val trackedProduct = repo.getProducts().first { it.id == "p_olive_oil" && it.isStockTracked }
+        val stockBefore = trackedProduct.stockCount
+        val initialSupplierBalance = supplier.balanceOwedIls
+
+        // Create bill with two separate lines for same SKU: 2x10 + 1x20 = 40
+        val line1 = PurchaseLineItem(
+            productId = trackedProduct.id,
+            productNameAr = "زيت زيتون بكر",
+            productNameEn = "Olive Oil Extra",
+            quantity = 2,
+            unitCostIls = 10.0
+        )
+        val line2 = PurchaseLineItem(
+            productId = trackedProduct.id,
+            productNameAr = "زيت زيتون بكر",
+            productNameEn = "Olive Oil Extra",
+            quantity = 1,
+            unitCostIls = 20.0
+        )
+        val billRes = repo.recordStructuredPurchaseBill(supplier.id, listOf(line1, line2), 0.0, repo.getCurrentSession())
+        assertTrue("Bill creation must succeed", billRes.isSuccess)
+        val bill = billRes.getOrNull()!!
+
+        val viewModel = TraderViewModel(repo)
+
+        // Wire exactly as in MainActivity.kt
+        composeTestRule.setContent {
+            val state by viewModel.uiState.collectAsState()
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                PurchasesScreen(
+                    state = state,
+                    onNewPurchase = {},
+                    onSupplier = {},
+                    onConfirmPhysicalGoodsReceipt = { billId, productId, qty, note ->
+                        viewModel.confirmPhysicalGoodsReceipt(billId, productId, qty, note)
+                    },
+                    onConfirmPhysicalGoodsReceiptResult = { billId, productId, qty, note, opId, lineId ->
+                        viewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, opId, lineId)
+                    }
+                )
+            }
+        }
+
+        // 1. Open bill detail from list
+        composeTestRule.onNodeWithTag("purchase_bill_${bill.id}").performClick()
+        composeTestRule.waitForIdle()
+
+        // 2. Click Receive Goods (GRN) button in detail view
+        composeTestRule.onNodeWithTag("receive_goods_button").performClick()
+        composeTestRule.waitForIdle()
+
+        // 3. Deliberately select the SECOND line chip
+        val line2Id = bill.lines[1].id
+        composeTestRule.onNodeWithTag("grn_line_chip_$line2Id").performClick()
+        composeTestRule.waitForIdle()
+
+        // 4. Assert receiving qty defaults to second line max (1) and confirm
+        composeTestRule.onNodeWithTag("grn_qty_input").assertTextContains("1", substring = true)
+        composeTestRule.onNodeWithTag("confirm_grn_submit_button").performClick()
+        composeTestRule.waitForIdle()
+
+        // 5. Verify authoritative repository state: exactly second line received 1, first received 0
+        val updatedBill = repo.getPurchaseBills().first { it.id == bill.id }
+        assertEquals("First line must remain 0 received", 0, updatedBill.lines[0].receivedQuantity)
+        assertEquals("First line pending must remain 2", 2, updatedBill.lines[0].pendingQuantity)
+        assertEquals("Second line must be exactly 1 received", 1, updatedBill.lines[1].receivedQuantity)
+        assertEquals("Second line pending must be 0", 0, updatedBill.lines[1].pendingQuantity)
+        assertTrue("Second line must be fully received", updatedBill.lines[1].isReceived)
+        assertFalse("Bill as a whole is not fully received yet", updatedBill.isReceived)
+        assertTrue("Bill is partially received", updatedBill.isPartiallyReceived)
+
+        // 6. Stock incremented by exactly 1
+        val updatedProduct = repo.getProducts().first { it.id == trackedProduct.id }
+        assertEquals("Stock must increase by exactly 1", stockBefore + 1, updatedProduct.stockCount)
+
+        // 7. Supplier payable owed unchanged (goods receipt does not alter liabilities)
+        val updatedSupplier = repo.getSuppliers().first { it.id == supplier.id }
+        assertEquals("Supplier payable must remain exactly 40.00 ILS", initialSupplierBalance + 40.0, updatedSupplier.balanceOwedIls, 0.001)
+
+        // 8. Re-open GRN dialog on the same bill to verify fully received line selection disables Confirm
+        composeTestRule.onNodeWithTag("receive_goods_button").performClick()
+        composeTestRule.waitForIdle()
+
+        // Select the second line which is now fully received (pending 0)
+        composeTestRule.onNodeWithTag("grn_line_chip_$line2Id").performClick()
+        composeTestRule.waitForIdle()
+
+        // Assert Confirm button is DISABLED and fully received banner is displayed
+        composeTestRule.onNodeWithTag("confirm_grn_submit_button").assertIsNotEnabled()
+        composeTestRule.onNodeWithTag("grn_line_fully_received_banner").assertIsDisplayed()
+    }
+
+    /**
+     * P0: Genuine Compose -> real MainActivity/ViewModel -> repo regression (SuppliersScreen path).
+     * Verifies the SuppliersScreen / SupplierDetailScreen callback wiring carries lineId.
+     */
+    @Test
+    fun regressionP0_grn_suppliersPath_composeToViewModelToRepo_secondLineSelected_exactSecondReceived() {
+        val repo = OfflineDemoTraderRepository()
+        val supplier = repo.getSuppliers().first()
+        val trackedProduct = repo.getProducts().first { it.id == "p_olive_oil" && it.isStockTracked }
+        val stockBefore = trackedProduct.stockCount
+        val initialSupplierBalance = supplier.balanceOwedIls
+
+        // Create bill with two separate lines for same SKU: 2x10 + 1x20 = 40
+        val line1 = PurchaseLineItem(
+            productId = trackedProduct.id,
+            productNameAr = "زيت زيتون بكر",
+            productNameEn = "Olive Oil Extra",
+            quantity = 2,
+            unitCostIls = 10.0
+        )
+        val line2 = PurchaseLineItem(
+            productId = trackedProduct.id,
+            productNameAr = "زيت زيتون بكر",
+            productNameEn = "Olive Oil Extra",
+            quantity = 1,
+            unitCostIls = 20.0
+        )
+        val billRes = repo.recordStructuredPurchaseBill(supplier.id, listOf(line1, line2), 0.0, repo.getCurrentSession())
+        assertTrue("Bill creation must succeed", billRes.isSuccess)
+        val bill = billRes.getOrNull()!!
+
+        val viewModel = TraderViewModel(repo)
+        // Select supplier for detail
+        viewModel.selectSupplierForDetail(supplier)
+
+        // Wire exactly as in MainActivity.kt
+        composeTestRule.setContent {
+            val state by viewModel.uiState.collectAsState()
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                SupplierDetailScreen(
+                    state = state,
+                    onBack = {},
+                    onPaySupplier = { _, _ -> true },
+                    onPaySupplierResult = { sup, amount, paymentId ->
+                        viewModel.paySupplierAmountResult(sup.id, amount, paymentId = paymentId)
+                    },
+                    onOpenReceivePurchaseDialog = {},
+                    onConfirmGoodsReceipt = viewModel::confirmPhysicalGoodsReceipt,
+                    onConfirmGoodsReceiptResult = { billId, productId, qty, note, opId, lineId ->
+                        viewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, opId, lineId)
+                    }
+                )
+            }
+        }
+
+        // 1. Open GRN dialog from supplier bill row
+        composeTestRule.onNodeWithTag("open_grn_dialog_button_${bill.billNumber}").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+
+        // 2. Select SECOND line chip
+        val line2Id = bill.lines[1].id
+        composeTestRule.onNodeWithTag("grn_line_chip_$line2Id").performClick()
+        composeTestRule.waitForIdle()
+
+        // 3. Confirm GRN
+        composeTestRule.onNodeWithTag("confirm_grn_submit_button").performClick()
+        composeTestRule.waitForIdle()
+
+        // 4. Assert authoritative repository state
+        val updatedBill = repo.getPurchaseBills().first { it.id == bill.id }
+        assertEquals("First line must remain 0 received", 0, updatedBill.lines[0].receivedQuantity)
+        assertEquals("First line pending must remain 2", 2, updatedBill.lines[0].pendingQuantity)
+        assertEquals("Second line must be exactly 1 received", 1, updatedBill.lines[1].receivedQuantity)
+        assertEquals("Second line pending must be 0", 0, updatedBill.lines[1].pendingQuantity)
+
+        val updatedProduct = repo.getProducts().first { it.id == trackedProduct.id }
+        assertEquals("Stock must increment by exactly 1", stockBefore + 1, updatedProduct.stockCount)
+
+        val updatedSupplier = repo.getSuppliers().first { it.id == supplier.id }
+        assertEquals("Supplier payable owed must remain unchanged", initialSupplierBalance + 40.0, updatedSupplier.balanceOwedIls, 0.001)
+    }
+
+    /**
+     * P0: Guard negative cases for operationId replay against conflicting line/bill,
+     * and multiline mandatory lineId enforcement.
+     */
+    @Test
+    fun regressionP0_grn_negativeCases_idempotentOperationGuards_and_multilineMandatoryLineId() {
+        val repo = OfflineDemoTraderRepository()
+        val supplier = repo.getSuppliers().first()
+        val trackedProduct = repo.getProducts().first { it.id == "p_olive_oil" && it.isStockTracked }
+        val stockInitial = trackedProduct.stockCount
+
+        val line1 = PurchaseLineItem(productId = trackedProduct.id, quantity = 2, unitCostIls = 10.0)
+        val line2 = PurchaseLineItem(productId = trackedProduct.id, quantity = 1, unitCostIls = 20.0)
+        val bill1 = repo.recordStructuredPurchaseBill(supplier.id, listOf(line1, line2), 0.0, repo.getCurrentSession()).getOrNull()!!
+
+        val line3 = PurchaseLineItem(productId = trackedProduct.id, quantity = 3, unitCostIls = 15.0)
+        val bill2 = repo.recordStructuredPurchaseBill(supplier.id, listOf(line3), 0.0, repo.getCurrentSession()).getOrNull()!!
+
+        // 1. Initial valid GRN with stable operationId
+        val stableOpId = "op_idempotent_test_unique"
+        val res1 = repo.confirmPhysicalGoodsReceipt(
+            billId = bill1.id,
+            productId = trackedProduct.id,
+            receivedQty = 1,
+            batchNote = "initial receipt",
+            operator = repo.getCurrentSession(),
+            operationId = stableOpId,
+            lineId = bill1.lines[0].id
+        )
+        assertTrue("Initial GRN must succeed", res1.isSuccess)
+        assertEquals("Stock must be +1", stockInitial + 1, repo.getProducts().first { it.id == trackedProduct.id }.stockCount)
+
+        // 2. Negative guard: Same operationId on DIFFERENT bill MUST reject with no mutations
+        val conflictBillRes = repo.confirmPhysicalGoodsReceipt(
+            billId = bill2.id,
+            productId = trackedProduct.id,
+            receivedQty = 1,
+            batchNote = "initial receipt",
+            operator = repo.getCurrentSession(),
+            operationId = stableOpId,
+            lineId = bill2.lines[0].id
+        )
+        assertTrue("Conflicting bill operationId must fail", conflictBillRes.isFailure)
+        assertTrue(
+            "Failure must indicate conflicting operation",
+            conflictBillRes.exceptionOrNull() is IllegalStateException
+        )
+        assertEquals("Stock must remain stockInitial + 1 (no mutation on conflict)", stockInitial + 1, repo.getProducts().first { it.id == trackedProduct.id }.stockCount)
+
+        // 3. Negative guard: Same operationId on DIFFERENT line of same bill MUST reject
+        val conflictLineRes = repo.confirmPhysicalGoodsReceipt(
+            billId = bill1.id,
+            productId = trackedProduct.id,
+            receivedQty = 1,
+            batchNote = "initial receipt",
+            operator = repo.getCurrentSession(),
+            operationId = stableOpId,
+            lineId = bill1.lines[1].id
+        )
+        assertTrue("Conflicting line operationId must fail", conflictLineRes.isFailure)
+        assertTrue(
+            "Failure must indicate conflicting operation",
+            conflictLineRes.exceptionOrNull() is IllegalStateException
+        )
+        assertEquals("Stock must remain stockInitial + 1", stockInitial + 1, repo.getProducts().first { it.id == trackedProduct.id }.stockCount)
+
+        // 4. Positive idempotent retry: Exact same bill, line, product, qty, note MUST return existing successfully
+        val retryRes = repo.confirmPhysicalGoodsReceipt(
+            billId = bill1.id,
+            productId = trackedProduct.id,
+            receivedQty = 1,
+            batchNote = "initial receipt",
+            operator = repo.getCurrentSession(),
+            operationId = stableOpId,
+            lineId = bill1.lines[0].id
+        )
+        assertTrue("Identical replay must succeed", retryRes.isSuccess)
+        assertEquals("Stock must still be stockInitial + 1 (no extra increment)", stockInitial + 1, repo.getProducts().first { it.id == trackedProduct.id }.stockCount)
+
+        // 5. Negative guard: Multi-line bill with MISSING lineId MUST reject (no first-pending SKU fallback)
+        val missingLineIdRes = repo.confirmPhysicalGoodsReceipt(
+            billId = bill1.id,
+            productId = trackedProduct.id,
+            receivedQty = 1,
+            batchNote = "missing lineId",
+            operator = repo.getCurrentSession(),
+            operationId = "op_new_missing_line",
+            lineId = null
+        )
+        assertTrue("Multi-line bill missing lineId must be rejected", missingLineIdRes.isFailure)
+        assertTrue(
+            "Failure must be IllegalArgumentException for missing lineId",
+            missingLineIdRes.exceptionOrNull() is IllegalArgumentException
+        )
     }
 }

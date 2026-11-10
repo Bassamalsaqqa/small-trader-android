@@ -704,7 +704,7 @@ fun SupplierDetailScreen(
     onLaunchConsumed: () -> Unit = {},
     onConfirmGoodsReceipt: ((billId: String, productId: String, receivedQty: Int, batchNote: String) -> Boolean)? = null,
     onPaySupplierResult: ((supplier: Supplier, amount: Double, paymentId: String) -> Result<SupplierPayment>)? = null,
-    onConfirmGoodsReceiptResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String) -> Result<StockMovement>)? = null
+    onConfirmGoodsReceiptResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String, lineId: String?) -> Result<StockMovement>)? = null
 ) {
     val paymentDraft = rememberSaveableStateHolder()
     val lang = state.language
@@ -1067,7 +1067,7 @@ fun SupplierDetailScreen(
                     PurchaseBillRow(
                         bill = bill,
                         lang = lang,
-                        canReceiveStock = canManageSuppliers && onConfirmGoodsReceipt != null,
+                        canReceiveStock = canManageSuppliers && (onConfirmGoodsReceiptResult != null || onConfirmGoodsReceipt != null),
                         onOpenReceiveGoodsDialog = { activeBillForGrn = bill }
                     )
                 }
@@ -1150,9 +1150,9 @@ fun SupplierDetailScreen(
             products = state.products,
             lang = lang,
             onDismiss = { activeBillForGrn = null },
-            onConfirmGrnResult = { operationId, productId, receivedQty, batchNote ->
+            onConfirmGrnResult = { operationId, productId, receivedQty, batchNote, lineId ->
                 if (onConfirmGoodsReceiptResult != null) {
-                    val res = onConfirmGoodsReceiptResult(currentGrnBill.id, productId, receivedQty, batchNote, operationId)
+                    val res = onConfirmGoodsReceiptResult(currentGrnBill.id, productId, receivedQty, batchNote, operationId, lineId)
                     if (res.isSuccess) {
                         activeBillForGrn = null
                     }

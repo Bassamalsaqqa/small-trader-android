@@ -145,8 +145,8 @@ fun SmallTraderApp(
                             onConfirmPhysicalGoodsReceipt = { billId, productId, qty, note ->
                                 traderViewModel.confirmPhysicalGoodsReceipt(billId, productId, qty, note)
                             },
-                            onConfirmPhysicalGoodsReceiptResult = { billId, productId, qty, note, operationId ->
-                                traderViewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, operationId)
+                            onConfirmPhysicalGoodsReceiptResult = { billId, productId, qty, note, operationId, lineId ->
+                                traderViewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, operationId, lineId)
                             }
                         )
                         TraderScreen.HOME -> {
@@ -402,7 +402,7 @@ fun SmallTraderApp(
                                 onDismissFeedback = traderViewModel::dismissSupplierFeedback,
                                 onSaveSupplier = traderViewModel::saveSupplier,
                                 onConfirmGoodsReceipt = traderViewModel::confirmPhysicalGoodsReceipt,
-                                onConfirmGoodsReceiptResult = { billId, productId, qty, note, opId -> traderViewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, opId) },
+                                onConfirmGoodsReceiptResult = { billId, productId, qty, note, opId, lineId -> traderViewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, opId, lineId) },
                                 launchPayment = state.pendingAction == MerchantAction.PAY,
                                 onLaunchConsumed = traderViewModel::consumeAction
                             )

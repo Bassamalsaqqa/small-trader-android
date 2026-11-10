@@ -305,9 +305,8 @@ fun PhysicalGoodsReceiptDialog(
     products: List<Product>,
     lang: AppLanguage,
     onDismiss: () -> Unit,
-    onConfirmGrnResult: (operationId: String, productId: String, receivedQty: Int, batchNote: String) -> Result<StockMovement>,
-    errorMessage: String? = null,
-    onConfirmGrnResultWithLine: ((operationId: String, productId: String, receivedQty: Int, batchNote: String, lineId: String?) -> Result<StockMovement>)? = null
+    onConfirmGrnResult: (operationId: String, productId: String, receivedQty: Int, batchNote: String, lineId: String?) -> Result<StockMovement>,
+    errorMessage: String? = null
 ) {
     var submissionId by rememberSaveable(bill.id) { mutableStateOf(UUID.randomUUID().toString()) }
 
@@ -331,7 +330,7 @@ fun PhysicalGoodsReceiptDialog(
         bill.pendingQuantity.coerceAtLeast(0)
     }
 
-    val maxReceivableQty = if (pendingQty > 0) pendingQty else (selectedLine?.quantity ?: bill.expectedQuantity).coerceAtLeast(0)
+    val maxReceivableQty = pendingQty.coerceAtLeast(0)
     var receivingQtyText by rememberSaveable(bill.id, selectedLineId) { mutableStateOf(maxReceivableQty.toString()) }
     val receivingQty = receivingQtyText.toIntOrNull() ?: 0
     val isQtyValid = receivingQty > 0 && receivingQty <= maxReceivableQty
@@ -412,13 +411,13 @@ fun PhysicalGoodsReceiptDialog(
                                     Text("${line.name(lang)} ($linePending)")
                                 },
                                 shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.testTag("grn_product_chip_${line.productId}")
+                                modifier = Modifier.testTag("grn_line_chip_${line.id}")
                             )
                         }
                     }
                 }
 
-                if (expectedProduct != null && maxReceivableQty > 0) {
+                if (expectedProduct != null) {
                     val unitStr = expectedProduct.unit(lang)
                     Surface(
                         shape = RoundedCornerShape(10.dp),
@@ -488,32 +487,53 @@ fun PhysicalGoodsReceiptDialog(
                         }
                     }
 
-                    OutlinedTextField(
-                        value = receivingQtyText,
-                        onValueChange = {
-                            receivingQtyText = WesternFormatters.sanitizeWesternDigits(it)
-                            grnInlineError = null
-                        },
-                        label = { Text(lang.tr("الكمية المستلمة الآن", "Quantity Received Now")) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
-                        isError = !isQtyValid && receivingQtyText.isNotBlank(),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("grn_qty_input")
-                    )
+                    if (maxReceivableQty > 0) {
+                        OutlinedTextField(
+                            value = receivingQtyText,
+                            onValueChange = {
+                                receivingQtyText = WesternFormatters.sanitizeWesternDigits(it)
+                                grnInlineError = null
+                            },
+                            label = { Text(lang.tr("الكمية المستلمة الآن", "Quantity Received Now")) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            isError = !isQtyValid && receivingQtyText.isNotBlank(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("grn_qty_input")
+                        )
 
-                    OutlinedTextField(
-                        value = batchNote,
-                        onValueChange = { batchNote = it },
-                        label = { Text(lang.tr("ملاحظة الاستلام المخزني", "Receipt Note")) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("grn_note_input")
-                    )
+                        OutlinedTextField(
+                            value = batchNote,
+                            onValueChange = { batchNote = it },
+                            label = { Text(lang.tr("ملاحظة الاستلام المخزني", "Receipt Note")) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("grn_note_input")
+                        )
+                    } else {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .testTag("grn_line_fully_received_banner")
+                        ) {
+                            Text(
+                                text = lang.tr(
+                                    "تم استلام هذا البند بالكامل مخزنياً (${WesternFormatters.formatInt(previouslyReceived)} من ${WesternFormatters.formatInt(selectedLine?.quantity ?: bill.expectedQuantity)}).",
+                                    "This line has been fully received (${WesternFormatters.formatInt(previouslyReceived)} of ${WesternFormatters.formatInt(selectedLine?.quantity ?: bill.expectedQuantity)})."
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
                 } else {
                     Text(
                         text = lang.tr(
@@ -529,11 +549,12 @@ fun PhysicalGoodsReceiptDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (!isSubmittingGrn && canConfirm && expectedProduct != null) {
+                    val prod = expectedProduct
+                    if (!isSubmittingGrn && canConfirm && prod != null) {
                         isSubmittingGrn = true
                         grnInlineError = null
-                        val result = onConfirmGrnResultWithLine?.invoke(submissionId, expectedProduct.id, receivingQty, batchNote, selectedLine?.id)
-                            ?: onConfirmGrnResult(submissionId, expectedProduct.id, receivingQty, batchNote)
+                        val lineIdToConfirm = selectedLine?.id?.takeIf { it.isNotBlank() } ?: bill.lines.firstOrNull()?.id
+                        val result = onConfirmGrnResult(submissionId, prod.id, receivingQty, batchNote, lineIdToConfirm)
                         isSubmittingGrn = false
                         if (result.isSuccess) {
                             onDismiss()
@@ -580,6 +601,27 @@ fun PhysicalGoodsReceiptDialog(
                 Text(lang.tr("إلغاء", "Cancel"))
             }
         }
+    )
+}
+
+@Composable
+fun PhysicalGoodsReceiptDialog(
+    bill: PurchaseBill,
+    products: List<Product>,
+    lang: AppLanguage,
+    onDismiss: () -> Unit,
+    onConfirmGrnResult: (operationId: String, productId: String, receivedQty: Int, batchNote: String) -> Result<StockMovement>,
+    errorMessage: String? = null
+) {
+    PhysicalGoodsReceiptDialog(
+        bill = bill,
+        products = products,
+        lang = lang,
+        onDismiss = onDismiss,
+        onConfirmGrnResult = { operationId, productId, receivedQty, batchNote, _ ->
+            onConfirmGrnResult(operationId, productId, receivedQty, batchNote)
+        },
+        errorMessage = errorMessage
     )
 }
 

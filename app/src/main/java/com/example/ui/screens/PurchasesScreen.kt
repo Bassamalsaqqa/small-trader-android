@@ -112,7 +112,7 @@ fun PurchasesScreen(
     onNewPurchase: () -> Unit,
     onSupplier: (Supplier) -> Unit,
     onConfirmPhysicalGoodsReceipt: ((String, String, Int, String) -> Boolean)? = null,
-    onConfirmPhysicalGoodsReceiptResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String) -> Result<StockMovement>)? = null
+    onConfirmPhysicalGoodsReceiptResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String, lineId: String?) -> Result<StockMovement>)? = null
 ) {
     if (!state.currentSession.canManageSuppliers()) return
     val lang = state.language
@@ -724,7 +724,7 @@ private fun PurchaseBillDetailView(
     onBack: () -> Unit,
     onSupplier: (Supplier) -> Unit,
     onConfirmPhysicalGoodsReceipt: ((String, String, Int, String) -> Boolean)?,
-    onConfirmPhysicalGoodsReceiptResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String) -> Result<StockMovement>)? = null
+    onConfirmPhysicalGoodsReceiptResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String, lineId: String?) -> Result<StockMovement>)? = null
 ) {
     var isGrnDialogOpen by rememberSaveable { mutableStateOf(false) }
 
@@ -1250,8 +1250,8 @@ private fun PurchaseBillDetailView(
                 lang = lang,
                 onDismiss = { isGrnDialogOpen = false },
                 errorMessage = if (state.isSupplierActionError) lang.tr(state.lastSupplierActionMessageAr.orEmpty(), state.lastSupplierActionMessageEn.orEmpty()).takeIf { it.isNotBlank() } else null,
-                onConfirmGrnResult = { operationId, productId, receivedQty, batchNote ->
-                    val res = onConfirmPhysicalGoodsReceiptResult(bill.id, productId, receivedQty, batchNote, operationId)
+                onConfirmGrnResult = { operationId, productId, receivedQty, batchNote, lineId ->
+                    val res = onConfirmPhysicalGoodsReceiptResult(bill.id, productId, receivedQty, batchNote, operationId, lineId)
                     if (res.isSuccess) {
                         isGrnDialogOpen = false
                     }

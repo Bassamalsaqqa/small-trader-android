@@ -88,6 +88,15 @@ interface TraderRepository {
     fun recordExpense(title: String, category: ExpenseCategory, amountIls: Double, operator: UserSession): Result<ExpenseEntry>
 }
 
+data class RecordedGrnOperation(
+    val billId: String,
+    val lineId: String,
+    val productId: String,
+    val receivedQty: Int,
+    val batchNote: String,
+    val movement: StockMovement
+)
+
 /**
  * In-memory reference implementation strictly adhering to accounting, stock, and role integrity.
  * This class is the single authoritative domain engine for local POS demo operations.
@@ -105,7 +114,7 @@ class OfflineDemoTraderRepository : TraderRepository {
     private val suppliers = SampleCatalog.initialSuppliers.toMutableList()
     private val purchaseBills = SampleCatalog.initialPurchaseBills.toMutableList()
     private val supplierPayments = mutableListOf<SupplierPayment>()
-    private val recordedGrnOperations = mutableMapOf<String, StockMovement>()
+    private val recordedGrnOperations = mutableMapOf<String, RecordedGrnOperation>()
     private val recordedSupplierPayments = mutableMapOf<String, SupplierPayment>()
     private val expenses = SampleCatalog.initialExpenses.toMutableList()
 
@@ -828,6 +837,26 @@ class OfflineDemoTraderRepository : TraderRepository {
         if (billId.isBlank()) {
             return Result.failure(IllegalArgumentException("معرف فاتورة الشراء غير صالح | Purchase bill ID cannot be blank"))
         }
+
+        // 1. Idempotent Replay Guard via stable operationId
+        if (operationId.isNotBlank()) {
+            val existing = recordedGrnOperations[operationId]
+            if (existing != null) {
+                val matchesBill = existing.billId == billId
+                val matchesLine = if (!lineId.isNullOrBlank()) existing.lineId == lineId else (existing.billId == billId && existing.productId == productId)
+                val matchesProduct = existing.productId == productId
+                val matchesQty = existing.receivedQty == receivedQty
+                val matchesNote = existing.batchNote == batchNote
+                if (matchesBill && matchesLine && matchesProduct && matchesQty && matchesNote) {
+                    return Result.success(existing.movement)
+                } else {
+                    return Result.failure(
+                        IllegalStateException("Conflicting GRN operation with ID $operationId already recorded with different payload: expected (billId=${existing.billId}, lineId=${existing.lineId}, product=${existing.productId}, delta=${existing.receivedQty}, note=${existing.batchNote}) but received (billId=$billId, lineId=$lineId, product=$productId, delta=$receivedQty, note=$batchNote)")
+                    )
+                }
+            }
+        }
+
         val billIdx = purchaseBills.indexOfFirst { it.id == billId }
         if (billIdx == -1) {
             return Result.failure(
@@ -836,23 +865,6 @@ class OfflineDemoTraderRepository : TraderRepository {
         }
         val bill = purchaseBills[billIdx]
         val billCode = WesternFormatters.formatBillCode(bill.billNumber)
-
-        // 1. Idempotent Replay Guard via stable operationId
-        if (operationId.isNotBlank()) {
-            val existing = recordedGrnOperations[operationId]
-            if (existing != null) {
-                val matchesPayload = existing.productId == productId &&
-                        existing.delta == receivedQty &&
-                        existing.reasonEn.contains(billCode)
-                if (matchesPayload) {
-                    return Result.success(existing)
-                } else {
-                    return Result.failure(
-                        IllegalStateException("Conflicting GRN operation with ID $operationId already recorded with different payload: expected (${existing.productId}, delta=${existing.delta}) but received ($productId, delta=$receivedQty)")
-                    )
-                }
-            }
-        }
 
         if (bill.isReceived) {
             return Result.failure(
@@ -868,6 +880,12 @@ class OfflineDemoTraderRepository : TraderRepository {
             )
         }
 
+        if (effectiveLines.size > 1 && lineId.isNullOrBlank()) {
+            return Result.failure(
+                IllegalArgumentException("الفاتورة $billCode تحتوي على بنود متعددة؛ يلزم تحديد معرف البند (lineId) بدقة لإتمام الاستلام المخزني | Structured multi-line bill $billCode requires specific lineId for goods receipt")
+            )
+        }
+
         val targetLineIndex = if (!lineId.isNullOrBlank()) {
             val idx = effectiveLines.indexOfFirst { it.id == lineId }
             if (idx == -1) {
@@ -878,16 +896,16 @@ class OfflineDemoTraderRepository : TraderRepository {
             }
             idx
         } else {
-            effectiveLines.indexOfFirst { it.productId == productId && it.pendingQuantity > 0 }
-                .takeIf { it != -1 } ?: effectiveLines.indexOfFirst { it.productId == productId }
+            val idx = effectiveLines.indexOfFirst { it.productId == productId }
+            if (idx == -1) {
+                val validSkus = effectiveLines.joinToString(", ") { it.productId }
+                return Result.failure(
+                    IllegalArgumentException("الصنف المختار ($productId) لا يطابق بنود فاتورة الشراء $billCode (البنود المؤهلة: $validSkus) | Selected product ($productId) does not match bill $billCode lines ($validSkus)")
+                )
+            }
+            idx
         }
 
-        if (targetLineIndex == -1) {
-            val validSkus = effectiveLines.joinToString(", ") { it.productId }
-            return Result.failure(
-                IllegalArgumentException("الصنف المختار ($productId) لا يطابق بنود فاتورة الشراء $billCode (البنود المؤهلة: $validSkus) | Selected product ($productId) does not match bill $billCode lines ($validSkus)")
-            )
-        }
         val targetLine = effectiveLines[targetLineIndex]
         val pendingQty = targetLine.pendingQuantity
         if (receivedQty <= 0 || receivedQty > pendingQty) {
@@ -938,7 +956,14 @@ class OfflineDemoTraderRepository : TraderRepository {
         )
         stockMovements.add(0, movement)
         if (operationId.isNotBlank()) {
-            recordedGrnOperations[operationId] = movement
+            recordedGrnOperations[operationId] = RecordedGrnOperation(
+                billId = billId,
+                lineId = targetLine.id,
+                productId = productId,
+                receivedQty = receivedQty,
+                batchNote = batchNote,
+                movement = movement
+            )
         }
         return Result.success(movement)
     }

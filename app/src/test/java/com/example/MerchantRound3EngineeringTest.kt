@@ -483,13 +483,16 @@ class MerchantRound3EngineeringTest {
         // 4. Multi-line Partial Goods Receiving
         val oilBefore = viewModel.uiState.value.products.first { it.id == "p_olive_oil" }.stockCount
         val zaatarBefore = viewModel.uiState.value.products.first { it.id == "p_zaatar_jenin" }.stockCount
+        val oilLineId = createdBill.lines.first { it.productId == "p_olive_oil" }.id
+        val zaatarLineId = createdBill.lines.first { it.productId == "p_zaatar_jenin" }.id
 
         // Receive 6 of 10 olive oil
         val grn1 = viewModel.confirmPhysicalGoodsReceiptResult(
             billId = createdBill.id,
             productId = "p_olive_oil",
             receivedQty = 6,
-            batchNote = "First batch oil receipt"
+            batchNote = "First batch oil receipt",
+            lineId = oilLineId
         )
         assertTrue("Receiving 6 of 10 oil units must succeed", grn1.isSuccess)
         val oilAfter1 = viewModel.uiState.value.products.first { it.id == "p_olive_oil" }.stockCount
@@ -505,7 +508,8 @@ class MerchantRound3EngineeringTest {
             billId = createdBill.id,
             productId = "p_zaatar_jenin",
             receivedQty = 4,
-            batchNote = "Full zaatar delivery"
+            batchNote = "Full zaatar delivery",
+            lineId = zaatarLineId
         )
         assertTrue("Receiving 4 zaatar units must succeed", grn2.isSuccess)
         val zaatarAfter = viewModel.uiState.value.products.first { it.id == "p_zaatar_jenin" }.stockCount
@@ -516,7 +520,8 @@ class MerchantRound3EngineeringTest {
             billId = createdBill.id,
             productId = "p_olive_oil",
             receivedQty = 4,
-            batchNote = "Final oil delivery"
+            batchNote = "Final oil delivery",
+            lineId = oilLineId
         )
         assertTrue("Receiving remaining 4 oil units must succeed", grn3.isSuccess)
         val updatedBillFinal = viewModel.uiState.value.purchaseBills.first { it.id == createdBill.id }
