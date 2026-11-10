@@ -105,7 +105,8 @@ class OutboxConfirmationVerificationTest {
                 deviceId = event.deviceId,
                 clientEventId = event.clientEventId,
                 payloadDigest = event.computePayloadDigest(),
-                serverUlid = serverUlid,
+                invoiceUlid = serverUlid,
+                paymentUlid = OutboxTestFixtures.SAMPLE_PAYMENT_ULID,
                 serverAcknowledgedAt = "2026-11-10T12:01:00Z",
                 claimToken = batch.claimToken
             )
@@ -139,7 +140,8 @@ class OutboxConfirmationVerificationTest {
                 deviceId = event.deviceId,
                 clientEventId = event.clientEventId,
                 payloadDigest = tamperedDigest,
-                serverUlid = serverUlid,
+                invoiceUlid = serverUlid,
+                paymentUlid = OutboxTestFixtures.SAMPLE_PAYMENT_ULID,
                 serverAcknowledgedAt = "2026-11-10T12:01:00Z",
                 claimToken = batch.claimToken
             )
@@ -178,7 +180,8 @@ class OutboxConfirmationVerificationTest {
                 deviceId = originalEvent.deviceId,
                 clientEventId = originalEvent.clientEventId,
                 payloadDigest = originalEvent.computePayloadDigest(),
-                serverUlid = serverUlid,
+                invoiceUlid = serverUlid,
+                paymentUlid = OutboxTestFixtures.SAMPLE_PAYMENT_ULID,
                 serverAcknowledgedAt = "2026-11-10T12:01:00Z",
                 claimToken = "dummy-token"
             )
@@ -203,7 +206,8 @@ class OutboxConfirmationVerificationTest {
                 deviceId = event.deviceId,
                 clientEventId = event.clientEventId,
                 payloadDigest = event.computePayloadDigest(),
-                serverUlid = serverUlid,
+                invoiceUlid = serverUlid,
+                paymentUlid = OutboxTestFixtures.SAMPLE_PAYMENT_ULID,
                 serverAcknowledgedAt = "2026-11-10T12:01:00Z",
                 claimToken = "some-token"
             )
@@ -219,7 +223,8 @@ class OutboxConfirmationVerificationTest {
                 deviceId = event.deviceId,
                 clientEventId = event.clientEventId,
                 payloadDigest = event.computePayloadDigest(),
-                serverUlid = serverUlid,
+                invoiceUlid = serverUlid,
+                paymentUlid = OutboxTestFixtures.SAMPLE_PAYMENT_ULID,
                 serverAcknowledgedAt = "2026-11-10T12:01:00Z",
                 claimToken = "some-token"
             )
@@ -312,9 +317,26 @@ class OutboxConfirmationVerificationTest {
         }
         assertTrue(ex.message!!.contains("Conflicting server mapping"))
 
-        // Original confirmation remains strictly preserved
+        // A changed payment mapping is equally invalid, through both acknowledgement paths.
+        val conflictingPayment = ServerUlid.parse("01JCV8X9MBV4W5X6Y7Z8666666")
+        assertThrows(InvalidAcknowledgementException::class.java) {
+            repository.confirmDelivery(
+                event.companyId, event.actorId, event.deviceId, event.clientEventId,
+                event.computePayloadDigest(), originalInvoice, conflictingPayment,
+                "2026-11-10T12:02:00Z", "any-token"
+            )
+        }
+        assertThrows(InvalidAcknowledgementException::class.java) {
+            repository.reconcileDeliveryConfirmation(
+                event.companyId, event.actorId, event.deviceId, event.clientEventId,
+                event.computePayloadDigest(), originalInvoice, conflictingPayment,
+                "2026-11-10T12:02:00Z"
+            )
+        }
+        // Original confirmation remains strictly preserved.
         val record = repository.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId)
         assertEquals(originalInvoice.value, record!!.deliveryState.invoiceUlid)
+        assertEquals(originalPayment.value, record.deliveryState.paymentUlid)
     }
 
     @Test
@@ -329,7 +351,8 @@ class OutboxConfirmationVerificationTest {
             deviceId = event.deviceId,
             clientEventId = event.clientEventId,
             payloadDigest = event.computePayloadDigest(),
-            serverUlid = OutboxTestFixtures.SAMPLE_INVOICE_ULID,
+            invoiceUlid = OutboxTestFixtures.SAMPLE_INVOICE_ULID,
+                paymentUlid = OutboxTestFixtures.SAMPLE_PAYMENT_ULID,
             serverAcknowledgedAt = "2026-11-10T12:01:00Z",
             claimToken = batch.claimToken
         )

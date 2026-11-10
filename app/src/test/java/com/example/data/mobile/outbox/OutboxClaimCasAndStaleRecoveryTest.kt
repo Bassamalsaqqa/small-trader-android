@@ -191,7 +191,8 @@ class OutboxClaimCasAndStaleRecoveryTest {
                 deviceId = event.deviceId,
                 clientEventId = event.clientEventId,
                 payloadDigest = event.computePayloadDigest(),
-                serverUlid = OutboxTestFixtures.SAMPLE_INVOICE_ULID,
+                invoiceUlid = OutboxTestFixtures.SAMPLE_INVOICE_ULID,
+                paymentUlid = OutboxTestFixtures.SAMPLE_PAYMENT_ULID,
                 serverAcknowledgedAt = "2026-11-10T12:01:00Z",
                 claimToken = batch1.claimToken // stale token!
             )
@@ -204,7 +205,8 @@ class OutboxClaimCasAndStaleRecoveryTest {
             deviceId = event.deviceId,
             clientEventId = event.clientEventId,
             payloadDigest = event.computePayloadDigest(),
-            serverUlid = OutboxTestFixtures.SAMPLE_INVOICE_ULID,
+            invoiceUlid = OutboxTestFixtures.SAMPLE_INVOICE_ULID,
+                paymentUlid = OutboxTestFixtures.SAMPLE_PAYMENT_ULID,
             serverAcknowledgedAt = "2026-11-10T12:01:00Z",
             claimToken = batch2.claimToken
         )

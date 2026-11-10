@@ -89,20 +89,6 @@ interface OutboxRepository {
     ): Boolean
 
     /**
-     * Overload for delivery confirmation with single server ULID (invoice).
-     */
-    fun confirmDelivery(
-        companyId: ServerUlid,
-        actorId: ServerUlid,
-        deviceId: ClientUuid,
-        clientEventId: ClientUuid,
-        payloadDigest: PayloadDigest,
-        serverUlid: ServerUlid,
-        serverAcknowledgedAt: String,
-        claimToken: String
-    ): Boolean
-
-    /**
      * Reconciles delivery confirmation from status query without worker claim token.
      * Explicit path separate from worker claims. Only transitions in_flight or unknown_ack.
      */
@@ -452,10 +438,10 @@ class OutboxRepositoryImpl(
 
             // Terminal check: CONFIRMED
             if (state.status == OutboxStatus.CONFIRMED.wireValue) {
-                val currentInvoice = state.invoiceUlid ?: state.serverUlid
+                val currentInvoice = state.invoiceUlid
                 val currentPayment = state.paymentUlid
                 val matches = currentInvoice == invoiceUlid.value &&
-                        (currentPayment == null || currentPayment == paymentUlid.value)
+                        currentPayment == paymentUlid.value
                 if (matches) {
                     // Exact mapping replay: return true without mutating existing record
                     return@runInTransaction true
@@ -506,29 +492,6 @@ class OutboxRepositoryImpl(
         }
     }
 
-    override fun confirmDelivery(
-        companyId: ServerUlid,
-        actorId: ServerUlid,
-        deviceId: ClientUuid,
-        clientEventId: ClientUuid,
-        payloadDigest: PayloadDigest,
-        serverUlid: ServerUlid,
-        serverAcknowledgedAt: String,
-        claimToken: String
-    ): Boolean {
-        return confirmDelivery(
-            companyId = companyId,
-            actorId = actorId,
-            deviceId = deviceId,
-            clientEventId = clientEventId,
-            payloadDigest = payloadDigest,
-            invoiceUlid = serverUlid,
-            paymentUlid = serverUlid,
-            serverAcknowledgedAt = serverAcknowledgedAt,
-            claimToken = claimToken
-        )
-    }
-
     override fun reconcileDeliveryConfirmation(
         companyId: ServerUlid,
         actorId: ServerUlid,
@@ -567,10 +530,10 @@ class OutboxRepositoryImpl(
             }
 
             if (state.status == OutboxStatus.CONFIRMED.wireValue) {
-                val currentInvoice = state.invoiceUlid ?: state.serverUlid
+                val currentInvoice = state.invoiceUlid
                 val currentPayment = state.paymentUlid
                 val matches = currentInvoice == invoiceUlid.value &&
-                        (currentPayment == null || currentPayment == paymentUlid.value)
+                        currentPayment == paymentUlid.value
                 if (matches) {
                     return@runInTransaction true
                 } else {
