@@ -2,18 +2,23 @@
 
 PR: https://github.com/Bassamalsaqqa/small-trader-android/pull/3 (draft, targets main).
 Active checkout: `/home/t3dev/projects/small-trader-android`, branch `ux/stitch-native-prototype`.
-Candidate source revision: `923902435b0603f99357ebeb520f24807863c49a` (reviewed and verified).
+Candidate source revision: `9ed37778c7bee4a535944e7f7e2a3ee54086db72` (reviewed and verified).
 
 ## Review & Candidate APK Artifacts
 
-- **Review Benchmark APK:** `app/round2/validation/small-trader-review-benchmark.apk`
+- **Review Benchmark APK:** `app/round2/validation/small-trader-review-9ed3777.apk`
   - Build variant: `benchmark` (R8 minified, resource shrunk, Android debug certificate).
-  - Source Commit: `923902435b0603f99357ebeb520f24807863c49a`
+  - Source Commit: `9ed37778c7bee4a535944e7f7e2a3ee54086db72`
   - Size: 2,132,291 bytes (~2.03 MB / 2.1 MB).
-  - SHA-256: `bf70833ee6f34cbd35e400e21192cca7607018df349cd2e91269e5b7ad344d91`.
+  - SHA-256: `8c62f4a68017f5b2eef6603256d92c8397a8c7c815fb63ad5771004b4f8fde2c`.
   - AndroidManifest SHA-256: `cec768c60a8942c2b662bfd0e18f76d873128bb19df1cd483ae8d0c4e0aeb5de`.
-  - classes.dex SHA-256: `08ef3771c9f39b388e04bd1d90e051ea66029bf719d59e748983ed5ba67c94d9`.
+  - classes.dex SHA-256: `925858256480f95435c88920c270e9f61da653bbadb4f9f124e0bb78efe464c7`.
   - Build mirror: `app/build/outputs/apk/benchmark/app-benchmark.apk`.
+- **Preserved Previous Review APK:** `app/round2/validation/small-trader-review-benchmark.apk`
+  - Source Commit: `923902435b0603f99357ebeb520f24807863c49a`
+  - Size: 2,132,291 bytes.
+  - SHA-256: `bf70833ee6f34cbd35e400e21192cca7607018df349cd2e91269e5b7ad344d91`.
+  - classes.dex SHA-256: `08ef3771c9f39b388e04bd1d90e051ea66029bf719d59e748983ed5ba67c94d9`.
 - **Preserved Baseline APK:** `app/round2/validation/small-trader-candidate-benchmark.apk`
   - Source Commit: `df4935c6d21db524652f8114baf0693d7b39f1a2`
   - Size: 2,132,291 bytes.
@@ -23,7 +28,7 @@ Candidate source revision: `923902435b0603f99357ebeb520f24807863c49a` (reviewed 
 
 ## Current local verification
 
-Saved XML reports in `app/build/test-results/testDebugUnitTest/`: **137 tests total: 136 passed, 1 skipped, 0 failures/errors**. Includes 8 dedicated accounting regression tests in `MerchantPurchaseAccountingRegressionTest.kt` verifying duplicate SKU pricing, read-only derived totals, coherent draft preservation, zero-cost unit pricing, cent rounding, and actual `MainActivity` recreation. Lint debug completed successfully with 0 errors. Navigation captures and assertions cover 360dp/393dp, font scales 1/1.5/2, EN/AR, light/dark. Captures are under `app/round2/validation/native-renders-v03/`; these are Robolectric evidence, not device acceptance.
+Saved XML reports in `app/build/test-results/testDebugUnitTest/`: **140 tests total: 139 passed, 1 skipped, 0 failures/errors**. Includes 11 dedicated accounting regression tests in `MerchantPurchaseAccountingRegressionTest.kt` verifying mandatory line identity, multi-line same-SKU selection, disabled Confirm on fully received lines, idempotent replay conflict protection, duplicate SKU pricing, read-only derived totals, coherent draft preservation, zero-cost unit pricing, cent rounding, and actual `MainActivity` recreation. Lint debug completed successfully with 0 errors. Navigation captures and assertions cover 360dp/393dp, font scales 1/1.5/2, EN/AR, light/dark. Captures are under `app/round2/validation/native-renders-v03/`; these are Robolectric evidence, not device acceptance.
 
 See [review remediation](PR3_REVIEW_REMEDIATION.md) for test commands, search harness results and per-finding limitations. Search measurements are host JVM measurements, not Android latency. APK sizes from different variants do not establish causal shrinkage gains.
 
