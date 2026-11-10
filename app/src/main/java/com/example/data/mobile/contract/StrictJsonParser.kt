@@ -73,7 +73,7 @@ class StrictJsonParser private constructor(private val src: String) {
     private var currentDepth: Int = 0
 
     init {
-        if (len > ContractConstants.MAX_PAYLOAD_BYTES) {
+        if (src.toByteArray(Charsets.UTF_8).size > ContractConstants.MAX_PAYLOAD_BYTES) {
             throw CanonicalSerializationException("Payload size $len exceeds maximum allowed ${ContractConstants.MAX_PAYLOAD_BYTES}")
         }
     }

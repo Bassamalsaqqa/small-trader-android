@@ -71,7 +71,7 @@ Binary floating-point types (`Double`, `Float`, `NaN`, `Infinity`) are strictly 
    - Provides conversion to fractional rate `toRate() = value / 100` (scale 8, `HALF_UP`).
 5. **`SalesLineCalculator`**:
    - Narrowed scope: supported no-discount base currency line calculator preview.
-   - Requires explicit `minorUnits` bounded to `0..6` (default 2); callers for 3-minor currencies (e.g. KWD, JOD) or 0-minor (JPY) must pass explicit currency scale.
+   - Requires explicit `minorUnits` bounded to `0..6` (no default; use server currency metadata); callers for 3-minor currencies (e.g. KWD, JOD) or 0-minor (JPY) must pass explicit currency scale.
    - Sequence:
      - `rawSubtotal = quantity * unitPrice` -> `subtotal = rawSubtotal.setScale(minorUnits, RoundingMode.HALF_UP)`
      - Inclusive Tax: `net = subtotal / (1 + rate)` with `HALF_UP`; `tax = subtotal - net`; `total = subtotal`.
@@ -122,5 +122,7 @@ The pure JVM Gradle test suite runs under JDK 21 (`/home/t3dev/.local/share/andr
 | `IdentifierPrimitivesTest` | 4 | Valid ULID acceptance, Crockford exclusion rules (`I`, `L`, `O`, `U`, lowercase, leading > 7, length), UUID validation and rejection as ULID, payload digest validation and lowercase hex format. |
 | `OfflineSaleContractGoldenParityTest` | 8 | Golden offline intake event digest, envelope equality checks, packaging unit mapping, envelope tamper detection, altered payload conflict regression, lost-ACK replay parity, exact decimal lexeme preservation & roundtrip with quantity '1' / unit_price '50', unknown field rejection at all 4 levels, deterministic boundary checks (timestamps, string caps, cash conservation, line sum equality), defensive list copy against mutable alias. |
 
-Total: **30 focused unit tests**, **100% passing**, 0 failures, 0 skipped.
+The foundation has **33 contract unit tests**, including `BoundaryCompatibilityTest` (3 tests): API-24-compatible timestamp field checks, UTF-8 payload byte limits, and explicit three-decimal currency precision.
+
+Codex independently ran the 33 contract tests plus `MerchantCheckoutTest` and `MerchantSaleLifecycleTest` after the final boundary corrections. All selected tests passed. The full suite was attempted but stopped after a nonconverging Compose idle wait in existing `NativeVisualEvidenceTest.capture_16_fullApp_home_360dp_font2_stress`; a fresh full-suite pass is not claimed. No emulator or physical-device acceptance was performed.
 Contract manifest hash verified: `a8d04a130bdb0bd909a7cfabdde93fb6f90c96cc07dbedfbd01971bdb07c6733`.

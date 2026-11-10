@@ -155,14 +155,8 @@ class OfflineSaleEvent(
         require(this.lines.size <= ContractConstants.MAX_LINE_ITEMS) {
             "lines exceeds maximum allowed ${ContractConstants.MAX_LINE_ITEMS}"
         }
-        // Timestamp validation & bounds (RFC 3339 / ISO-8601 date-time)
-        try {
-            val instant = java.time.Instant.parse(capturedAt)
-            val year = instant.atZone(java.time.ZoneOffset.UTC).year
-            require(year in 2020..2100) { "capturedAt year $year is out of bounds [2020..2100]" }
-        } catch (e: java.time.format.DateTimeParseException) {
-            throw IllegalArgumentException("capturedAt '$capturedAt' is not a valid ISO-8601 date-time: ${e.message}", e)
-        }
+        // Calendar is available on API 24; java.time requires API 26 or desugaring.
+        validateCapturedAt(capturedAt)
         // String caps
         require(catalogSnapshotVersion.isNotEmpty() && catalogSnapshotVersion.length <= 64) {
             "catalogSnapshotVersion length must be 1..64, got '${catalogSnapshotVersion.length}'"
@@ -385,4 +379,21 @@ data class OfflineSaleIntakeRequest(
             )
         }
     }
+}
+
+/** Strict RFC 3339 field validation using APIs available at the supported minimum SDK. */
+internal fun validateCapturedAt(value: String) {
+    val match = Regex("""^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.[0-9]{1,9})?(?:[Zz]|([+-])(\d{2}):(\d{2}))$""").matchEntire(value)
+        ?: throw IllegalArgumentException("capturedAt must be an RFC 3339 timestamp")
+    val groups = match.groupValues
+    require(groups[1].toInt() in 2020..2100) { "capturedAt year is outside supported bounds" }
+    if (groups[7].isNotEmpty()) {
+        require(groups[8].toInt() <= 23 && groups[9].toInt() <= 59) { "Invalid timestamp offset" }
+    }
+    val calendar = java.util.GregorianCalendar(java.util.TimeZone.getTimeZone("UTC"))
+    calendar.isLenient = false
+    calendar.clear()
+    calendar.set(groups[1].toInt(), groups[2].toInt() - 1, groups[3].toInt(),
+        groups[4].toInt(), groups[5].toInt(), groups[6].toInt())
+    calendar.timeInMillis // Force validation, including month lengths and leap years.
 }

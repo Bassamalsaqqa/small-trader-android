@@ -14,9 +14,8 @@ import java.math.RoundingMode
  *    posting authority for all general ledger entries, inventory lot movements, and fiscal tax/invoice records.
  *    This class provides deterministic client-side calculation parity for local preview and verification only,
  *    and does not establish independent financial authority.
- * 3. Currency Minor Units: Callers must ensure `minorUnits` matches currency precision (0..6). Standard default
- *    is 2 minor units (e.g. ILS/USD/EUR), but 3-minor currencies (e.g. KWD/BHD/OMR/JOD) or 0-minor (JPY) must explicitly
- *    pass their authoritative scale.
+ * 3. Currency Minor Units: Callers must ensure `minorUnits` matches the server-provided currency precision (0..6).
+ *    There is no default currency scale.
  *
  * Sequence:
  * 1. Line Subtotal: rawSubtotal = quantity * unitPrice -> rounded to minorUnits with RoundingMode.HALF_UP
@@ -39,7 +38,7 @@ object SalesLineCalculator {
         unitPrice: MoneyAmount,
         taxPercentage: TaxPercentage,
         taxInclusive: Boolean,
-        minorUnits: Int = ContractConstants.MINOR_UNITS
+        minorUnits: Int
     ): CalculationResult {
         require(minorUnits in 0..6) {
             "minorUnits must be explicitly bounded between 0 and 6, got $minorUnits"

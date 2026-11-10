@@ -44,7 +44,8 @@ class DecimalPrimitivesAndRoundingTest {
                         quantity = q,
                         unitPrice = p,
                         taxPercentage = taxRate,
-                        taxInclusive = taxInclusive
+                        taxInclusive = taxInclusive,
+                        minorUnits = 2
                     )
 
                     assertEquals("Subtotal mismatch in $name", tc.require("subtotal").asString(), res.subtotal.toPlainString())
@@ -62,7 +63,8 @@ class DecimalPrimitivesAndRoundingTest {
                         quantity = q,
                         unitPrice = p,
                         taxPercentage = taxRate,
-                        taxInclusive = taxInclusive
+                        taxInclusive = taxInclusive,
+                        minorUnits = 2
                     )
 
                     assertEquals("Subtotal mismatch in $name", tc.require("subtotal").asString(), res.subtotal.toPlainString())
@@ -84,7 +86,8 @@ class DecimalPrimitivesAndRoundingTest {
                         quantity = q,
                         unitPrice = p,
                         taxPercentage = taxRate,
-                        taxInclusive = taxInclusive
+                        taxInclusive = taxInclusive,
+                        minorUnits = 2
                     )
 
                     assertEquals("Subtotal mismatch in $name", tc.require("subtotal").asString(), res.subtotal.toPlainString())
