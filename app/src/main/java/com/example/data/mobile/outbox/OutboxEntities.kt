@@ -1,12 +1,9 @@
 package com.example.data.mobile.outbox
 
 import androidx.room.ColumnInfo
-import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
-import androidx.room.PrimaryKey
-import androidx.room.Relation
 
 /**
  * Immutable economic event bytes and identity.
@@ -15,15 +12,15 @@ import androidx.room.Relation
  * Once inserted, this record must NEVER be updated, repriced, rekeyed, or deleted.
  * Stored payload_bytes is the exact captured UTF-8 JSON bytes to guarantee cryptographic
  * digest integrity.
+ *
+ * Composite Primary Key: (company_id, client_event_id).
+ * Per contract, clientEventId is unique within a company scope.
+ * Different companies with identical clientEventIds remain strictly isolated.
  */
 @Entity(
     tableName = "outbox_events",
+    primaryKeys = ["company_id", "client_event_id"],
     indices = [
-        Index(
-            value = ["company_id", "client_event_id"],
-            unique = true,
-            name = "index_outbox_events_company_event"
-        ),
         Index(
             value = ["company_id", "actor_id", "device_id"],
             name = "index_outbox_events_scope"
@@ -31,7 +28,6 @@ import androidx.room.Relation
     ]
 )
 data class OutboxEventEntity(
-    @PrimaryKey
     @ColumnInfo(name = "client_event_id")
     val clientEventId: String,
 
@@ -93,14 +89,18 @@ data class OutboxEventEntity(
  * Separated from the immutable event payload to allow delivery attempts, leases,
  * server acknowledgements, and error statuses to mutate without risking corruption
  * of the immutable event bytes or digest.
+ *
+ * Composite Primary Key: (company_id, client_event_id).
+ * Foreign key references outbox_events(company_id, client_event_id) with RESTRICT.
  */
 @Entity(
     tableName = "outbox_delivery_states",
+    primaryKeys = ["company_id", "client_event_id"],
     foreignKeys = [
         ForeignKey(
             entity = OutboxEventEntity::class,
-            parentColumns = ["client_event_id"],
-            childColumns = ["client_event_id"],
+            parentColumns = ["company_id", "client_event_id"],
+            childColumns = ["company_id", "client_event_id"],
             onDelete = ForeignKey.RESTRICT,
             onUpdate = ForeignKey.RESTRICT
         )
@@ -117,7 +117,6 @@ data class OutboxEventEntity(
     ]
 )
 data class OutboxDeliveryStateEntity(
-    @PrimaryKey
     @ColumnInfo(name = "client_event_id")
     val clientEventId: String,
 
@@ -145,6 +144,12 @@ data class OutboxDeliveryStateEntity(
     @ColumnInfo(name = "claim_expires_at")
     val claimExpiresAt: Long? = null,
 
+    @ColumnInfo(name = "invoice_ulid")
+    val invoiceUlid: String? = null,
+
+    @ColumnInfo(name = "payment_ulid")
+    val paymentUlid: String? = null,
+
     @ColumnInfo(name = "server_ulid")
     val serverUlid: String? = null,
 
@@ -162,16 +167,38 @@ data class OutboxDeliveryStateEntity(
 )
 
 /**
+ * Persisted scope lock for authentication denial (HTTP 401).
+ *
+ * Scoped by (company_id, actor_id, device_id).
+ * Guarantees that even if the queue has zero events at the time of auth denial,
+ * the lock persists across process restarts, disk reopens, and subsequent captures.
+ */
+@Entity(
+    tableName = "outbox_scope_locks",
+    primaryKeys = ["company_id", "actor_id", "device_id"]
+)
+data class OutboxScopeLockEntity(
+    @ColumnInfo(name = "company_id")
+    val companyId: String,
+
+    @ColumnInfo(name = "actor_id")
+    val actorId: String,
+
+    @ColumnInfo(name = "device_id")
+    val deviceId: String,
+
+    @ColumnInfo(name = "locked_at")
+    val lockedAt: Long,
+
+    @ColumnInfo(name = "reason")
+    val reason: String
+)
+
+/**
  * Composite model binding immutable event payload and mutable delivery state.
  */
 data class OutboxRecord(
-    @Embedded
     val event: OutboxEventEntity,
-
-    @Relation(
-        parentColumn = "client_event_id",
-        entityColumn = "client_event_id"
-    )
     val deliveryState: OutboxDeliveryStateEntity
 ) {
     val clientEventId: String get() = event.clientEventId
@@ -180,5 +207,5 @@ data class OutboxRecord(
     val deviceId: String get() = event.deviceId
     val status: OutboxStatus get() = OutboxStatus.fromWireValue(deliveryState.status)
     val payloadDigest: String get() = event.payloadDigest
-    val payloadBytes: ByteArray get() = event.payloadBytes
+    val payloadBytes: ByteArray get() = event.payloadBytes.clone()
 }

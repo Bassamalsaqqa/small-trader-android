@@ -6,18 +6,20 @@ This integration foundation implements the local-first, durable SQLite Room outb
 
 ### Scope Constraints
 - **In-Scope**:
-  - Room persistent immutable economic event entity (`OutboxEventEntity`) storing exact captured UTF-8 JSON bytes, cryptographic SHA-256 digest (`PayloadDigest`), and multi-tenant identity.
-  - Separate mutable delivery projection entity (`OutboxDeliveryStateEntity`) tracking lifecycle state, attempts, leases, and server acknowledgements.
-  - Atomic capture transaction writing validated byte-preserved `OfflineSaleEvent` plus initial `PENDING` projection before returning success.
-  - Strict immutability: captured events cannot be repriced, rekeyed, or deleted. Replays with identical digests return existing records idempotently; differing digests trigger a local `CONFLICT` state with no payload replacement.
-  - Scoped reads and claims (`company_id`, `actor_id`, `device_id`), preventing cross-user or cross-tenant leakage across logouts.
-  - Lease-bounded Compare-And-Set (CAS) claim mechanism preventing parallel drains across concurrent workers and recovering abandoned in-flight records upon lease expiry.
-  - Timeout safety: timeouts transition records to `UNKNOWN_ACK` and never confirm prematurely.
-  - Strict server confirmation: delivery confirmation requires verified server acknowledgement matching original `client_event_id`, `company_id`, and `payload_digest` with a valid 26-character Crockford Base32 server ULID.
-  - Queue locking on HTTP 401 authentication denial (`AUTH_BLOCKED`), preserving all pending and conflict records without deletion.
-  - Frozen exported Room schema Version 1 (`app/schemas/com.example.data.mobile.outbox.OutboxDatabase/1.json`) with no destructive migration fallback.
-  - Real upgrade migration (`MIGRATION_1_2`) preserving all queued records without loss.
-  - Comprehensive unit test suite covering local durability, disk reopen, rollback atomicity, replay, conflict, claim CAS, stale recovery, auth lock, tenant isolation, and schema upgrade.
+  - Room persistent immutable economic event entity (`OutboxEventEntity`) storing exact captured UTF-8 JSON bytes, cryptographic SHA-256 digest (`PayloadDigest`), and composite primary key `(company_id, client_event_id)`.
+  - Separate mutable delivery projection entity (`OutboxDeliveryStateEntity`) tracking lifecycle state, attempts, leases, and authoritative server entity mappings (`invoice_ulid`, `payment_ulid`, `server_ulid`).
+  - Persisted explicit scope lock entity (`OutboxScopeLockEntity`) keyed by `(company_id, actor_id, device_id)`, ensuring queue locking on HTTP 401 authentication denial persists even when the queue has zero events, across disk reopens, and locks subsequent captures.
+  - Atomic capture transaction writing validated byte-preserved `OfflineSaleEvent` plus initial delivery state (`PENDING`, or `AUTH_BLOCKED` if scope is locked).
+  - Strict immutability and terminal state protection: captured events cannot be repriced, rekeyed, or deleted. Replays with identical digests return existing records idempotently; differing digests trigger a local `CONFLICT` state without replacing original event bytes. Confirmed records (`CONFIRMED`) can never be demoted by late timeouts, altered captures, or auth denials.
+  - Scoped reads and mutations (`company_id`, `actor_id`, `device_id`): public `getRecord` requires full scope. Cross-tenant same-UUID captures succeed as isolated independent events; same-company cross-actor/device collisions return `CaptureResult.ScopeRejected` with zero data leakage.
+  - Lease-bounded Compare-And-Set (CAS) claim mechanism with overflow-safe arithmetic and bounded parameters (batch size 1..100, lease 1..300s).
+  - Timeout safety: `recordTimeout` requires `in_flight` status and matching `claimToken`, transitioning records to `UNKNOWN_ACK` and never demoting confirmed records.
+  - Strict server confirmation: delivery confirmation via worker claim requires active lease and verified server acknowledgement matching original event and payload digest, storing both `invoice_ulid` and `payment_ulid`. Re-ack with identical mapping is an idempotent replay with no database mutation; conflicting mapping is rejected.
+  - Explicit status reconciliation path: `reconcileDeliveryConfirmation` allows reconciling server confirmation without worker claim tokens from `in_flight` or `unknown_ack`.
+  - Strict UTF-8 validation with `REPORT` error action rejecting malformed byte sequences without silent replacement characters; defensive copying of byte arrays to prevent mutable source aliasing.
+  - Clock injection for deterministic, race-free tests without `Thread.sleep`.
+  - Frozen exported Room schema Version 1 (`app/schemas/com.example.data.mobile.outbox.OutboxDatabase/1.json`) with no destructive migration fallback (`fallbackToDestructiveMigration` strictly omitted).
+  - Focused unit test suite covering local durability, disk reopen, rollback atomicity, replay, conflict, claim CAS, stale recovery, auth lock, tenant isolation, and terminal state immutability.
 - **Explicitly Excluded**:
   - No live sale capture activation.
   - No network sync transport or HTTP calls implemented in this layer.
@@ -37,13 +39,13 @@ This integration foundation implements the local-first, durable SQLite Room outb
 
 ---
 
-## 3. Data Model: Separation of Immutable Payload & Mutable Delivery State
+## 3. Data Model: Separation of Immutable Payload, Delivery State & Scope Lock
 
-The outbox architecture separates immutable event bytes from mutable delivery state to ensure cryptographic digest integrity cannot be corrupted by delivery attempts:
+The outbox architecture separates immutable event bytes from mutable delivery state and persisted auth locks:
 
 ### Table: `outbox_events` (Immutable Economic Event)
+- `company_id` (TEXT, PK): Server Crockford ULID tenant identifier.
 - `client_event_id` (TEXT, PK): Stable client RFC 4122 UUID.
-- `company_id` (TEXT): Server Crockford ULID tenant identifier.
 - `actor_id` (TEXT): Server Crockford ULID authenticated user.
 - `device_id` (TEXT): Client UUID physical device binding.
 - `device_lease_id` (TEXT): Client UUID device lease binding.
@@ -51,13 +53,13 @@ The outbox architecture separates immutable event bytes from mutable delivery st
 - `payload_digest` (TEXT): `sha256:<64 hex>` cryptographic hash.
 - `payload_bytes` (BLOB): Exact raw UTF-8 canonical JSON bytes captured at time of sale.
 - `event_version` (INTEGER): Schema version (default 1).
+- **Primary Key**: Composite `(company_id, client_event_id)`.
 - **Indices**:
-  - Unique index `index_outbox_events_company_event` on `(company_id, client_event_id)`.
   - Composite index `index_outbox_events_scope` on `(company_id, actor_id, device_id)`.
 
 ### Table: `outbox_delivery_states` (Mutable Delivery Projection)
-- `client_event_id` (TEXT, PK): Foreign key referencing `outbox_events.client_event_id` (`ON DELETE RESTRICT, ON UPDATE RESTRICT`).
-- `company_id` (TEXT): Matching tenant ULID.
+- `company_id` (TEXT, PK): Matching tenant ULID.
+- `client_event_id` (TEXT, PK): Foreign key referencing `outbox_events(company_id, client_event_id)` (`ON DELETE RESTRICT, ON UPDATE RESTRICT`).
 - `actor_id` (TEXT): Matching user ULID.
 - `device_id` (TEXT): Matching device UUID.
 - `status` (TEXT): One of `pending`, `in_flight`, `unknown_ack`, `confirmed`, `conflict`, `auth_blocked`.
@@ -65,14 +67,25 @@ The outbox architecture separates immutable event bytes from mutable delivery st
 - `last_attempt_at` (INTEGER, NULLABLE): Epoch millis of last attempt.
 - `claim_token` (TEXT, NULLABLE): Ephemeral UUID identifying the active drain worker.
 - `claim_expires_at` (INTEGER, NULLABLE): Epoch millis when claim lease expires.
-- `server_ulid` (TEXT, NULLABLE): Authoritative server entity ULID (e.g. invoice or sale ID).
+- `invoice_ulid` (TEXT, NULLABLE): Authoritative server sales invoice ULID.
+- `payment_ulid` (TEXT, NULLABLE): Authoritative server customer payment ULID.
+- `server_ulid` (TEXT, NULLABLE): Authoritative server entity ULID (alias for invoice ULID).
 - `server_acknowledged_at` (TEXT, NULLABLE): Timestamp of server confirmation.
 - `error_message` (TEXT, NULLABLE): Reason for timeout, conflict, or auth denial.
 - `created_at` (INTEGER): Local capture epoch millis.
 - `updated_at` (INTEGER): Last state mutation epoch millis.
+- **Primary Key**: Composite `(company_id, client_event_id)`.
 - **Indices**:
   - Composite index `index_outbox_states_scope_status` on `(company_id, actor_id, device_id, status)`.
   - Index `index_outbox_states_status_claim` on `(status, claim_expires_at)`.
+
+### Table: `outbox_scope_locks` (Persisted Auth Denial Lock)
+- `company_id` (TEXT, PK): Tenant identifier.
+- `actor_id` (TEXT, PK): Authenticated user identifier.
+- `device_id` (TEXT, PK): Physical device binding.
+- `locked_at` (INTEGER): Timestamp when lock was engaged.
+- `reason` (TEXT): Rejection / auth denial reason.
+- **Primary Key**: Composite `(company_id, actor_id, device_id)`.
 
 ---
 
@@ -83,145 +96,115 @@ The outbox architecture separates immutable event bytes from mutable delivery st
                       |   captureSale()   |
                       +---------+---------+
                                 |
-                                v
-                      +-------------------+
-                      |      PENDING      |<------------------+
-                      +---------+---------+                   |
-                                |                             |
-                        claimNextBatch()                      |
-                         (CAS lease)                          |
-                                |                             |
-                                v                             |
-                      +-------------------+            unlockQueueAfterReauth()
-                      |     IN_FLIGHT     |                   |
-                      +----+---------+----+                   |
-                           |         |                        |
-         confirmDelivery() |         | recordTimeout()        |
-     (verified server ack) |         | (network timeout)      |
-                           |         |                        |
-                           v         v                        |
-            +--------------+   +-----+-------------+          |
-            |  CONFIRMED   |   |    UNKNOWN_ACK    |          |
-            +--------------+   +-----+-------------+          |
-                                     |                        |
-                                     | (lease expires,        |
-                                     |  re-claimed)           |
-                                     +------------------------+
-                                     |
-               lockQueueOnAuthDenied() (HTTP 401)
-                                     |
-                                     v
-                           +-------------------+
-                           |   AUTH_BLOCKED    |
-                           +-------------------+
+             +------------------+------------------+
+             |                                     |
+    (Scope not locked)                      (Scope locked)
+             |                                     |
+             v                                     v
+   +-------------------+                 +-------------------+
+   |      PENDING      |                 |   AUTH_BLOCKED    |
+   +---------+---------+                 +-------------------+
+             |                                     ^
+     claimNextBatch()                              |
+      (CAS lease)                                  | lockQueueOnAuthDenied()
+             |                                     | (HTTP 401)
+             v                                     |
+   +-------------------+                           |
+   |     IN_FLIGHT     |---------------------------+
+   +----+---------+----+                           |
+        |         |                                |
+        |         | recordTimeout()                |
+        |         | (network timeout)              |
+        |         v                                |
+        |   +-------------+                        |
+        |   | UNKNOWN_ACK |------------------------+
+        |   +-----+-------+
+        |         |
+        |         | reconcileDeliveryConfirmation() / re-claim
+        v         v
+   +-------------------+
+   |     CONFIRMED     | (TERMINAL: immutable mapping, rejects conflicts/timeouts)
+   +-------------------+
 
-   [Special Path]
-   captureSale(same client_event_id, differing digest)
-                     |
-                     v
-             +---------------+
-             |   CONFLICT    | (Original event payload preserved, NO replacement)
-             +---------------+
+   [Special Paths]
+   captureSale(same client_event_id, differing digest) -> CONFLICT (TERMINAL)
+   captureSale(same client_event_id, differing actor/device) -> ScopeRejected (NO leakage)
 ```
 
 ### State Definitions
 1. **`PENDING`**: Validated offline sale captured locally; waiting to be picked up by drain worker.
-2. **`IN_FLIGHT`**: Claimed by a worker with an active lease duration (e.g., 30s) and unique `claim_token`.
+2. **`IN_FLIGHT`**: Claimed by a worker with an active lease duration (1..300s) and unique `claim_token`.
 3. **`UNKNOWN_ACK`**: Delivery attempted but network timed out or failed without a definitive server response. Eligible for re-claim once the lease expires.
-4. **`CONFIRMED`**: Server returned verified response matching `client_event_id`, `company_id`, and `payload_digest`, with valid 26-char Crockford ULID `server_ulid`.
+4. **`CONFIRMED`**: Server returned verified response matching `client_event_id`, `company_id`, and `payload_digest`, with valid 26-char Crockford ULIDs for `invoice_ulid` and `payment_ulid`. Terminal state; cannot be altered or demoted.
 5. **`CONFLICT`**: Client re-presented existing `client_event_id` with an altered payload digest. The original event bytes remain unchanged; delivery state is marked `CONFLICT`.
-6. **`AUTH_BLOCKED`**: Authentication was denied (HTTP 401). Queue is frozen to prevent token leakage or runaway retries until manager re-authentication occurs.
+6. **`AUTH_BLOCKED`**: Authentication was denied (HTTP 401). Queue is frozen via persisted scope lock to prevent token leakage or runaway retries until manager re-authentication occurs.
 
 ---
 
-## 5. Claim CAS, Parallel Drain Prevention & Stale Lease Recovery
+## 5. Multi-Tenant, Actor & Device Scope Isolation
 
-To prevent concurrent drain workers from sending duplicate HTTP requests:
-1. **Compare-And-Set (CAS)**:
-   ```sql
-   UPDATE outbox_delivery_states
-   SET status = 'in_flight',
-       claim_token = :claimToken,
-       claim_expires_at = :claimExpiresAt,
-       attempt_count = attempt_count + 1,
-       last_attempt_at = :nowMillis,
-       updated_at = :nowMillis
-   WHERE client_event_id = :clientEventId
-     AND company_id = :companyId
-     AND actor_id = :actorId
-     AND device_id = :deviceId
-     AND (
-       status = 'pending'
-       OR (status IN ('in_flight', 'unknown_ack') AND (claim_expires_at IS NULL OR claim_expires_at < :nowMillis))
-     )
-   ```
-2. **Parallel Drain Prevention**: If Worker 1 claims a record, its status becomes `in_flight` and `claim_expires_at = now + leaseDuration`. A concurrent Worker 2 attempting to claim the same record matches 0 rows and receives an empty batch.
-3. **Abandoned In-Flight Recovery**: If Worker 1 crashes or is killed mid-transmission, once `nowMillis > claim_expires_at`, Worker 2's query detects the expired lease and reclaims the record with a fresh `claim_token` and incremented `attempt_count`.
+- **Composite Key Parity**: Event identity is `(company_id, client_event_id)`. Two distinct companies capturing with identical UUIDs are stored and managed completely independently without collision.
+- **Public Query Scoping**: `getRecord(companyId, actorId, deviceId, clientEventId)` enforces that records can only be retrieved by the exact matching tenant, user, and device scope.
+- **Cross-Scope Collision Safety**: If Actor 2 / Device 2 within Company A attempts to capture with a `client_event_id` already owned by Actor 1 / Device 1, the capture is rejected as `CaptureResult.ScopeRejected`. No existing record payload, bytes, or digest is leaked, and Actor 1's record remains in `PENDING` without being marked as `CONFLICT`.
 
 ---
 
-## 6. Multi-Tenant, Actor & Device Isolation
-
-To satisfy data security and privacy requirements:
-- Every query, claim, and confirmation operation is strictly filtered by `(company_id, actor_id, device_id)`.
-- **No Cross-User Logout Leakage**: If Actor 1 logs out and Actor 2 logs in on the same physical device, Actor 2's claims and queries return zero records from Actor 1's queue. When Actor 1 logs back in, their pending records are intact and claimable.
-- **No Cross-Tenant Contamination**: Records belonging to Company A are invisible and unclaimable by workers operating on Company B.
-
----
-
-## 7. Authentication Denial & Queue Lock
+## 6. Authentication Denial & Persisted Scope Lock
 
 When authentication fails at the network gate (HTTP 401):
-- `lockQueueOnAuthDenied(companyId, actorId, deviceId, reason)` transitions all active records (`pending`, `in_flight`, `unknown_ack`) to `auth_blocked`.
-- `conflict` and `confirmed` records are preserved untouched.
-- No records are deleted or discarded.
-- While locked, `claimNextBatch()` throws `QueueLockedException`.
-- Once re-authenticated by an authorized manager, `unlockQueueAfterReauth()` transitions `auth_blocked` records back to `pending`, restoring the queue without data loss.
+- `lockQueueOnAuthDenied(companyId, actorId, deviceId, reason)` transactionally inserts an `OutboxScopeLockEntity` record and transitions active records (`pending`, `in_flight`, `unknown_ack`) to `auth_blocked`.
+- **Empty Queue Protection**: The lock row in `outbox_scope_locks` persists even if zero events were queued at the time of auth denial.
+- **Disk Reopen Persistence**: The scope lock persists across database closure and process restart.
+- **Post-Lock Captures**: Any capture attempted while the scope is locked is immediately assigned `status = AUTH_BLOCKED` and `errorMessage = "Captured while queue locked due to auth denial"`. The cash and canonical event bytes are safely preserved on disk, but worker drains are blocked.
+- **Re-Authentication**: `unlockQueueAfterReauth(companyId, actorId, deviceId)` transactionally deletes the scope lock and restores all `auth_blocked` records to `pending`.
 
 ---
 
-## 8. Durability, Backup Exclusions & Migration Strategy
+## 7. Server Confirmation & Exact Mapping Replay
 
-### Room Configuration Guarantees
-- **No Destructive Fallbacks**: `fallbackToDestructiveMigration()` is strictly omitted from `OutboxDatabase`. Schema mismatches fail-fast rather than dropping un-synchronized offline transactions.
-- **Startup Safety**: Database open operations never delete, reset, or truncate tables.
-- **Exported Schema**: Schema Version 1 is exported to `app/schemas/com.example.data.mobile.outbox.OutboxDatabase/1.json` for CI validation.
-
-### Backup Exclusion Notice (Before Live Wiring)
-> [!WARNING]
-> **Android Auto Backup Exclusion Requirement**:
-> The SQLite database file (`small_trader_outbox.db`) and its journal/WAL files (`small_trader_outbox.db-wal`, `small_trader_outbox.db-shm`) **must be explicitly excluded** from Android Auto Backup and Google Drive device transfer (`backup_rules.xml` and `data_extraction_rules.xml`) before live runtime wiring is activated.
->
-> If outbox database files are backed up and restored to a different device or instance, restored `client_event_id`s could collide or leak cached economic state across physical devices.
->
-> **Notice**: The current application manifest and backup rules have **not** been modified in this foundation PR and are **not claimed safe for live backup**. Backup exclusions must be wired alongside runtime sync activation.
-
-### Upgrade Strategy
-- Version 1 schema is frozen.
-- Version 2 migration (`OutboxMigrations.MIGRATION_1_2`) demonstrates schema evolution by adding `routing_tag TEXT DEFAULT NULL` to `outbox_delivery_states`.
-- Unit test `OutboxMigrationUpgradeTest` verifies that applying `MIGRATION_1_2` preserves all queued events and delivery projections with zero data loss.
+- **Worker Confirmation**: `confirmDelivery` requires a non-blank `claimToken`, status `IN_FLIGHT`, and unexpired lease. Requires valid 26-character Crockford ULIDs for `invoice_ulid` and `payment_ulid`.
+- **Exact Mapping Replay**: If an already-confirmed record is re-acknowledged with the exact same invoice and payment mappings, the method returns `true` idempotently with zero database mutation (timestamps and records remain unchanged).
+- **Conflicting Mapping Rejection**: If an already-confirmed record receives a differing invoice or payment ULID, the confirmation is rejected with `InvalidAcknowledgementException`, strictly preserving the original server confirmation.
+- **Status Reconciliation**: `reconcileDeliveryConfirmation` provides an explicit separate path for polling status queries from `in_flight` or `unknown_ack` without requiring a worker claim token.
 
 ---
 
-## 9. Verification & Test Suite Summary
+## 8. Payload Integrity, Strict Decoding & Clock Injection
 
-The foundation is covered by 19 targeted unit tests running under Robolectric 4.16.1 against real SQLite database instances:
+- **Strict UTF-8 Decoding**: `captureSale` uses a `CharsetDecoder` configured with `CodingErrorAction.REPORT` for both malformed input and unmappable characters. Any invalid byte sequence throws `IllegalArgumentException` without silent Unicode replacement character (`\uFFFD`) substitution.
+- **Defensive Byte Copying**: Byte arrays (`rawUtf8Json`, `payloadBytes`) are cloned defensively upon capture, storage, and retrieval to prevent caller mutation from altering canonical digests.
+- **Privacy Enforcement**: Validation error messages identify events solely by `client_event_id` and never log sensitive prices, line items, or customer details.
+- **Deterministic Test Clock**: `OutboxRepositoryImpl` accepts an optional `clock: () -> Long` parameter (defaulting to system time), allowing deterministic time manipulation in tests without `Thread.sleep` races.
+
+---
+
+## 9. Durability & Schema Strategy
+
+- **Unreleased PR Initial Version 1**: This PR establishes the baseline Version 1 schema (`app/schemas/com.example.data.mobile.outbox.OutboxDatabase/1.json`, identity hash `6eddfecc8dabbb7ec370b858ec36714a`). No deployed schema has been mutated.
+- **Fail-Closed Future Upgrades**: `fallbackToDestructiveMigration()` is strictly omitted. Any unhandled future schema change must fail fast rather than silently dropping un-synced economic events. All future migrations will be gated by real schema version increments and migration scripts.
+- **Startup Safety**: Database initialization never drops or resets queue tables.
+
+---
+
+## 10. Verification & Test Suite Summary
+
+The foundation is covered by 31 focused unit tests running under Robolectric 4.16.1 against real SQLite database instances:
 
 | Test Class | Tests | Key Scenarios Covered |
 | :--- | :--- | :--- |
 | `OutboxDurabilityReopenTest` | 2 | Real disk-backed SQLite file persistence across `close()` and `reopen()`; verification that database open does not truncate existing queue records. |
-| `OutboxTransactionRollbackTest` | 2 | Atomic transaction rollback on disk write failure / SQLite exception; foreign key constraint enforcement between delivery state and parent event. |
-| `OutboxIdempotencyAndConflictTest` | 2 | Same-event lost-ACK replay returns `Duplicate` without mutation; altered payload digest flags `Conflict` without replacing original event bytes. |
-| `OutboxClaimCasAndStaleRecoveryTest` | 3 | Compare-And-Set (CAS) claim prevents parallel drains across concurrent workers; expired lease recovery reclaims abandoned in-flight records; network timeout transitions to `UNKNOWN_ACK` without premature confirmation. |
-| `OutboxConfirmationVerificationTest` | 5 | Valid server acknowledgement confirms record and sets server ULID; mismatched company ID rejected; tampered payload digest rejected; invalid server ULID rejected; events in `CONFLICT` state rejected from confirmation. |
-| `OutboxTenantIsolationTest` | 3 | Cross-tenant read/claim isolation; cross-actor logout leakage prevention; device-level claim boundaries. |
-| `OutboxAuthDenialPreservationTest` | 1 | HTTP 401 auth denial locks queue, moves active records to `AUTH_BLOCKED`, preserves pending and conflict records, and restores queue upon re-authentication. |
-| `OutboxMigrationUpgradeTest` | 1 | Real SQLite schema migration from Version 1 to Version 2 preserving queued records intact without data loss. |
+| `OutboxTransactionRollbackTest` | 2 | Atomic transaction rollback on disk write failure / SQLite exception; composite foreign key constraint enforcement between delivery state and parent event. |
+| `OutboxIdempotencyAndConflictTest` | 5 | Same-event lost-ACK replay returns `Duplicate` without mutation; altered payload digest flags `Conflict` without replacing original event bytes; strict UTF-8 rejection of malformed bytes; defensive byte copying; privacy check avoiding sensitive payload logging. |
+| `OutboxClaimCasAndStaleRecoveryTest` | 5 | Compare-And-Set (CAS) claim prevents parallel drains across concurrent workers; deterministic stale lease recovery without `Thread.sleep`; timeout transitions to `UNKNOWN_ACK`; late confirmation with stale claim token is rejected; batch/lease boundary and overflow validation. |
+| `OutboxConfirmationVerificationTest` | 10 | Valid server acknowledgement confirms record and sets invoice/payment ULIDs; mismatched company ID rejected; tampered payload digest rejected; invalid server ULID rejected; events in `CONFLICT` state rejected; unclaimed `PENDING`/`AUTH_BLOCKED` states rejected; confirmed record exact mapping replay preserves original without mutation; conflicting mapping rejected; confirmed record cannot be demoted by late timeout, conflict, or auth denial; explicit status reconciliation path. |
+| `OutboxTenantIsolationTest` | 5 | Cross-tenant read/claim isolation; cross-actor logout leakage prevention; device-level claim boundaries; cross-tenant same UUID collision succeeds independently; same-tenant other actor/device collision rejected with zero data leakage. |
+| `OutboxAuthDenialPreservationTest` | 2 | HTTP 401 auth denial locks queue, moves active records to `AUTH_BLOCKED`, preserves pending and conflict records, and restores queue upon re-authentication; persisted empty-queue auth lock across disk reopen and subsequent capture. |
 
 ### Test Count Parity Summary
-- **Outbox Unit Tests**: 19 passed.
-- **Contract Unit Tests**: 33 passed (`BoundaryCompatibilityTest`, `CanonicalJsonSerializerTest`, `DecimalPrimitivesAndRoundingTest`, `IdentifierPrimitivesTest`, `OfflineSaleContractGoldenParityTest`).
-- **Checkout & Lifecycle Unit Tests**: 8 passed (`MerchantCheckoutTest`, `MerchantSaleLifecycleTest`).
-- **Total JVM Unit Tests**: **60 passed**.
+- **Outbox Unit Tests**: **31 passed** (0 failures, 0 errors, 0 skipped).
+- **Contract Unit Tests**: **33 passed** (`BoundaryCompatibilityTest`, `CanonicalJsonSerializerTest`, `DecimalPrimitivesAndRoundingTest`, `IdentifierPrimitivesTest`, `OfflineSaleContractGoldenParityTest`).
+- **Checkout & Lifecycle Unit Tests**: **8 passed** (`MerchantCheckoutTest`, `MerchantSaleLifecycleTest`).
+- **Total Selected Unit Tests**: **72 passed**.
+- **Lint**: `lintDebug` passed (BUILD SUCCESSFUL).
 - **Python Contract Validation Suite**: **120 checks passed** (`tools/validate-mobile-contract.py`).
 - **Contract Manifest SHA-256**: `a8d04a130bdb0bd909a7cfabdde93fb6f90c96cc07dbedfbd01971bdb07c6733` (frozen and verified).

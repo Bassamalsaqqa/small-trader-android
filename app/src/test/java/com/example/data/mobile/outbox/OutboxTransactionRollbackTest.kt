@@ -44,18 +44,7 @@ class OutboxTransactionRollbackTest {
     fun testTransactionAbortsAndRollsBackOnDeliveryStateFailure() {
         val event = OutboxTestFixtures.createSampleEvent()
 
-        // Manually insert an orphan delivery state with this ID to force an SQLite primary key collision on state insert
-        val conflictingState = OutboxDeliveryStateEntity(
-            clientEventId = event.clientEventId.value,
-            companyId = event.companyId.value,
-            actorId = event.actorId.value,
-            deviceId = event.deviceId.value,
-            status = OutboxStatus.PENDING.wireValue,
-            createdAt = 1000L,
-            updatedAt = 1000L
-        )
-
-        // First insert event so FK is satisfied
+        // Insert first event and state
         val eventEntity = OutboxEventEntity(
             clientEventId = event.clientEventId.value,
             companyId = event.companyId.value,
@@ -67,13 +56,21 @@ class OutboxTransactionRollbackTest {
             payloadBytes = byteArrayOf(1, 2, 3),
             eventVersion = 1
         )
+        val conflictingState = OutboxDeliveryStateEntity(
+            clientEventId = event.clientEventId.value,
+            companyId = event.companyId.value,
+            actorId = event.actorId.value,
+            deviceId = event.deviceId.value,
+            status = OutboxStatus.PENDING.wireValue,
+            createdAt = 1000L,
+            updatedAt = 1000L
+        )
         database.outboxDao().insertEvent(eventEntity)
         database.outboxDao().insertDeliveryState(conflictingState)
 
-        // Now test that another event with differing ID cannot have state insert if constrained
         val newEvent = OutboxTestFixtures.createSampleEvent()
 
-        // We simulate a transaction failure during runInTransaction:
+        // Simulate a transaction failure during runInTransaction:
         try {
             database.runInTransaction {
                 val newEventEntity = OutboxEventEntity(
@@ -98,9 +95,9 @@ class OutboxTransactionRollbackTest {
         }
 
         // Verify rollback: newEvent must NOT exist in outbox_events table!
-        val rolledBackEvent = database.outboxDao().getEvent(newEvent.clientEventId.value)
+        val rolledBackEvent = database.outboxDao().getEvent(newEvent.companyId.value, newEvent.clientEventId.value)
         assertNull("Event must not exist after transaction rollback", rolledBackEvent)
-        val rolledBackState = database.outboxDao().getDeliveryState(newEvent.clientEventId.value)
+        val rolledBackState = database.outboxDao().getDeliveryState(newEvent.companyId.value, newEvent.clientEventId.value)
         assertNull("Delivery state must not exist after transaction rollback", rolledBackState)
     }
 

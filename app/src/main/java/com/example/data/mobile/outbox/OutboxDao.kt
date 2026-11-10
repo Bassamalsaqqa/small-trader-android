@@ -5,70 +5,113 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
-import androidx.room.Update
 
 @Dao
-interface OutboxDao {
+abstract class OutboxDao {
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
-    fun insertEvent(event: OutboxEventEntity)
+    abstract fun insertEvent(event: OutboxEventEntity)
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
-    fun insertDeliveryState(state: OutboxDeliveryStateEntity)
+    abstract fun insertDeliveryState(state: OutboxDeliveryStateEntity)
 
-    @Update
-    fun updateDeliveryState(state: OutboxDeliveryStateEntity): Int
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    abstract fun insertScopeLock(lock: OutboxScopeLockEntity)
 
-    @Query("SELECT * FROM outbox_events WHERE client_event_id = :clientEventId")
-    fun getEvent(clientEventId: String): OutboxEventEntity?
+    @Query("DELETE FROM outbox_scope_locks WHERE company_id = :companyId AND actor_id = :actorId AND device_id = :deviceId")
+    abstract fun deleteScopeLock(companyId: String, actorId: String, deviceId: String): Int
+
+    @Query("SELECT COUNT(*) > 0 FROM outbox_scope_locks WHERE company_id = :companyId AND actor_id = :actorId AND device_id = :deviceId")
+    abstract fun isScopeLocked(companyId: String, actorId: String, deviceId: String): Boolean
 
     @Query("SELECT * FROM outbox_events WHERE company_id = :companyId AND client_event_id = :clientEventId")
-    fun getEventByCompany(companyId: String, clientEventId: String): OutboxEventEntity?
+    abstract fun getEvent(companyId: String, clientEventId: String): OutboxEventEntity?
 
-    @Query("SELECT * FROM outbox_delivery_states WHERE client_event_id = :clientEventId")
-    fun getDeliveryState(clientEventId: String): OutboxDeliveryStateEntity?
+    @Query("SELECT * FROM outbox_delivery_states WHERE company_id = :companyId AND client_event_id = :clientEventId")
+    abstract fun getDeliveryState(companyId: String, clientEventId: String): OutboxDeliveryStateEntity?
 
-    @Transaction
-    @Query("SELECT * FROM outbox_events WHERE client_event_id = :clientEventId")
-    fun getRecord(clientEventId: String): OutboxRecord?
-
-    @Transaction
     @Query("""
-        SELECT * FROM outbox_events 
-        WHERE company_id = :companyId 
-          AND actor_id = :actorId 
+        SELECT * FROM outbox_events
+        WHERE company_id = :companyId
+          AND actor_id = :actorId
           AND device_id = :deviceId
         ORDER BY captured_at ASC
     """)
-    fun getRecordsByScope(
+    abstract fun getEventsByScope(
         companyId: String,
         actorId: String,
         deviceId: String
-    ): List<OutboxRecord>
+    ): List<OutboxEventEntity>
 
-    @Transaction
+    @Query("""
+        SELECT * FROM outbox_delivery_states
+        WHERE company_id = :companyId
+          AND actor_id = :actorId
+          AND device_id = :deviceId
+    """)
+    abstract fun getDeliveryStatesByScope(
+        companyId: String,
+        actorId: String,
+        deviceId: String
+    ): List<OutboxDeliveryStateEntity>
+
     @Query("""
         SELECT e.* FROM outbox_events e
-        INNER JOIN outbox_delivery_states s ON e.client_event_id = s.client_event_id
+        INNER JOIN outbox_delivery_states s 
+          ON e.company_id = s.company_id AND e.client_event_id = s.client_event_id
         WHERE s.company_id = :companyId 
           AND s.actor_id = :actorId 
           AND s.device_id = :deviceId
           AND s.status = :status
         ORDER BY s.created_at ASC
     """)
-    fun getRecordsByScopeAndStatus(
+    abstract fun getEventsByScopeAndStatus(
         companyId: String,
         actorId: String,
         deviceId: String,
         status: String
-    ): List<OutboxRecord>
+    ): List<OutboxEventEntity>
 
-    /**
-     * Finds candidate event IDs eligible for claim CAS:
-     * - status is 'pending'
-     * - status is 'in_flight' with expired lease (claim_expires_at < :nowMillis)
-     * - status is 'unknown_ack' with expired or null lease (claim_expires_at IS NULL OR claim_expires_at < :nowMillis)
-     */
+    @Transaction
+    open fun getRecord(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        clientEventId: String
+    ): OutboxRecord? {
+        val event = getEvent(companyId, clientEventId) ?: return null
+        if (event.actorId != actorId || event.deviceId != deviceId) return null
+        val state = getDeliveryState(companyId, clientEventId) ?: return null
+        return OutboxRecord(event, state)
+    }
+
+    @Transaction
+    open fun getRecordsByScope(
+        companyId: String,
+        actorId: String,
+        deviceId: String
+    ): List<OutboxRecord> {
+        val events = getEventsByScope(companyId, actorId, deviceId)
+        val states = getDeliveryStatesByScope(companyId, actorId, deviceId).associateBy { it.clientEventId }
+        return events.mapNotNull { event ->
+            states[event.clientEventId]?.let { state -> OutboxRecord(event, state) }
+        }
+    }
+
+    @Transaction
+    open fun getRecordsByScopeAndStatus(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        status: String
+    ): List<OutboxRecord> {
+        val events = getEventsByScopeAndStatus(companyId, actorId, deviceId, status)
+        val states = getDeliveryStatesByScope(companyId, actorId, deviceId).associateBy { it.clientEventId }
+        return events.mapNotNull { event ->
+            states[event.clientEventId]?.let { state -> OutboxRecord(event, state) }
+        }
+    }
+
     @Query("""
         SELECT client_event_id FROM outbox_delivery_states
         WHERE company_id = :companyId
@@ -81,7 +124,7 @@ interface OutboxDao {
         ORDER BY created_at ASC
         LIMIT :limit
     """)
-    fun findClaimCandidateIds(
+    abstract fun findClaimCandidateIds(
         companyId: String,
         actorId: String,
         deviceId: String,
@@ -89,10 +132,6 @@ interface OutboxDao {
         limit: Int
     ): List<String>
 
-    /**
-     * Atomic Compare-And-Set (CAS) claim update.
-     * Guarantees only one worker can transition an eligible record to 'in_flight'.
-     */
     @Query("""
         UPDATE outbox_delivery_states
         SET status = 'in_flight',
@@ -101,8 +140,8 @@ interface OutboxDao {
             attempt_count = attempt_count + 1,
             last_attempt_at = :nowMillis,
             updated_at = :nowMillis
-        WHERE client_event_id = :clientEventId
-          AND company_id = :companyId
+        WHERE company_id = :companyId
+          AND client_event_id = :clientEventId
           AND actor_id = :actorId
           AND device_id = :deviceId
           AND (
@@ -110,7 +149,7 @@ interface OutboxDao {
             OR (status IN ('in_flight', 'unknown_ack') AND (claim_expires_at IS NULL OR claim_expires_at < :nowMillis))
           )
     """)
-    fun executeClaimCas(
+    abstract fun executeClaimCas(
         clientEventId: String,
         companyId: String,
         actorId: String,
@@ -120,10 +159,6 @@ interface OutboxDao {
         nowMillis: Long
     ): Int
 
-    /**
-     * Transitions an in-flight claimed record to unknown_ack upon network timeout.
-     * Prevents false confirmation while recording timeout error.
-     */
     @Query("""
         UPDATE outbox_delivery_states
         SET status = 'unknown_ack',
@@ -131,13 +166,14 @@ interface OutboxDao {
             claim_expires_at = NULL,
             error_message = :errorMessage,
             updated_at = :nowMillis
-        WHERE client_event_id = :clientEventId
-          AND company_id = :companyId
+        WHERE company_id = :companyId
+          AND client_event_id = :clientEventId
           AND actor_id = :actorId
           AND device_id = :deviceId
           AND claim_token = :claimToken
+          AND status = 'in_flight'
     """)
-    fun recordTimeout(
+    abstract fun recordTimeout(
         clientEventId: String,
         companyId: String,
         actorId: String,
@@ -147,10 +183,6 @@ interface OutboxDao {
         nowMillis: Long
     ): Int
 
-    /**
-     * Marks an existing delivery state as CONFLICT upon detecting an altered payload digest.
-     * Never touches the original immutable outbox_events record.
-     */
     @Query("""
         UPDATE outbox_delivery_states
         SET status = 'conflict',
@@ -158,47 +190,77 @@ interface OutboxDao {
             claim_token = NULL,
             claim_expires_at = NULL,
             updated_at = :nowMillis
-        WHERE client_event_id = :clientEventId
+        WHERE company_id = :companyId
+          AND client_event_id = :clientEventId
+          AND status != 'confirmed'
     """)
-    fun markConflict(
+    abstract fun markConflict(
+        companyId: String,
         clientEventId: String,
         reason: String,
         nowMillis: Long
     ): Int
 
-    /**
-     * Confirms delivery upon verified server acknowledgement.
-     * Sets server ULID and verified server timestamp.
-     */
     @Query("""
         UPDATE outbox_delivery_states
         SET status = 'confirmed',
+            invoice_ulid = :invoiceUlid,
+            payment_ulid = :paymentUlid,
             server_ulid = :serverUlid,
             server_acknowledged_at = :serverAcknowledgedAt,
             claim_token = NULL,
             claim_expires_at = NULL,
+            error_message = NULL,
             updated_at = :nowMillis
-        WHERE client_event_id = :clientEventId
-          AND company_id = :companyId
+        WHERE company_id = :companyId
+          AND client_event_id = :clientEventId
           AND actor_id = :actorId
           AND device_id = :deviceId
+          AND claim_token = :claimToken
+          AND status = 'in_flight'
     """)
-    fun confirmDelivery(
+    abstract fun confirmDelivery(
         clientEventId: String,
         companyId: String,
         actorId: String,
         deviceId: String,
+        claimToken: String,
+        invoiceUlid: String,
+        paymentUlid: String,
         serverUlid: String,
         serverAcknowledgedAt: String,
         nowMillis: Long
     ): Int
 
-    /**
-     * Locks queue upon authentication denial (HTTP 401).
-     * Transitions all active delivery states (pending, in_flight, unknown_ack)
-     * for the given company, actor, and device to 'auth_blocked'.
-     * Preserves 'conflict' and 'confirmed' records untouched.
-     */
+    @Query("""
+        UPDATE outbox_delivery_states
+        SET status = 'confirmed',
+            invoice_ulid = :invoiceUlid,
+            payment_ulid = :paymentUlid,
+            server_ulid = :serverUlid,
+            server_acknowledged_at = :serverAcknowledgedAt,
+            claim_token = NULL,
+            claim_expires_at = NULL,
+            error_message = NULL,
+            updated_at = :nowMillis
+        WHERE company_id = :companyId
+          AND client_event_id = :clientEventId
+          AND actor_id = :actorId
+          AND device_id = :deviceId
+          AND status IN ('in_flight', 'unknown_ack')
+    """)
+    abstract fun reconcileConfirmation(
+        clientEventId: String,
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        invoiceUlid: String,
+        paymentUlid: String,
+        serverUlid: String,
+        serverAcknowledgedAt: String,
+        nowMillis: Long
+    ): Int
+
     @Query("""
         UPDATE outbox_delivery_states
         SET status = 'auth_blocked',
@@ -211,7 +273,7 @@ interface OutboxDao {
           AND device_id = :deviceId
           AND status IN ('pending', 'in_flight', 'unknown_ack')
     """)
-    fun lockQueueOnAuthDenied(
+    abstract fun lockQueueOnAuthDenied(
         companyId: String,
         actorId: String,
         deviceId: String,
@@ -219,11 +281,6 @@ interface OutboxDao {
         nowMillis: Long
     ): Int
 
-    /**
-     * Unlocks queue after authenticated manager re-establishes valid credentials.
-     * Restores 'auth_blocked' records to 'pending'.
-     * Leaves 'conflict' and 'confirmed' records untouched.
-     */
     @Query("""
         UPDATE outbox_delivery_states
         SET status = 'pending',
@@ -234,7 +291,7 @@ interface OutboxDao {
           AND device_id = :deviceId
           AND status = 'auth_blocked'
     """)
-    fun unlockQueueAfterReauth(
+    abstract fun unlockQueueAfterReauth(
         companyId: String,
         actorId: String,
         deviceId: String,
@@ -248,7 +305,7 @@ interface OutboxDao {
           AND device_id = :deviceId
           AND status = 'auth_blocked'
     """)
-    fun countAuthBlocked(
+    abstract fun countAuthBlocked(
         companyId: String,
         actorId: String,
         deviceId: String

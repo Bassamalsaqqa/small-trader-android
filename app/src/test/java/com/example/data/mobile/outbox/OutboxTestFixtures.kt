@@ -14,6 +14,11 @@ import java.io.File
 
 object OutboxTestFixtures {
 
+    val SAMPLE_INVOICE_ULID = ServerUlid.parse("01JCV8X9ME7890123456789ABC")
+    val SAMPLE_PAYMENT_ULID = ServerUlid.parse("01JCV8X9MFGHJKMNPQRSTVWXYZ")
+    const val SAMPLE_INVOICE_NUMBER = "INV-2026-00042"
+    const val SAMPLE_PAYMENT_RECEIPT_NUMBER = "RCT-2026-00042"
+
     fun locateFixturesDir(): File {
         val base = System.getProperty("user.dir") ?: "."
         val root = generateSequence(File(base)) { it.parentFile }

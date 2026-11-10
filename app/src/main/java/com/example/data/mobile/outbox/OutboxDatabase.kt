@@ -17,7 +17,8 @@ import androidx.room.RoomDatabase
 @Database(
     entities = [
         OutboxEventEntity::class,
-        OutboxDeliveryStateEntity::class
+        OutboxDeliveryStateEntity::class,
+        OutboxScopeLockEntity::class
     ],
     version = 1,
     exportSchema = true
@@ -39,7 +40,6 @@ abstract class OutboxDatabase : RoomDatabase() {
                 OutboxDatabase::class.java,
                 name
             )
-            .addMigrations(OutboxMigrations.MIGRATION_1_2)
             if (allowMainThreadQueries) {
                 builder.allowMainThreadQueries()
             }
@@ -55,7 +55,6 @@ abstract class OutboxDatabase : RoomDatabase() {
                 context.applicationContext,
                 OutboxDatabase::class.java
             )
-            .addMigrations(OutboxMigrations.MIGRATION_1_2)
             if (allowMainThreadQueries) {
                 builder.allowMainThreadQueries()
             }
