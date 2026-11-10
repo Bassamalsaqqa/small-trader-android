@@ -2,44 +2,46 @@
   "scenario": "Same client_event_id with altered economic payload must be rejected with 409 Conflict",
   "stored_record": {
     "client_event_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "payload_digest": "sha256:402719d8160cd4e54833ec30f4de6cb9cdac12f32b689ec1943104fecabe43db"
+    "payload_digest": "sha256:d442ce49a7609a9a42bb5165990d481d1c7c563cb8030403487099a9919728d9"
   },
   "incoming_request": {
     "client_event_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
     "device_id": "8e2b8bc6-f80c-4034-8c88-59368d1f2e10",
     "captured_at": "2026-11-10T12:00:00Z",
-    "payload_digest": "sha256:487a4c864f6a195533a4b20fedc4ce3ee1c213f013bf78c204b3a0099cb31a4d",
+    "payload_digest": "sha256:4516f569edc5fe6d2bd5a418291ae4ccbff7d7135082f509a67c21838f9fbc4f",
     "event": {
       "client_event_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
       "event_version": 1,
-      "company_id": "c1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c",
-      "actor_id": "550e8400-e29b-41d4-a716-446655440000",
+      "company_id": "01JCV8X9M2NQW3TYZ4R5S6789A",
+      "actor_id": "01JCV8X9M8T1V2W3X4Y5Z67890",
       "device_id": "8e2b8bc6-f80c-4034-8c88-59368d1f2e10",
       "device_lease_id": "7c1e5a2b-3d4f-5678-90ab-cdef12345678",
       "captured_at": "2026-11-10T12:00:00Z",
-      "customer_id": "b1e847c2-550a-4a24-9b88-874246011c34",
+      "customer_id": "01JCV8X9M4K1P2Q3R4S5T6V7W8",
       "currency": "ILS",
-      "warehouse_id": "9f8e7d6c-5b4a-3210-fedc-ba9876543210",
-      "cash_account_id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+      "warehouse_id": "01JCV8X9M9A2B3C4D5E6F7G8H9",
+      "cash_account_id": "01JCV8X9MAJ3K4M5N6P7Q8R9S0",
       "catalog_snapshot_version": "snap-20261110-v1",
       "local_receipt_number": "REC-OFF-00042",
       "lines": [
         {
-          "product_id": "f7d3a2b1-1234-4567-89ab-cdef01234567",
-          "unit_id": "e2f1a0b9-8c7d-6e5f-4a3b-2c1d0e9f8a7b",
-          "quantity": "2.000",
-          "unit_price": "20.00",
-          "tax_rate": "0.1600",
-          "tax_amount": "6.40",
-          "line_total": "46.40"
+          "product_id": "01JCV8X9M6A1B2C3D4E5F6G7H8",
+          "product_unit_id": "01JCV8X9MBV4W5X6Y7Z8012345",
+          "unit_id": "01JCV8X9MBV4W5X6Y7Z8012345",
+          "quantity": "2.000000",
+          "unit_price": "20.000000",
+          "tax_rate": "16.000000",
+          "tax_amount": "6.400000",
+          "line_total": "46.400000"
         }
       ],
       "payment": {
-        "mode": "cash",
-        "cash_account_id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-        "amount_tendered": "100.00",
-        "amount_settled": "46.40",
-        "change_returned": "53.60"
+        "mode": "full",
+        "payment_method": "cash",
+        "cash_account_id": "01JCV8X9MAJ3K4M5N6P7Q8R9S0",
+        "amount_tendered": "100.000000",
+        "amount_settled": "46.400000",
+        "change_returned": "53.600000"
       }
     }
   },
@@ -53,8 +55,8 @@
       },
       "conflict_evidence": {
         "client_event_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-        "stored_payload_digest": "sha256:402719d8160cd4e54833ec30f4de6cb9cdac12f32b689ec1943104fecabe43db",
-        "incoming_payload_digest": "sha256:487a4c864f6a195533a4b20fedc4ce3ee1c213f013bf78c204b3a0099cb31a4d",
+        "stored_payload_digest": "sha256:d442ce49a7609a9a42bb5165990d481d1c7c563cb8030403487099a9919728d9",
+        "incoming_payload_digest": "sha256:4516f569edc5fe6d2bd5a418291ae4ccbff7d7135082f509a67c21838f9fbc4f",
         "conflict_detected_at": "2026-11-10T12:03:00Z"
       }
     }

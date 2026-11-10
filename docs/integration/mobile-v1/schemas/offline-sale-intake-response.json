@@ -17,7 +17,7 @@
     },
     "status": {
       "type": "string",
-      "enum": ["posted", "parked_conflict"]
+      "enum": ["posted"]
     },
     "payload_digest": {
       "type": "string",
@@ -25,47 +25,43 @@
     },
     "outcome": {
       "type": "object",
-      "required": ["action"],
+      "required": [
+        "action",
+        "invoice_id",
+        "invoice_number",
+        "payment_id",
+        "grand_total"
+      ],
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["posted_canonically", "parked_for_manager_resolution"]
+          "enum": ["posted_canonically"]
         },
         "invoice_id": {
-          "type": ["string", "null"],
-          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          "type": "string",
+          "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
         },
         "invoice_number": {
-          "type": ["string", "null"],
+          "type": "string",
+          "minLength": 1,
           "maxLength": 64
         },
         "payment_id": {
-          "type": ["string", "null"],
-          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          "type": "string",
+          "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
         },
         "grand_total": {
-          "type": ["string", "null"],
-          "pattern": "^(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{1,6})?$"
+          "type": "string",
+          "pattern": "^(?:0\\.(?=[0-9]{1,6}$)[0-9]*[1-9][0-9]*|[1-9][0-9]{0,13}(?:\\.[0-9]{1,6})?)$"
         },
         "conflict_code": {
-          "type": ["string", "null"],
-          "enum": [
-            null,
-            "OFFLINE_POLICY_DISABLED",
-            "PRICE_SNAPSHOT_MISMATCH",
-            "STOCK_EXHAUSTED",
-            "ACTOR_REVOKED",
-            "DEVICE_REVOKED",
-            "PAYLOAD_MISMATCH_CONFLICT"
-          ]
+          "type": ["string", "null"]
         },
         "conflict_reason": {
-          "type": ["string", "null"],
-          "maxLength": 255
+          "type": ["string", "null"]
         },
         "resolution_instructions": {
-          "type": ["string", "null"],
-          "maxLength": 500
+          "type": ["string", "null"]
         }
       },
       "additionalProperties": false

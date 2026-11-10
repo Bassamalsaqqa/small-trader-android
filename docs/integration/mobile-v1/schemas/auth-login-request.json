@@ -49,5 +49,33 @@
       "pattern": "^[a-zA-Z0-9]{8,24}(-[a-zA-Z0-9]{8,24})?$"
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mfa_code": { "type": "string" }
+        },
+        "required": ["mfa_code"]
+      },
+      "then": {
+        "properties": {
+          "recovery_code": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "recovery_code": { "type": "string" }
+        },
+        "required": ["recovery_code"]
+      },
+      "then": {
+        "properties": {
+          "mfa_code": { "type": "null" }
+        }
+      }
+    }
+  ],
   "additionalProperties": false
 }

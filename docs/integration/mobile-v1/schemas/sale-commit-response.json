@@ -24,7 +24,7 @@
     },
     "invoice_id": {
       "type": "string",
-      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
     },
     "invoice_number": {
       "type": "string",
@@ -33,7 +33,7 @@
     },
     "payment_id": {
       "type": ["string", "null"],
-      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
     },
     "payment_receipt_number": {
       "type": ["string", "null"],
@@ -41,7 +41,7 @@
     },
     "grand_total": {
       "type": "string",
-      "pattern": "^(?:0\\.[0-9]{0,5}[1-9]|[1-9][0-9]{0,13}(?:\\.[0-9]{1,6})?)$"
+      "pattern": "^(?:0\\.(?=[0-9]{1,6}$)[0-9]*[1-9][0-9]*|[1-9][0-9]{0,13}(?:\\.[0-9]{1,6})?)$"
     },
     "amount_paid": {
       "type": "string",

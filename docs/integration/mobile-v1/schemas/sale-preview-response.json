@@ -6,6 +6,7 @@
   "required": [
     "company_id",
     "customer_id",
+    "warehouse_id",
     "currency",
     "subtotal",
     "tax_total",
@@ -13,17 +14,22 @@
     "amount_due",
     "change",
     "lines",
+    "payload_digest",
     "preview_token",
     "expires_at"
   ],
   "properties": {
     "company_id": {
       "type": "string",
-      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
     },
     "customer_id": {
       "type": "string",
-      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    },
+    "warehouse_id": {
+      "type": "string",
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
     },
     "currency": {
       "type": "string",
@@ -39,7 +45,7 @@
     },
     "grand_total": {
       "type": "string",
-      "pattern": "^(?:0\\.[0-9]{0,5}[1-9]|[1-9][0-9]{0,13}(?:\\.[0-9]{1,6})?)$"
+      "pattern": "^(?:0\\.(?=[0-9]{1,6}$)[0-9]*[1-9][0-9]*|[1-9][0-9]{0,13}(?:\\.[0-9]{1,6})?)$"
     },
     "amount_due": {
       "type": "string",
@@ -52,11 +58,12 @@
     "lines": {
       "type": "array",
       "minItems": 1,
-      "maxItems": 500,
+      "maxItems": 100,
       "items": {
         "type": "object",
         "required": [
           "product_id",
+          "product_unit_id",
           "quantity",
           "unit_price",
           "tax_rate",
@@ -66,11 +73,15 @@
         "properties": {
           "product_id": {
             "type": "string",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+          },
+          "product_unit_id": {
+            "type": "string",
+            "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
           },
           "quantity": {
             "type": "string",
-            "pattern": "^(?:0\\.[0-9]{0,3}[1-9]|[1-9][0-9]{0,9}(?:\\.[0-9]{1,4})?)$"
+            "pattern": "^(?:0\\.(?=[0-9]{1,6}$)[0-9]*[1-9][0-9]*|[1-9][0-9]{0,13}(?:\\.[0-9]{1,6})?)$"
           },
           "unit_price": {
             "type": "string",
@@ -78,7 +89,7 @@
           },
           "tax_rate": {
             "type": "string",
-            "pattern": "^(?:0|[1-9][0-9]{0,2})(?:\\.[0-9]{1,4})?$"
+            "pattern": "^(?:100(?:\\.0{1,6})?|(?:0|[1-9][0-9]?)(?:\\.[0-9]{1,6})?)$"
           },
           "tax_amount": {
             "type": "string",
@@ -86,11 +97,15 @@
           },
           "line_total": {
             "type": "string",
-            "pattern": "^(?:0\\.[0-9]{0,5}[1-9]|[1-9][0-9]{0,13}(?:\\.[0-9]{1,6})?)$"
+            "pattern": "^(?:0\\.(?=[0-9]{1,6}$)[0-9]*[1-9][0-9]*|[1-9][0-9]{0,13}(?:\\.[0-9]{1,6})?)$"
           }
         },
         "additionalProperties": false
       }
+    },
+    "payload_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
     },
     "preview_token": {
       "type": "string",

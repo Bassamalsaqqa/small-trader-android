@@ -66,7 +66,7 @@
         },
         "responses": {
           "200": {
-            "description": "Authentication successful, token issued",
+            "description": "Authentication successful, token issued or MFA required",
             "content": {
               "application/json": {
                 "schema": {
@@ -115,7 +115,7 @@
         },
         "responses": {
           "200": {
-            "description": "Logged out successfully",
+            "description": "Token successfully revoked",
             "content": {
               "application/json": {
                 "schema": {
@@ -125,7 +125,7 @@
             }
           },
           "401": {
-            "description": "Unauthenticated or token expired",
+            "description": "Unauthenticated or token already revoked",
             "content": {
               "application/json": {
                 "schema": {
@@ -139,8 +139,8 @@
     },
     "/api/mobile/v1/devices/{deviceId}/revoke": {
       "post": {
-        "summary": "Revoke device and terminate all issued tokens",
-        "operationId": "deviceRevoke",
+        "summary": "Remotely revoke a lost or compromised device session",
+        "operationId": "revokeDevice",
         "security": [{ "bearerAuth": [] }],
         "parameters": [
           {
@@ -185,7 +185,7 @@
             }
           },
           "403": {
-            "description": "Forbidden (insufficient permissions)",
+            "description": "Unauthorized to revoke device",
             "content": {
               "application/json": {
                 "schema": {
@@ -199,8 +199,8 @@
     },
     "/api/mobile/v1/companies/{companyId}/bootstrap": {
       "get": {
-        "summary": "Bootstrap tenant configuration, permissions, and offline policy",
-        "operationId": "bootstrapCompany",
+        "summary": "Fetch initial operating context, default warehouse, approved cash account, units, authoritative taxes, and offline policy",
+        "operationId": "getBootstrap",
         "security": [{ "bearerAuth": [] }],
         "parameters": [
           {
@@ -209,13 +209,13 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+              "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Bootstrap payload",
+            "description": "Bootstrap context payload",
             "content": {
               "application/json": {
                 "schema": {
@@ -235,7 +235,7 @@
             }
           },
           "403": {
-            "description": "Forbidden (tenant mismatch or revoked membership)",
+            "description": "Forbidden (tenant mismatch)",
             "content": {
               "application/json": {
                 "schema": {
@@ -249,8 +249,8 @@
     },
     "/api/mobile/v1/companies/{companyId}/products": {
       "get": {
-        "summary": "Retrieve active sellable product catalog with exact decimal prices",
-        "operationId": "listProducts",
+        "summary": "Fetch catalog products with pagination, search, tracked inventory, and packaging units",
+        "operationId": "getProducts",
         "security": [{ "bearerAuth": [] }],
         "parameters": [
           {
@@ -259,13 +259,42 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+              "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 100
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Product catalog",
+            "description": "Product catalog page",
             "content": {
               "application/json": {
                 "schema": {
@@ -299,8 +328,8 @@
     },
     "/api/mobile/v1/companies/{companyId}/customers": {
       "get": {
-        "summary": "Retrieve customer directory including walk-in identifier",
-        "operationId": "listCustomers",
+        "summary": "Fetch customer directory with pagination and search",
+        "operationId": "getCustomers",
         "security": [{ "bearerAuth": [] }],
         "parameters": [
           {
@@ -309,13 +338,42 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+              "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 100
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Customer directory",
+            "description": "Customer directory page",
             "content": {
               "application/json": {
                 "schema": {
@@ -349,7 +407,7 @@
     },
     "/api/mobile/v1/companies/{companyId}/sales/preview": {
       "post": {
-        "summary": "Generate server-authoritative exact pricing preview and confirmation token",
+        "summary": "Calculate live totals, taxes, and obtain a bound preview token with canonical digest",
         "operationId": "previewSale",
         "security": [{ "bearerAuth": [] }],
         "parameters": [
@@ -359,7 +417,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+              "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
             }
           }
         ],
@@ -375,7 +433,7 @@
         },
         "responses": {
           "200": {
-            "description": "Pricing preview with confirmation token",
+            "description": "Preview calculation and bound preview token",
             "content": {
               "application/json": {
                 "schema": {
@@ -419,7 +477,7 @@
     },
     "/api/mobile/v1/companies/{companyId}/sales/commit": {
       "post": {
-        "summary": "Atomically commit an online sale using reviewed preview token",
+        "summary": "Atomically commit an online sale using reviewed preview token and verified digest",
         "operationId": "commitSale",
         "security": [{ "bearerAuth": [] }],
         "parameters": [
@@ -429,7 +487,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+              "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
             }
           }
         ],
@@ -509,7 +567,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+              "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
             }
           }
         ],
@@ -589,7 +647,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+              "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
             }
           },
           {

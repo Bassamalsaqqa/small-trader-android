@@ -2,13 +2,13 @@
   "scenario": "Contract fixture shape: Client authenticated under Tenant A attempts to access or mutate Tenant B resources. Server returns 403 Forbidden conforming to error-response.json.",
   "scope_limitation": "Fixture consistency only. Live tenancy enforcement and database boundary isolation are executed by Laravel TenantWriteAccess middleware and proven via Laravel PHPUnit feature suites.",
   "authenticated_session": {
-    "actor_id": "550e8400-e29b-41d4-a716-446655440000",
-    "token_company_id": "c1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c",
+    "actor_id": "01JCV8X9M8T1V2W3X4Y5Z67890",
+    "token_company_id": "01JCV8X9M2NQW3TYZ4R5S6789A",
     "token": "sanctum_1092837465_mobile_token_982347109238471092384710"
   },
   "targeted_request": {
     "method": "POST",
-    "url": "/api/mobile/v1/companies/e9f8a7b6-c5d4-3e2f-1a0b-9c8d7e6f5a4b/sales/preview",
+    "url": "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789B/sales/preview",
     "headers": {
       "Authorization": "Bearer sanctum_1092837465_mobile_token_982347109238471092384710"
     }
@@ -19,7 +19,7 @@
       "code": "FORBIDDEN_TENANT_MISMATCH",
       "message": "User does not possess active authorized membership in the requested company context.",
       "details": {
-        "requested_company_id": "e9f8a7b6-c5d4-3e2f-1a0b-9c8d7e6f5a4b"
+        "requested_company_id": "01JCV8X9M2NQW3TYZ4R5S6789B"
       }
     }
   }

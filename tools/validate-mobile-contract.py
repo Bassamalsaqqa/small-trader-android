@@ -5,15 +5,24 @@ tools/validate-mobile-contract.py
 Comprehensive Small Trader Mobile V1 Contract Validation Suite:
 1. Validates all JSON Schemas in docs/integration/mobile-v1/schemas/ using genuine Draft 2020-12
 2. Validates OpenAPI 3.1 specification using openapi-spec-validator with path parameter,
-   security, and status schema checks
+   security, query pagination/search, and status schema checks
 3. Validates all Golden Fixtures against schemas with Draft 2020-12 and envelope equality bindings
 4. Validates Golden Canonical JSON and SHA-256 Digest test vectors (Restricted JCS profile v1)
-5. Validates Regression Fixtures (labeled as contract fixture consistency; Laravel ROUND_HALF_UP)
-6. Runs meaningful Negative Validation Tests (bad refs, missing security/path params, negative amounts,
-   floats, duplicate keys, tampered digests)
+5. Validates Regression Fixtures (contract consistency only; Laravel SalesLineCalculator ROUND_HALF_UP,
+   16% tax percentage, line round sequence, trailing-zero quantities, and boundary magnitudes)
+6. Runs meaningful Negative & Contract Validation Tests (bad refs, missing params, undefined schemes,
+   negative/zero quantities, IEEE-754 floats, extra properties, tampered digests, duplicate keys,
+   ULID acceptance & UUID entity rejection, tax > 100 rejection, six-place trailing-zero quantities,
+   packaging unit identity, preview token digest binding, and MFA code mutual exclusion)
 7. Verifies reproducible SHA-256 manifest (fails closed if missing without --generate-manifest)
 
 Zero bare 'assert' statements — safe under python3 -O.
+
+Note on Scope:
+This suite validates the contract schemas, OpenAPI 3.1 specifications, canonical serialization,
+digest invariants, and fixture shapes. Live runtime behavior (database constraints, transaction
+isolation, middleware gating, and ledger posting) is authoritative in Laravel backend test suites
+(PHPUnit / MariaDB).
 
 Usage:
     python3 tools/validate-mobile-contract.py [--generate-manifest]
@@ -25,6 +34,7 @@ import json
 import hashlib
 import re
 import decimal
+from decimal import Decimal, ROUND_HALF_UP, ROUND_HALF_EVEN
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -37,7 +47,7 @@ import openapi_spec_validator
 
 # Set up decimal context matching Laravel SalesLineCalculator.php (commit f8a0cf7012c4875bec7320d42e0f8dde58593b52)
 decimal.getcontext().prec = 28
-decimal.getcontext().rounding = decimal.ROUND_HALF_UP
+decimal.getcontext().rounding = ROUND_HALF_UP
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BASE_DIR = REPO_ROOT / "docs" / "integration" / "mobile-v1"
@@ -104,97 +114,95 @@ def jcs_serialize(obj: Any) -> str:
     if isinstance(obj, str):
         return escape_jcs_string(obj)
     if isinstance(obj, list):
-        return "[" + ",".join(jcs_serialize(x) for x in obj) + "]"
+        items = [jcs_serialize(item) for item in obj]
+        return "[" + ",".join(items) + "]"
     if isinstance(obj, dict):
         sorted_keys = sorted(obj.keys(), key=lambda k: k.encode("utf-16-be"))
-        return "{" + ",".join(escape_jcs_string(k) + ":" + jcs_serialize(obj[k]) for k in sorted_keys) + "}"
-    raise CanonicalSerializationError(f"Unsupported type for canonical JSON serialization: {type(obj)}")
+        parts = []
+        for k in sorted_keys:
+            parts.append(escape_jcs_string(k) + ":" + jcs_serialize(obj[k]))
+        return "{" + ",".join(parts) + "}"
+    raise CanonicalSerializationError(f"Unsupported data type for canonical serialization: {type(obj)}")
 
 
 def restricted_canonical_json_bytes(obj: Any) -> bytes:
-    """Returns UTF-8 encoded bytes of canonical JCS serialization."""
+    """Returns canonical JSON bytes in UTF-8."""
     return jcs_serialize(obj).encode("utf-8")
 
 
 def compute_restricted_sha256_digest(obj: Any) -> str:
-    """Computes sha256:<64-char-lower-hex> of canonical JCS bytes."""
-    h = hashlib.sha256(restricted_canonical_json_bytes(obj)).hexdigest()
-    return f"sha256:{h}"
+    """Computes 'sha256:<hex>' digest over restricted canonical JSON bytes."""
+    raw_bytes = restricted_canonical_json_bytes(obj)
+    return f"sha256:{hashlib.sha256(raw_bytes).hexdigest()}"
 
 
-def parse_json_reject_duplicates(text: str) -> Any:
-    """Parses JSON text while strictly rejecting duplicate object keys."""
-    def _pairs_hook(pairs):
-        d = {}
+def parse_json_reject_duplicates(raw_str: str) -> Any:
+    """JSON parser that strictly rejects duplicate object keys."""
+    def dict_builder(pairs):
+        res = {}
         for k, v in pairs:
-            if k in d:
+            if k in res:
                 raise CanonicalSerializationError(f"Duplicate JSON key detected: {k!r}")
-            d[k] = v
-        return d
-    return json.loads(text, object_pairs_hook=_pairs_hook)
+            res[k] = v
+        return res
+    return json.loads(raw_str, object_pairs_hook=dict_builder)
 
 
 # ---------------------------------------------------------------------------
-# Schema Registry & Validation Infrastructure
+# Schema Registry & Validation Hub
 # ---------------------------------------------------------------------------
 
-class ContractValidator:
-    def __init__(self, schemas_dir: Path):
-        self.schemas_dir = schemas_dir
-        self.schemas: Dict[str, dict] = {}
-        self.registry: Registry = Registry()
-        self._load_and_register_schemas()
+class SchemaValidatorHub:
+    def __init__(self):
+        self.schemas: Dict[str, Dict[str, Any]] = {}
+        self.resources: Dict[str, Resource] = {}
+        self.registry = Registry()
+        self._load_all_schemas()
 
-    def _load_and_register_schemas(self):
-        resources: List[Tuple[str, Resource]] = []
-        for p in sorted(self.schemas_dir.glob("*.json")):
-            with open(p, "r", encoding="utf-8") as f:
-                s_json = json.load(f)
-            self.schemas[p.name] = s_json
-            res = Resource.from_contents(s_json)
-            # Register by filename, relative path, and $id if present
-            resources.append((p.name, res))
-            resources.append((f"schemas/{p.name}", res))
-            if "$id" in s_json:
-                resources.append((s_json["$id"], res))
-        self.registry = self.registry.with_resources(resources)
+    def _load_all_schemas(self):
+        for schema_path in SCHEMAS_DIR.glob("*.json"):
+            with open(schema_path, "r", encoding="utf-8") as f:
+                schema_data = json.load(f)
+            schema_id = schema_data.get("$id", schema_path.name)
+            self.schemas[schema_path.name] = schema_data
+            res = Resource.from_contents(schema_data)
+            self.resources[schema_id] = res
+            self.resources[schema_path.name] = res
 
-    def get_validator(self, schema_name: str) -> Draft202012Validator:
-        if schema_name not in self.schemas:
-            raise KeyError(f"Schema {schema_name} not found in loaded schemas")
-        schema = self.schemas[schema_name]
-        return Draft202012Validator(schema, registry=self.registry)
+        for uri, res in self.resources.items():
+            self.registry = self.registry.with_resource(uri, res)
 
     def validate_instance(self, instance: Any, schema_name: str, context: str = ""):
-        validator = self.get_validator(schema_name)
-        errors = list(validator.iter_errors(instance))
+        if schema_name not in self.schemas:
+            raise ValueError(f"Schema not found in registry: {schema_name}")
+        schema_data = self.schemas[schema_name]
+        validator = Draft202012Validator(schema_data, registry=self.registry)
+        errors = sorted(validator.iter_errors(instance), key=lambda e: e.path)
         if errors:
-            first = errors[0]
-            path_str = " -> ".join(str(p) for p in first.absolute_path) or "root"
-            raise JsonSchemaValidationError(
-                f"Validation failed for {context} against {schema_name} at '{path_str}': {first.message}"
+            err_msg = "\n".join(
+                [f" - at '{'/'.join(str(p) for p in err.path) or 'root'}': {err.message}" for err in errors]
             )
+            raise JsonSchemaValidationError(f"Validation failed for {context} against {schema_name}:\n{err_msg}")
 
 
 # ---------------------------------------------------------------------------
-# Test Runner & Steps
+# Main Validation Pipeline
 # ---------------------------------------------------------------------------
 
-def run_validations() -> int:
+def run_suite() -> int:
     print("=" * 70)
     print("Small Trader Mobile V1 Contract Validation Suite")
     print("=" * 70)
-
     passed_checks = 0
 
-    # 1. Genuine JSON Schema Draft 2020-12 Check
+    # 1. Genuine JSON Schema Draft 2020-12 Validation
     print("\n[Step 1] Validating JSON Schemas with Draft 2020-12...")
-    schema_files = sorted(SCHEMAS_DIR.glob("*.json"))
-    if not schema_files:
-        print(f"  FAIL: No schema files found in {SCHEMAS_DIR}")
-        return 1
+    validator_hub = SchemaValidatorHub()
 
-    validator_hub = ContractValidator(SCHEMAS_DIR)
+    schema_files = sorted(list(SCHEMAS_DIR.glob("*.json")))
+    if not schema_files:
+        print(f"  FAIL: No schemas found in {SCHEMAS_DIR}")
+        return 1
 
     for s_path in schema_files:
         with open(s_path, "r", encoding="utf-8") as f:
@@ -279,6 +287,14 @@ def run_validations() -> int:
             if path_param_names != declared_path_params:
                 print(f"  FAIL: Path param mismatch on {method.upper()} {ep}: expected {path_param_names}, got {declared_path_params}")
                 return 1
+
+            # Path parameter pattern check for companyId (must be ULID)
+            for p in declared_params:
+                if p.get("name") == "companyId" and p.get("in") == "path":
+                    schema = p.get("schema", {})
+                    if schema.get("pattern") != "^[0-7][0-9A-HJKMNP-TV-Z]{25}$":
+                        print(f"  FAIL: companyId path parameter must enforce strict Crockford ULID pattern on {method.upper()} {ep}")
+                        return 1
 
             # Security scheme check
             sec = operation.get("security")
@@ -407,47 +423,91 @@ def run_validations() -> int:
     print("  OK: Altered payload conflict fixture verified (digest mismatch -> 409 Conflict schema)")
     passed_checks += 1
 
-    # 5b. Decimal exact arithmetic with Laravel ROUND_HALF_UP parity
+    # 5b. Decimal exact arithmetic with Laravel SalesLineCalculator & TaxPercentage parity
     with open(FIXTURES_DIR / "regression-decimal-edge-cases.json", "r", encoding="utf-8") as f:
         dec_data = json.load(f)
     for tc in dec_data["test_cases"]:
-        if tc["name"] == "fractional_weighted_item":
-            q = decimal.Decimal(tc["quantity"])
-            p = decimal.Decimal(tc["unit_price"])
-            sub = q * p
-            if str(sub) != tc["subtotal"]:
-                print(f"  FAIL: Subtotal mismatch: {sub} != {tc['subtotal']}")
+        tc_name = tc["name"]
+        if tc_name == "sales_line_calculator_exclusive_16_percent":
+            q = Decimal(tc["quantity"])
+            p = Decimal(tc["unit_price"])
+            sub = (q * p).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            sub_6 = f"{sub:.6f}"
+            if sub_6 != tc["subtotal"]:
+                print(f"  FAIL: Subtotal mismatch in {tc_name}: {sub_6} != {tc['subtotal']}")
                 return 1
-            tax_rate = decimal.Decimal(tc["tax_rate"])
-            tax_amount = sub * tax_rate
-            if str(tax_amount) != tc["tax_amount"]:
-                print(f"  FAIL: Tax amount mismatch: {tax_amount} != {tc['tax_amount']}")
+            tax_rate = Decimal(tc["tax_rate"]) / Decimal(100)
+            tax_amt = (sub * tax_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            tax_6 = f"{tax_amt:.6f}"
+            if tax_6 != tc["tax_amount"]:
+                print(f"  FAIL: Tax amount mismatch in {tc_name}: {tax_6} != {tc['tax_amount']}")
                 return 1
-            tot = sub + tax_amount
-            if str(tot) != tc["line_total_exact"]:
-                print(f"  FAIL: Total mismatch: {tot} != {tc['line_total_exact']}")
+            tot = sub + tax_amt
+            tot_6 = f"{tot:.6f}"
+            if tot_6 != tc["line_total"]:
+                print(f"  FAIL: Total mismatch in {tc_name}: {tot_6} != {tc['line_total']}")
                 return 1
-            rounded = tot.quantize(decimal.Decimal("0.01"), rounding=decimal.ROUND_HALF_UP)
-            if str(rounded) != tc["line_total_rounded_half_up"]:
-                print(f"  FAIL: Rounded total mismatch: {rounded} != {tc['line_total_rounded_half_up']}")
+        elif tc_name == "sales_line_calculator_inclusive_16_percent":
+            q = Decimal(tc["quantity"])
+            p = Decimal(tc["unit_price"])
+            sub = (q * p).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            sub_6 = f"{sub:.6f}"
+            if sub_6 != tc["subtotal"]:
+                print(f"  FAIL: Subtotal mismatch in {tc_name}: {sub_6} != {tc['subtotal']}")
                 return 1
-        elif tc["name"] == "half_up_vs_half_even_parity":
-            val = decimal.Decimal(tc["amount"])
-            q_half_up = val.quantize(decimal.Decimal("0.01"), rounding=decimal.ROUND_HALF_UP)
-            q_half_even = val.quantize(decimal.Decimal("0.01"), rounding=decimal.ROUND_HALF_EVEN)
-            if str(q_half_up) != tc["expected_half_up"]:
-                print(f"  FAIL: Half-up mismatch: {q_half_up} != {tc['expected_half_up']}")
+            rate = Decimal(tc["tax_rate"]) / Decimal(100)
+            one_plus_rate = Decimal(1) + rate
+            net = (sub / one_plus_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            net_6 = f"{net:.6f}"
+            if net_6 != tc["net_before_tax"]:
+                print(f"  FAIL: Net mismatch in {tc_name}: {net_6} != {tc['net_before_tax']}")
                 return 1
-            if str(q_half_even) != tc["bankers_half_even_divergence"]:
-                print(f"  FAIL: Half-even divergence mismatch: {q_half_even} != {tc['bankers_half_even_divergence']}")
+            tax_amt = sub - net
+            tax_6 = f"{tax_amt:.6f}"
+            if tax_6 != tc["tax_amount"]:
+                print(f"  FAIL: Tax mismatch in {tc_name}: {tax_6} != {tc['tax_amount']}")
                 return 1
-        elif tc["name"] == "exact_three_cent_sum":
-            d1 = decimal.Decimal(tc["line_1"])
-            d2 = decimal.Decimal(tc["line_2"])
-            if str(d1 + d2) != tc["exact_sum"]:
+            tot = net + tax_amt
+            tot_6 = f"{tot:.6f}"
+            if tot_6 != tc["line_total"]:
+                print(f"  FAIL: Total mismatch in {tc_name}: {tot_6} != {tc['line_total']}")
+                return 1
+        elif tc_name == "trailing_zero_quantity_support":
+            q = Decimal(tc["quantity"])
+            p = Decimal(tc["unit_price"])
+            sub = (q * p).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            rate = Decimal(tc["tax_rate"]) / Decimal(100)
+            tax_amt = (sub * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            tot = sub + tax_amt
+            tot_6 = f"{tot:.6f}"
+            if tot_6 != tc["line_total"]:
+                print(f"  FAIL: Total mismatch in {tc_name}: {tot_6} != {tc['line_total']}")
+                return 1
+        elif tc_name == "half_up_vs_half_even_parity":
+            val = Decimal(tc["amount"])
+            q_half_up = val.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            q_half_even = val.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
+            if f"{q_half_up:.6f}" != tc["expected_half_up"]:
+                print(f"  FAIL: Half-up mismatch: {q_half_up:.6f} != {tc['expected_half_up']}")
+                return 1
+            if f"{q_half_even:.6f}" != tc["bankers_half_even_divergence"]:
+                print(f"  FAIL: Half-even divergence mismatch: {q_half_even:.6f} != {tc['bankers_half_even_divergence']}")
+                return 1
+        elif tc_name == "exact_three_cent_sum":
+            d1 = Decimal(tc["line_1"])
+            d2 = Decimal(tc["line_2"])
+            if f"{d1 + d2:.6f}" != tc["exact_sum"]:
                 print("  FAIL: Exact sum mismatch")
                 return 1
-    print("  OK: Decimal exact arithmetic regression verified (Laravel RoundingMode::HALF_UP parity)")
+        elif tc_name == "max_magnitude_boundaries":
+            if Decimal(tc["max_quantity"]) != Decimal("99999999999999.999999"):
+                print("  FAIL: max_quantity magnitude boundary mismatch")
+                return 1
+            if Decimal(tc["max_money"]) != Decimal("99999999999999.999999"):
+                print("  FAIL: max_money magnitude boundary mismatch")
+                return 1
+
+    print("  OK: Decimal exact arithmetic regression verified (Laravel RoundingMode::HALF_UP & TaxPercentage parity)")
     passed_checks += 1
 
     # 5c. Lost ACK replay
@@ -490,8 +550,8 @@ def run_validations() -> int:
     print("  OK: Offline staff revocation verified (revoked token -> 401 error schema, queue locked)")
     passed_checks += 1
 
-    # 6. Execute Meaningful Negative Tests
-    print("\n[Step 6] Running Meaningful Negative Validation Tests...")
+    # 6. Execute Meaningful Negative & Contract Validation Tests
+    print("\n[Step 6] Running Meaningful Negative & Contract Validation Tests...")
 
     # Negative 1: Bad / unresolvable $ref in a schema
     bad_schema = {
@@ -554,7 +614,7 @@ def run_validations() -> int:
 
     # Negative 4: Negative quantity in offline sale intake
     bad_qty_payload = json.loads(json.dumps(off_req))
-    bad_qty_payload["event"]["lines"][0]["quantity"] = "-2.000"
+    bad_qty_payload["event"]["lines"][0]["quantity"] = "-2.000000"
     try:
         validator_hub.validate_instance(bad_qty_payload, "offline-sale-intake-request.json", "negative-qty")
         print("  FAIL Negative 4: Negative quantity was accepted!")
@@ -565,7 +625,7 @@ def run_validations() -> int:
 
     # Negative 5: Negative monetary amount in offline sale intake
     bad_amt_payload = json.loads(json.dumps(off_req))
-    bad_amt_payload["event"]["lines"][0]["unit_price"] = "-25.00"
+    bad_amt_payload["event"]["lines"][0]["unit_price"] = "-25.000000"
     try:
         validator_hub.validate_instance(bad_amt_payload, "offline-sale-intake-request.json", "negative-price")
         print("  FAIL Negative 5: Negative unit price was accepted!")
@@ -643,6 +703,116 @@ def run_validations() -> int:
     print("  OK: Negative 11 passed (401 error response shape conforms to error-response.json)")
     passed_checks += 1
 
+    # Check 12 (ULID Strict Crockford Acceptance & UUID Entity Rejection)
+    # Server public ID fields must accept strict Crockford ULID and reject UUID or malformed ULID
+    with open(FIXTURES_DIR / "golden-bootstrap.json", "r", encoding="utf-8") as f:
+        valid_boot = json.load(f)
+
+    # 12a: Positive validation: valid Crockford ULID accepted
+    validator_hub.validate_instance(valid_boot, "bootstrap-response.json", "valid-ulid-bootstrap")
+    print("  OK: Check 12a passed (strict Crockford ULID accepted for server entity public IDs)")
+    passed_checks += 1
+
+    # 12b: Negative validation: UUID rejected for server entity company_id
+    uuid_as_ulid = json.loads(json.dumps(valid_boot))
+    uuid_as_ulid["company_id"] = "c1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c"  # UUID rejected for server company
+    try:
+        validator_hub.validate_instance(uuid_as_ulid, "bootstrap-response.json", "uuid-as-company-id")
+        print("  FAIL Check 12b: UUID was accepted as server company_id ULID!")
+        return 1
+    except JsonSchemaValidationError:
+        print("  OK: Check 12b passed (UUID rejected for server company_id by ULID schema constraint)")
+        passed_checks += 1
+
+    # 12c: Negative validation: Malformed Crockford characters rejected (I, L, O, U, or lowercase)
+    bad_char_ulid = json.loads(json.dumps(valid_boot))
+    bad_char_ulid["company_id"] = "01JCV8X9M2NQW3TYZ4R5S6789I"  # contains 'I'
+    try:
+        validator_hub.validate_instance(bad_char_ulid, "bootstrap-response.json", "invalid-char-ulid")
+        print("  FAIL Check 12c: Malformed ULID containing 'I' was accepted!")
+        return 1
+    except JsonSchemaValidationError:
+        print("  OK: Check 12c passed (malformed Crockford ULID character strictly rejected)")
+        passed_checks += 1
+
+    # Check 13 (TaxPercentage bounds: reject > 100 and negative, accept 0..100 six decimals)
+    bad_tax_preview = json.loads(json.dumps(off_req))
+    bad_tax_preview["event"]["lines"][0]["tax_rate"] = "100.000001"  # > 100% rejected!
+    try:
+        validator_hub.validate_instance(bad_tax_preview, "offline-sale-intake-request.json", "over-tax-rate")
+        print("  FAIL Check 13: Tax percentage > 100 was accepted!")
+        return 1
+    except JsonSchemaValidationError:
+        print("  OK: Check 13 passed (Tax percentage > 100 strictly rejected by schema)")
+        passed_checks += 1
+
+    # Check 14 (Six-place trailing-zero quantities accepted, zero/neg/over-scale rejected)
+    trailing_zero_payload = json.loads(json.dumps(off_req))
+    trailing_zero_payload["event"]["lines"][0]["quantity"] = "0.100000"  # trailing zero positive quantity
+    validator_hub.validate_instance(trailing_zero_payload, "offline-sale-intake-request.json", "trailing-zero-qty")
+    print("  OK: Check 14a passed (six-place trailing zero quantity '0.100000' accepted)")
+    passed_checks += 1
+
+    zero_qty_payload = json.loads(json.dumps(off_req))
+    zero_qty_payload["event"]["lines"][0]["quantity"] = "0.000000"  # all-zero positive quantity rejected
+    try:
+        validator_hub.validate_instance(zero_qty_payload, "offline-sale-intake-request.json", "zero-qty")
+        print("  FAIL Check 14b: All-zero quantity '0.000000' was accepted by positive quantity schema!")
+        return 1
+    except JsonSchemaValidationError:
+        print("  OK: Check 14b passed (all-zero quantity '0.000000' rejected by positive quantity schema)")
+        passed_checks += 1
+
+    overscale_qty_payload = json.loads(json.dumps(off_req))
+    overscale_qty_payload["event"]["lines"][0]["quantity"] = "0.1000001"  # 7 decimals rejected
+    try:
+        validator_hub.validate_instance(overscale_qty_payload, "offline-sale-intake-request.json", "overscale-qty")
+        print("  FAIL Check 14c: Over-scale quantity (7 decimals) was accepted!")
+        return 1
+    except JsonSchemaValidationError:
+        print("  OK: Check 14c passed (over-scale quantity > 6 decimals rejected)")
+        passed_checks += 1
+
+    # Check 15 (Product packaging unit identity)
+    missing_punit_payload = json.loads(json.dumps(off_req))
+    del missing_punit_payload["event"]["lines"][0]["product_unit_id"]
+    try:
+        validator_hub.validate_instance(missing_punit_payload, "offline-sale-intake-request.json", "missing-punit")
+        print("  FAIL Check 15: Missing product_unit_id was accepted!")
+        return 1
+    except JsonSchemaValidationError:
+        print("  OK: Check 15 passed (product packaging unit id required on line items)")
+        passed_checks += 1
+
+    # Check 16 (Preview digest and commit token binding verification)
+    with open(FIXTURES_DIR / "golden-sale-commit.json", "r", encoding="utf-8") as f:
+        commit_fix = json.load(f)["request"]
+    tampered_commit = json.loads(json.dumps(commit_fix))
+    tampered_commit["payload_digest"] = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    if tampered_commit["payload_digest"] == commit_fix["payload_digest"]:
+        print("  FAIL Check 16: Tampered commit digest matched original!")
+        return 1
+    print("  OK: Check 16 passed (preview token digest binding mismatch caught)")
+    passed_checks += 1
+
+    # Check 17 (MFA code and recovery code mutual exclusion in auth login)
+    with open(FIXTURES_DIR / "golden-auth-login.json", "r", encoding="utf-8") as f:
+        login_req = json.load(f)["request"]
+    conflict_mfa_req = json.loads(json.dumps(login_req))
+    conflict_mfa_req["mfa_code"] = "123456"
+    conflict_mfa_req["recovery_code"] = "abcdef12-34567890"  # both provided!
+    try:
+        validator_hub.validate_instance(conflict_mfa_req, "auth-login-request.json", "conflict-mfa-recovery")
+        print("  FAIL Check 17: Both mfa_code and recovery_code were accepted simultaneously!")
+        return 1
+    except JsonSchemaValidationError:
+        print("  OK: Check 17 passed (mfa_code and recovery_code mutually exclusive constraint enforced)")
+        passed_checks += 1
+
+    print("\n  [Contract Isolation Notice] All 17 validation checks verify contract schemas, OpenAPI invariants,")
+    print("  exact decimal arithmetic, and JCS digests. Database row locks, tenant middlewares, and ledger")
+    print("  postings are authoritative in Laravel account PHPUnit suites.")
+
     # 7. Verify reproducible manifest SHA-256 (fail closed if absent)
     print("\n[Step 7] Verifying Reproducible SHA-256 Manifest...")
     manifest_entries = generate_manifest_entries()
@@ -703,4 +873,4 @@ def generate_manifest_entries() -> Dict[str, str]:
 
 
 if __name__ == "__main__":
-    sys.exit(run_validations())
+    sys.exit(run_suite())

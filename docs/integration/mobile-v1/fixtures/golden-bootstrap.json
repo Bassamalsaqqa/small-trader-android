@@ -1,10 +1,10 @@
 {
-  "company_id": "c1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c",
+  "company_id": "01JCV8X9M2NQW3TYZ4R5S6789A",
   "company_name": "Al-Amal Retail Company",
   "base_currency": "ILS",
-  "walk_in_customer_id": "b1e847c2-550a-4a24-9b88-874246011c34",
+  "walk_in_customer_id": "01JCV8X9M4K1P2Q3R4S5T6V7W8",
   "staff": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "id": "01JCV8X9M8T1V2W3X4Y5Z67890",
     "name": "Ahmad Cashier",
     "role": "cashier",
     "permissions": [
@@ -14,26 +14,21 @@
       "products.read"
     ]
   },
-  "device_lease": {
-    "lease_id": "7c1e5a2b-3d4f-5678-90ab-cdef12345678",
-    "device_id": "8e2b8bc6-f80c-4034-8c88-59368d1f2e10",
-    "actor_id": "550e8400-e29b-41d4-a716-446655440000",
-    "expires_at": "2026-11-11T12:00:00Z"
-  },
+  "device_lease": null,
   "default_warehouse": {
-    "id": "9f8e7d6c-5b4a-3210-fedc-ba9876543210",
+    "id": "01JCV8X9M9A2B3C4D5E6F7G8H9",
     "code": "WH-MAIN",
     "name": "Main Store Warehouse"
   },
   "approved_cash_account": {
-    "id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+    "id": "01JCV8X9MAJ3K4M5N6P7Q8R9S0",
     "code": "CASH-REG-01",
     "name": "Cash Register 01 (ILS)",
     "currency": "ILS"
   },
   "units": [
     {
-      "id": "e2f1a0b9-8c7d-6e5f-4a3b-2c1d0e9f8a7b",
+      "id": "01JCV8X9MBV4W5X6Y7Z8012345",
       "code": "PCS",
       "name": "Piece",
       "symbol": "pc",
@@ -41,7 +36,7 @@
       "decimal_places": 0
     },
     {
-      "id": "d3c2b1a0-9f8e-7d6c-5b4a-3a2b1c0d9e8f",
+      "id": "01JCV8X9MC6789ABCDEFGHJKMN",
       "code": "KG",
       "name": "Kilogram",
       "symbol": "kg",
@@ -49,12 +44,30 @@
       "decimal_places": 3
     }
   ],
+  "taxes": [
+    {
+      "id": "01JCV8X9MDPTRSVWXYZ0123456",
+      "code": "VAT16",
+      "name": "Standard VAT (16%)",
+      "rate": "16.000000",
+      "calculation": "exclusive",
+      "is_default": true
+    },
+    {
+      "id": "01JCV8X9MDZER0000000000000",
+      "code": "ZERO",
+      "name": "Zero-Rated (0%)",
+      "rate": "0.000000",
+      "calculation": "exclusive",
+      "is_default": false
+    }
+  ],
   "offline_policy": {
     "enabled": false,
     "cash_only": true,
     "max_offline_hours": 12,
     "max_offline_sales_count": 50,
-    "max_offline_total_amount": "5000.00"
+    "max_offline_total_amount": "5000.000000"
   },
   "catalog_snapshot_version": "snap-20261110-v1"
 }
