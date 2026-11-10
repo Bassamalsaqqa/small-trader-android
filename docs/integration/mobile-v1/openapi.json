@@ -84,6 +84,16 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
           }
         }
       }
@@ -110,6 +120,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "schemas/auth-logout-response.json"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated or token expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
                 }
               }
             }
@@ -153,6 +173,26 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Unauthenticated or token revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden (insufficient permissions)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
           }
         }
       }
@@ -180,6 +220,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "schemas/bootstrap-response.json"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated or token revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
                 }
               }
             }
@@ -223,6 +273,26 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Unauthenticated or token revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden (tenant mismatch)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
           }
         }
       }
@@ -250,6 +320,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "schemas/customer-directory-response.json"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated or token revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden (tenant mismatch)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
                 }
               }
             }
@@ -290,6 +380,36 @@
               "application/json": {
                 "schema": {
                   "$ref": "schemas/sale-preview-response.json"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated or token revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden (tenant mismatch)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error in line items or payment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
                 }
               }
             }
@@ -334,8 +454,38 @@
               }
             }
           },
+          "401": {
+            "description": "Unauthenticated or token revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden (tenant mismatch)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          },
           "409": {
             "description": "Conflict: same client event ID with altered payload digest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error or expired preview token",
             "content": {
               "application/json": {
                 "schema": {
@@ -384,8 +534,38 @@
               }
             }
           },
+          "401": {
+            "description": "Unauthenticated or token revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden (tenant mismatch or unauthorized actor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          },
           "409": {
             "description": "Conflict: same client event ID with altered payload digest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error in event payload or envelope mismatch",
             "content": {
               "application/json": {
                 "schema": {
@@ -429,6 +609,36 @@
               "application/json": {
                 "schema": {
                   "$ref": "schemas/sale-event-status-response.json"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated or token revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden (tenant mismatch)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Client event ID not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/error-response.json"
                 }
               }
             }

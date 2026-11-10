@@ -2,7 +2,7 @@
   "client_event_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "company_id": "c1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c",
   "status": "posted",
-  "payload_digest": "sha256:95d91224f0904b6dd13e1baee18aabaef28e4e5a080808c126632f7762b89a37",
+  "payload_digest": "sha256:402719d8160cd4e54833ec30f4de6cb9cdac12f32b689ec1943104fecabe43db",
   "official_invoice": {
     "invoice_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
     "invoice_number": "INV-2026-00042",

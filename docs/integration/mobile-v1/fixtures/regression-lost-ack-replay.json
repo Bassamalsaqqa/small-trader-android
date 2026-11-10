@@ -2,7 +2,7 @@
   "scenario": "Network drops after server commit; client retries intake with identical event ID and identical digest. Server returns existing canonical outcome without regenerating invoice sequences.",
   "first_submission": {
     "client_event_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "payload_digest": "sha256:95d91224f0904b6dd13e1baee18aabaef28e4e5a080808c126632f7762b89a37",
+    "payload_digest": "sha256:402719d8160cd4e54833ec30f4de6cb9cdac12f32b689ec1943104fecabe43db",
     "committed_at": "2026-11-10T12:02:10Z",
     "result": {
       "status": "posted",
@@ -15,7 +15,7 @@
   "lost_ack_event": "HTTP socket timeout on client; Android receives no response; client event status remains UNKNOWN_ACK in local Room database.",
   "retry_submission": {
     "client_event_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "payload_digest": "sha256:95d91224f0904b6dd13e1baee18aabaef28e4e5a080808c126632f7762b89a37"
+    "payload_digest": "sha256:402719d8160cd4e54833ec30f4de6cb9cdac12f32b689ec1943104fecabe43db"
   },
   "server_behavior": {
     "db_lookup": "UNIQUE KEY match on (company_id, client_event_id)",
@@ -25,7 +25,7 @@
     "response": {
       "client_event_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
       "status": "posted",
-      "payload_digest": "sha256:95d91224f0904b6dd13e1baee18aabaef28e4e5a080808c126632f7762b89a37",
+      "payload_digest": "sha256:402719d8160cd4e54833ec30f4de6cb9cdac12f32b689ec1943104fecabe43db",
       "outcome": {
         "action": "posted_canonically",
         "invoice_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",

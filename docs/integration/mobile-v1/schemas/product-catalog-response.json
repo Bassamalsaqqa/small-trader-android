@@ -11,7 +11,8 @@
     },
     "catalog_snapshot_version": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 64
     },
     "generated_at": {
       "type": "string",
@@ -38,33 +39,37 @@
           },
           "sku": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 64
           },
           "barcode": {
-            "type": ["string", "null"]
+            "type": ["string", "null"],
+            "maxLength": 64
           },
           "name": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 100
           },
           "unit_price": {
             "type": "string",
-            "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+            "pattern": "^(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{1,6})?$"
           },
           "tax_rate": {
             "type": "string",
-            "pattern": "^[0-9]+(\\.[0-9]+)?$"
+            "pattern": "^(?:0|[1-9][0-9]{0,2})(?:\\.[0-9]{1,4})?$"
           },
           "is_tracked": {
             "type": "boolean"
           },
           "available_quantity": {
             "type": "string",
-            "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+            "pattern": "^(?:0|[1-9][0-9]{0,9})(?:\\.[0-9]{1,4})?$"
           },
           "unit_of_measure": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 32
           }
         },
         "additionalProperties": false

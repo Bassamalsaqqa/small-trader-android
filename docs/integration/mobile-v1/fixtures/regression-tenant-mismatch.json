@@ -1,5 +1,6 @@
 {
-  "scenario": "Client authenticated under Tenant A attempts to access or mutate Tenant B resources. Server rejects with 403 Forbidden.",
+  "scenario": "Contract fixture shape: Client authenticated under Tenant A attempts to access or mutate Tenant B resources. Server returns 403 Forbidden conforming to error-response.json.",
+  "scope_limitation": "Fixture consistency only. Live tenancy enforcement and database boundary isolation are executed by Laravel TenantWriteAccess middleware and proven via Laravel PHPUnit feature suites.",
   "authenticated_session": {
     "actor_id": "550e8400-e29b-41d4-a716-446655440000",
     "token_company_id": "c1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c",

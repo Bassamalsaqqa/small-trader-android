@@ -31,30 +31,38 @@
     },
     "subtotal": {
       "type": "string",
-      "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+      "pattern": "^(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{1,6})?$"
     },
     "tax_total": {
       "type": "string",
-      "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+      "pattern": "^(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{1,6})?$"
     },
     "grand_total": {
       "type": "string",
-      "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+      "pattern": "^(?:0\\.[0-9]{0,5}[1-9]|[1-9][0-9]{0,13}(?:\\.[0-9]{1,6})?)$"
     },
     "amount_due": {
       "type": "string",
-      "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+      "pattern": "^(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{1,6})?$"
     },
     "change": {
       "type": "string",
-      "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+      "pattern": "^(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{1,6})?$"
     },
     "lines": {
       "type": "array",
       "minItems": 1,
+      "maxItems": 500,
       "items": {
         "type": "object",
-        "required": ["product_id", "quantity", "unit_price", "tax_rate", "tax_amount", "line_total"],
+        "required": [
+          "product_id",
+          "quantity",
+          "unit_price",
+          "tax_rate",
+          "tax_amount",
+          "line_total"
+        ],
         "properties": {
           "product_id": {
             "type": "string",
@@ -62,23 +70,23 @@
           },
           "quantity": {
             "type": "string",
-            "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+            "pattern": "^(?:0\\.[0-9]{0,3}[1-9]|[1-9][0-9]{0,9}(?:\\.[0-9]{1,4})?)$"
           },
           "unit_price": {
             "type": "string",
-            "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+            "pattern": "^(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{1,6})?$"
           },
           "tax_rate": {
             "type": "string",
-            "pattern": "^[0-9]+(\\.[0-9]+)?$"
+            "pattern": "^(?:0|[1-9][0-9]{0,2})(?:\\.[0-9]{1,4})?$"
           },
           "tax_amount": {
             "type": "string",
-            "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+            "pattern": "^(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{1,6})?$"
           },
           "line_total": {
             "type": "string",
-            "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+            "pattern": "^(?:0\\.[0-9]{0,5}[1-9]|[1-9][0-9]{0,13}(?:\\.[0-9]{1,6})?)$"
           }
         },
         "additionalProperties": false
@@ -86,7 +94,8 @@
     },
     "preview_token": {
       "type": "string",
-      "minLength": 32
+      "minLength": 32,
+      "maxLength": 16384
     },
     "expires_at": {
       "type": "string",

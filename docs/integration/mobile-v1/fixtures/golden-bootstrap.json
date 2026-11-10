@@ -14,6 +14,41 @@
       "products.read"
     ]
   },
+  "device_lease": {
+    "lease_id": "7c1e5a2b-3d4f-5678-90ab-cdef12345678",
+    "device_id": "8e2b8bc6-f80c-4034-8c88-59368d1f2e10",
+    "actor_id": "550e8400-e29b-41d4-a716-446655440000",
+    "expires_at": "2026-11-11T12:00:00Z"
+  },
+  "default_warehouse": {
+    "id": "9f8e7d6c-5b4a-3210-fedc-ba9876543210",
+    "code": "WH-MAIN",
+    "name": "Main Store Warehouse"
+  },
+  "approved_cash_account": {
+    "id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+    "code": "CASH-REG-01",
+    "name": "Cash Register 01 (ILS)",
+    "currency": "ILS"
+  },
+  "units": [
+    {
+      "id": "e2f1a0b9-8c7d-6e5f-4a3b-2c1d0e9f8a7b",
+      "code": "PCS",
+      "name": "Piece",
+      "symbol": "pc",
+      "allows_fraction": false,
+      "decimal_places": 0
+    },
+    {
+      "id": "d3c2b1a0-9f8e-7d6c-5b4a-3a2b1c0d9e8f",
+      "code": "KG",
+      "name": "Kilogram",
+      "symbol": "kg",
+      "allows_fraction": true,
+      "decimal_places": 3
+    }
+  ],
   "offline_policy": {
     "enabled": false,
     "cash_only": true,

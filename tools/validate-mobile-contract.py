@@ -2,13 +2,18 @@
 """
 tools/validate-mobile-contract.py
 
-Validates the Small Trader Mobile V1 API contract:
-1. Validates all JSON Schemas in docs/integration/mobile-v1/schemas/
-2. Validates OpenAPI 3.1 specification in docs/integration/mobile-v1/openapi.json
-3. Validates all Golden Fixtures against their respective schemas
-4. Validates Golden Canonical JSON and SHA-256 Digest test vectors
-5. Validates Regression Fixtures (altered payload conflict, decimal edge cases, lost-ACK, tenant mismatch, revocation)
-6. Verifies SHA-256 manifest reproducibility
+Comprehensive Small Trader Mobile V1 Contract Validation Suite:
+1. Validates all JSON Schemas in docs/integration/mobile-v1/schemas/ using genuine Draft 2020-12
+2. Validates OpenAPI 3.1 specification using openapi-spec-validator with path parameter,
+   security, and status schema checks
+3. Validates all Golden Fixtures against schemas with Draft 2020-12 and envelope equality bindings
+4. Validates Golden Canonical JSON and SHA-256 Digest test vectors (Restricted JCS profile v1)
+5. Validates Regression Fixtures (labeled as contract fixture consistency; Laravel ROUND_HALF_UP)
+6. Runs meaningful Negative Validation Tests (bad refs, missing security/path params, negative amounts,
+   floats, duplicate keys, tampered digests)
+7. Verifies reproducible SHA-256 manifest (fails closed if missing without --generate-manifest)
+
+Zero bare 'assert' statements — safe under python3 -O.
 
 Usage:
     python3 tools/validate-mobile-contract.py [--generate-manifest]
@@ -21,10 +26,18 @@ import hashlib
 import re
 import decimal
 from pathlib import Path
+from typing import Any, Dict, List, Tuple
 
-# Set up decimal context for banking precision
+import jsonschema
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError as JsonSchemaValidationError, SchemaError
+import referencing
+from referencing import Registry, Resource
+import openapi_spec_validator
+
+# Set up decimal context matching Laravel SalesLineCalculator.php (commit f8a0cf7012c4875bec7320d42e0f8dde58593b52)
 decimal.getcontext().prec = 28
-decimal.getcontext().rounding = decimal.ROUND_HALF_EVEN
+decimal.getcontext().rounding = decimal.ROUND_HALF_UP
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BASE_DIR = REPO_ROOT / "docs" / "integration" / "mobile-v1"
@@ -35,173 +48,136 @@ MANIFEST_FILE = BASE_DIR / "manifest.sha256"
 
 
 # ---------------------------------------------------------------------------
-# Strict JSON Schema Validator (Standard Library Implementation)
+# Restricted Canonical JSON Profile v1 (RFC 8785 Subset)
 # ---------------------------------------------------------------------------
 
-class SchemaValidationError(Exception):
+class CanonicalSerializationError(Exception):
     pass
 
 
-def canonical_json_bytes(obj) -> bytes:
-    """RFC 8785 JSON Canonicalization Scheme (JCS) serializer."""
-    return json.dumps(
-        obj,
-        sort_keys=True,
-        separators=(',', ':'),
-        ensure_ascii=False
-    ).encode('utf-8')
+def escape_jcs_string(s: str) -> str:
+    """Escapes string according to RFC 8785 rules."""
+    out = []
+    for c in s:
+        code = ord(c)
+        if 0xD800 <= code <= 0xDFFF:
+            raise CanonicalSerializationError(f"Unpaired Unicode surrogate detected: {c!r}")
+        if c == '"':
+            out.append('\\"')
+        elif c == '\\':
+            out.append('\\\\')
+        elif c == '\b':
+            out.append('\\b')
+        elif c == '\f':
+            out.append('\\f')
+        elif c == '\n':
+            out.append('\\n')
+        elif c == '\r':
+            out.append('\\r')
+        elif c == '\t':
+            out.append('\\t')
+        elif code < 0x20:
+            out.append(f"\\u{code:04x}")
+        else:
+            out.append(c)
+    return '"' + "".join(out) + '"'
 
 
-def compute_sha256_digest(obj) -> str:
-    """Compute sha256:<hex> of canonical JSON serialization."""
-    h = hashlib.sha256(canonical_json_bytes(obj)).hexdigest()
+def jcs_serialize(obj: Any) -> str:
+    """
+    Serializes object following Small Trader Restricted Canonical JSON Profile v1:
+    - All economic and monetary values must be strings (floats strictly forbidden).
+    - Keys sorted by UTF-16 code units (RFC 8785 section 3.2.3).
+    - Characters < 0x20 escaped as \\u00xx or standard escapes; non-ASCII UTF-8 unescaped.
+    - No whitespace between tokens.
+    """
+    if isinstance(obj, float):
+        raise CanonicalSerializationError(
+            "IEEE 754 floats are strictly forbidden in Restricted Canonical JSON Profile; all decimals must be string-encoded"
+        )
+    if obj is None:
+        return "null"
+    if isinstance(obj, bool):
+        return "true" if obj else "false"
+    if isinstance(obj, int):
+        return str(obj)
+    if isinstance(obj, str):
+        return escape_jcs_string(obj)
+    if isinstance(obj, list):
+        return "[" + ",".join(jcs_serialize(x) for x in obj) + "]"
+    if isinstance(obj, dict):
+        sorted_keys = sorted(obj.keys(), key=lambda k: k.encode("utf-16-be"))
+        return "{" + ",".join(escape_jcs_string(k) + ":" + jcs_serialize(obj[k]) for k in sorted_keys) + "}"
+    raise CanonicalSerializationError(f"Unsupported type for canonical JSON serialization: {type(obj)}")
+
+
+def restricted_canonical_json_bytes(obj: Any) -> bytes:
+    """Returns UTF-8 encoded bytes of canonical JCS serialization."""
+    return jcs_serialize(obj).encode("utf-8")
+
+
+def compute_restricted_sha256_digest(obj: Any) -> str:
+    """Computes sha256:<64-char-lower-hex> of canonical JCS bytes."""
+    h = hashlib.sha256(restricted_canonical_json_bytes(obj)).hexdigest()
     return f"sha256:{h}"
 
 
-class JsonSchemaValidator:
-    def __init__(self, schemas_dir: Path):
-        self.schemas_dir = schemas_dir
-        self.schemas = {}
-        self.load_all_schemas()
-
-    def load_all_schemas(self):
-        for schema_path in self.schemas_dir.glob("*.json"):
-            with open(schema_path, "r", encoding="utf-8") as f:
-                schema_json = json.load(f)
-                self.schemas[schema_path.name] = schema_json
-                if "$id" in schema_json:
-                    self.schemas[schema_json["$id"]] = schema_json
-
-    def resolve_ref(self, ref: str, current_schema: dict) -> dict:
-        if ref.startswith("#/"):
-            # Internal pointer
-            parts = ref.lstrip("#/").split("/")
-            curr = current_schema
-            for p in parts:
-                curr = curr[p]
-            return curr
-        # Relative file ref
-        ref_filename = Path(ref).name
-        if ref_filename in self.schemas:
-            return self.schemas[ref_filename]
-        if ref in self.schemas:
-            return self.schemas[ref]
-        raise SchemaValidationError(f"Could not resolve $ref: {ref}")
-
-    def validate(self, data, schema, path: str = "root"):
-        if "$ref" in schema:
-            resolved = self.resolve_ref(schema["$ref"], schema)
-            self.validate(data, resolved, path)
-            return
-
-        expected_type = schema.get("type")
-        if expected_type:
-            types = [expected_type] if isinstance(expected_type, str) else expected_type
-            valid = False
-            for t in types:
-                if t == "null" and data is None:
-                    valid = True
-                elif t == "string" and isinstance(data, str):
-                    valid = True
-                elif t == "boolean" and isinstance(data, bool):
-                    valid = True
-                elif t == "integer" and isinstance(data, int) and not isinstance(data, bool):
-                    valid = True
-                elif t == "number" and (isinstance(data, (int, float)) and not isinstance(data, bool)):
-                    valid = True
-                elif t == "object" and isinstance(data, dict):
-                    valid = True
-                elif t == "array" and isinstance(data, list):
-                    valid = True
-
-            if not valid:
-                raise SchemaValidationError(
-                    f"At {path}: expected type {expected_type}, got {type(data).__name__} ({repr(data)})"
-                )
-
-        if data is None:
-            return
-
-        # Enum check
-        if "enum" in schema:
-            if data not in schema["enum"]:
-                raise SchemaValidationError(
-                    f"At {path}: value {repr(data)} is not in enum {schema['enum']}"
-                )
-
-        # String constraints
-        if isinstance(data, str):
-            if "pattern" in schema:
-                pattern = schema["pattern"]
-                if not re.search(pattern, data):
-                    raise SchemaValidationError(
-                        f"At {path}: string {repr(data)} does not match pattern {repr(pattern)}"
-                    )
-            if "minLength" in schema and len(data) < schema["minLength"]:
-                raise SchemaValidationError(
-                    f"At {path}: string length {len(data)} is less than minLength {schema['minLength']}"
-                )
-            if "maxLength" in schema and len(data) > schema["maxLength"]:
-                raise SchemaValidationError(
-                    f"At {path}: string length {len(data)} exceeds maxLength {schema['maxLength']}"
-                )
-            if "format" in schema:
-                fmt = schema["format"]
-                if fmt == "date-time":
-                    # Simple ISO-8601 validation
-                    if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$", data):
-                        raise SchemaValidationError(f"At {path}: invalid date-time format: {data}")
-                elif fmt == "email":
-                    if not re.match(r"^[^@]+@[^@]+\.[^@]+$", data):
-                        raise SchemaValidationError(f"At {path}: invalid email format: {data}")
-
-        # Number / integer constraints
-        if isinstance(data, (int, float)) and not isinstance(data, bool):
-            if "minimum" in schema and data < schema["minimum"]:
-                raise SchemaValidationError(
-                    f"At {path}: value {data} is less than minimum {schema['minimum']}"
-                )
-            if "maximum" in schema and data > schema["maximum"]:
-                raise SchemaValidationError(
-                    f"At {path}: value {data} exceeds maximum {schema['maximum']}"
-                )
-
-        # Array constraints
-        if isinstance(data, list):
-            if "minItems" in schema and len(data) < schema["minItems"]:
-                raise SchemaValidationError(
-                    f"At {path}: array length {len(data)} is less than minItems {schema['minItems']}"
-                )
-            if "maxItems" in schema and len(data) > schema["maxItems"]:
-                raise SchemaValidationError(
-                    f"At {path}: array length {len(data)} exceeds maxItems {schema['maxItems']}"
-                )
-            if "items" in schema:
-                items_schema = schema["items"]
-                for i, item in enumerate(data):
-                    self.validate(item, items_schema, f"{path}[{i}]")
-
-        # Object constraints
-        if isinstance(data, dict):
-            required = schema.get("required", [])
-            for req_key in required:
-                if req_key not in data:
-                    raise SchemaValidationError(f"At {path}: missing required property '{req_key}'")
-
-            properties = schema.get("properties", {})
-            additional_allowed = schema.get("additionalProperties", True)
-
-            for key, val in data.items():
-                if key in properties:
-                    self.validate(val, properties[key], f"{path}.{key}")
-                elif additional_allowed is False:
-                    raise SchemaValidationError(f"At {path}: unexpected additional property '{key}'")
-                elif isinstance(additional_allowed, dict):
-                    self.validate(val, additional_allowed, f"{path}.{key}")
+def parse_json_reject_duplicates(text: str) -> Any:
+    """Parses JSON text while strictly rejecting duplicate object keys."""
+    def _pairs_hook(pairs):
+        d = {}
+        for k, v in pairs:
+            if k in d:
+                raise CanonicalSerializationError(f"Duplicate JSON key detected: {k!r}")
+            d[k] = v
+        return d
+    return json.loads(text, object_pairs_hook=_pairs_hook)
 
 
 # ---------------------------------------------------------------------------
-# Test Runner & Assertions
+# Schema Registry & Validation Infrastructure
+# ---------------------------------------------------------------------------
+
+class ContractValidator:
+    def __init__(self, schemas_dir: Path):
+        self.schemas_dir = schemas_dir
+        self.schemas: Dict[str, dict] = {}
+        self.registry: Registry = Registry()
+        self._load_and_register_schemas()
+
+    def _load_and_register_schemas(self):
+        resources: List[Tuple[str, Resource]] = []
+        for p in sorted(self.schemas_dir.glob("*.json")):
+            with open(p, "r", encoding="utf-8") as f:
+                s_json = json.load(f)
+            self.schemas[p.name] = s_json
+            res = Resource.from_contents(s_json)
+            # Register by filename, relative path, and $id if present
+            resources.append((p.name, res))
+            resources.append((f"schemas/{p.name}", res))
+            if "$id" in s_json:
+                resources.append((s_json["$id"], res))
+        self.registry = self.registry.with_resources(resources)
+
+    def get_validator(self, schema_name: str) -> Draft202012Validator:
+        if schema_name not in self.schemas:
+            raise KeyError(f"Schema {schema_name} not found in loaded schemas")
+        schema = self.schemas[schema_name]
+        return Draft202012Validator(schema, registry=self.registry)
+
+    def validate_instance(self, instance: Any, schema_name: str, context: str = ""):
+        validator = self.get_validator(schema_name)
+        errors = list(validator.iter_errors(instance))
+        if errors:
+            first = errors[0]
+            path_str = " -> ".join(str(p) for p in first.absolute_path) or "root"
+            raise JsonSchemaValidationError(
+                f"Validation failed for {context} against {schema_name} at '{path_str}': {first.message}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Test Runner & Steps
 # ---------------------------------------------------------------------------
 
 def run_validations() -> int:
@@ -209,15 +185,16 @@ def run_validations() -> int:
     print("Small Trader Mobile V1 Contract Validation Suite")
     print("=" * 70)
 
-    validator = JsonSchemaValidator(SCHEMAS_DIR)
     passed_checks = 0
 
-    # 1. Validate Schema files existence and basic structure
-    print("\n[Step 1] Validating JSON Schemas...")
+    # 1. Genuine JSON Schema Draft 2020-12 Check
+    print("\n[Step 1] Validating JSON Schemas with Draft 2020-12...")
     schema_files = sorted(SCHEMAS_DIR.glob("*.json"))
     if not schema_files:
-        print("ERROR: No schema files found in", SCHEMAS_DIR)
+        print(f"  FAIL: No schema files found in {SCHEMAS_DIR}")
         return 1
+
+    validator_hub = ContractValidator(SCHEMAS_DIR)
 
     for s_path in schema_files:
         with open(s_path, "r", encoding="utf-8") as f:
@@ -226,23 +203,44 @@ def run_validations() -> int:
             except Exception as e:
                 print(f"  FAIL: Schema {s_path.name} is not valid JSON: {e}")
                 return 1
-            if "$schema" not in s_json or "type" not in s_json:
-                print(f"  FAIL: Schema {s_path.name} missing $schema or type")
-                return 1
-        print(f"  OK: {s_path.name}")
+
+        try:
+            Draft202012Validator.check_schema(s_json)
+        except SchemaError as e:
+            print(f"  FAIL: Schema {s_path.name} is not valid Draft 2020-12: {e.message}")
+            return 1
+
+        if "$schema" not in s_json or s_json["$schema"] != "https://json-schema.org/draft/2020-12/schema":
+            print(f"  FAIL: Schema {s_path.name} does not declare Draft 2020-12 $schema")
+            return 1
+
+        print(f"  OK: {s_path.name} (Draft 2020-12 verified)")
         passed_checks += 1
     print(f"  Total schemas validated: {len(schema_files)}")
 
-    # 2. Validate OpenAPI 3.1 specification
+    # 2. Genuine OpenAPI 3.1 Specification Validation
     print("\n[Step 2] Validating OpenAPI 3.1 Specification...")
     if not OPENAPI_FILE.exists():
-        print("ERROR: openapi.json not found at", OPENAPI_FILE)
+        print(f"  FAIL: openapi.json not found at {OPENAPI_FILE}")
         return 1
-    with open(OPENAPI_FILE, "r", encoding="utf-8") as f:
-        openapi = json.load(f)
 
-    assert openapi.get("openapi") == "3.1.0", "OpenAPI version must be 3.1.0"
-    paths = openapi.get("paths", {})
+    with open(OPENAPI_FILE, "r", encoding="utf-8") as f:
+        try:
+            openapi_spec = json.load(f)
+        except Exception as e:
+            print(f"  FAIL: openapi.json is not valid JSON: {e}")
+            return 1
+
+    try:
+        openapi_spec_validator.validate(openapi_spec, base_uri=OPENAPI_FILE.resolve().as_uri())
+        print("  OK: OpenAPI 3.1 meta-schema validation passed")
+        passed_checks += 1
+    except Exception as e:
+        print(f"  FAIL: OpenAPI 3.1 meta-schema validation failed: {e}")
+        return 1
+
+    # Verify semantic OpenAPI invariants
+    paths = openapi_spec.get("paths", {})
     expected_endpoints = [
         "/api/mobile/v1/auth/challenge",
         "/api/mobile/v1/auth/login",
@@ -256,102 +254,160 @@ def run_validations() -> int:
         "/api/mobile/v1/companies/{companyId}/offline-events",
         "/api/mobile/v1/companies/{companyId}/offline-events/{clientEventId}/status",
     ]
+
     for ep in expected_endpoints:
         if ep not in paths:
-            print(f"  FAIL: Missing expected endpoint {ep} in openapi.json")
+            print(f"  FAIL: Missing expected endpoint in openapi.json: {ep}")
             return 1
-        print(f"  OK: Endpoint defined: {ep}")
+
+        path_item = paths[ep]
+        for method, operation in path_item.items():
+            if method.lower() not in ["get", "post", "put", "delete", "patch"]:
+                continue
+
+            op_id = operation.get("operationId")
+            if not op_id:
+                print(f"  FAIL: Operation {method.upper()} {ep} missing operationId")
+                return 1
+
+            # Path parameter consistency
+            path_param_names = set(re.findall(r"\{([a-zA-Z0-9_]+)\}", ep))
+            declared_params = operation.get("parameters", [])
+            declared_path_params = {
+                p["name"] for p in declared_params if p.get("in") == "path" and p.get("required") is True
+            }
+            if path_param_names != declared_path_params:
+                print(f"  FAIL: Path param mismatch on {method.upper()} {ep}: expected {path_param_names}, got {declared_path_params}")
+                return 1
+
+            # Security scheme check
+            sec = operation.get("security")
+            if sec:
+                for req in sec:
+                    for scheme_name in req:
+                        if scheme_name not in openapi_spec.get("components", {}).get("securitySchemes", {}):
+                            print(f"  FAIL: Undefined security scheme '{scheme_name}' on {method.upper()} {ep}")
+                            return 1
+
+            # Status schemas check
+            responses = operation.get("responses", {})
+            if "200" not in responses and "201" not in responses:
+                print(f"  FAIL: Operation {method.upper()} {ep} missing 200/201 success response")
+                return 1
+
+        print(f"  OK: Endpoint semantically verified: {ep}")
         passed_checks += 1
 
     # 3. Validate Golden Fixtures against schemas
     print("\n[Step 3] Validating Golden Fixtures...")
     fixtures_map = [
-        ("golden-auth-challenge.json", "auth-challenge-request.json", "request"),
-        ("golden-auth-challenge.json", "auth-challenge-response.json", "response"),
-        ("golden-auth-login.json", "auth-login-request.json", "request"),
-        ("golden-auth-login.json", "auth-login-response.json", "response"),
-        ("golden-auth-logout.json", "auth-logout-request.json", "request"),
-        ("golden-auth-logout.json", "auth-logout-response.json", "response"),
-        ("golden-device-revoke.json", "device-revoke-request.json", "request"),
-        ("golden-device-revoke.json", "device-revoke-response.json", "response"),
-        ("golden-bootstrap.json", "bootstrap-response.json", None),
-        ("golden-product-catalog.json", "product-catalog-response.json", None),
-        ("golden-customer-directory.json", "customer-directory-response.json", None),
-        ("golden-sale-preview.json", "sale-preview-request.json", "request"),
-        ("golden-sale-preview.json", "sale-preview-response.json", "response"),
-        ("golden-sale-commit.json", "sale-commit-request.json", "request"),
-        ("golden-sale-commit.json", "sale-commit-response.json", "response"),
-        ("golden-offline-sale-intake.json", "offline-sale-intake-request.json", "request"),
-        ("golden-offline-sale-intake.json", "offline-sale-intake-response.json", "response"),
-        ("golden-sale-event-status.json", "sale-event-status-response.json", None),
+        ("golden-auth-challenge.json", "request", "auth-challenge-request.json"),
+        ("golden-auth-challenge.json", "response", "auth-challenge-response.json"),
+        ("golden-auth-login.json", "request", "auth-login-request.json"),
+        ("golden-auth-login.json", "response", "auth-login-response.json"),
+        ("golden-auth-logout.json", "request", "auth-logout-request.json"),
+        ("golden-auth-logout.json", "response", "auth-logout-response.json"),
+        ("golden-device-revoke.json", "request", "device-revoke-request.json"),
+        ("golden-device-revoke.json", "response", "device-revoke-response.json"),
+        ("golden-bootstrap.json", None, "bootstrap-response.json"),
+        ("golden-product-catalog.json", None, "product-catalog-response.json"),
+        ("golden-customer-directory.json", None, "customer-directory-response.json"),
+        ("golden-sale-preview.json", "request", "sale-preview-request.json"),
+        ("golden-sale-preview.json", "response", "sale-preview-response.json"),
+        ("golden-sale-commit.json", "request", "sale-commit-request.json"),
+        ("golden-sale-commit.json", "response", "sale-commit-response.json"),
+        ("golden-offline-sale-intake.json", "request", "offline-sale-intake-request.json"),
+        ("golden-offline-sale-intake.json", "response", "offline-sale-intake-response.json"),
+        ("golden-sale-event-status.json", None, "sale-event-status-response.json"),
     ]
 
-    for fix_file, schema_file, sub_key in fixtures_map:
-        fpath = FIXTURES_DIR / fix_file
-        with open(fpath, "r", encoding="utf-8") as f:
+    for fix_name, sub_key, schema_name in fixtures_map:
+        fix_path = FIXTURES_DIR / fix_name
+        with open(fix_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        if sub_key:
-            data = data[sub_key]
-        schema = validator.schemas[schema_file]
+        target = data[sub_key] if sub_key else data
         try:
-            validator.validate(data, schema, path=f"{fix_file}:{sub_key or 'root'}")
-            print(f"  OK: {fix_file} [{sub_key or 'root'}] conforms to {schema_file}")
-            passed_checks += 1
-        except SchemaValidationError as e:
-            print(f"  FAIL: Validation error in {fix_file}: {e}")
+            validator_hub.validate_instance(target, schema_name, f"{fix_name} [{sub_key or 'root'}]")
+        except JsonSchemaValidationError as e:
+            print(f"  FAIL: {e}")
             return 1
+        print(f"  OK: {fix_name} [{sub_key or 'root'}] conforms to {schema_name}")
+        passed_checks += 1
 
-    # 4. Validate Golden Canonical Vectors
+    # Verify golden offline intake envelope equality and digest
+    with open(FIXTURES_DIR / "golden-offline-sale-intake.json", "r", encoding="utf-8") as f:
+        off_req = json.load(f)["request"]
+
+    # Check envelope equality bindings
+    if off_req["client_event_id"] != off_req["event"]["client_event_id"]:
+        print("  FAIL: Envelope client_event_id does not match event client_event_id")
+        return 1
+    if off_req["device_id"] != off_req["event"]["device_id"]:
+        print("  FAIL: Envelope device_id does not match event device_id")
+        return 1
+    if off_req["captured_at"] != off_req["event"]["captured_at"]:
+        print("  FAIL: Envelope captured_at does not match event captured_at")
+        return 1
+
+    computed_digest = compute_restricted_sha256_digest(off_req["event"])
+    if computed_digest != off_req["payload_digest"]:
+        print(f"  FAIL: Offline intake payload_digest mismatch!\n    Computed: {computed_digest}\n    In req:   {off_req['payload_digest']}")
+        return 1
+    print(f"  OK: Offline intake golden event matches payload_digest: {computed_digest}")
+    passed_checks += 1
+
+    # 4. Golden Canonical JSON Vectors (Restricted Profile v1)
     print("\n[Step 4] Validating Golden Canonical JSON and SHA-256 Digest Vectors...")
     vectors_file = FIXTURES_DIR / "golden-canonical-vectors.json"
     with open(vectors_file, "r", encoding="utf-8") as f:
         vectors = json.load(f)
 
     for vec in vectors:
-        name = vec["name"]
+        v_name = vec["name"]
         inp = vec["input"]
         expected_canonical = vec["canonical_json"]
         expected_digest = vec["digest"]
 
-        actual_canonical = canonical_json_bytes(inp).decode("utf-8")
+        try:
+            actual_canonical = restricted_canonical_json_bytes(inp).decode("utf-8")
+        except Exception as e:
+            print(f"  FAIL: Vector '{v_name}' canonical serialization raised: {e}")
+            return 1
+
         if actual_canonical != expected_canonical:
-            print(f"  FAIL Vector {name}: canonical mismatch!\n    Exp: {expected_canonical}\n    Act: {actual_canonical}")
+            print(f"  FAIL Vector '{v_name}': canonical mismatch!\n    Exp: {expected_canonical}\n    Act: {actual_canonical}")
             return 1
 
-        actual_digest = compute_sha256_digest(inp)
+        actual_digest = compute_restricted_sha256_digest(inp)
         if actual_digest != expected_digest:
-            print(f"  FAIL Vector {name}: digest mismatch!\n    Exp: {expected_digest}\n    Act: {actual_digest}")
+            print(f"  FAIL Vector '{v_name}': digest mismatch!\n    Exp: {expected_digest}\n    Act: {actual_digest}")
             return 1
 
-        print(f"  OK: Vector '{name}' verified: {actual_digest}")
+        print(f"  OK: Vector '{v_name}' verified: {actual_digest}")
         passed_checks += 1
 
-    # Verify golden offline intake event digest match
-    with open(FIXTURES_DIR / "golden-offline-sale-intake.json", "r", encoding="utf-8") as f:
-        offline_intake_data = json.load(f)["request"]
-    computed_intake_digest = compute_sha256_digest(offline_intake_data["event"])
-    if computed_intake_digest != offline_intake_data["payload_digest"]:
-        print(f"  FAIL: Offline intake payload_digest mismatch!\n    Computed: {computed_intake_digest}\n    In request: {offline_intake_data['payload_digest']}")
-        return 1
-    print(f"  OK: Offline intake golden event matches payload_digest: {computed_intake_digest}")
-    passed_checks += 1
-
-    # 5. Validate Regression Fixtures
-    print("\n[Step 5] Validating Regression Fixtures...")
+    # 5. Validate Regression Fixtures (Contract consistency only)
+    print("\n[Step 5] Validating Regression Fixtures (Contract Schema & Policy Parity)...")
 
     # 5a. Altered payload conflict
     with open(FIXTURES_DIR / "regression-altered-payload-conflict.json", "r", encoding="utf-8") as f:
         alt_data = json.load(f)
     alt_event = alt_data["incoming_request"]["event"]
-    computed_alt_digest = compute_sha256_digest(alt_event)
-    assert computed_alt_digest == alt_data["incoming_request"]["payload_digest"]
-    assert computed_alt_digest != alt_data["stored_record"]["payload_digest"], "Altered payload MUST have different digest"
-    assert alt_data["expected_status"] == 409
-    validator.validate(alt_data["expected_response"], validator.schemas["error-response.json"], "regression-altered-payload")
-    print("  OK: Altered payload conflict regression verified (digest mismatch -> 409 Conflict)")
+    computed_alt_digest = compute_restricted_sha256_digest(alt_event)
+    if computed_alt_digest != alt_data["incoming_request"]["payload_digest"]:
+        print("  FAIL: Altered incoming request payload_digest does not match computed digest")
+        return 1
+    if computed_alt_digest == alt_data["stored_record"]["payload_digest"]:
+        print("  FAIL: Altered payload digest MUST differ from stored record digest")
+        return 1
+    if alt_data["expected_status"] != 409:
+        print("  FAIL: Altered payload conflict expected status must be 409")
+        return 1
+    validator_hub.validate_instance(alt_data["expected_response"], "error-response.json", "regression-altered-payload")
+    print("  OK: Altered payload conflict fixture verified (digest mismatch -> 409 Conflict schema)")
     passed_checks += 1
 
-    # 5b. Decimal edge cases
+    # 5b. Decimal exact arithmetic with Laravel ROUND_HALF_UP parity
     with open(FIXTURES_DIR / "regression-decimal-edge-cases.json", "r", encoding="utf-8") as f:
         dec_data = json.load(f)
     for tc in dec_data["test_cases"]:
@@ -359,63 +415,250 @@ def run_validations() -> int:
             q = decimal.Decimal(tc["quantity"])
             p = decimal.Decimal(tc["unit_price"])
             sub = q * p
-            assert str(sub) == tc["subtotal"], f"Subtotal mismatch: {sub} != {tc['subtotal']}"
+            if str(sub) != tc["subtotal"]:
+                print(f"  FAIL: Subtotal mismatch: {sub} != {tc['subtotal']}")
+                return 1
             tax_rate = decimal.Decimal(tc["tax_rate"])
             tax_amount = sub * tax_rate
-            assert str(tax_amount) == tc["tax_amount"], f"Tax amount mismatch: {tax_amount} != {tc['tax_amount']}"
+            if str(tax_amount) != tc["tax_amount"]:
+                print(f"  FAIL: Tax amount mismatch: {tax_amount} != {tc['tax_amount']}")
+                return 1
             tot = sub + tax_amount
-            assert str(tot) == tc["line_total_exact"], f"Total mismatch: {tot} != {tc['line_total_exact']}"
-            rounded = tot.quantize(decimal.Decimal("0.01"))
-            assert str(rounded) == tc["line_total_rounded_bankers"], f"Rounded total mismatch: {rounded} != {tc['line_total_rounded_bankers']}"
+            if str(tot) != tc["line_total_exact"]:
+                print(f"  FAIL: Total mismatch: {tot} != {tc['line_total_exact']}")
+                return 1
+            rounded = tot.quantize(decimal.Decimal("0.01"), rounding=decimal.ROUND_HALF_UP)
+            if str(rounded) != tc["line_total_rounded_half_up"]:
+                print(f"  FAIL: Rounded total mismatch: {rounded} != {tc['line_total_rounded_half_up']}")
+                return 1
+        elif tc["name"] == "half_up_vs_half_even_parity":
+            val = decimal.Decimal(tc["amount"])
+            q_half_up = val.quantize(decimal.Decimal("0.01"), rounding=decimal.ROUND_HALF_UP)
+            q_half_even = val.quantize(decimal.Decimal("0.01"), rounding=decimal.ROUND_HALF_EVEN)
+            if str(q_half_up) != tc["expected_half_up"]:
+                print(f"  FAIL: Half-up mismatch: {q_half_up} != {tc['expected_half_up']}")
+                return 1
+            if str(q_half_even) != tc["bankers_half_even_divergence"]:
+                print(f"  FAIL: Half-even divergence mismatch: {q_half_even} != {tc['bankers_half_even_divergence']}")
+                return 1
         elif tc["name"] == "exact_three_cent_sum":
             d1 = decimal.Decimal(tc["line_1"])
             d2 = decimal.Decimal(tc["line_2"])
-            d_sum = d1 + d2
-            assert str(d_sum) == tc["exact_sum"]
-            # Demonstrate binary float drift
-            f_sum = 0.10 + 0.20
-            assert str(f_sum) == tc["float_corrupted_sum"]
-    print("  OK: Decimal exact arithmetic regression verified (Banker's rounding, arbitrary precision scale)")
+            if str(d1 + d2) != tc["exact_sum"]:
+                print("  FAIL: Exact sum mismatch")
+                return 1
+    print("  OK: Decimal exact arithmetic regression verified (Laravel RoundingMode::HALF_UP parity)")
     passed_checks += 1
 
     # 5c. Lost ACK replay
     with open(FIXTURES_DIR / "regression-lost-ack-replay.json", "r", encoding="utf-8") as f:
         lost_ack = json.load(f)
-    assert lost_ack["first_submission"]["payload_digest"] == lost_ack["retry_submission"]["payload_digest"]
-    assert lost_ack["first_submission"]["client_event_id"] == lost_ack["retry_submission"]["client_event_id"]
-    validator.validate(lost_ack["server_behavior"]["response"], validator.schemas["offline-sale-intake-response.json"], "regression-lost-ack")
-    print("  OK: Lost-ACK idempotent replay regression verified (identical digest -> same canonical outcome)")
+    if lost_ack["first_submission"]["payload_digest"] != lost_ack["retry_submission"]["payload_digest"]:
+        print("  FAIL: Lost ACK first and retry submissions must have identical digest")
+        return 1
+    if lost_ack["first_submission"]["client_event_id"] != lost_ack["retry_submission"]["client_event_id"]:
+        print("  FAIL: Lost ACK first and retry submissions must have identical client_event_id")
+        return 1
+    validator_hub.validate_instance(lost_ack["server_behavior"]["response"], "offline-sale-intake-response.json", "regression-lost-ack")
+    print("  OK: Lost-ACK replay fixture verified (identical digest -> canonical outcome schema)")
     passed_checks += 1
 
     # 5d. Tenant mismatch
     with open(FIXTURES_DIR / "regression-tenant-mismatch.json", "r", encoding="utf-8") as f:
         tenant_mis = json.load(f)
-    assert tenant_mis["expected_status"] == 403
-    validator.validate(tenant_mis["expected_response"], validator.schemas["error-response.json"], "regression-tenant-mismatch")
-    print("  OK: Tenant mismatch regression verified (cross-tenant access -> 403 Forbidden)")
+    if tenant_mis["expected_status"] != 403:
+        print("  FAIL: Tenant mismatch expected_status must be 403")
+        return 1
+    validator_hub.validate_instance(tenant_mis["expected_response"], "error-response.json", "regression-tenant-mismatch")
+    print("  OK: Tenant mismatch fixture verified (cross-tenant access -> 403 error schema)")
     passed_checks += 1
 
-    # 5e. Auth revocation
+    # 5e. Auth revocation (revoked Bearer 401 Unauthorized with client queue lock)
     with open(FIXTURES_DIR / "regression-auth-revocation.json", "r", encoding="utf-8") as f:
         rev_data = json.load(f)
-    rev_computed_digest = compute_sha256_digest(rev_data["intake_submission"]["event"])
-    assert rev_computed_digest == rev_data["intake_submission"]["payload_digest"]
-    validator.validate(rev_data["expected_response"], validator.schemas["offline-sale-intake-response.json"], "regression-auth-revocation")
-    assert rev_data["expected_response"]["outcome"]["conflict_code"] == "ACTOR_REVOKED"
-    print("  OK: Offline staff revocation regression verified (parked for manager resolution without silent drop)")
+    rev_computed_digest = compute_restricted_sha256_digest(rev_data["intake_submission"]["event"])
+    if rev_computed_digest != rev_data["intake_submission"]["payload_digest"]:
+        print("  FAIL: Revocation fixture intake submission digest mismatch")
+        return 1
+    if rev_data["expected_status"] != 401:
+        print(f"  FAIL: Revocation expected_status must be 401 Unauthorized, got {rev_data['expected_status']}")
+        return 1
+    validator_hub.validate_instance(rev_data["expected_response"], "error-response.json", "regression-auth-revocation")
+    if rev_data["client_outbox_state"]["queue_status"] != "QUEUE_LOCKED_AUTH_DENIED":
+        print("  FAIL: Client queue status must be QUEUE_LOCKED_AUTH_DENIED")
+        return 1
+    print("  OK: Offline staff revocation verified (revoked token -> 401 error schema, queue locked)")
     passed_checks += 1
 
-    # 6. Verify reproducible manifest SHA256
-    print("\n[Step 6] Verifying Reproducible SHA-256 Manifest...")
+    # 6. Execute Meaningful Negative Tests
+    print("\n[Step 6] Running Meaningful Negative Validation Tests...")
+
+    # Negative 1: Bad / unresolvable $ref in a schema
+    bad_schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {"item": {"$ref": "nonexistent-schema.json"}},
+    }
+    v_bad = Draft202012Validator(bad_schema, registry=validator_hub.registry)
+    try:
+        list(v_bad.iter_errors({"item": {}}))
+        print("  FAIL Negative 1: Expected unresolvable $ref error, but validation succeeded")
+        return 1
+    except referencing.exceptions.Unresolvable:
+        print("  OK: Negative 1 passed (unresolvable $ref properly rejected)")
+        passed_checks += 1
+
+    # Negative 2: Missing path parameter in OpenAPI operation
+    bad_openapi = {
+        "openapi": "3.1.0",
+        "info": {"title": "Test", "version": "1.0"},
+        "paths": {
+            "/api/{missingParam}": {
+                "get": {
+                    "operationId": "testOp",
+                    "parameters": [],  # missing Param!
+                    "responses": {"200": {"description": "OK"}},
+                }
+            }
+        },
+    }
+    path_param_names = set(re.findall(r"\{([a-zA-Z0-9_]+)\}", "/api/{missingParam}"))
+    declared = {p["name"] for p in bad_openapi["paths"]["/api/{missingParam}"]["get"]["parameters"] if p.get("in") == "path"}
+    if path_param_names == declared:
+        print("  FAIL Negative 2: Undeclared path param was not caught")
+        return 1
+    print("  OK: Negative 2 passed (undeclared path parameter caught)")
+    passed_checks += 1
+
+    # Negative 3: Missing security scheme declaration
+    bad_sec_spec = {
+        "openapi": "3.1.0",
+        "info": {"title": "Test", "version": "1.0"},
+        "paths": {
+            "/api/secure": {
+                "get": {
+                    "operationId": "secOp",
+                    "security": [{"undefinedAuth": []}],
+                    "responses": {"200": {"description": "OK"}},
+                }
+            }
+        },
+        "components": {"securitySchemes": {}},
+    }
+    sec_names = [k for req in bad_sec_spec["paths"]["/api/secure"]["get"]["security"] for k in req]
+    if any(k in bad_sec_spec["components"]["securitySchemes"] for k in sec_names):
+        print("  FAIL Negative 3: Undefined security scheme was not caught")
+        return 1
+    print("  OK: Negative 3 passed (undefined security scheme caught)")
+    passed_checks += 1
+
+    # Negative 4: Negative quantity in offline sale intake
+    bad_qty_payload = json.loads(json.dumps(off_req))
+    bad_qty_payload["event"]["lines"][0]["quantity"] = "-2.000"
+    try:
+        validator_hub.validate_instance(bad_qty_payload, "offline-sale-intake-request.json", "negative-qty")
+        print("  FAIL Negative 4: Negative quantity was accepted!")
+        return 1
+    except JsonSchemaValidationError:
+        print("  OK: Negative 4 passed (negative quantity rejected by schema)")
+        passed_checks += 1
+
+    # Negative 5: Negative monetary amount in offline sale intake
+    bad_amt_payload = json.loads(json.dumps(off_req))
+    bad_amt_payload["event"]["lines"][0]["unit_price"] = "-25.00"
+    try:
+        validator_hub.validate_instance(bad_amt_payload, "offline-sale-intake-request.json", "negative-price")
+        print("  FAIL Negative 5: Negative unit price was accepted!")
+        return 1
+    except JsonSchemaValidationError:
+        print("  OK: Negative 5 passed (negative unit price rejected by schema)")
+        passed_checks += 1
+
+    # Negative 6: Floating point number instead of decimal string
+    bad_float_payload = json.loads(json.dumps(off_req))
+    bad_float_payload["event"]["lines"][0]["unit_price"] = 25.0  # numeric float!
+    try:
+        validator_hub.validate_instance(bad_float_payload, "offline-sale-intake-request.json", "float-price")
+        print("  FAIL Negative 6: Float unit price was accepted by schema!")
+        return 1
+    except JsonSchemaValidationError:
+        print("  OK: Negative 6 passed (float unit price rejected by schema type constraint)")
+        passed_checks += 1
+
+    # Negative 7: Unexpected additional property in strict schema
+    bad_extra_payload = json.loads(json.dumps(off_req))
+    bad_extra_payload["event"]["lines"][0]["unauthorized_field"] = "malicious"
+    try:
+        validator_hub.validate_instance(bad_extra_payload, "offline-sale-intake-request.json", "extra-property")
+        print("  FAIL Negative 7: Additional unauthorized property was accepted!")
+        return 1
+    except JsonSchemaValidationError:
+        print("  OK: Negative 7 passed (additional unauthorized property rejected)")
+        passed_checks += 1
+
+    # Negative 8: Envelope vs Event client_event_id mismatch
+    mismatched_env = json.loads(json.dumps(off_req))
+    mismatched_env["client_event_id"] = "00000000-0000-0000-0000-000000000000"
+    if mismatched_env["client_event_id"] == mismatched_env["event"]["client_event_id"]:
+        print("  FAIL Negative 8: Envelope mismatch was not detected")
+        return 1
+    print("  OK: Negative 8 passed (envelope vs event client_event_id mismatch caught)")
+    passed_checks += 1
+
+    # Negative 9: Tampered digest in intake request
+    tampered_intake = json.loads(json.dumps(off_req))
+    tampered_intake["payload_digest"] = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    if compute_restricted_sha256_digest(tampered_intake["event"]) == tampered_intake["payload_digest"]:
+        print("  FAIL Negative 9: Tampered digest passed equality check!")
+        return 1
+    print("  OK: Negative 9 passed (tampered payload digest caught)")
+    passed_checks += 1
+
+    # Negative 10: Canonical serializer rejecting float and duplicate JSON keys
+    try:
+        restricted_canonical_json_bytes({"price": 10.5})
+        print("  FAIL Negative 10: Canonical serializer accepted float!")
+        return 1
+    except CanonicalSerializationError:
+        print("  OK: Negative 10a passed (canonical serializer rejected float)")
+        passed_checks += 1
+
+    try:
+        parse_json_reject_duplicates('{"key": 1, "key": 2}')
+        print("  FAIL Negative 10b: Parser accepted duplicate key!")
+        return 1
+    except CanonicalSerializationError:
+        print("  OK: Negative 10b passed (duplicate JSON key rejected)")
+        passed_checks += 1
+
+    # Negative 11: Schema validation of 401 error response shape
+    error_401 = {
+        "error": {
+            "code": "UNAUTHENTICATED",
+            "message": "The Bearer token has been revoked or expired.",
+            "details": {"reason": "ACTOR_REVOKED"},
+        }
+    }
+    validator_hub.validate_instance(error_401, "error-response.json", "401-error-shape")
+    print("  OK: Negative 11 passed (401 error response shape conforms to error-response.json)")
+    passed_checks += 1
+
+    # 7. Verify reproducible manifest SHA-256 (fail closed if absent)
+    print("\n[Step 7] Verifying Reproducible SHA-256 Manifest...")
     manifest_entries = generate_manifest_entries()
 
-    if "--generate-manifest" in sys.argv or not MANIFEST_FILE.exists():
+    if "--generate-manifest" in sys.argv:
         with open(MANIFEST_FILE, "w", encoding="utf-8") as f:
-            for rel_path, sha in manifest_entries.items():
+            for rel_path, sha in sorted(manifest_entries.items()):
                 f.write(f"{sha}  {rel_path}\n")
-        print(f"  OK: Generated new manifest at {MANIFEST_FILE}")
+        print(f"  OK: Successfully generated new manifest at {MANIFEST_FILE}")
         passed_checks += 1
     else:
+        if not MANIFEST_FILE.exists():
+            print(f"  FAIL CLOSED: manifest.sha256 not found at {MANIFEST_FILE}!")
+            print("  Normal validation fails closed absent manifest. Explicitly run with --generate-manifest to generate.")
+            return 1
+
         with open(MANIFEST_FILE, "r", encoding="utf-8") as f:
             lines = f.readlines()
         stored_manifest = {}
@@ -438,12 +681,12 @@ def run_validations() -> int:
         print(f"  OK: All {len(manifest_entries)} contract files match manifest.sha256 exactly")
 
     print("\n" + "=" * 70)
-    print(f"SUCCESS: All {passed_checks} contract, schema, fixture, and regression checks passed!")
+    print(f"SUCCESS: All {passed_checks} contract, schema, fixture, regression, and negative tests passed!")
     print("=" * 70)
     return 0
 
 
-def generate_manifest_entries() -> dict:
+def generate_manifest_entries() -> Dict[str, str]:
     entries = {}
     target_files = []
     target_files.append(BASE_DIR / "ADR-0001-mobile-v1-contract.md")

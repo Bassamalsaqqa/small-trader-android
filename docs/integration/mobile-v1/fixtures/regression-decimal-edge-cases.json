@@ -1,5 +1,10 @@
 {
-  "scenario": "Exact arbitrary-precision decimal strings must preserve scales and prevent IEEE-754 binary floating point precision loss",
+  "scenario": "Exact arbitrary-precision decimal strings must preserve scales, reject binary floating point, and follow Laravel SalesLineCalculator RoundingMode::HALF_UP policy (commit f8a0cf7012c4875bec7320d42e0f8dde58593b52)",
+  "source_authorities": [
+    "app/Domain/Sales/Calculators/SalesLineCalculator.php",
+    "app/Domain/Sales/Calculators/SalesDocumentTotalsCalculator.php",
+    "docs/adr/0002-money-and-accounting-primitives.md"
+  ],
   "test_cases": [
     {
       "name": "fractional_weighted_item",
@@ -9,8 +14,18 @@
       "tax_rate": "0.1600",
       "tax_amount": "1.065067200",
       "line_total_exact": "7.721737200",
-      "line_total_rounded_bankers": "7.72",
+      "line_total_rounded_half_up": "7.72",
+      "rounding_policy": "ROUND_HALF_UP (Laravel canonical)",
       "float_danger": "0.333 * 19.99 in binary float gives 6.6566700000000005, introducing rounding drift in financial ledgers"
+    },
+    {
+      "name": "half_up_vs_half_even_parity",
+      "description": "Demonstrates critical divergence between unverified Banker's rounding (HALF_EVEN) and verified Laravel policy (HALF_UP)",
+      "amount": "2.505",
+      "scale": 2,
+      "expected_half_up": "2.51",
+      "bankers_half_even_divergence": "2.50",
+      "policy_source": "SalesLineCalculator.php line 27: toScale($minorUnits, RoundingMode::HALF_UP)"
     },
     {
       "name": "high_precision_unit_cost",

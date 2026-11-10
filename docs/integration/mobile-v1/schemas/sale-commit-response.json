@@ -28,26 +28,28 @@
     },
     "invoice_number": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 64
     },
     "payment_id": {
       "type": ["string", "null"],
       "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
     },
     "payment_receipt_number": {
-      "type": ["string", "null"]
+      "type": ["string", "null"],
+      "maxLength": 64
     },
     "grand_total": {
       "type": "string",
-      "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+      "pattern": "^(?:0\\.[0-9]{0,5}[1-9]|[1-9][0-9]{0,13}(?:\\.[0-9]{1,6})?)$"
     },
     "amount_paid": {
       "type": "string",
-      "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+      "pattern": "^(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{1,6})?$"
     },
     "change_returned": {
       "type": "string",
-      "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+      "pattern": "^(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{1,6})?$"
     },
     "posted_at": {
       "type": "string",
