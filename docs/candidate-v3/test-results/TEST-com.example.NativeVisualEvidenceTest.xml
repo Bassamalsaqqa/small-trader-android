@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.NativeVisualEvidenceTest" tests="16" skipped="0" failures="0" errors="0" timestamp="2026-11-08T21:20:11.502Z" hostname="pasta-hp-worker" time="10.569">
+  <properties/>
+  <testcase name="capture_04_peopleCustomerFlow_ar_light_393dp" classname="com.example.NativeVisualEvidenceTest" time="5.128"/>
+  <testcase name="capture_16_fullApp_home_360dp_font2_stress" classname="com.example.NativeVisualEvidenceTest" time="0.385"/>
+  <testcase name="capture_13_peopleHubPager_ar_light_393dp" classname="com.example.NativeVisualEvidenceTest" time="0.53"/>
+  <testcase name="capture_10_invoicesHistory_ar_light_393dp" classname="com.example.NativeVisualEvidenceTest" time="0.441"/>
+  <testcase name="capture_05_compact360_fontScale1_5_stress" classname="com.example.NativeVisualEvidenceTest" time="0.321"/>
+  <testcase name="capture_03_cashPayment_ar_light_393dp" classname="com.example.NativeVisualEvidenceTest" time="0.345"/>
+  <testcase name="capture_11_inventoryCatalog_ar_light_393dp" classname="com.example.NativeVisualEvidenceTest" time="0.425"/>
+  <testcase name="capture_02_populatedCatalog_ar_light_393dp" classname="com.example.NativeVisualEvidenceTest" time="0.359"/>
+  <testcase name="capture_12_productDetail_ar_light_393dp" classname="com.example.NativeVisualEvidenceTest" time="0.336"/>
+  <testcase name="capture_09_fullApp_360dp_font2_stress" classname="com.example.NativeVisualEvidenceTest" time="0.232"/>
+  <testcase name="capture_15_profile_ar_light_393dp" classname="com.example.NativeVisualEvidenceTest" time="0.346"/>
+  <testcase name="capture_07_compact360_fontScale2_stress" classname="com.example.NativeVisualEvidenceTest" time="0.265"/>
+  <testcase name="capture_14_settings_ar_light_393dp" classname="com.example.NativeVisualEvidenceTest" time="0.438"/>
+  <testcase name="capture_01_homeScreen_ar_light_393dp" classname="com.example.NativeVisualEvidenceTest" time="0.319"/>
+  <testcase name="capture_06_en_dark_393dp" classname="com.example.NativeVisualEvidenceTest" time="0.305"/>
+  <testcase name="capture_08_appShell_ar_light_393dp" classname="com.example.NativeVisualEvidenceTest" time="0.341"/>
+  <system-out><![CDATA[EVIDENCE_RENDER: 04_people_customer_flow_ar_light_393dp.png -> 1179x2556 (238782 bytes)
+EVIDENCE_RENDER: 16_full_app_home_360dp_font2_stress.png -> 720x1560 (137431 bytes)
+EVIDENCE_RENDER: 13_people_hub_pager_ar_light_393dp.png -> 1179x2556 (235349 bytes)
+EVIDENCE_RENDER: 10_invoices_history_ar_light_393dp.png -> 1179x2556 (267713 bytes)
+EVIDENCE_RENDER: 05_compact_catalog_360dp_font1_5_stress.png -> 720x1560 (146680 bytes)
+EVIDENCE_RENDER: 03_cash_payment_ar_light_393dp.png -> 1179x2556 (168486 bytes)
+EVIDENCE_RENDER: 11_inventory_catalog_ar_light_393dp.png -> 1179x2556 (271071 bytes)
+EVIDENCE_RENDER: 02_populated_catalog_ar_light_393dp.png -> 1179x2556 (265102 bytes)
+EVIDENCE_RENDER: 12_product_detail_ar_light_393dp.png -> 1179x2556 (247715 bytes)
+EVIDENCE_RENDER: 09_full_app_360dp_font2_stress.png -> 720x1560 (139650 bytes)
+EVIDENCE_RENDER: 15_profile_ar_light_393dp.png -> 1179x2556 (151424 bytes)
+EVIDENCE_RENDER: 07_compact_catalog_360dp_font2_stress.png -> 720x1560 (133405 bytes)
+EVIDENCE_RENDER: 14_settings_ar_light_393dp.png -> 1179x2556 (194459 bytes)
+EVIDENCE_RENDER: 01_home_screen_ar_light_393dp.png -> 1179x2556 (239539 bytes)
+EVIDENCE_RENDER: 06_home_screen_en_dark_393dp.png -> 1179x2556 (243840 bytes)
+EVIDENCE_RENDER: 08_app_shell_ar_light_393dp.png -> 1179x2556 (231508 bytes)
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

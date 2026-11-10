@@ -1,0 +1,208 @@
+{
+  "status": "VERIFIED_LOCAL_QA_ROUND2_V3_OWNER_DEVICE_ACCEPTANCE_PENDING",
+  "branch": "ux/stitch-native-prototype",
+  "worktree": "/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b",
+  "qaTimestamp": "2026-11-08T23:22:00+02:00",
+  "tests": {
+    "total": 105,
+    "passed": 104,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 1,
+    "skippedDetails": "com.example.ExampleRobolectricTest.testPackageName (pre-existing ignored test placeholder)"
+  },
+  "testSuiteBreakdown": {
+    "com.example.ExampleRobolectricTest": {
+      "total": 1,
+      "passed": 0,
+      "skipped": 1,
+      "failed": 0
+    },
+    "com.example.ExampleUnitTest": {
+      "total": 40,
+      "passed": 40,
+      "skipped": 0,
+      "failed": 0
+    },
+    "com.example.MerchantCheckoutTest": {
+      "total": 6,
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0
+    },
+    "com.example.MerchantHomeTest": {
+      "total": 5,
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0
+    },
+    "com.example.MerchantNavigationTest": {
+      "total": 11,
+      "passed": 11,
+      "skipped": 0,
+      "failed": 0
+    },
+    "com.example.MerchantPrivacyTest": {
+      "total": 5,
+      "passed": 5,
+      "skipped": 0,
+      "failed": 0
+    },
+    "com.example.MerchantRoleTest": {
+      "total": 2,
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0
+    },
+    "com.example.MerchantSaleLifecycleTest": {
+      "total": 2,
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0
+    },
+    "com.example.NativeVisualEvidenceTest": {
+      "total": 16,
+      "passed": 16,
+      "skipped": 0,
+      "failed": 0
+    },
+    "com.example.NewSaleScreenDesignTest": {
+      "total": 1,
+      "passed": 1,
+      "skipped": 0,
+      "failed": 0
+    },
+    "com.example.PeopleHubPagerTest": {
+      "total": 7,
+      "passed": 7,
+      "skipped": 0,
+      "failed": 0
+    },
+    "com.example.PhaseOneWorkflowTest": {
+      "total": 1,
+      "passed": 1,
+      "skipped": 0,
+      "failed": 0
+    },
+    "com.example.Round2NavigationTest": {
+      "total": 8,
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0
+    }
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 61,
+    "bidiSpoofingResolved": 2
+  },
+  "apk": {
+    "path": "round2/validation/small-trader-round2-v3-review.apk",
+    "bytes": 19628852,
+    "sha256": "3c2d23f14a22f1ce6b63f55e88ef920fac5e4158dc69407a4db24b6c19f1b6cc",
+    "v2SignatureVerified": true,
+    "certificateSha256": "f0995a82c2051d776a9307fcd75bb7d5862576714f1bd500885be2da0ca3e683",
+    "originalApkPreserved": "round2/validation/small-trader-round2-review.apk",
+    "originalApkSha256": "36844ab096c034b82fd5c4dd5d6df17b9b2411ea2b3cb60c140d60126e6259c4"
+  },
+  "bottomBarFrozen": {
+    "verifiedAgainstHead": true,
+    "exactFunctionBodyIdentical": true,
+    "sha256Signature": "47d5304160ff85e069f44aa9002fd2290b50fe2ff8da383adcf3b7cf2c84ad2a",
+    "commonComponentsEditedInTurn": false
+  },
+  "visualRenders": {
+    "count": 16,
+    "outputDir": "round2/validation/native-renders-v03",
+    "renders": [
+      {
+        "file": "01_home_screen_ar_light_393dp.png",
+        "bytes": 239539,
+        "sha256": "73c94f79f8d0df3d02b21c02849eaf81cdcae59161da58f246a0da34d6f9d27e"
+      },
+      {
+        "file": "02_populated_catalog_ar_light_393dp.png",
+        "bytes": 265102,
+        "sha256": "66e8b7b1fbf0fc659e1ebcbdc88bc9a0fcc744990753a509c7c8dace8d0c360b"
+      },
+      {
+        "file": "03_cash_payment_ar_light_393dp.png",
+        "bytes": 168486,
+        "sha256": "d0700b23605a0aec397a0b47b8b153ac51a4d5ebed0bd500339995e39226881f"
+      },
+      {
+        "file": "04_people_customer_flow_ar_light_393dp.png",
+        "bytes": 238782,
+        "sha256": "40df69e66178d7e8344b6ee48ead4cc20f7bf66608c2932dda6122c4c7b8282c"
+      },
+      {
+        "file": "05_compact_catalog_360dp_font1_5_stress.png",
+        "bytes": 146680,
+        "sha256": "eb3e0ab7bd7664f88a4e76bdcbdaef531807878bac0e03564f4b97b78cfaf2d7"
+      },
+      {
+        "file": "06_home_screen_en_dark_393dp.png",
+        "bytes": 243840,
+        "sha256": "5c3c31151534a26196d6d3ab61da28cfb0ef8524e6bf7d6c133fccdbf97b6448"
+      },
+      {
+        "file": "07_compact_catalog_360dp_font2_stress.png",
+        "bytes": 133405,
+        "sha256": "9a8331093cfa4d34f7a694dfb31a3fca01d831b4a62d428472e9a85e75275387"
+      },
+      {
+        "file": "08_app_shell_ar_light_393dp.png",
+        "bytes": 231508,
+        "sha256": "eddc8b80d625a9a820df46ebaaae268de09ba59ba1b39c433ce295bd7599df1f"
+      },
+      {
+        "file": "09_full_app_360dp_font2_stress.png",
+        "bytes": 139650,
+        "sha256": "a08a71f20e13593aadf8cdb0d6d2921313ec4c94e9eea08873eff80cfeecbc67"
+      },
+      {
+        "file": "10_invoices_history_ar_light_393dp.png",
+        "bytes": 267713,
+        "sha256": "fd9acd990bcbeab91d1478e14601ab4e1a8d224095e737b3ae419864fb8dd10e"
+      },
+      {
+        "file": "11_inventory_catalog_ar_light_393dp.png",
+        "bytes": 271071,
+        "sha256": "0e597069c77ed15310447f50c8798c032443476f22433400c9c874da0d79b532"
+      },
+      {
+        "file": "12_product_detail_ar_light_393dp.png",
+        "bytes": 247715,
+        "sha256": "310eacea9cf8bdbfcc46685619592bbdd6d80381d9c8d627509109f1958d0685"
+      },
+      {
+        "file": "13_people_hub_pager_ar_light_393dp.png",
+        "bytes": 235349,
+        "sha256": "987c3a6d1fdedff79471fd57a0fc715408edba6333105cc35eb59c3cc2031c9d"
+      },
+      {
+        "file": "14_settings_ar_light_393dp.png",
+        "bytes": 194459,
+        "sha256": "ff622df77d5f65dcce21142a60fda191c66dede1942c2511e29b5044a3c086ed"
+      },
+      {
+        "file": "15_profile_ar_light_393dp.png",
+        "bytes": 151424,
+        "sha256": "ba3572f62a3ad70da41e7ec1b1180c6827715fe8debebeb250d3f3a590887776"
+      },
+      {
+        "file": "16_full_app_home_360dp_font2_stress.png",
+        "bytes": 137431,
+        "sha256": "f55b0e6c5628e4445ed4510381fecfbb1c3c3f80512ca9f04ae69d83c9dec93b"
+      }
+    ]
+  },
+  "settlementLogicVerified": {
+    "productionHelpersUsed": [
+      "com.example.ui.screens.computeInvoiceSettledPaidPortion",
+      "com.example.ui.screens.calculateFilteredInvoicesPaidTotalIls"
+    ],
+    "unitTest": "invoiceLedger_filteredPaidTotalCalculatesSettlementNetMinusDebt_forCashPartialAndCredit",
+    "testedInvariants": "cash tender with change, partial debt, credit invoice, view conservation"
+  }
+}

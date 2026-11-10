@@ -1,3 +1,5 @@
+> **Candidate v3 (Consolidated Working Prototype):** Native Arabic-first merchant workspace with Home, POS Sales, Invoices Ledger, Products Catalog, and People Hub. See **[Candidate v3 Handoff (`docs/CANDIDATE_V3_HANDOFF.md`)](docs/CANDIDATE_V3_HANDOFF.md)** for canonical APK artifacts, verified test totals (105 tests, 104 passed), lint audit, limitations, and owner Windows installation instructions. The prototype description below provides project background and architecture.
+
 # التاجر الصغير · Small Trader (Android POS & Merchant Ledger)
 
 **التاجر الصغير (Small Trader)** is an Arabic-first (RTL) / English (LTR) native Android point-of-sale, customer debt ledger (`دفتر الدين`), inventory, supplier payables, and shift cash-drawer prototype built in **Kotlin** and **Jetpack Compose** (Material 3) for Palestinian shopkeepers, roasteries, and grocery merchants.
@@ -8,6 +10,7 @@ This repository is prepared for **local Android Studio development** and integra
 
 ## Quick Links
 
+- **[Candidate v3 Handoff (`docs/CANDIDATE_V3_HANDOFF.md`)](docs/CANDIDATE_V3_HANDOFF.md)** — Canonical APK digest, verified test totals (105 tests), lint report, bottom bar freeze status, and Windows owner installation steps.
 - **[Surface Coverage Matrix (`docs/SURFACE_COVERAGE.md`)](docs/SURFACE_COVERAGE.md)** — Exact classification of every screen, flow, and dialog: *Working Demo*, *Interactive Simulation*, *Shallow Preview*, or *Deferred to Backend / Hardware*.
 - **[Local Android Handoff Guide (`docs/LOCAL_ANDROID_HANDOFF.md`)](docs/LOCAL_ANDROID_HANDOFF.md)** — Architecture overview, financial invariants, hardware boundaries (CameraX/ML Kit & Bluetooth ESC/POS), verified `Bassamalsaqqa/account` (`routes/api-v1.php`) contracts vs future backend requirements, test evidence, and local cleanup priorities.
 

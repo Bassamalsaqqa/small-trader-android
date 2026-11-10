@@ -26,7 +26,9 @@ android {
   // and updating Android apps in AI Studio.
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
+      val keystorePath = System.getenv("KEYSTORE_PATH")
+        ?: System.getenv("MYAPP_UPLOAD_STORE_FILE")
+        ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
       storePassword = System.getenv("STORE_PASSWORD")
       keyAlias = "upload"
@@ -43,11 +45,22 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
-      signingConfig = signingConfigs.getByName("release")
+      val allowInsecureDebugSign = project.findProperty("smalltrader.allowInsecureDebugSigningForRelease")?.toString()?.toBoolean() == true
+      signingConfig = if (allowInsecureDebugSign) {
+        signingConfigs.getByName("debugConfig")
+      } else {
+        signingConfigs.getByName("release")
+      }
+    }
+    create("benchmark") {
+      initWith(getByName("release"))
+      matchingFallbacks += listOf("release")
+      signingConfig = signingConfigs.getByName("debugConfig")
     }
     debug {
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in

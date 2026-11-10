@@ -1,0 +1,9 @@
+{
+  "baseline": "ce2bb6ef8c480048036187892850fa6fb8853f6f",
+  "branch": "ux/native-phase1",
+  "apk": "app/build/outputs/apk/debug/app-debug.apk",
+  "applicationId": "com.aistudio.smalltrader.psdukx",
+  "bytes": 17924393,
+  "sha256": "2fc1efe1ee0f4f75c1c395ec2b34de392bf7a5af1a60923099181e637e309159",
+  "uxAcceptance": "PENDING Pixel_8a_T3 visual and interactive review"
+}

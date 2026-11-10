@@ -2,6 +2,8 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.Switch
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,36 +26,53 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothConnected
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonSearch
+import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.Receipt
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.Store
+import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material.icons.filled.SwitchAccount
 import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,10 +81,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -73,17 +94,40 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.model.AppLanguage
 import com.example.model.ExpenseCategory
+import com.example.model.Product
 import com.example.model.TraderScreen
+import com.example.model.UserRole
 import com.example.model.UserSession
 import com.example.model.WesternFormatters
+import com.example.ui.components.StitchBadge
+import com.example.ui.components.StitchBadgeTone
+import com.example.ui.components.StitchBidiUtils
+import com.example.ui.components.StitchCard
+import com.example.ui.components.StitchPrimaryButton
+import com.example.ui.components.StitchTonalButton
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
+import kotlin.math.abs
+import kotlin.math.max
+
+/**
+ * Returns an appropriate Material Icon for each ExpenseCategory.
+ */
+private fun expenseCategoryIcon(category: ExpenseCategory): ImageVector = when (category) {
+    ExpenseCategory.RENT -> Icons.Default.Store
+    ExpenseCategory.ELECTRICITY_WATER -> Icons.Default.Receipt
+    ExpenseCategory.TRANSPORT -> Icons.Default.LocalShipping
+    ExpenseCategory.SALARIES -> Icons.Default.Payments
+    ExpenseCategory.MAINTENANCE -> Icons.Default.ShoppingBag
+    ExpenseCategory.OTHER -> Icons.Default.AccountBalanceWallet
+}
 
 // ============================================================================
-// 1. OPERATING EXPENSES & EXPENSE HISTORY (Prompt 14)
+// 1. OPERATING EXPENSES & EXPENSE HISTORY (ST-44 v02 Canonical)
 // ============================================================================
 
 @Composable
@@ -94,9 +138,9 @@ fun ExpensesScreen(
 ) {
     val lang = state.language
     val financial = TraderTheme.financial
-    val canManageExpenses = state.currentSession.canManageSuppliers() || state.currentSession.canViewReports()
+    val canManageExpenses = state.currentSession.canManageExpenses()
 
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf<ExpenseCategory?>(null) }
 
     val filteredExpenses = remember(state.expenses, searchQuery, selectedCategory) {
@@ -117,6 +161,10 @@ fun ExpensesScreen(
         filteredExpenses.sumOf { it.amountIls }
     }
 
+    val todayExpenses = remember(state.expenses, state.todayDate) {
+        state.expenses.filter { it.date.startsWith(state.todayDate) }
+    }
+
     val feedbackMessage = if (lang == AppLanguage.AR) {
         state.lastExpenseActionMessageAr
     } else {
@@ -129,10 +177,11 @@ fun ExpensesScreen(
             .background(MaterialTheme.colorScheme.background)
             .testTag("expenses_screen")
     ) {
-        // Summary & Primary Action Strip
+        // Sticky Header / Summary Section adhering to Stitch ST-44 v02
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 0.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -141,60 +190,52 @@ fun ExpensesScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                // Screen Title & Action Bar Hero Card
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = lang.tr("مصاريف وردية اليوم", "Today's Shift Expenses"),
+                                text = state.businessInfo.name(lang),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = WesternFormatters.formatIls(state.shiftExpensesIls),
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = financial.debit
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = lang.tr("إجمالي كل السجلات", "All-Time Recorded"),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = WesternFormatters.formatIls(state.totalExpensesIls),
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.SemiBold
-                                ),
+                                text = lang.tr("المصاريف التشغيلية", "Operating Expenses"),
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
-                    }
 
-                    if (canManageExpenses) {
-                        Button(
-                            onClick = onOpenAddExpenseDialog,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("add_expense_button")
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = lang.tr("مصروف جديد", "New Expense"),
-                                fontWeight = FontWeight.Bold
-                            )
+                        if (canManageExpenses) {
+                            Button(
+                                onClick = onOpenAddExpenseDialog,
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("add_expense_button")
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = lang.tr("تسجيل مصروف", "Add Expense"),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
                         }
                     }
                 }
@@ -203,13 +244,14 @@ fun ExpensesScreen(
                 if (!canManageExpenses) {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("cashier_expense_restriction_banner")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
@@ -217,7 +259,7 @@ fun ExpensesScreen(
                                 imageVector = Icons.Default.Lock,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                             Text(
                                 text = lang.tr(
@@ -272,7 +314,110 @@ fun ExpensesScreen(
                     }
                 }
 
-                // Search & Category Filter Row
+                // ST-44 Hero Summary Card (Shift Cash vs Total)
+                StitchCard(
+                    shape = RoundedCornerShape(12.dp),
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentPadding = PaddingValues(14.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f, fill = false),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PointOfSale,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = lang.tr(
+                                        "فترة الصندوق: الوردية الحالية (${state.todayDate})",
+                                        "Cash Period: Current Shift (${state.todayDate})"
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = financial.warningContainer
+                            ) {
+                                Text(
+                                    text = lang.tr("خصم نقدي مباشر", "Cash Drawer Deduction"),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = financial.warning,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = lang.tr("إجمالي مصاريف الوردية", "Today's Shift Expenses"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = StitchBidiUtils.formatIls(state.shiftExpensesIls),
+                                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = financial.debit
+                                )
+                                Text(
+                                    text = lang.tr(
+                                        "${todayExpenses.size} سندات مقيدة بالوردية",
+                                        "${todayExpenses.size} shift vouchers"
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = lang.tr("إجمالي كل السجلات", "All-Time Recorded"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = StitchBidiUtils.formatIls(state.totalExpensesIls),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = lang.tr(
+                                        "${state.expenses.size} سند إجمالي",
+                                        "${state.expenses.size} total entries"
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Search & Filter Row
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
@@ -290,7 +435,10 @@ fun ExpensesScreen(
                     },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
+                            IconButton(
+                                onClick = { searchQuery = "" },
+                                modifier = Modifier.size(48.dp)
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = lang.tr("مسح", "Clear"),
@@ -302,11 +450,12 @@ fun ExpensesScreen(
                     placeholder = {
                         Text(
                             text = lang.tr("ابحث في البيان أو التاريخ...", "Search description or date..."),
-                            style = MaterialTheme.typography.bodySmall
+                            style = MaterialTheme.typography.bodyMedium
                         )
                     }
                 )
 
+                // Category Chips Row (48dp min touch targets)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -323,13 +472,22 @@ fun ExpensesScreen(
                                     "All (${WesternFormatters.formatInt(state.expenses.size)})"
                                 )
                             )
-                        }
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp)
                     )
                     ExpenseCategory.entries.forEach { cat ->
                         FilterChip(
                             selected = selectedCategory == cat,
                             onClick = { selectedCategory = if (selectedCategory == cat) null else cat },
-                            label = { Text(cat.label(lang)) }
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = expenseCategoryIcon(cat),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            label = { Text(cat.label(lang)) },
+                            modifier = Modifier.heightIn(min = 48.dp)
                         )
                     }
                 }
@@ -338,36 +496,40 @@ fun ExpensesScreen(
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
+        // Expenses Ledger List
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             if (selectedCategory != null || searchQuery.isNotBlank()) {
                 item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            text = lang.tr(
-                                "نتائج التصفية (${WesternFormatters.formatInt(filteredExpenses.size)})",
-                                "Filtered entries (${WesternFormatters.formatInt(filteredExpenses.size)})"
-                            ),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = WesternFormatters.formatIls(filteredTotalIls),
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = financial.debit
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = lang.tr(
+                                    "نتائج التصفية (${filteredExpenses.size} سند)",
+                                    "Filtered results (${filteredExpenses.size} entries)"
+                                ),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = StitchBidiUtils.formatIls(filteredTotalIls),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = financial.debit
+                            )
+                        }
                     }
                 }
             }
@@ -377,25 +539,33 @@ fun ExpensesScreen(
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 16.dp)
                     ) {
                         Column(
-                            modifier = Modifier.padding(20.dp),
+                            modifier = Modifier.padding(24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.Receipt,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(36.dp)
+                            )
                             Text(
                                 text = lang.tr("لا توجد مصاريف مطابقة للبحث", "No matching expenses found"),
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                             )
                             if (searchQuery.isNotBlank() || selectedCategory != null) {
-                                TextButton(
+                                OutlinedButton(
                                     onClick = {
                                         searchQuery = ""
                                         selectedCategory = null
-                                    }
+                                    },
+                                    modifier = Modifier.heightIn(min = 48.dp)
                                 ) {
                                     Text(lang.tr("إعادة ضبط البحث", "Reset filters"))
                                 }
@@ -417,70 +587,105 @@ fun ExpensesScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                .padding(14.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(end = 12.dp),
-                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = expense.title(lang),
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    modifier = Modifier.size(44.dp)
                                 ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant
-                                    ) {
-                                        Text(
-                                            text = expense.category.label(lang),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = expenseCategoryIcon(expense.category),
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(22.dp)
                                         )
                                     }
+                                }
+
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text(
-                                        text = "• ${expense.date}",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFontFamily),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        text = expense.title(lang),
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
                                     )
-                                    if (isToday) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant
+                                        ) {
+                                            Text(
+                                                text = expense.category.label(lang),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
                                         Text(
-                                            text = lang.tr("• وردية اليوم", "• Today's shift"),
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                            color = MaterialTheme.colorScheme.primary
+                                            text = "• ${expense.date}",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFontFamily),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            softWrap = false
                                         )
+                                        if (isToday) {
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = MaterialTheme.colorScheme.primaryContainer
+                                            ) {
+                                                Text(
+                                                    text = lang.tr("وردية اليوم", "Today"),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = FontWeight.Medium,
+                                                    maxLines = 1,
+                                                    softWrap = false,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
 
-                            Text(
-                                text = "- ${WesternFormatters.formatIls(expense.amountIls)}",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = "- " + StitchBidiUtils.formatIls(expense.amountIls),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = financial.debit
+                                )
+                                Text(
+                                    text = lang.tr("سند #${expense.id.takeLast(4)}", "Voucher #${expense.id.takeLast(4)}"),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFontFamily),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            // Truthful Audit Note (How mistakes are handled without fake reversal/edit buttons)
+            // ST-44 v02 Truthful Accounting Note
             item {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 6.dp)
@@ -491,17 +696,17 @@ fun ExpensesScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Info,
+                            imageVector = Icons.Default.VerifiedUser,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = financial.income,
                             modifier = Modifier
-                                .size(16.dp)
+                                .size(18.dp)
                                 .padding(top = 2.dp)
                         )
                         Text(
                             text = lang.tr(
-                                "ملاحظة ضبط الصندوق: كل مصروف يُسجل هنا يُخصم نقداً من صندوق الوردية الحالية (${state.todayDate}). لا يدعم الوضع التجريبي تعديل أو حذف مصروف بعد ترحيله؛ في حال وجود خطأ إدخال يتم توثيقه عند جرد الوردية.",
-                                "Drawer audit note: Expenses recorded here are deducted in cash from today's shift drawer (${state.todayDate}). Editing or reversing posted expenses is not enabled in this demo; entry discrepancies are noted at shift close."
+                                "تُخصم المصاريف النقدية فوراً من رصيد صندوق الوردية الدفتري لضمان مطابقة الجرد الفعلي عند الإغلاق وتسليم العهدة.",
+                                "Cash expenses are deducted immediately from today's shift book cash to ensure exact physical reconciliation at shift close."
                             ),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -513,6 +718,10 @@ fun ExpensesScreen(
     }
 }
 
+// ============================================================================
+// 1B. ADD OPERATING EXPENSE MODAL (ST-45 v02 Canonical)
+// ============================================================================
+
 @Composable
 fun AddExpenseDialog(
     state: TraderUiState,
@@ -521,59 +730,120 @@ fun AddExpenseDialog(
 ) {
     val lang = state.language
     val financial = TraderTheme.financial
-    var titleText by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf(ExpenseCategory.ELECTRICITY_WATER) }
-    var amountText by remember { mutableStateOf("") }
+    var titleText by rememberSaveable { mutableStateOf("") }
+    var selectedCategory by rememberSaveable { mutableStateOf(ExpenseCategory.TRANSPORT) }
+    var amountText by rememberSaveable { mutableStateOf("") }
     var localError by remember { mutableStateOf<String?>(null) }
 
     val parsedAmount = amountText.toDoubleOrNull() ?: 0.0
+    val quickPresets = listOf(20.0, 50.0, 60.0, 100.0, 200.0)
 
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(16.dp),
         title = {
-            Text(
-                text = lang.tr("تسجيل مصروف نقدي من الصندوق", "Record Cash Drawer Expense"),
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = lang.tr("تسجيل مصروف تشغيلي", "Record Operating Expense"),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+                Text(
+                    text = lang.tr("سند صرف نقدي فوري مباشر", "Direct cash drawer disbursement"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    text = lang.tr(
-                        "التاريخ: ${state.todayDate} • المصدر: صندوق الكاش الرئيسي",
-                        "Date: ${state.todayDate} • Source: Main Cash Drawer"
-                    ),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                // Shift Context
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    ExpenseCategory.entries.forEach { cat ->
-                        FilterChip(
-                            selected = selectedCategory == cat,
-                            onClick = { selectedCategory = cat },
-                            label = { Text(cat.label(lang)) },
-                            modifier = Modifier.heightIn(min = 48.dp)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PointOfSale,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = lang.tr(
+                                "الوردية: ${state.todayDate} • المسؤول: ${state.currentSession.name}",
+                                "Shift: ${state.todayDate} • By: ${state.currentSession.name}"
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
+                // Amount Field
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedTextField(
+                        value = amountText,
+                        onValueChange = {
+                            amountText = WesternFormatters.sanitizeWesternDigits(it)
+                            localError = null
+                        },
+                        label = { Text(lang.tr("المبلغ المصروف نقداً (₪) *", "Cash Amount (₪) *")) },
+                        placeholder = { Text("0.00") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        textStyle = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("expense_amount_input")
+                    )
+
+                    // Quick Amount Presets (ST-45 v02)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        quickPresets.forEach { preset ->
+                            val isSelected = abs(parsedAmount - preset) < 0.01
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    amountText = WesternFormatters.formatNumber(preset).removeSuffix(".00")
+                                    localError = null
+                                },
+                                label = { Text("${preset.toInt()} ₪") },
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Description Field
                 OutlinedTextField(
                     value = titleText,
                     onValueChange = {
                         titleText = it
                         localError = null
                     },
-                    label = { Text(lang.tr("بيان المصروف (مثال: أكياس تغليف، فاتورة مياه)", "Description (e.g. Packaging bags, water bill)")) },
+                    label = { Text(lang.tr("بيان المصروف (السبب) *", "Description (Reason) *")) },
+                    placeholder = {
+                        Text(
+                            lang.tr(
+                                "مثال: شحن بضاعة، أكياس تعبئة، ضيافة المحل...",
+                                "e.g. Shipping goods, packaging, hospitality..."
+                            )
+                        )
+                    },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
@@ -581,45 +851,99 @@ fun AddExpenseDialog(
                         .testTag("expense_title_input")
                 )
 
-                OutlinedTextField(
-                    value = amountText,
-                    onValueChange = {
-                        amountText = WesternFormatters.sanitizeWesternDigits(it)
-                        localError = null
-                    },
-                    label = { Text(lang.tr("المبلغ المدفوع نقداً (₪)", "Cash Amount Paid (₪)")) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("expense_amount_input")
-                )
+                // Category Selection
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = lang.tr("تصنيف المصروف *", "Expense Category *"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        ExpenseCategory.entries.forEach { cat ->
+                            FilterChip(
+                                selected = selectedCategory == cat,
+                                onClick = { selectedCategory = cat },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = expenseCategoryIcon(cat),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                },
+                                label = { Text(cat.label(lang)) },
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            )
+                        }
+                    }
+                }
 
-                if (parsedAmount > 0.0) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier.fillMaxWidth()
+                // Live Drawer Deduction Preview Card (ST-45 v02)
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = lang.tr("النقد المتوقع بالصندوق بعد الصرف:", "Expected drawer cash after expense:"),
+                                text = lang.tr("الرصيد الدفتري الحالي بالصندوق:", "Current drawer book cash:"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = WesternFormatters.formatIls(state.drawerTotalCashIls - parsedAmount),
-                                style = MaterialTheme.typography.labelLarge.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = MaterialTheme.colorScheme.onSurface
+                                text = StitchBidiUtils.formatIls(state.expectedBookCashIls),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                             )
+                        }
+
+                        if (parsedAmount > 0.0) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = lang.tr("المبلغ المخصوم الآن:", "Amount deducted:"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = financial.debit
+                                )
+                                Text(
+                                    text = "- " + StitchBidiUtils.formatIls(parsedAmount),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = financial.debit
+                                )
+                            }
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = lang.tr("الرصيد الدفتري بعد الصرف:", "Drawer cash after deduction:"),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Text(
+                                    text = StitchBidiUtils.formatIls(max(0.0, state.expectedBookCashIls - parsedAmount)),
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
                     }
                 }
@@ -648,11 +972,26 @@ fun AddExpenseDialog(
                         }
                     }
                 },
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
                 modifier = Modifier
                     .heightIn(min = 48.dp)
                     .testTag("confirm_add_expense_button")
             ) {
-                Text(lang.tr("تأكيد الصرف من الصندوق", "Record Cash Expense"))
+                Text(
+                    text = if (parsedAmount > 0.0) {
+                        lang.tr(
+                            "تأكيد صرف ${StitchBidiUtils.formatIls(parsedAmount)}",
+                            "Confirm ${StitchBidiUtils.formatIls(parsedAmount)}"
+                        )
+                    } else {
+                        lang.tr("تأكيد الصرف من الصندوق", "Confirm Drawer Expense")
+                    },
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                )
             }
         },
         dismissButton = {
@@ -660,14 +999,17 @@ fun AddExpenseDialog(
                 onClick = onDismiss,
                 modifier = Modifier.heightIn(min = 48.dp)
             ) {
-                Text(lang.tr("إلغاء", "Cancel"))
+                Text(
+                    text = lang.tr("إلغاء والعودة", "Cancel"),
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
         }
     )
 }
 
 // ============================================================================
-// 2. REPORTS, CASH DRAWER & SHIFT ACCOUNTING EXPLANATIONS (Prompt 15)
+// 2. FINANCIAL REPORTS & RECONCILIATION HUB (ST-41, ST-42, ST-43 v02)
 // ============================================================================
 
 @Composable
@@ -681,6 +1023,7 @@ fun FinancialReportsScreen(
     val session = state.currentSession
     val financial = TraderTheme.financial
 
+    // Cashier Role Access Guard
     if (!session.canViewReports()) {
         Box(
             modifier = Modifier
@@ -692,18 +1035,19 @@ fun FinancialReportsScreen(
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Lock,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(40.dp)
                     )
                     Text(
                         text = lang.tr("غير مصرح بالدخول", "Access Restricted"),
@@ -711,8 +1055,8 @@ fun FinancialReportsScreen(
                     )
                     Text(
                         text = lang.tr(
-                            "هذا القسم مخصص للمالك والإدارة فقط. المستخدم الحالي (${session.role.label(lang)}) لا يملك صلاحية الاطلاع على تقارير الصندوق والذمم.",
-                            "This section is restricted to Owner and Management. Current role (${session.role.label(lang)}) cannot view cash drawer and financial reports."
+                            "هذا القسم مخصص للمالك والإدارة فقط. المستخدم الحالي (${session.role.label(lang)}) لا يملك صلاحية الاطلاع على تقارير الصندوق الشاملة والذمم التراكمية.",
+                            "This section is restricted to Owner and Management. Current role (${session.role.label(lang)}) cannot view cash drawer totals and cumulative debt ledgers."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -723,6 +1067,7 @@ fun FinancialReportsScreen(
         return
     }
 
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -731,47 +1076,196 @@ fun FinancialReportsScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Period & Scope Header Banner
+        // ST-41 v02 Header & Period Selector (Card-Contained Hero)
         item {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                        .padding(16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         Text(
-                            text = lang.tr(
-                                "تقرير وردية اليوم (${state.todayDate})",
-                                "Today's Shift Report (${state.todayDate})"
-                            ),
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
+                            text = "${state.businessInfo.name(lang)} • ${session.role.label(lang)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = lang.tr(
-                                "الأرقام في جدول الصندوق أدناه تمثل الحركة النقدية الفعلية لليوم فقط ولا تخلط مصاريف الأيام السابقة.",
-                                "The cash drawer table below reconciles today's shift cash inflows and outflows only, separated from prior days."
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = lang.tr("التقارير وسجلات النشاط", "Reports & Activity Hub"),
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        Text(
+                            text = lang.tr("اليوم", "Today"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                         )
                     }
                 }
             }
         }
 
-        // 1. Expected Cash in Drawer for Today's Shift (100% Reconciled Formula)
+        // ST-41 High Signal Operational Summary Metrics
         item {
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = lang.tr("حركة الأعمال اللحظية", "Live Business Operations"),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        StitchBadge(
+                            text = lang.tr("وردية اليوم", "Today's Shift"),
+                            tone = StitchBadgeTone.NEUTRAL
+                        )
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Total Sales Card
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = lang.tr("مبيعات مسجلة", "Recorded Sales"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = StitchBidiUtils.formatIls(state.todaySalesTotalIls),
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = lang.tr(
+                                        "${state.todayInvoiceCount} فواتير",
+                                        "${state.todayInvoiceCount} invoices"
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        // Book Cash in Drawer Card
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = financial.incomeContainer.copy(alpha = 0.6f),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = lang.tr("النقد بالدرج (دفتري)", "Book Cash in Drawer"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = StitchBidiUtils.formatIls(state.expectedBookCashIls),
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = financial.income
+                                )
+                                Text(
+                                    text = if (state.shiftCashVarianceIls != null && abs(state.shiftCashVarianceIls!!) < 0.005) {
+                                        lang.tr("مطابق للجرد الفعلي", "Matches Count")
+                                    } else {
+                                        lang.tr("رصيد دفتري مسجل", "Recorded Book Cash")
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = financial.income
+                                )
+                            }
+                        }
+                    }
+
+                    // Receivables & Payables Quick Glance
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = lang.tr("ذمم الزبائن", "Customer Receivables"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = StitchBidiUtils.formatIls(state.totalCustomerDebtsIls),
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = lang.tr("مستحقات الموردين", "Supplier Payables"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = StitchBidiUtils.formatIls(state.totalSupplierPayablesIls),
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = financial.warning
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                            val netReceivable = state.totalCustomerDebtsIls - state.totalSupplierPayablesIls
+                            Text(
+                                text = lang.tr("صافي الذمم", "Net Position"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = (if (netReceivable >= 0) "+ " else "") + StitchBidiUtils.formatIls(netReceivable),
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = if (netReceivable >= 0) financial.income else financial.debit
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ST-42: Expected Cash in Drawer & Shift Breakdown (Reconciliation Card)
+        item {
+            Card(
+                shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier
@@ -789,101 +1283,89 @@ fun FinancialReportsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = lang.tr("النقد المتوقع في الصندوق (وردية اليوم)", "Expected Cash in Drawer (Today's Shift)"),
+                                text = lang.tr("الصندوق والوردية الحالية", "Cash Drawer & Shift Ledger"),
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                             )
                             Text(
                                 text = lang.tr(
-                                    "تاريخ الوردية: ${state.todayDate} • رصيد دفتري قبل الجرد الفعلي",
-                                    "Shift date: ${state.todayDate} • Book balance prior to physical count"
+                                    "تاريخ الوردية: ${state.todayDate} • رصيد دفتري من واقع القيود",
+                                    "Shift: ${state.todayDate} • Book balance from ledger"
                                 ),
-                                style = MaterialTheme.typography.labelSmall,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                        StitchBadge(
+                            text = if (state.isShiftClosedPreview) {
+                                lang.tr("معاينة إغلاق", "Preview Closed")
+                            } else {
+                                lang.tr("مفتوحة الآن", "Open Now")
+                            },
+                            tone = if (state.isShiftClosedPreview) StitchBadgeTone.WARNING else StitchBadgeTone.SUCCESS
+                        )
                     }
 
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
+                    // Inflows & Outflows Ledger
                     ReportMetricRow(
-                        label = lang.tr("رصيد افتتاح الصندوق صباحاً", "Opening Drawer Float"),
-                        value = WesternFormatters.formatIls(state.startingDrawerCashIls),
+                        label = lang.tr("رصيد بداية الوردية (العهدة الافتتاحية)", "Opening Drawer Cash (Float)"),
+                        value = StitchBidiUtils.formatIls(state.startingDrawerCashIls),
                         valueColor = MaterialTheme.colorScheme.onSurface
                     )
 
                     ReportMetricRow(
-                        label = lang.tr("مبيعات اليوم النقدية الصافية (كاش)", "Today's Net Cash Sales"),
-                        value = "+ ${WesternFormatters.formatIls(state.shiftCashSalesIls)}",
+                        label = lang.tr("مبيعات نقدية مقبوضة بالدرج (كاش)", "Cash Sales Received in Drawer"),
+                        value = "+ " + StitchBidiUtils.formatIls(state.shiftCashSalesIls),
                         valueColor = financial.income
                     )
 
                     ReportMetricRow(
-                        label = lang.tr("تحصيل ديون زبائن نقداً اليوم", "Today's Customer Debt Collections"),
-                        value = "+ ${WesternFormatters.formatIls(state.shiftCustomerCollectionsIls)}",
-                        valueColor = if (state.shiftCustomerCollectionsIls > 0.0) {
-                            financial.income
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
+                        label = lang.tr("سداد ديون زبائن مقبوض نقداً اليوم", "Customer Debt Collected (Cash)"),
+                        value = "+ " + StitchBidiUtils.formatIls(state.shiftCustomerCollectionsIls),
+                        valueColor = if (state.shiftCustomerCollectionsIls > 0.0) financial.income else MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     ReportMetricRow(
-                        label = lang.tr("دفعات نقدية للموردين من الصندوق اليوم", "Today's Supplier Cash Payments"),
-                        value = "- ${WesternFormatters.formatIls(state.shiftSupplierDisbursementsIls)}",
-                        valueColor = if (state.shiftSupplierDisbursementsIls > 0.0) {
-                            MaterialTheme.colorScheme.onSurface
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
+                        label = lang.tr("دفعات نقدية للموردين من الدرج", "Supplier Payments from Drawer"),
+                        value = "- " + StitchBidiUtils.formatIls(state.shiftSupplierDisbursementsIls),
+                        valueColor = if (state.shiftSupplierDisbursementsIls > 0.0) financial.debit else MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     ReportMetricRow(
-                        label = lang.tr("مصاريف ونثريات مدفوعة من الصندوق اليوم", "Today's Cash Expenses Paid"),
-                        value = "- ${WesternFormatters.formatIls(state.shiftExpensesIls)}",
-                        valueColor = if (state.shiftExpensesIls > 0.0) {
-                            MaterialTheme.colorScheme.onSurface
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
+                        label = lang.tr("مصاريف ونثريات مدفوعة نقداً", "Shift Cash Expenses Paid"),
+                        value = "- " + StitchBidiUtils.formatIls(state.shiftExpensesIls),
+                        valueColor = if (state.shiftExpensesIls > 0.0) financial.debit else MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
+                    // Grand Book Total
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 2.dp),
+                            .padding(top = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = lang.tr("النقد المتوقع بالصندوق الآن", "Expected Cash in Drawer Now"),
+                                text = lang.tr("النقد المتوقع دفترياً بالدرج", "Expected Book Cash in Drawer"),
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = if (state.countedPhysicalCashIls == null) {
-                                    lang.tr(
-                                        "لم يتم تسجيل جرد فعلي للأوراق النقدية بعد",
-                                        "Physical bill count has not been recorded yet"
-                                    )
-                                } else {
-                                    lang.tr(
-                                        "تم إدخال الجرد الفعلي بالأسفل (${WesternFormatters.formatIls(state.countedPhysicalCashIls!!)})",
-                                        "Physical count entered below (${WesternFormatters.formatIls(state.countedPhysicalCashIls!!)})"
-                                    )
-                                },
+                                text = lang.tr(
+                                    "المعادلة: العهدة + المقبوضات - المدفوعات",
+                                    "Formula: Float + Inflows - Outflows"
+                                ),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = WesternFormatters.formatIls(state.drawerTotalCashIls),
-                            style = MaterialTheme.typography.headlineSmall.copy(
-                                fontWeight = FontWeight.Bold
-                            ),
+                            text = StitchBidiUtils.formatIls(state.expectedBookCashIls),
+                            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.testTag("expected_drawer_cash_value")
                         )
@@ -892,11 +1374,11 @@ fun FinancialReportsScreen(
             }
         }
 
-        // 1B. Interactive Shift Opening Float, Physical Count, Variance & Closing Preview Card
+        // ST-43: Physical Count, Variance & Shift Closing Card
         item {
             val variance = state.shiftCashVarianceIls
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier
@@ -909,46 +1391,48 @@ fun FinancialReportsScreen(
                 ) {
                     Text(
                         text = lang.tr(
-                            "جرد الصندوق الفعلي، الفروقات، ومعاينة إغلاق الوردية",
-                            "Physical Cash Count, Variance & Shift Close Preview"
+                            "جرد الصندوق الفعلي ومطابقة الوردية",
+                            "Physical Cash Count & Shift Reconciliation"
                         ),
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
                     Text(
                         text = lang.tr(
-                            "يفصل بين (النقد المتوقع دفترياً) و(الجرد الفعلي للأوراق النقدية بالدرج) لحساب العجز أو الفائض قبل إغلاق الوردية.",
-                            "Separates expected book cash from actual physically counted bills in the drawer to compute shortage or overage before shift close."
+                            "أدخل النقد الموجود فعلياً بالدرج للتحقق من تطابق الرصيد الدفتري مع الأوراق النقدية قبل تسليم الوردية.",
+                            "Enter the actual physically counted cash in the drawer to verify against book cash before shift handover."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                    // Opening Float Quick Presets
+                    // Opening Float Preset Chips (ST-42)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = lang.tr("رصيد افتتاح الوردية:", "Opening Shift Float:"),
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                            text = lang.tr("عهدة افتتاح الوردية:", "Opening Float:"),
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             listOf(250.0, 350.0, 500.0).forEach { floatAmt ->
-                                val isSel = kotlin.math.abs(state.startingDrawerCashIls - floatAmt) < 0.01
+                                val isSel = abs(state.startingDrawerCashIls - floatAmt) < 0.01
                                 FilterChip(
                                     selected = isSel,
                                     onClick = { onUpdateOpeningCash(floatAmt) },
                                     label = { Text("${floatAmt.toInt()} ₪") },
-                                    modifier = Modifier.testTag("shift_opening_preset_${floatAmt.toInt()}")
+                                    modifier = Modifier
+                                        .heightIn(min = 48.dp)
+                                        .testTag("shift_opening_preset_${floatAmt.toInt()}")
                                 )
                             }
                         }
                     }
 
-                    // Physical Cash Input + Match Book Balance button
+                    // Physical Cash Count Input Field (ST-43)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -960,8 +1444,8 @@ fun FinancialReportsScreen(
                             label = {
                                 Text(
                                     lang.tr(
-                                        "الجرد الفعلي النقدي المعدود بالدرج (₪)",
-                                        "Physically Counted Cash in Drawer (₪)"
+                                        "الجرد الفعلي النقدي بالدرج (₪)",
+                                        "Actual Counted Cash in Drawer (₪)"
                                     )
                                 )
                             },
@@ -986,14 +1470,35 @@ fun FinancialReportsScreen(
                         ) {
                             Text(
                                 text = lang.tr("مطابق للدفتري", "Match Book"),
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
                             )
                         }
                     }
 
-                    // Variance Display Banner
+                    // Quick Cash Addition Chips (ST-43)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(20, 50, 100, 200).forEach { bill ->
+                            FilterChip(
+                                selected = false,
+                                onClick = {
+                                    val current = state.countedPhysicalCashIls ?: 0.0
+                                    val next = current + bill
+                                    onUpdateCountedCashText(WesternFormatters.formatNumber(next).removeSuffix(".00"))
+                                },
+                                label = { Text("+$bill ₪") },
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            )
+                        }
+                    }
+
+                    // Variance Banner (ST-43 v02: مطابق تماماً / عجز / فائض)
                     if (variance != null) {
-                        val isExact = kotlin.math.abs(variance) < 0.005
+                        val isExact = abs(variance) < 0.005
                         val isSurplus = variance > 0.005
                         Surface(
                             shape = RoundedCornerShape(10.dp),
@@ -1002,33 +1507,50 @@ fun FinancialReportsScreen(
                                 isSurplus -> financial.warningContainer
                                 else -> financial.debitContainer
                             },
+                            border = BorderStroke(
+                                1.dp,
+                                when {
+                                    isExact -> financial.income.copy(alpha = 0.35f)
+                                    isSurplus -> financial.warning.copy(alpha = 0.35f)
+                                    else -> financial.debit.copy(alpha = 0.35f)
+                                }
+                            ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = lang.tr(
-                                        "الفرق (الجرد الفعلي - الرصيد الدفتري):",
-                                        "Variance (Counted - Book Cash):"
-                                    ),
-                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isExact) Icons.Default.CheckCircle else Icons.Default.WarningAmber,
+                                        contentDescription = null,
+                                        tint = when {
+                                            isExact -> financial.income
+                                            isSurplus -> financial.warning
+                                            else -> financial.debit
+                                        },
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = lang.tr(
+                                            "الفارق (الفعلي - الدفتري):",
+                                            "Variance (Counted - Book):"
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                                    )
+                                }
                                 Text(
                                     text = when {
                                         isExact -> lang.tr("مطابق تماماً (0.00 ₪)", "Exact Match (0.00 ₪)")
-                                        isSurplus -> lang.tr(
-                                            "فائض +${WesternFormatters.formatIls(variance)}",
-                                            "Overage +${WesternFormatters.formatIls(variance)}"
-                                        )
-                                        else -> lang.tr(
-                                            "عجز ${WesternFormatters.formatIls(variance)}",
-                                            "Shortage ${WesternFormatters.formatIls(variance)}"
-                                        )
+                                        isSurplus -> "+ " + StitchBidiUtils.formatIls(variance)
+                                        else -> StitchBidiUtils.formatIls(variance)
                                     },
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                     color = when {
@@ -1042,7 +1564,7 @@ fun FinancialReportsScreen(
                         }
                     }
 
-                    // Shift Closing Preview Toggle
+                    // Shift Closing Action
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1052,13 +1574,13 @@ fun FinancialReportsScreen(
                             Text(
                                 text = if (state.isShiftClosedPreview) {
                                     lang.tr(
-                                        "حالة الوردية (معاينة): مغلقة مؤقتاً (${state.shiftClosedTimestamp ?: ""})",
-                                        "Shift Status (Preview): Closed (${state.shiftClosedTimestamp ?: ""})"
+                                        "حالة الوردية: مغلقة مؤقتاً (${state.shiftClosedTimestamp ?: ""})",
+                                        "Shift Status: Closed (${state.shiftClosedTimestamp ?: ""})"
                                     )
                                 } else {
                                     lang.tr(
-                                        "حالة الوردية: مفتوحة وتستقبل المبيعات والدفعات",
-                                        "Shift Status: Open and accepting transactions"
+                                        "حالة الوردية: مفتوحة وتستقبل العمليات",
+                                        "Shift Status: Open and active"
                                     )
                                 },
                                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
@@ -1071,16 +1593,16 @@ fun FinancialReportsScreen(
                             onClick = { onToggleShiftClose(!state.isShiftClosedPreview) },
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
-                                .heightIn(min = 44.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("toggle_shift_close_button")
                         ) {
                             Text(
                                 text = if (state.isShiftClosedPreview) {
-                                    lang.tr("إعادة فتح المعاينة", "Reopen Shift Preview")
+                                    lang.tr("إعادة فتح المعاينة", "Reopen Shift")
                                 } else {
                                     lang.tr("معاينة إغلاق الوردية", "Preview Shift Close")
                                 },
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
                             )
                         }
                     }
@@ -1088,10 +1610,10 @@ fun FinancialReportsScreen(
             }
         }
 
-        // 2. Today's Sales & Operating Expenses Breakdown (Separating Shift vs Prior Days)
+        // ST-41 Detailed Reports & Insights (Sales, Receivables, Payables, Stock)
         item {
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier.fillMaxWidth()
@@ -1101,120 +1623,101 @@ fun FinancialReportsScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = lang.tr("ملخص مبيعات ومصاريف المتجر", "Sales & Operating Expenses Summary"),
+                        text = lang.tr("سجلات التقارير الميدانية", "Operational Ledger Reports"),
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
+                    // 1. Sales & Invoices
                     ReportMetricRow(
-                        label = lang.tr(
-                            "إجمالي فواتير بيع اليوم (${WesternFormatters.formatInt(state.todayInvoiceCount)} فاتورة)",
-                            "Today's Total Invoices (${WesternFormatters.formatInt(state.todayInvoiceCount)} invoices)"
-                        ),
-                        value = WesternFormatters.formatIls(state.todaySalesTotalIls),
+                        label = lang.tr("إجمالي مبيعات اليوم", "Today's Gross Sales"),
+                        value = StitchBidiUtils.formatIls(state.todaySalesTotalIls),
                         valueColor = MaterialTheme.colorScheme.onSurface,
                         boldValue = true
                     )
-
                     ReportMetricRow(
-                        label = lang.tr("• منها مبيعات نقدية دخلت الصندوق", "• Paid in cash (in drawer)"),
-                        value = WesternFormatters.formatIls(state.shiftCashSalesIls),
+                        label = lang.tr("عدد الفواتير المنفذة", "Invoices Issued"),
+                        value = "${state.todayInvoiceCount} " + lang.tr("فاتورة", "invoices"),
+                        valueColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    ReportMetricRow(
+                        label = lang.tr("متوسط قيمة السلة (الفاتورة)", "Average Basket Value"),
+                        value = StitchBidiUtils.formatIls(state.averageBasketIls),
                         valueColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                    // 2. Receivables & Payables
                     ReportMetricRow(
-                        label = lang.tr("• منها مبيعات آجلة على الذمة (لم تدخل الصندوق)", "• Sold on credit (receivable, not in drawer)"),
-                        value = WesternFormatters.formatIls(state.shiftCreditSalesIls),
+                        label = lang.tr("ديون الزبائن المستحقة للمحل (لنا)", "Customer Debts (Receivables)"),
+                        value = StitchBidiUtils.formatIls(state.totalCustomerDebtsIls),
+                        valueColor = MaterialTheme.colorScheme.onSurface,
+                        boldValue = true
+                    )
+                    ReportMetricRow(
+                        label = lang.tr("أرصدة أمانات الزبائن (لهم)", "Customer Advance Balances"),
+                        value = StitchBidiUtils.formatIls(state.totalCustomerAdvancesIls),
                         valueColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
                     ReportMetricRow(
-                        label = lang.tr("مصاريف اليوم (${state.todayDate}) المخصومة من الصندوق", "Today's Shift Expenses (${state.todayDate})"),
-                        value = WesternFormatters.formatIls(state.shiftExpensesIls),
+                        label = lang.tr("مستحقات الموردين القائمة (علينا)", "Supplier Payables"),
+                        value = StitchBidiUtils.formatIls(state.totalSupplierPayablesIls),
+                        valueColor = financial.warning,
+                        boldValue = true
+                    )
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                    // 3. Operating Expenses Breakdown
+                    ReportMetricRow(
+                        label = lang.tr("مصاريف وردية اليوم", "Today's Shift Expenses"),
+                        value = StitchBidiUtils.formatIls(state.shiftExpensesIls),
+                        valueColor = financial.debit,
+                        boldValue = true
+                    )
+                    ReportMetricRow(
+                        label = lang.tr("مصاريف الأيام السابقة (المثبتة)", "Prior Days' Expenses"),
+                        value = StitchBidiUtils.formatIls(state.historicalExpensesIls),
+                        valueColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    ReportMetricRow(
+                        label = lang.tr("إجمالي المصاريف التراكمية", "Total Cumulative Expenses"),
+                        value = StitchBidiUtils.formatIls(state.totalExpensesIls),
                         valueColor = MaterialTheme.colorScheme.onSurface
                     )
 
-                    ReportMetricRow(
-                        label = lang.tr("مصاريف الأيام السابقة (مخصومة في ورديات سابقة)", "Prior Days' Expenses (previous shifts)"),
-                        value = WesternFormatters.formatIls(state.historicalExpensesIls),
-                        valueColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                    ReportMetricRow(
-                        label = lang.tr("إجمالي المصاريف المسجلة في السجل", "Cumulative Recorded Expenses"),
-                        value = WesternFormatters.formatIls(state.totalExpensesIls),
-                        valueColor = MaterialTheme.colorScheme.onSurface,
-                        boldValue = true
-                    )
-                }
-            }
-        }
-
-        // 3. Receivables & Payables Outside Cash Drawer
-        item {
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    // 4. Critical Inventory Alerts
+                    val lowStock = state.lowStockProducts
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = lang.tr("الديون والالتزامات التراكمية (خارج الصندوق النقدي)", "Receivables & Payables (Outside Cash Drawer)"),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            text = lang.tr("نواقص المخزون والكميات الحرجة", "Low Stock & Reorder Alerts"),
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
                         )
-                        Text(
-                            text = lang.tr(
-                                "هذه الأرصدة تمثل ذمماً للزبائن والموردين وليست مبالغ نقدية موجودة داخل الدرج حالياً.",
-                                "These balances represent customer and supplier accounts, not physical cash inside the drawer."
-                            ),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        StitchBadge(
+                            text = if (lowStock.isEmpty()) {
+                                lang.tr("المخزون كافٍ", "Stock OK")
+                            } else {
+                                "${lowStock.size} " + lang.tr("أصناف حرجة", "critical")
+                            },
+                            tone = if (lowStock.isEmpty()) StitchBadgeTone.SUCCESS else StitchBadgeTone.WARNING
                         )
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    ReportMetricRow(
-                        label = lang.tr("ديون الزبائن للمحل (لنا عند الزبائن)", "Customer Debts Owed to Store"),
-                        value = WesternFormatters.formatIls(state.totalCustomerDebtsIls),
-                        valueColor = MaterialTheme.colorScheme.onSurface,
-                        boldValue = true
-                    )
-
-                    ReportMetricRow(
-                        label = lang.tr("أرصدة مقدمة للزبائن (لهم عند المحل)", "Customer Advance Balances"),
-                        value = WesternFormatters.formatIls(state.totalCustomerAdvancesIls),
-                        valueColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    ReportMetricRow(
-                        label = lang.tr("مستحقات الموردين على المحل (ذمم دائنة)", "Supplier Payables Owed by Store"),
-                        value = WesternFormatters.formatIls(state.totalSupplierPayablesIls),
-                        valueColor = MaterialTheme.colorScheme.onSurface,
-                        boldValue = true
-                    )
-
-                    ReportMetricRow(
-                        label = lang.tr("دفعات مقدمة للموردين (لنا عند الموردين)", "Store Advances with Suppliers"),
-                        value = WesternFormatters.formatIls(state.totalSupplierAdvancesIls),
-                        valueColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
         }
 
-        // 4. Shallow Preview: Cash/Bank Accounts, Transfers, Post-Dated Cheques & Report Categories
+        // Treasury & Extended Reports Shallow Preview Card (ST-41)
         item {
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                 ),
@@ -1229,15 +1732,15 @@ fun FinancialReportsScreen(
                 ) {
                     Text(
                         text = lang.tr(
-                            "معاينة الصناديق والبنوك والشيكات والتقارير التفصيلية (Shallow Preview)",
-                            "Cash/Bank Accounts, Cheques & Extended Reports (Shallow Preview)"
+                            "معاينة الصناديق والبنوك والشيكات والتقارير التفصيلية",
+                            "Cash/Bank Accounts, Cheques & Extended Reports"
                         ),
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                     )
                     Text(
                         text = lang.tr(
-                            "• الصناديق والبنوك: صندوق الكاشير الرئيسي (${WesternFormatters.formatIls(state.drawerTotalCashIls)}) • الخزنة الرئيسية الخلفية (4,200.00 ₪ مرجعي) • حساب بنك فلسطين التجاري (12,500.00 ₪ مرجعي)\n• التحويلات والشيكات: توريد نقدي من الدرج للخزنة • حافظة شيكات زبائن آجلة برسم التحصيل (2 شيكات بقيمة 1,450.00 ₪)\n• تقارير إضافية (ترتبط بـ Laravel /api/v1): أعمار ديون الزبائن (Aging) • حركة الأصناف الأكثر مبيعاً • كشف الضريبة المجمّع",
-                            "• Cash & Bank Accounts: Main POS Drawer (${WesternFormatters.formatIls(state.drawerTotalCashIls)}) • Back-office Safe (4,200.00 ₪ sample) • Bank of Palestine Current Account (12,500.00 ₪ sample)\n• Transfers & Cheques: Drawer-to-Safe cash drop • Post-dated customer cheques portfolio (2 cheques totaling 1,450.00 ₪)\n• Extended Reports (Laravel /api/v1): Receivables Aging • Top-Moving SKUs • Tax Summary"
+                            "• الصناديق والبنوك: صندوق الكاشير الرئيسي (${StitchBidiUtils.formatIls(state.drawerTotalCashIls)}) • الخزنة الرئيسية الخلفية (4,200.00 ₪ مرجعي) • حساب بنك فلسطين التجاري (12,500.00 ₪ مرجعي)\n• التحويلات والشيكات: توريد نقدي من الدرج للخزنة • حافظة شيكات زبائن آجلة برسم التحصيل (2 شيكات بقيمة 1,450.00 ₪)\n• تقارير موسعة: أعمار ديون الزبائن • حركة الأصناف الأكثر مبيعاً • كشف الضريبة المجمّع",
+                            "• Cash & Bank Accounts: Main POS Drawer (${StitchBidiUtils.formatIls(state.drawerTotalCashIls)}) • Back-office Safe (4,200.00 ₪ sample) • Bank of Palestine Current Account (12,500.00 ₪ sample)\n• Transfers & Cheques: Drawer-to-Safe cash drop • Post-dated customer cheques portfolio (2 cheques totaling 1,450.00 ₪)\n• Extended Reports: Receivables Aging • Top-Moving SKUs • Tax Summary"
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1258,20 +1761,20 @@ private fun ReportMetricRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
+            .padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f)
         )
         Spacer(modifier = Modifier.width(12.dp))
         Text(
             text = value,
-            style = MaterialTheme.typography.titleMedium.copy(
+            style = MaterialTheme.typography.bodyMedium.copy(
                 fontWeight = if (boldValue) FontWeight.Bold else FontWeight.SemiBold
             ),
             color = valueColor
@@ -1280,21 +1783,22 @@ private fun ReportMetricRow(
 }
 
 // ============================================================================
-// 3. USER PROFILE / MY ACCOUNT EXPERIENCE (Prompt 16)
+// 3. USER PROFILE / MY ACCOUNT EXPERIENCE (ST-46 v02 Canonical)
 // ============================================================================
 
 @Composable
 fun UserProfileScreen(
     state: TraderUiState,
     onSwitchUser: (UserSession) -> Unit,
-    onToggleLanguage: () -> Unit,
-    onToggleTheme: () -> Unit,
-    onOpenSettings: () -> Unit
+    onToggleLanguage: () -> Unit = {},
+    onToggleTheme: () -> Unit = {},
+    onOpenSettings: () -> Unit = {}
 ) {
     val lang = state.language
     val session = state.currentSession
     val business = state.businessInfo
     val financial = TraderTheme.financial
+    var showAdvancedDetails by rememberSaveable { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -1304,10 +1808,10 @@ fun UserProfileScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. Identity & Business Context Card
+        // 1. Identity Header Hero Card (Card-Contained)
         item {
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier.fillMaxWidth()
@@ -1318,144 +1822,78 @@ fun UserProfileScreen(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         Surface(
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.size(52.dp)
+                            modifier = Modifier.size(56.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Person,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.size(28.dp)
+                                val initials = session.name.split(" ")
+                                    .take(2)
+                                    .mapNotNull { it.firstOrNull()?.toString() }
+                                    .joinToString("")
+                                    .ifEmpty { "أك" }
+                                Text(
+                                    text = initials,
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             }
                         }
+
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = session.name,
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer
-                                ) {
-                                    Text(
-                                        text = session.role.label(lang),
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                    )
-                                }
-                                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                                    Text(
-                                        text = "@${session.username}",
-                                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = MonoFontFamily),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
+                                Text(
+                                    text = session.name,
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                StitchBadge(
+                                    text = session.role.label(lang),
+                                    tone = if (session.role == UserRole.OWNER) StitchBadgeTone.PRIMARY else StitchBadgeTone.NEUTRAL
+                                )
+                            }
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                Text(
+                                    text = "@${session.username}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFontFamily),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
 
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = lang.tr("المنشأة الحالية", "Active Business"),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = business.name(lang),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                            )
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = lang.tr("الفرع / نقطة البيع", "Branch / POS"),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = session.branch(lang),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. Role Permissions & Scope Card
-        item {
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.VerifiedUser,
+                            imageVector = Icons.Default.Storefront,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = lang.tr("صلاحيات الدور الحالي (${session.role.label(lang)})", "Current Role Capabilities (${session.role.label(lang)})"),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            text = "${business.name(lang)} • ${session.branch(lang)}",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    PermissionRow(
-                        label = lang.tr("البيع النقدي والآجل، إصدار الفواتير، وتحصيل دفعات الزبائن", "POS sales, receipts, and collecting customer payments"),
-                        allowed = true,
-                        lang = lang
-                    )
-                    PermissionRow(
-                        label = lang.tr("تعديل أسعار البيع، الاطلاع على التكلفة، وضبط كميات المخزون", "Edit selling prices, view product costs, and adjust inventory"),
-                        allowed = session.canManageInventory(),
-                        lang = lang
-                    )
-                    PermissionRow(
-                        label = lang.tr("تسجيل فواتير الموردين، صرف دفعات الموردين، وتسجيل المصاريف", "Record supplier bills, supplier payments, and operating expenses"),
-                        allowed = session.canManageSuppliers(),
-                        lang = lang
-                    )
-                    PermissionRow(
-                        label = lang.tr("الاطلاع على تقارير مطابقة الصندوق والمركز المالي", "Access cash drawer reconciliation and financial reports"),
-                        allowed = session.canViewReports(),
-                        lang = lang
-                    )
                 }
             }
         }
 
-        // 3. Personal Preferences & Quick Link to Settings
+        // 2. Operational Role & Scope Summary Card
         item {
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier.fillMaxWidth()
@@ -1464,64 +1902,122 @@ fun UserProfileScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = lang.tr("تفضيلات العرض السريعة", "Quick Display Preferences"),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                    )
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        OutlinedButton(
-                            onClick = onToggleLanguage,
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 48.dp)
-                                .testTag("profile_toggle_language_button")
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            modifier = Modifier.size(32.dp)
                         ) {
-                            Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(lang.tr("اللغة: العربية (EN)", "Lang: English (عربي)"))
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.VerifiedUser,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
-                        OutlinedButton(
-                            onClick = onToggleTheme,
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 48.dp)
-                                .testTag("profile_toggle_theme_button")
-                        ) {
-                            Icon(
-                                imageVector = if (state.isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                if (state.isDarkTheme) lang.tr("المظهر: داكن", "Theme: Dark")
-                                else lang.tr("المظهر: فاتح", "Theme: Light")
-                            )
-                        }
+                        Text(
+                            text = lang.tr("نطاق الصلاحيات التشغيلية", "Operational Role & Scope"),
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
 
-                    TextButton(
-                        onClick = onOpenSettings,
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = when (session.role) {
+                            UserRole.OWNER, UserRole.MANAGER -> financial.incomeContainer
+                            UserRole.CASHIER -> MaterialTheme.colorScheme.surfaceVariant
+                        }
+                    ) {
+                        Text(
+                            text = when (session.role) {
+                                UserRole.OWNER -> lang.tr("صلاحيات إدارية كاملة", "Full Owner Administrative Access")
+                                UserRole.MANAGER -> lang.tr("صلاحيات إدارة المبيعات والمخزون", "Sales & Inventory Management Access")
+                                UserRole.CASHIER -> lang.tr("صلاحيات نقطة البيع والتحصيل", "Cashier POS & Collection Access")
+                            },
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = when (session.role) {
+                                UserRole.OWNER, UserRole.MANAGER -> financial.income
+                                UserRole.CASHIER -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+
+
+                    // Quick Scope Badges
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 48.dp)
-                            .testTag("profile_open_settings_button")
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(lang.tr("الانتقال إلى إعدادات التطبيق والمتجر", "Go to Store & App Settings"))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        ) {
+                            Text(
+                                text = lang.tr("إدارة الفواتير", "Invoicing"),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        ) {
+                            Text(
+                                text = if (session.canViewReports()) lang.tr("تسوية الوردية", "Shift Reconciliation") else lang.tr("وردية كاشير", "Cashier Shift"),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                        if (session.canManageSuppliers()) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            ) {
+                                Text(
+                                    text = lang.tr("سداد الموردين", "Suppliers"),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                        if (session.canViewReports()) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            ) {
+                                Text(
+                                    text = lang.tr("التقارير الشاملة", "Full Reports"),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // 3B. Shallow Preview: Account Security, MFA, Active Sessions & Read-Only Mode Context
+        // 3. Session & Terminal Info Card
         item {
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier
@@ -1530,75 +2026,124 @@ fun UserProfileScreen(
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = lang.tr(
-                            "الأمان والجلسات والفروع (معاينة نموذجية - Shallow Preview)",
-                            "Security, Sessions & Multi-Branch Context (Shallow Preview)"
-                        ),
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = lang.tr("بيانات الجلسة والتشغيل", "Session & System Information"),
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                    ReportMetricRow(
+                        label = lang.tr("العملة المعتمدة", "Base Currency"),
+                        value = "₪ (${business.defaultCurrency})",
+                        valueColor = MaterialTheme.colorScheme.onSurface
                     )
-                    Text(
-                        text = lang.tr(
-                            "• الفروع المرتبطة: الفرع الرئيسي (نابلس) • مستودع الجملة المركزي\n• حالة الجلسة: جلسة عرض محلية نشطة — فحص الجلسة الحالية وإدارة جلسات الأجهزة عبر المسارات المعتمدة (`GET /api/v1/session`، `GET /api/v1/sessions`، `DELETE /api/v1/sessions/{opaqueHandle}`).",
-                            "• Linked Branches: Main Branch (Nablus) • Central Wholesale Warehouse\n• Session Context: Active local demo session — session inspection and device revocation map to existing session-authenticated routes (`GET /api/v1/session`, `GET /api/v1/sessions`, `DELETE /api/v1/sessions/{opaqueHandle}`)."
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    ReportMetricRow(
+                        label = lang.tr("إصدار الواجهة", "UI Version"),
+                        value = com.example.BuildConfig.VERSION_NAME,
+                        valueColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
         }
 
-        // 4. Isolated Developer / Demo Role Switcher (Clearly Separated from Real Auth)
+        // 4. Collapsible Advanced Permissions & Diagnostics Details
         item {
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                 ),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("demo_role_switcher_card")
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = lang.tr(
-                            "أدوات العرض والاختبار (Demo & Testing Controls)",
-                            "Demo & Testing Controls (Role Switcher)"
-                        ),
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = lang.tr(
-                            "لا يتضمن هذا العرض التجريبي المحلي تسجيل دخول حقيقي أو تغيير كلمة مرور أو إدارة جلسات عن بُعد. يمكنك تبديل الدور هنا لمعاينة الفرق بين صلاحيات المالك والكاشير.",
-                            "Real authentication, password change, and remote session management are not connected in this offline demo. Switch roles below to inspect Owner vs. Cashier permissions."
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
+                Column(modifier = Modifier.padding(14.dp)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showAdvancedDetails = !showAdvancedDetails },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        state.availableUsers.forEach { user ->
-                            FilterChip(
-                                selected = state.currentSession.id == user.id,
-                                onClick = { onSwitchUser(user) },
-                                label = {
-                                    Text("${user.name} (${user.role.label(lang)})")
-                                },
-                                modifier = Modifier
-                                    .heightIn(min = 48.dp)
-                                    .testTag("switch_role_${user.id}")
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SwitchAccount,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
                             )
+                            Text(
+                                text = lang.tr("تفاصيل الصلاحيات وأداة التبديل التجريبية", "Permission Details & Demo Role Switcher"),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        TextButton(
+                            onClick = { showAdvancedDetails = !showAdvancedDetails },
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        ) {
+                            Text(
+                                text = if (showAdvancedDetails) lang.tr("إخفاء", "Hide") else lang.tr("عرض", "Show"),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+
+                    if (showAdvancedDetails) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Demo Role Switcher
+                        Column(
+                            modifier = Modifier.testTag("demo_role_switcher_card"),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = lang.tr("أداة تبديل الدور التجريبية:", "Demo Role Switcher:"),
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = lang.tr(
+                                    "معاينة الفروق الميدانية بين صلاحيات المالك والكاشير داخل هذا النموذج التجريبي المحلي.",
+                                    "Inspect field differences between Owner and Cashier permissions in this local prototype."
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                state.availableUsers.forEach { user ->
+                                    FilterChip(
+                                        selected = state.currentSession.id == user.id,
+                                        onClick = { onSwitchUser(user) },
+                                        label = {
+                                            Text("${user.name} (${user.role.label(lang)})")
+                                        },
+                                        modifier = Modifier
+                                            .heightIn(min = 48.dp)
+                                            .testTag("switch_role_${user.id}")
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1613,11 +2158,10 @@ private fun PermissionRow(
     allowed: Boolean,
     lang: AppLanguage
 ) {
-    val financial = TraderTheme.financial
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
+            .padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1629,22 +2173,15 @@ private fun PermissionRow(
                 .weight(1f)
                 .padding(end = 8.dp)
         )
-        Surface(
-            shape = RoundedCornerShape(6.dp),
-            color = if (allowed) financial.incomeContainer else MaterialTheme.colorScheme.surfaceVariant
-        ) {
-            Text(
-                text = if (allowed) lang.tr("مسموح", "Allowed") else lang.tr("مقيد", "Restricted"),
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                color = if (allowed) financial.income else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-            )
-        }
+        StitchBadge(
+            text = if (allowed) lang.tr("مسموح", "Allowed") else lang.tr("مقيد", "Restricted"),
+            tone = if (allowed) StitchBadgeTone.SUCCESS else StitchBadgeTone.NEUTRAL
+        )
     }
 }
 
 // ============================================================================
-// 4. SETTINGS & APP PREFERENCES (Prompt 17)
+// 4. BUSINESS SETTINGS & SYSTEM LIMITATIONS (ST-47, ST-48, ST-51 v02)
 // ============================================================================
 
 @Composable
@@ -1655,12 +2192,14 @@ fun BusinessSettingsScreen(
     onToggleTheme: () -> Unit = {},
     onSelectPaperWidth: (Int) -> Unit = {},
     onOpenPrinterSheet: () -> Unit = {},
-    onOpenProfile: () -> Unit = {}
+    onOpenProfile: () -> Unit = {},
+    onResetDemoData: (() -> Unit)? = null
 ) {
     val lang = state.language
     val b = state.businessInfo
     val session = state.currentSession
-    val isOwnerOrManager = session.canViewReports()
+    val financial = TraderTheme.financial
+    var showResetDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -1670,10 +2209,11 @@ fun BusinessSettingsScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. Display Language & Appearance Preferences (Working Controls)
+        // 1. Store Header Hero Card (Card-Contained)
+        // Clean layout: removes duplicate branch context, unsupported active pill, and enforces Western LTR numeric formatting
         item {
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier.fillMaxWidth()
@@ -1682,134 +2222,77 @@ fun BusinessSettingsScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = lang.tr("اللغة والمظهر", "Language & Appearance"),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                    )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = lang.tr("لغة الواجهة", "Display Language"),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                            )
-                            Text(
-                                text = lang.tr("الأرقام والعملة تُعرض دائماً بالأرقام الغربية (0-9)", "Numbers and currency always use Western digits (0-9)"),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        FilterChip(
-                            selected = true,
-                            onClick = onToggleLanguage,
-                            label = {
-                                Text(lang.tr("العربية (تبديل EN)", "English (Switch عربي)"))
-                            },
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("settings_language_chip")
-                        )
-                    }
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = lang.tr("مظهر الشاشة", "Screen Theme"),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                            )
-                            Text(
-                                text = if (state.isDarkTheme) {
-                                    lang.tr("الوضع الداكن مفعل حالياً", "Dark theme is currently active")
-                                } else {
-                                    lang.tr("الوضع الفاتح مفعل حالياً", "Light theme is currently active")
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        FilterChip(
-                            selected = state.isDarkTheme,
-                            onClick = onToggleTheme,
-                            label = {
-                                Text(
-                                    if (state.isDarkTheme) lang.tr("داكن", "Dark")
-                                    else lang.tr("فاتح", "Light")
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Storefront,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(24.dp)
                                 )
-                            },
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("settings_theme_chip")
-                        )
+                            }
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = b.name(lang),
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = session.branch(lang),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
-                }
-            }
-        }
 
-        // 2. Receipt & Simulated Printer Preferences (Working Controls)
-        item {
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Print,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = lang.tr("إعدادات الإيصال والطابعة الحرارية", "Receipt & Thermal Printer Preferences"),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                        )
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
                             Text(
-                                text = lang.tr("عرض ورق الإيصال الحراري", "Thermal Paper Width"),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                            )
-                            Text(
-                                text = lang.tr("يضبط تنسيق الإيصال عند المعاينة والطباعة", "Adjusts receipt layout for preview and printing"),
+                                text = lang.tr("هاتف:", "Phone:"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                Text(
+                                    text = b.phone,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.testTag("settings_phone_text")
+                                )
+                            }
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(58, 80).forEach { widthMm ->
-                                FilterChip(
-                                    selected = state.receiptPaperWidthMm == widthMm,
-                                    onClick = { onSelectPaperWidth(widthMm) },
-                                    label = { Text("${widthMm}mm") },
-                                    modifier = Modifier
-                                        .heightIn(min = 48.dp)
-                                        .testTag("settings_paper_width_${widthMm}")
+                        Text("•", color = MaterialTheme.colorScheme.outlineVariant)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = lang.tr("الرقم الضريبي:", "Tax ID:"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                Text(
+                                    text = b.taxNumber,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.testTag("settings_tax_id_text")
                                 )
                             }
                         }
@@ -1822,188 +2305,382 @@ fun BusinessSettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = lang.tr("طابعة البلوتوث (وضع المحاكاة)", "Simulated Bluetooth Printer"),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                            )
-                            Text(
-                                text = state.connectedPrinter?.let {
-                                    lang.tr("متصل محاكاةً بـ: ${it.name}", "Simulated connection: ${it.name}")
-                                } ?: lang.tr("غير متصل بطابعة حالياً", "No printer currently selected"),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        OutlinedButton(
-                            onClick = onOpenPrinterSheet,
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("settings_open_printer_button")
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         ) {
-                            Icon(
-                                imageVector = if (state.connectedPrinter != null) Icons.Default.BluetoothConnected else Icons.Default.Bluetooth,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Payments,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = lang.tr("العملة المعتمدة: ₪ (${b.defaultCurrency})", "Base Currency: ₪ (${b.defaultCurrency})"),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                        Text(
+                            text = lang.tr("الرئيسية", "Primary"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        // 2. Group 1: Display Preferences (Grouped Native Preference Rows)
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = lang.tr("تفضيلات الواجهة", "Display Preferences"),
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column {
+                        // Dark Mode Row - Whole row toggleable, child Switch with no duplicate handler
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClick = onToggleTheme)
+                                .padding(horizontal = 16.dp, vertical = 14.dp)
+                                .testTag("settings_theme_chip"),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = if (state.isDarkTheme) Icons.Default.DarkMode else Icons.Default.LightMode,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = lang.tr("الوضع الداكن", "Dark Mode"),
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = if (state.isDarkTheme) {
+                                            lang.tr("الوضع الداكن مفعل حالياً", "Dark Mode is currently active")
+                                        } else {
+                                            lang.tr("الوضع الفاتح مفعل حالياً", "Light Mode is currently active")
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            // Switch child has onCheckedChange = null to prevent duplicate handling
+                            Switch(
+                                checked = state.isDarkTheme,
+                                onCheckedChange = null
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(lang.tr("إعداد الطابعة", "Printer Setup"))
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                        // Language Row
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Language,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = lang.tr("لغة الواجهة", "Display Language"),
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = lang.tr("اللغة الحالية: العربية", "Current Language: English"),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            OutlinedButton(
+                                onClick = onToggleLanguage,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("settings_language_chip")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Language,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = lang.tr("تبديل إلى الإنجليزية", "Switch to Arabic"),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
-        // 3. Store & Business Identity (Permission-aware presentation)
+        // 3. Group 2: Printing & Hardware (ONE printer configuration row)
         item {
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = lang.tr("إعدادات الطباعة والعتاد", "Printing & Hardware"),
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Store,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = lang.tr("بيانات المتجر المطبوعة على الفواتير", "Store Identity on Receipts"),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                        )
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    Text(
-                        text = b.name(lang),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = b.city(lang),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text("•", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                            Text(
-                                text = b.phone,
-                                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = MonoFontFamily),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    if (isOwnerOrManager) {
-                        Text(
-                            text = "${lang.tr("الرقم الضريبي للمنشأة:", "Business Tax ID:")} ${b.taxNumber}",
-                            style = MaterialTheme.typography.labelMedium.copy(fontFamily = MonoFontFamily),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    Text(
-                        text = "${lang.tr("العملة المعتمدة:", "Store Currency:")} ${b.defaultCurrency} (₪)",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Text(
-                        text = if (isOwnerOrManager) {
-                            lang.tr(
-                                "بيانات المنشأة والعملة ثابتة في نسخة العرض الحالية لضمان تطابق الفواتير المسجلة.",
-                                "Store identity and currency are fixed in this demo dataset to keep historical receipts consistent."
-                            )
-                        } else {
-                            lang.tr(
-                                "عرض فقط: تعديل بيانات المنشأة والضريبة مخصص للمالك.",
-                                "Read-only: Store registration and tax settings are managed by the store owner."
-                            )
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-
-        // 4. Active Profile Shortcut & Truthful App Mode
-        item {
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onOpenPrinterSheet)
+                            .padding(horizontal = 16.dp, vertical = 14.dp)
+                            .testTag("settings_open_printer_button"),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = lang.tr("المستخدم النشط والصلاحيات", "Active Profile & Permissions"),
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                            )
-                            Text(
-                                text = "${session.name} • ${session.role.label(lang)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        OutlinedButton(
-                            onClick = onOpenProfile,
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("settings_open_profile_button")
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(lang.tr("الملف الشخصي", "My Profile"))
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Print,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = lang.tr("إعدادات الطابعة الحرارية", "Thermal Printer Setup"),
+                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (state.connectedPrinter != null) Icons.Default.BluetoothConnected else Icons.Default.Bluetooth,
+                                        contentDescription = null,
+                                        tint = if (state.connectedPrinter != null) financial.income else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = (state.connectedPrinter?.let {
+                                            lang.tr("محاكاة: ${it.name}", "Simulated: ${it.name}")
+                                        } ?: lang.tr("طابعة البلوتوث الافتراضية (محاكاة)", "Default Bluetooth Printer (Simulated)")) +
+                                            " • ${state.receiptPaperWidthMm}mm",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                         }
-                    }
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    Row(
-                        verticalAlignment = Alignment.Top,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
                         Icon(
-                            imageVector = Icons.Default.Info,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .size(18.dp)
-                                .padding(top = 2.dp)
-                        )
-                        Text(
-                            text = lang.tr(
-                                "حالة التطبيق: نسخة عرض محلية تعمل بدون إنترنت. جميع الفواتير والدفعات تُحفظ في ذاكرة الجلسة الحالية، وتتوفر أداة تبديل الدور التوضيحية داخل صفحة الملف الشخصي.",
-                                "App status: Offline local demo. Sales, ledgers, and expenses are stored in the active session memory. The demo role switcher is available inside My Profile."
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
             }
         }
+
+        // 4. Group 3: System & Runtime Environment & In-Memory Reset
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = lang.tr("النظام وبيئة التشغيل", "System & Runtime"),
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Info,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = lang.tr("التاجر الصغير — نموذج تجريبي محلي يعمل في ذاكرة الجهاز • الإصدار 1.0", "Small Trader — Local in-memory demo • v1.0"),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        if (onResetDemoData != null) {
+                            OutlinedButton(
+                                onClick = { showResetDialog = true },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                ),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = lang.tr("إعادة تصفير الذاكرة التجريبية", "Reset In-Memory Demo Data"),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Confirmation Dialog for In-Memory Reset (ST-51 v02)
+    if (showResetDialog && onResetDemoData != null) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            shape = RoundedCornerShape(16.dp),
+            title = {
+                Text(
+                    text = lang.tr("تأكيد إعادة ضبط البيانات التجريبية", "Confirm In-Memory Reset"),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            },
+            text = {
+                Text(
+                    text = lang.tr(
+                        "سيؤدي هذا الإجراء إلى حذف العمليات المسجلة في الذاكرة للجلسة الحالية واستعادة البيانات الافتراضية للنموذج.",
+                        "This action will reset current session's in-memory transactions and restore default sample data."
+                    ),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showResetDialog = false
+                        onResetDemoData()
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    ),
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text(lang.tr("تأكيد التصفير", "Confirm Reset"))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showResetDialog = false },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text(lang.tr("إلغاء", "Cancel"))
+                }
+            }
+        )
     }
 }

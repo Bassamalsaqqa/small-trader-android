@@ -7,89 +7,110 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 /**
- * Contemporary Retail-Business Visual Identity & Color System for Small Trader (التاجر الصغير).
+ * Stitch Design System Canonical Color Scheme for Small Trader (التاجر الصغير).
  *
- * Design Principles:
- * 1. Light Theme First: Crisp white cards (`#FFFFFF`) layered over a calm architectural
- *    stone-alabaster canvas (`#F4F6F9`), anchored by one disciplined Cobalt-Navy primary accent (`#1D4E89`).
- * 2. Properly Graded Dark Theme: Replaces near-black voids (`#101317`) with a stepped dark-slate
- *    surface hierarchy (`#161B22` canvas -> `#1E2530` card surface -> `#283140` interactive container)
- *    that preserves depth and legibility without eye strain.
- * 3. Functional Status Colors: Replaces neon mint, muddy orange/brown, and pastel pink figures
- *    with high-contrast emerald-sage (`income`), warm vermilion-crimson (`debit`), and deep ochre (`warning`).
+ * Grounded in Stitch Project 15641450350510420845 and DESIGN_LOCK.md:
+ * 1. Primary Brand: Vibrant Retail Blue (#255FD6), pressed state (#1F52BD), pale container (#EEF4FF).
+ * 2. Canvas Background: Cool, crisp ground (#F7F9FC).
+ * 3. Elevated Cards & Sheets: Pure White (#FFFFFF) with subtle outline (#E4E9F1).
+ * 4. Secondary Wells & Input BG: Soft surface (#F5F7FB).
+ * 5. High-Contrast Text: Primary ink (#172033), Secondary slate (#475467), Muted hint (#526174).
+ * 6. Financial Semantics:
+ *    - Success (Paid): #14804A, Container #E8F5E9
+ *    - Warning (Partial / Low Stock): #A15C00, Container #FFF5DF
+ *    - Danger / Debt (Receivables / Removal): #B42318, Container #FFF0EE
+ * 7. Accessible Dark Theme: High contrast #7EB3F7 with #0B2545 text (no white on 7EB3F7),
+ *    graded slate surfaces (#161B22 -> #1E2530 -> #283140).
  */
 
 // ============================================================================
-// 1. LIGHT THEME PALETTE — Crisp Neutral Surfaces & Controlled Cobalt Accent
+// 1. LIGHT THEME PALETTE — Canonical Stitch Brand
 // ============================================================================
 
-val CobaltPrimaryLight = Color(0xFF1D4E89)            // Authoritative retail cobalt-navy (7.9:1 on white)
-val OnCobaltPrimaryLight = Color(0xFFFFFFFF)
-val CobaltPrimaryContainerLight = Color(0xFFE7EFF9)   // Soft sky-slate active highlight
-val OnCobaltPrimaryContainerLight = Color(0xFF0E2A4D) // Deep navy ink (11.5:1 on container)
-val CobaltInversePrimaryLight = Color(0xFF9BC3FA)
+val PrimaryBlueLight = Color(0xFF255FD6)              // Canonical Stitch Blue
+val OnPrimaryBlueLight = Color(0xFFFFFFFF)
+val PrimaryBlueContainerLight = Color(0xFFEEF4FF)     // Soft blue active container
+val OnPrimaryBlueContainerLight = Color(0xFF0E2A4D)   // Deep navy ink
+val PrimaryInverseLight = Color(0xFF9BC3FA)
 
-val SlateSecondaryLight = Color(0xFF334155)           // Balanced architectural slate
-val OnSlateSecondaryLight = Color(0xFFFFFFFF)
-val SlateSecondaryContainerLight = Color(0xFFEAEFF5)  // Tactile neutral tonal button / chip fill
-val OnSlateSecondaryContainerLight = Color(0xFF1E293B)
+val SecondarySlateLight = Color(0xFF475467)           // Balanced slate
+val OnSecondarySlateLight = Color(0xFFFFFFFF)
+val SecondarySlateContainerLight = Color(0xFFF5F7FB)  // Neutral soft surface
+val OnSecondarySlateContainerLight = Color(0xFF172033)
 
-val SteelTertiaryLight = Color(0xFF285E61)            // Restrained steel-teal accent
-val OnSteelTertiaryLight = Color(0xFFFFFFFF)
-val SteelTertiaryContainerLight = Color(0xFFE4F0F1)
-val OnSteelTertiaryContainerLight = Color(0xFF123436)
+val TertiarySteelLight = Color(0xFF285E61)            // Restrained teal accent
+val OnTertiarySteelLight = Color(0xFFFFFFFF)
+val TertiarySteelContainerLight = Color(0xFFE4F0F1)
+val OnTertiarySteelContainerLight = Color(0xFF123436)
 
-val CanvasBackgroundLight = Color(0xFFF4F6F9)         // Calm stone-alabaster background canvas
-val OnCanvasBackgroundLight = Color(0xFF111827)       // Crisp deep charcoal ink (16.5:1)
-val CardSurfaceLight = Color(0xFFFFFFFF)              // Pure white elevated card & bar surface
-val OnCardSurfaceLight = Color(0xFF111827)
-val SurfaceVariantLight = Color(0xFFEEF2F6)           // Subtle container for pills, inputs & headers
-val OnSurfaceVariantLight = Color(0xFF475569)         // High-contrast secondary text (7.2:1 on white)
+val CanvasBackgroundLight = Color(0xFFF7F9FC)         // Canonical Stitch Canvas
+val OnCanvasBackgroundLight = Color(0xFF172033)       // Primary ink
+val CardSurfaceLight = Color(0xFFFFFFFF)              // Pure white cards & sheets
+val OnCardSurfaceLight = Color(0xFF172033)
+val SurfaceVariantLight = Color(0xFFF5F7FB)           // Soft input / well surface
+val OnSurfaceVariantLight = Color(0xFF475467)         // Secondary text
 
 val SurfaceContainerLowestLight = Color(0xFFFFFFFF)
-val SurfaceContainerLowLight = Color(0xFFF8FAFC)
-val SurfaceContainerLight = Color(0xFFF1F5F9)
-val SurfaceContainerHighLight = Color(0xFFE9EEF5)
-val SurfaceContainerHighestLight = Color(0xFFE2E8F0)
+val SurfaceContainerLowLight = Color(0xFFF7F9FC)
+val SurfaceContainerLight = Color(0xFFF5F7FB)
+val SurfaceContainerHighLight = Color(0xFFEEF2F6)
+val SurfaceContainerHighestLight = Color(0xFFE4E9F1)
 val SurfaceBrightLight = Color(0xFFFFFFFF)
 val SurfaceDimLight = Color(0xFFDCE3EC)
 
-val OutlineLight = Color(0xFFCBD5E1)                  // Accessible control & input border
-val OutlineVariantLight = Color(0xFFE2E8F0)           // Delicate card border & hairline divider
-val InverseSurfaceLight = Color(0xFF1E293B)
-val InverseOnSurfaceLight = Color(0xFFF8FAFC)
+val OutlineLight = Color(0xFFE4E9F1)                  // Card outline & row dividers
+val OutlineVariantLight = Color(0xFFE4E9F1)
+val InverseSurfaceLight = Color(0xFF172033)
+val InverseOnSurfaceLight = Color(0xFFF7F9FC)
 
-val ErrorLight = Color(0xFFB42318)                    // Dignified vermilion-crimson
+val ErrorLight = Color(0xFFB42318)                    // Danger / Debt Accent
 val OnErrorLight = Color(0xFFFFFFFF)
-val ErrorContainerLight = Color(0xFFFEF0EF)
-val OnErrorContainerLight = Color(0xFF69150E)
+val ErrorContainerLight = Color(0xFFFFF0EE)           // Danger Pale Container
+val OnErrorContainerLight = Color(0xFFB42318)
+
+// Backward compatibility aliases for existing callers
+val CobaltPrimaryLight = PrimaryBlueLight
+val OnCobaltPrimaryLight = OnPrimaryBlueLight
+val CobaltPrimaryContainerLight = PrimaryBlueContainerLight
+val OnCobaltPrimaryContainerLight = OnPrimaryBlueContainerLight
+val CobaltInversePrimaryLight = PrimaryInverseLight
+
+val SlateSecondaryLight = SecondarySlateLight
+val OnSlateSecondaryLight = OnSecondarySlateLight
+val SlateSecondaryContainerLight = SecondarySlateContainerLight
+val OnSlateSecondaryContainerLight = OnSecondarySlateContainerLight
+
+val SteelTertiaryLight = TertiarySteelLight
+val OnSteelTertiaryLight = OnTertiarySteelLight
+val SteelTertiaryContainerLight = TertiarySteelContainerLight
+val OnSteelTertiaryContainerLight = OnTertiarySteelContainerLight
 
 // ============================================================================
-// 2. DARK THEME PALETTE — Graded Architectural Slate (Never an Almost-Black Void)
+// 2. DARK THEME PALETTE — Graded Architectural Slate (Never pitch black)
 // ============================================================================
 
-val CobaltPrimaryDark = Color(0xFF7EB3F7)             // Calm, high-contrast sky-cobalt (7.4:1 on surface)
-val OnCobaltPrimaryDark = Color(0xFF0B2545)           // Deep navy ink on primary buttons (9.2:1)
-val CobaltPrimaryContainerDark = Color(0xFF213C61)    // Rich elevated cobalt container
-val OnCobaltPrimaryContainerDark = Color(0xFFDCEAFB)  // Crisp ice-white text
-val CobaltInversePrimaryDark = Color(0xFF1D4E89)
+val CobaltPrimaryDark = Color(0xFF7EB3F7)             // Sky-cobalt for dark surfaces
+val OnCobaltPrimaryDark = Color(0xFF0B2545)           // Deep navy ink (strict contrast, never white on 7EB3F7)
+val CobaltPrimaryContainerDark = Color(0xFF213C61)    // Elevated cobalt container
+val OnCobaltPrimaryContainerDark = Color(0xFFDCEAFB)  // Crisp ice-blue text
+val CobaltInversePrimaryDark = Color(0xFF255FD6)
 
 val SlateSecondaryDark = Color(0xFF94A3B8)            // Refined cool slate
 val OnSlateSecondaryDark = Color(0xFF0F172A)
-val SlateSecondaryContainerDark = Color(0xFF2A3340)   // Clearly graded tonal button & chip surface
+val SlateSecondaryContainerDark = Color(0xFF2A3340)   // Graded tonal button/chip surface
 val OnSlateSecondaryContainerDark = Color(0xFFE2E8F0)
 
-val SteelTertiaryDark = Color(0xFF6FB8BC)             // Calm muted sea-steel
+val SteelTertiaryDark = Color(0xFF6FB8BC)             // Muted teal
 val OnSteelTertiaryDark = Color(0xFF0D2E30)
 val SteelTertiaryContainerDark = Color(0xFF1E3F42)
 val OnSteelTertiaryContainerDark = Color(0xFFCBECEE)
 
-val CanvasBackgroundDark = Color(0xFF161B22)          // Balanced deep slate canvas (not pitch black)
-val OnCanvasBackgroundDark = Color(0xFFF0F4F8)        // Crisp off-white primary ink (15.2:1)
-val CardSurfaceDark = Color(0xFF1E2530)               // First elevation tier: cards, top bar, bottom bar
+val CanvasBackgroundDark = Color(0xFF161B22)          // Deep slate canvas
+val OnCanvasBackgroundDark = Color(0xFFF0F4F8)        // Off-white primary ink
+val CardSurfaceDark = Color(0xFF1E2530)               // First elevation tier: cards & sheets
 val OnCardSurfaceDark = Color(0xFFF0F4F8)
-val SurfaceVariantDark = Color(0xFF283140)            // Second elevation tier: inputs, chips, badges
-val OnSurfaceVariantDark = Color(0xFFA6B4C6)          // Accessible secondary text (6.5:1 on surface)
+val SurfaceVariantDark = Color(0xFF283140)            // Second elevation tier: inputs & chips
+val OnSurfaceVariantDark = Color(0xFFA6B4C6)          // Accessible secondary text
 
 val SurfaceContainerLowestDark = Color(0xFF13171D)
 val SurfaceContainerLowDark = Color(0xFF1A2029)
@@ -99,12 +120,12 @@ val SurfaceContainerHighestDark = Color(0xFF2E3846)
 val SurfaceBrightDark = Color(0xFF344050)
 val SurfaceDimDark = Color(0xFF161B22)
 
-val OutlineDark = Color(0xFF3E4C5E)                   // Clear structural border for inputs & chips
-val OutlineVariantDark = Color(0xFF2C3646)            // Subtle card border & divider on dark slate
+val OutlineDark = Color(0xFF3E4C5E)                   // Structural borders in dark theme
+val OutlineVariantDark = Color(0xFF2C3646)            // Subtle dividers
 val InverseSurfaceDark = Color(0xFFE2E8F0)
 val InverseOnSurfaceDark = Color(0xFF161B22)
 
-val ErrorDark = Color(0xFFF0755E)                     // Warm vermilion red (never pastel pink)
+val ErrorDark = Color(0xFFF0755E)                     // Warm vermilion red
 val OnErrorDark = Color(0xFF3B0D07)
 val ErrorContainerDark = Color(0xFF3D1F1D)
 val OnErrorContainerDark = Color(0xFFFAD4CC)
@@ -115,37 +136,37 @@ val OnErrorContainerDark = Color(0xFFFAD4CC)
 
 @Immutable
 data class FinancialColors(
-    val income: Color,              // Cash inflows, collections, settled status
+    val income: Color,              // Cash inflows, collections, fully settled status
     val incomeContainer: Color,
     val onIncomeContainer: Color,
-    val debit: Color,               // Receivables, payables, deductions (vermilion-crimson, never pink)
+    val debit: Color,               // Receivables, debts, deductions
     val debitContainer: Color,
     val onDebitContainer: Color,
-    val warning: Color,             // Low stock, pending attention (ochre-gold, never muddy brown)
+    val warning: Color,             // Low stock, partial payment status
     val warningContainer: Color,
     val onWarningContainer: Color
 )
 
 val LightFinancialColors = FinancialColors(
-    income = Color(0xFF156D49),             // Deep forest emerald (6.4:1 on white)
-    incomeContainer = Color(0xFFE6F4ED),
-    onIncomeContainer = Color(0xFF0C422B),
-    debit = Color(0xFFB42318),              // Authoritative crimson-vermilion (6.3:1 on white)
-    debitContainer = Color(0xFFFEF0EF),
-    onDebitContainer = Color(0xFF69150E),
-    warning = Color(0xFF9A5208),            // Accessible deep ochre-amber (5.7:1 on white)
-    warningContainer = Color(0xFFFEF5E7),
-    onWarningContainer = Color(0xFF5C3004)
+    income = Color(0xFF14804A),             // Canonical Success Accent
+    incomeContainer = Color(0xFFE8F5E9),    // Success Pale Container
+    onIncomeContainer = Color(0xFF14804A),
+    debit = Color(0xFFB42318),              // Danger / Debt Accent
+    debitContainer = Color(0xFFFFF0EE),     // Danger Pale Container
+    onDebitContainer = Color(0xFFB42318),
+    warning = Color(0xFFA15C00),            // Warning / Partial Accent
+    warningContainer = Color(0xFFFFF5DF),   // Warning Pale Container
+    onWarningContainer = Color(0xFFA15C00)
 )
 
 val DarkFinancialColors = FinancialColors(
-    income = Color(0xFF5CC894),             // Calm jade-emerald (7.8:1 on dark card, never neon mint)
+    income = Color(0xFF5CC894),             // High-contrast jade
     incomeContainer = Color(0xFF173629),
     onIncomeContainer = Color(0xFFC4F0DA),
-    debit = Color(0xFFF0755E),              // Warm vermilion-coral (6.6:1 on dark card, never bubblegum pink)
+    debit = Color(0xFFF0755E),              // Warm vermilion
     debitContainer = Color(0xFF3D1F1D),
     onDebitContainer = Color(0xFFFAD4CC),
-    warning = Color(0xFFF2B249),            // Clear warm amber-gold (8.9:1 on dark card)
+    warning = Color(0xFFF2B249),            // Clear amber
     warningContainer = Color(0xFF3B2B13),
     onWarningContainer = Color(0xFFFCE3B4)
 )
@@ -173,7 +194,7 @@ val WarningAmberContainer: Color
     @ReadOnlyComposable
     get() = LocalFinancialColors.current.warningContainer
 
-// Authentic paper tokens for thermal receipt preview when needed
+// Thermal paper preview tokens
 val ThermalPaperCream = Color(0xFFFAFBFD)
-val ThermalPaperInk = Color(0xFF111827)
-val ThermalPaperMutedInk = Color(0xFF475569)
+val ThermalPaperInk = Color(0xFF172033)
+val ThermalPaperMutedInk = Color(0xFF475467)

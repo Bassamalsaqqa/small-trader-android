@@ -1,0 +1,28 @@
+{
+  "status": "VERIFIED_REVIEW_PROTOTYPE_OWNER_DEVICE_ACCEPTANCE_PENDING",
+  "branch": "ux/stitch-native-prototype",
+  "tests": {
+    "tests": 82,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "lint": {
+    "severity": {
+      "Warning": 61
+    },
+    "categories": {
+      "UnusedAttribute": 1,
+      "VectorRaster": 1,
+      "AndroidGradlePluginVersion": 2,
+      "GradleDependency": 22,
+      "NewerVersionAvailable": 9,
+      "UnusedResources": 21,
+      "IconLauncherShape": 5
+    }
+  },
+  "apkBytes": 20542340,
+  "apkSha256": "e393031cfafefe51526e620dd4ada8a8fc5dd38a0d4395ac1d75c220372fc5d0",
+  "deviceAcceptance": "PENDING: IME, TalkBack, hardware and performance unverified on Pixel_8a_T3",
+  "financialEngineChanged": false
+}

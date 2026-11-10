@@ -1,0 +1,20 @@
+{
+  "applicationId": "com.aistudio.smalltrader.psdukx",
+  "apk": "/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b/app/build/outputs/apk/debug/app-debug.apk",
+  "bytes": 18959577,
+  "sha256": "01951c61958752bfac698dd52f657a5811c96fd02fbc7b777fbdb760b6de3e3f",
+  "source_manifest_sha256": "79265f775430c1b398c5c271cfa597b6ec349c60bf8c4476105c14d3201d6216",
+  "tests": {
+    "passed": 72,
+    "skipped": 1,
+    "failed": 0,
+    "errors": 0
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 62
+  },
+  "apkSignature": "apksigner verify exit 0, APK Signature Scheme v2",
+  "acceptance": "PENDING Windows Pixel_8a_T3 owner review",
+  "deviceScreenshots": []
+}

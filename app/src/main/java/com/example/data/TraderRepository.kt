@@ -10,6 +10,7 @@ import com.example.model.InvoiceRecord
 import com.example.model.Product
 import com.example.model.ProductCategory
 import com.example.model.PurchaseBill
+import com.example.model.PurchaseLineItem
 import com.example.model.StockMovement
 import com.example.model.Supplier
 import com.example.model.SupplierPayment
@@ -17,6 +18,7 @@ import com.example.model.UserSession
 import com.example.model.WesternFormatters
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.util.UUID
 
 /**
  * Bounded domain repository contract for Small Trader (التاجر الصغير).
@@ -76,14 +78,24 @@ interface TraderRepository {
     fun getPurchaseBills(): List<PurchaseBill>
     fun getSupplierPayments(): List<SupplierPayment>
     fun saveSupplier(supplierId: String?, name: String, company: String, phone: String, operator: UserSession): Result<Supplier>
-    fun recordPurchaseBill(supplierId: String, itemsSummary: String, totalIls: Double, paidNowIls: Double, operator: UserSession): Result<PurchaseBill>
-    fun confirmPhysicalGoodsReceipt(billId: String, productId: String, receivedQty: Int, batchNote: String, operator: UserSession): Result<StockMovement>
-    fun recordSupplierPayment(supplierId: String, amountIls: Double, note: String, operator: UserSession): Result<SupplierPayment>
+    fun recordPurchaseBill(supplierId: String, itemsSummary: String, totalIls: Double, paidNowIls: Double, operator: UserSession, expectedProductId: String? = null, expectedQuantity: Int = 0): Result<PurchaseBill>
+    fun recordStructuredPurchaseBill(supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, operator: UserSession, note: String = ""): Result<PurchaseBill>
+    fun confirmPhysicalGoodsReceipt(billId: String, productId: String, receivedQty: Int, batchNote: String, operator: UserSession, operationId: String = "", lineId: String? = null): Result<StockMovement>
+    fun recordSupplierPayment(supplierId: String, amountIls: Double, note: String, operator: UserSession, paymentId: String = ""): Result<SupplierPayment>
 
     // Expenses
     fun getExpenses(): List<ExpenseEntry>
     fun recordExpense(title: String, category: ExpenseCategory, amountIls: Double, operator: UserSession): Result<ExpenseEntry>
 }
+
+data class RecordedGrnOperation(
+    val billId: String,
+    val lineId: String,
+    val productId: String,
+    val receivedQty: Int,
+    val batchNote: String,
+    val movement: StockMovement
+)
 
 /**
  * In-memory reference implementation strictly adhering to accounting, stock, and role integrity.
@@ -102,6 +114,8 @@ class OfflineDemoTraderRepository : TraderRepository {
     private val suppliers = SampleCatalog.initialSuppliers.toMutableList()
     private val purchaseBills = SampleCatalog.initialPurchaseBills.toMutableList()
     private val supplierPayments = mutableListOf<SupplierPayment>()
+    private val recordedGrnOperations = mutableMapOf<String, RecordedGrnOperation>()
+    private val recordedSupplierPayments = mutableMapOf<String, SupplierPayment>()
     private val expenses = SampleCatalog.initialExpenses.toMutableList()
 
     override fun getCurrentSession(): UserSession = currentSession
@@ -629,7 +643,9 @@ class OfflineDemoTraderRepository : TraderRepository {
         itemsSummary: String,
         totalIls: Double,
         paidNowIls: Double,
-        operator: UserSession
+        operator: UserSession,
+        expectedProductId: String?,
+        expectedQuantity: Int
     ): Result<PurchaseBill> {
         if (!operator.canManageSuppliers()) {
             return Result.failure(SecurityException("غير مصرح: تسجيل فواتير الشراء متاح للمالك والمدير فقط | Permission denied: Purchase bill requires Owner or Manager"))
@@ -639,6 +655,22 @@ class OfflineDemoTraderRepository : TraderRepository {
         }
         val idx = suppliers.indexOfFirst { it.id == supplierId }
         if (idx == -1) return Result.failure(NoSuchElementException("المورد غير موجود | Supplier not found: $supplierId"))
+
+        // Validate linked product before financial mutation
+        if (!expectedProductId.isNullOrBlank() || expectedQuantity > 0) {
+            if (expectedProductId.isNullOrBlank()) {
+                return Result.failure(IllegalArgumentException("Linked purchase line requires a valid product SKU"))
+            }
+            val linkedProd = products.firstOrNull { it.id == expectedProductId }
+                ?: return Result.failure(NoSuchElementException("Linked product not found in catalog: $expectedProductId"))
+            if (!linkedProd.isStockTracked) {
+                return Result.failure(IllegalStateException("Cannot create linked purchase line for non-tracked product: ${linkedProd.nameAr}"))
+            }
+            if (expectedQuantity <= 0) {
+                return Result.failure(IllegalArgumentException("Linked purchase line quantity must be greater than zero (was $expectedQuantity)"))
+            }
+        }
+
         if (totalIls <= 0.0) {
             return Result.failure(IllegalArgumentException("إجمالي الفاتورة يجب أن يكون أكبر من صفر | Bill total must be greater than zero."))
         }
@@ -654,6 +686,22 @@ class OfflineDemoTraderRepository : TraderRepository {
         val payableAdded = totalExact.subtract(paidExact)
 
         val nextBillNum = (purchaseBills.maxOfOrNull { it.billNumber } ?: 300) + 1
+        val synthesizedLines = if (!expectedProductId.isNullOrBlank() && expectedQuantity > 0) {
+            val prod = products.firstOrNull { it.id == expectedProductId }
+            listOf(
+                PurchaseLineItem(
+                    productId = expectedProductId,
+                    productNameAr = prod?.nameAr ?: itemsSummary,
+                    productNameEn = prod?.nameEn ?: itemsSummary,
+                    quantity = expectedQuantity,
+                    unitCostIls = totalExact.divide(BigDecimal(expectedQuantity.toString()), 4, RoundingMode.HALF_UP).toDouble(),
+                    receivedQuantity = 0
+                )
+            )
+        } else {
+            emptyList()
+        }
+
         val bill = PurchaseBill(
             id = "pb_${System.currentTimeMillis()}_$nextBillNum",
             billNumber = nextBillNum,
@@ -662,7 +710,105 @@ class OfflineDemoTraderRepository : TraderRepository {
             totalIls = totalExact.toDouble(),
             paidIls = paidExact.toDouble(),
             itemsSummary = itemsSummary,
-            isReceived = false // Text-only bills require physical itemized audit before marking goods received
+            isReceived = false, // Text-only bills require physical itemized audit before marking goods received
+            lines = synthesizedLines,
+            expectedProductId = expectedProductId,
+            expectedQuantity = expectedQuantity,
+            receivedQuantity = 0
+        )
+
+        val currentSup = suppliers[idx]
+        val newBalance = BigDecimal(currentSup.balanceOwedIls.toString())
+            .add(payableAdded)
+            .setScale(2, RoundingMode.HALF_UP)
+            .toDouble()
+
+        suppliers[idx] = currentSup.copy(balanceOwedIls = newBalance)
+        purchaseBills.add(0, bill)
+        return Result.success(bill)
+    }
+
+    override fun recordStructuredPurchaseBill(
+        supplierId: String,
+        lines: List<PurchaseLineItem>,
+        paidNowIls: Double,
+        operator: UserSession,
+        note: String
+    ): Result<PurchaseBill> {
+        if (!operator.canManageSuppliers()) {
+            return Result.failure(SecurityException("غير مصرح: تسجيل فواتير الشراء متاح للمالك والمدير فقط | Permission denied: Purchase bill requires Owner or Manager"))
+        }
+        if (supplierId.isBlank()) {
+            return Result.failure(IllegalArgumentException("معرف المورد غير صالح | Supplier ID cannot be blank."))
+        }
+        val idx = suppliers.indexOfFirst { it.id == supplierId }
+        if (idx == -1) return Result.failure(NoSuchElementException("المورد غير موجود | Supplier not found: $supplierId"))
+        if (lines.isEmpty()) {
+            return Result.failure(IllegalArgumentException("بنود الفاتورة لا يمكن أن تكون فارغة | Purchase bill must contain at least one line item."))
+        }
+
+        // Domain validation across all lines BEFORE financial mutation
+        val validatedLines = mutableListOf<PurchaseLineItem>()
+        for ((lineIdx, line) in lines.withIndex()) {
+            if (line.productId.isBlank()) {
+                return Result.failure(IllegalArgumentException("Line ${lineIdx + 1}: SKU / Product ID cannot be blank."))
+            }
+            val prod = products.firstOrNull { it.id == line.productId }
+                ?: return Result.failure(NoSuchElementException("Line ${lineIdx + 1}: Product not found in catalog: ${line.productId}"))
+            if (!prod.isStockTracked) {
+                return Result.failure(IllegalStateException("Line ${lineIdx + 1}: Product ${prod.nameAr} is not stock-tracked. Cannot create purchase line for non-tracked product."))
+            }
+            if (line.quantity <= 0) {
+                return Result.failure(IllegalArgumentException("Line ${lineIdx + 1}: Quantity must be greater than zero (was ${line.quantity})."))
+            }
+            if (line.unitCostIls < 0.0 || line.unitCostIls.isNaN() || line.unitCostIls.isInfinite()) {
+                return Result.failure(IllegalArgumentException("Line ${lineIdx + 1}: Explicit unit cost must be a valid non-negative number (was ${line.unitCostIls})."))
+            }
+            val lineId = if (line.id.isNotBlank()) line.id else UUID.randomUUID().toString()
+            validatedLines.add(
+                line.copy(
+                    id = lineId,
+                    productNameAr = prod.nameAr,
+                    productNameEn = prod.nameEn,
+                    receivedQuantity = 0
+                )
+            )
+        }
+
+        // Derive authoritative total strictly from exact priced structured lines with entered cost
+        val totalExact = validatedLines.fold(BigDecimal.ZERO) { acc, line ->
+            acc.add(BigDecimal(line.unitCostIls.toString()).multiply(BigDecimal(line.quantity.toString())))
+        }.setScale(2, RoundingMode.HALF_UP)
+
+        if (totalExact <= BigDecimal.ZERO) {
+            return Result.failure(IllegalArgumentException("Authoritative purchase total must be greater than zero."))
+        }
+
+        if (paidNowIls < 0.0 || paidNowIls.isNaN() || paidNowIls.isInfinite()) {
+            return Result.failure(IllegalArgumentException("المبلغ المدفوع فوراً لا يمكن أن يكون سالباً | Paid-now amount cannot be negative."))
+        }
+        val paidExact = BigDecimal(paidNowIls.toString()).setScale(2, RoundingMode.HALF_UP)
+        if (paidExact > totalExact) {
+            return Result.failure(IllegalArgumentException("المبلغ المدفوع فوراً لا يمكن أن يتجاوز إجمالي الفاتورة | Paid-now amount cannot exceed bill total."))
+        }
+
+        val payableAdded = totalExact.subtract(paidExact)
+        val nextBillNum = (purchaseBills.maxOfOrNull { it.billNumber } ?: 300) + 1
+        val summaryStr = if (note.isNotBlank()) note else validatedLines.joinToString(" • ") { "${it.quantity}x ${it.productNameAr}" }
+
+        val bill = PurchaseBill(
+            id = "pb_${System.currentTimeMillis()}_$nextBillNum",
+            billNumber = nextBillNum,
+            supplierId = supplierId,
+            date = WesternFormatters.currentDate(),
+            totalIls = totalExact.toDouble(),
+            paidIls = paidExact.toDouble(),
+            itemsSummary = summaryStr,
+            isReceived = false, // Physical stock receipt requires separate GRN
+            lines = validatedLines,
+            expectedProductId = validatedLines.firstOrNull()?.productId,
+            expectedQuantity = validatedLines.sumOf { it.quantity },
+            receivedQuantity = 0
         )
 
         val currentSup = suppliers[idx]
@@ -681,7 +827,9 @@ class OfflineDemoTraderRepository : TraderRepository {
         productId: String,
         receivedQty: Int,
         batchNote: String,
-        operator: UserSession
+        operator: UserSession,
+        operationId: String,
+        lineId: String?
     ): Result<StockMovement> {
         if (!operator.canManageInventory()) {
             return Result.failure(SecurityException("غير مصرح: استلام البضاعة المخزني متاح للمالك والمدير فقط | Permission denied: Goods receiving requires Owner or Manager"))
@@ -689,6 +837,26 @@ class OfflineDemoTraderRepository : TraderRepository {
         if (billId.isBlank()) {
             return Result.failure(IllegalArgumentException("معرف فاتورة الشراء غير صالح | Purchase bill ID cannot be blank"))
         }
+
+        // 1. Idempotent Replay Guard via stable operationId
+        if (operationId.isNotBlank()) {
+            val existing = recordedGrnOperations[operationId]
+            if (existing != null) {
+                val matchesBill = existing.billId == billId
+                val matchesLine = if (!lineId.isNullOrBlank()) existing.lineId == lineId else (existing.billId == billId && existing.productId == productId)
+                val matchesProduct = existing.productId == productId
+                val matchesQty = existing.receivedQty == receivedQty
+                val matchesNote = existing.batchNote == batchNote
+                if (matchesBill && matchesLine && matchesProduct && matchesQty && matchesNote) {
+                    return Result.success(existing.movement)
+                } else {
+                    return Result.failure(
+                        IllegalStateException("Conflicting GRN operation with ID $operationId already recorded with different payload: expected (billId=${existing.billId}, lineId=${existing.lineId}, product=${existing.productId}, delta=${existing.receivedQty}, note=${existing.batchNote}) but received (billId=$billId, lineId=$lineId, product=$productId, delta=$receivedQty, note=$batchNote)")
+                    )
+                }
+            }
+        }
+
         val billIdx = purchaseBills.indexOfFirst { it.id == billId }
         if (billIdx == -1) {
             return Result.failure(
@@ -704,21 +872,45 @@ class OfflineDemoTraderRepository : TraderRepository {
             )
         }
 
-        val expectedProductId = bill.expectedProductId
-        val expectedQty = bill.expectedQuantity
-        if (expectedProductId.isNullOrBlank() || expectedQty <= 0) {
+        // 2. Resolve matching line from structured or effective lines
+        val effectiveLines = bill.effectiveLines
+        if (effectiveLines.isEmpty()) {
             return Result.failure(
                 IllegalStateException("الفاتورة $billCode قيد مالي نصي بدون بنود أصناف محددة؛ يُرجى تعديل المخزون من بطاقة الصنف مباشرة | Financial-only purchase bill $billCode has no linked SKU line for automated GRN")
             )
         }
-        if (productId != expectedProductId) {
+
+        if (effectiveLines.size > 1 && lineId.isNullOrBlank()) {
             return Result.failure(
-                IllegalArgumentException("الصنف المختار لا يطابق الصنف المحدد في فاتورة الشراء $billCode | Selected product ($productId) does not match bill $billCode expected SKU ($expectedProductId)")
+                IllegalArgumentException("الفاتورة $billCode تحتوي على بنود متعددة؛ يلزم تحديد معرف البند (lineId) بدقة لإتمام الاستلام المخزني | Structured multi-line bill $billCode requires specific lineId for goods receipt")
             )
         }
-        if (receivedQty <= 0 || receivedQty != expectedQty) {
+
+        val targetLineIndex = if (!lineId.isNullOrBlank()) {
+            val idx = effectiveLines.indexOfFirst { it.id == lineId }
+            if (idx == -1) {
+                return Result.failure(IllegalArgumentException("Line ID $lineId not found in bill $billCode"))
+            }
+            if (effectiveLines[idx].productId != productId) {
+                return Result.failure(IllegalArgumentException("Line ID $lineId productId (${effectiveLines[idx].productId}) does not match requested productId ($productId)"))
+            }
+            idx
+        } else {
+            val idx = effectiveLines.indexOfFirst { it.productId == productId }
+            if (idx == -1) {
+                val validSkus = effectiveLines.joinToString(", ") { it.productId }
+                return Result.failure(
+                    IllegalArgumentException("الصنف المختار ($productId) لا يطابق بنود فاتورة الشراء $billCode (البنود المؤهلة: $validSkus) | Selected product ($productId) does not match bill $billCode lines ($validSkus)")
+                )
+            }
+            idx
+        }
+
+        val targetLine = effectiveLines[targetLineIndex]
+        val pendingQty = targetLine.pendingQuantity
+        if (receivedQty <= 0 || receivedQty > pendingQty) {
             return Result.failure(
-                IllegalArgumentException("الكمية المدخلة ($receivedQty) لا تطابق الكمية المتوقعة في فاتورة الشراء $billCode ($expectedQty) | Received quantity ($receivedQty) must match bill $billCode expected quantity ($expectedQty)")
+                IllegalArgumentException("الكمية المدخلة ($receivedQty) يجب أن تكون أكبر من صفر ولا تتجاوز الكمية المتبقية ($pendingQty) في فاتورة الشراء $billCode | Received quantity ($receivedQty) must be positive and not exceed pending quantity ($pendingQty) for bill $billCode")
             )
         }
 
@@ -729,20 +921,50 @@ class OfflineDemoTraderRepository : TraderRepository {
             return Result.failure(IllegalStateException("لا يمكن تسجيل استلام مخزني لصنف غير خاضع للجرد | Cannot receive physical stock for a non-tracked item"))
         }
 
-        purchaseBills[billIdx] = bill.copy(isReceived = true)
+        // 3. Update line and bill receiving state
+        val updatedLine = targetLine.copy(
+            receivedQuantity = targetLine.receivedQuantity + receivedQty
+        )
+        val updatedLines = effectiveLines.toMutableList()
+        updatedLines[targetLineIndex] = updatedLine
+
+        val newReceivedTotal = updatedLines.sumOf { it.receivedQuantity }
+        val isFullyReceived = updatedLines.all { it.isReceived }
+        purchaseBills[billIdx] = bill.copy(
+            lines = updatedLines,
+            receivedQuantity = newReceivedTotal,
+            isReceived = isFullyReceived
+        )
+
+        // 4. Atomically increment physical stock
         val newStock = prod.stockCount + receivedQty
         products[prodIdx] = prod.copy(stockCount = newStock)
+
         val noteSuffix = batchNote.trim().takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: ""
+        val receiptTypeAr = if (updatedLine.isReceived) "سند استلام بضاعة مخزني" else "سند استلام جزئي (+${WesternFormatters.formatInt(receivedQty)}/${WesternFormatters.formatInt(targetLine.quantity)})"
+        val receiptTypeEn = if (updatedLine.isReceived) "Physical Goods Receipt Note" else "Partial Goods Receipt (+$receivedQty/${targetLine.quantity})"
+
+        val movementId = if (operationId.isNotBlank()) operationId else "sm_grn_${System.currentTimeMillis()}"
         val movement = StockMovement(
-            id = "sm_grn_${System.currentTimeMillis()}",
+            id = movementId,
             productId = productId,
             date = WesternFormatters.currentTimestamp(),
             delta = receivedQty,
-            reasonAr = "سند استلام بضاعة مخزني $billCode$noteSuffix",
-            reasonEn = "Physical Goods Receipt Note $billCode$noteSuffix",
+            reasonAr = "$receiptTypeAr $billCode$noteSuffix",
+            reasonEn = "$receiptTypeEn $billCode$noteSuffix",
             resultingStock = newStock
         )
         stockMovements.add(0, movement)
+        if (operationId.isNotBlank()) {
+            recordedGrnOperations[operationId] = RecordedGrnOperation(
+                billId = billId,
+                lineId = targetLine.id,
+                productId = productId,
+                receivedQty = receivedQty,
+                batchNote = batchNote,
+                movement = movement
+            )
+        }
         return Result.success(movement)
     }
 
@@ -750,7 +972,8 @@ class OfflineDemoTraderRepository : TraderRepository {
         supplierId: String,
         amountIls: Double,
         note: String,
-        operator: UserSession
+        operator: UserSession,
+        paymentId: String
     ): Result<SupplierPayment> {
         if (!operator.canManageSuppliers()) {
             return Result.failure(SecurityException("غير مصرح: سداد دفعات الموردين متاح للمالك والمدير فقط | Permission denied: Supplier disbursement requires Owner or Manager"))
@@ -765,6 +988,23 @@ class OfflineDemoTraderRepository : TraderRepository {
         }
 
         val amountExact = BigDecimal(amountIls.toString()).setScale(2, RoundingMode.HALF_UP)
+
+        // Idempotent Replay Guard for Supplier Payments
+        if (paymentId.isNotBlank()) {
+            val existing = recordedSupplierPayments[paymentId] ?: supplierPayments.firstOrNull { it.id == paymentId }
+            if (existing != null) {
+                val matchesPayload = existing.supplierId == supplierId &&
+                        BigDecimal(existing.amountIls.toString()).setScale(2, RoundingMode.HALF_UP) == amountExact
+                if (matchesPayload) {
+                    return Result.success(existing)
+                } else {
+                    return Result.failure(
+                        IllegalStateException("Conflicting supplier payment payload with ID $paymentId: already recorded for supplier ${existing.supplierId} amount ${existing.amountIls}")
+                    )
+                }
+            }
+        }
+
         val currentSup = suppliers[idx]
         val newOwed = BigDecimal(currentSup.balanceOwedIls.toString())
             .subtract(amountExact)
@@ -773,14 +1013,18 @@ class OfflineDemoTraderRepository : TraderRepository {
 
         suppliers[idx] = currentSup.copy(balanceOwedIls = newOwed)
 
+        val paymentGeneratedId = if (paymentId.isNotBlank()) paymentId else "spay_${System.currentTimeMillis()}"
         val payment = SupplierPayment(
-            id = "spay_${System.currentTimeMillis()}",
+            id = paymentGeneratedId,
             supplierId = supplierId,
             date = WesternFormatters.currentTimestamp(),
             amountIls = amountExact.toDouble(),
             note = note.ifEmpty { "سداد نقدي من الصندوق" }
         )
         supplierPayments.add(0, payment)
+        if (paymentId.isNotBlank()) {
+            recordedSupplierPayments[paymentId] = payment
+        }
         return Result.success(payment)
     }
 

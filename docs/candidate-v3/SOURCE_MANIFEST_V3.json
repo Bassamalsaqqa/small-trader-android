@@ -1,0 +1,363 @@
+{
+  "version": "v3",
+  "timestamp": "2026-11-08T23:22:00+02:00",
+  "git_branch": "ux/stitch-native-prototype",
+  "worktree": "/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b",
+  "files": [
+    {
+      "path": "app/build.gradle.kts",
+      "bytes": 5470,
+      "sha256": "4bb57d9edb231489c51317daddb93ffefd39b8c30e89deb01fa8565e0453b92b"
+    },
+    {
+      "path": "app/src/main/AndroidManifest.xml",
+      "bytes": 1745,
+      "sha256": "120d08bce8ba70b6ded2633e05f7c38dab780c9a37705f24fb81abae588bcb90"
+    },
+    {
+      "path": "app/src/main/java/com/example/MainActivity.kt",
+      "bytes": 37431,
+      "sha256": "0223e9171f9e81e6981095366ae8ff0eb4121575479b57d904bac7f24176e3d1"
+    },
+    {
+      "path": "app/src/main/java/com/example/data/SampleCatalog.kt",
+      "bytes": 31122,
+      "sha256": "361db7f4bdb8289deb0ece110ac6ff5df378d45e2bc75237b8d280e3926b7431"
+    },
+    {
+      "path": "app/src/main/java/com/example/data/TraderRepository.kt",
+      "bytes": 40320,
+      "sha256": "69862c5559af260cc087296eed9107708a79f7b16363364b1193850c574e8271"
+    },
+    {
+      "path": "app/src/main/java/com/example/model/TraderModels.kt",
+      "bytes": 13141,
+      "sha256": "7ed977ff8a4a1dea8a0387aead50d8c82bb27fa403b26593981c847838c204c4"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/components/CommonComponents.kt",
+      "bytes": 81515,
+      "sha256": "b185c90753f45d31cc8748777086a9a0e96b1360a02a3ee6bcb6a74de6dcbbb9"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/components/PhaseOneComponents.kt",
+      "bytes": 15300,
+      "sha256": "4d5f4a2923e5916f3d2743546d6137067ae11bf4038ac2cc41217c69bb933729"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/components/StitchComponents.kt",
+      "bytes": 7986,
+      "sha256": "fbc58796bd92d9c23df2afd9e96d9f5b7c04152a149067a420af199de88b661a"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/navigation/TraderNavigationPolicy.kt",
+      "bytes": 1016,
+      "sha256": "b325775b1bd51f3ea9785eb9648f149214eb169a10658c1ecff41e7e5e6cb619"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/screens/BusinessExtraScreens.kt",
+      "bytes": 141763,
+      "sha256": "c78b7175def84c583cfe5bbf70fee29dac2d997e6aeedf5316e3af2f152407a9"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/screens/CashPaymentScreen.kt",
+      "bytes": 82440,
+      "sha256": "734365bcc44114acc69662d9c1c9af3b550022f28aef8bdc81f759d34201ec54"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/screens/CustomersScreen.kt",
+      "bytes": 96520,
+      "sha256": "355fb9d986b00459d77c83f005156dc34013853d1ce8f706dc8ceb052ebefb4a"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/screens/HomeScreen.kt",
+      "bytes": 49677,
+      "sha256": "336bd3a1e4b70313819acaeab2906f9297d2959edacd0f9d7ccac13f862cc81d"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/screens/InvoiceReviewScreen.kt",
+      "bytes": 86607,
+      "sha256": "729dcce3fd59d3b9e009a8b04e80aab2b5bdb0759de34abced4f3149a70b35aa"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/screens/NewSaleScreen.kt",
+      "bytes": 96133,
+      "sha256": "34df1e2d9b870672f1e8c7b2b48e0d16a751384ef52bce0b63098ca916ace5e2"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/screens/PeopleHubScreen.kt",
+      "bytes": 8381,
+      "sha256": "4d446a062f3bdcb1a46ef659b1157fbc582f91c324bc9e5d7534c8c6c302262d"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/screens/ProductsCatalogScreen.kt",
+      "bytes": 109152,
+      "sha256": "4c1ecb3b7a276eccce183617e4542e5acb0025d83b5d545b129a05a74bb5f7fa"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/screens/PurchasesScreen.kt",
+      "bytes": 65473,
+      "sha256": "b8c91158de163bd3d84b5ba3c0b745462896c1cf15fcd8209fd97913cb2e0b69"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/screens/ReceiptScreen.kt",
+      "bytes": 110238,
+      "sha256": "3fcccef7906580f26ab06cb03bcef8718c30b948854d8d218ab7711cfe9a063a"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/screens/SuppliersScreen.kt",
+      "bytes": 101456,
+      "sha256": "abed6343327de07ad1ba348582496d14f8d0104ae98f714ecfe85bbb17931aa8"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/shell/QuickActionSheet.kt",
+      "bytes": 18554,
+      "sha256": "7d6a1e640888d690306d1e8f09a377fd0cdb9fec7eab383f78a63cce843045bb"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/theme/Color.kt",
+      "bytes": 9135,
+      "sha256": "623de045a7c9bb400032fe91f452bd9c70913c10f260378add678b6153de0fa8"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/theme/Theme.kt",
+      "bytes": 5867,
+      "sha256": "ffa6da47fadf197287f40b7928a053fce1e2bfa726a753fc1d223449759d3788"
+    },
+    {
+      "path": "app/src/main/java/com/example/ui/theme/Type.kt",
+      "bytes": 5403,
+      "sha256": "835d7287c3f2a4174a6fa7160f0c21f5715d1b30058dfdeac6317c2fe2f7981c"
+    },
+    {
+      "path": "app/src/main/java/com/example/viewmodel/TraderViewModel.kt",
+      "bytes": 97136,
+      "sha256": "0bba4bef3efda35b6e4785f8093ff18d3a58b7f326b27d73782554af66f583ee"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_dukkan_illustration.xml",
+      "bytes": 2197,
+      "sha256": "1f23db77ac202f294e3f271b2c4a3c594a88846ae8094f629d88bbef5a865cd1"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_launcher_background.xml",
+      "bytes": 331,
+      "sha256": "474f52ed276f2e7950b3593d55b1f98c7a82ca1d9008171f337794a9f894964c"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_launcher_foreground.xml",
+      "bytes": 1536,
+      "sha256": "7b785b3c6465748f8b1e1ad6e4ed842e4324409965bfff70a148f487c8374a8d"
+    },
+    {
+      "path": "app/src/main/res/font/cairo.ttf",
+      "bytes": 33672,
+      "sha256": "35c8dbf3a9392d941aab50eb998ef2edade086a2030357e5eb2d542ee36d6534"
+    },
+    {
+      "path": "app/src/main/res/font/ibm_plex_sans_arabic_bold.ttf",
+      "bytes": 246992,
+      "sha256": "691e0c891a38637ae6bbdb69700f8042cb0724a137bee615068ffdb92244f61f"
+    },
+    {
+      "path": "app/src/main/res/font/ibm_plex_sans_arabic_medium.ttf",
+      "bytes": 242100,
+      "sha256": "b8363ab9f733dfa4f8e96b8b2102c24b5cf4110fb96d1d3d9a9412f6fb49cf74"
+    },
+    {
+      "path": "app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf",
+      "bytes": 235924,
+      "sha256": "6f611412270a132bbac838da9259d4c68569b4175f3b3b8fa3fa36a30b56dab9"
+    },
+    {
+      "path": "app/src/main/res/font/ibm_plex_sans_arabic_semibold.ttf",
+      "bytes": 244616,
+      "sha256": "597bd5502e5997be4414e4c9c88834b30ff3784250c84f20bce2b20e53ebd467"
+    },
+    {
+      "path": "app/src/main/res/font/jetbrains_mono.ttf",
+      "bytes": 57404,
+      "sha256": "a187c78346862e42584d87a3b9d681b4f76860e8ccf0227ac970b1ccdc9df25c"
+    },
+    {
+      "path": "app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml",
+      "bytes": 344,
+      "sha256": "6d0988175971f41bdc83eadb144af3d84c40052fa125e90edbe7d89227be4b25"
+    },
+    {
+      "path": "app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml",
+      "bytes": 344,
+      "sha256": "6d0988175971f41bdc83eadb144af3d84c40052fa125e90edbe7d89227be4b25"
+    },
+    {
+      "path": "app/src/main/res/mipmap-anydpi/ic_launcher.xml",
+      "bytes": 1655,
+      "sha256": "597f6ceea614ee26201dca468cbaa93fc563bb77e84427517362520b50164c2f"
+    },
+    {
+      "path": "app/src/main/res/mipmap-anydpi/ic_launcher_round.xml",
+      "bytes": 1680,
+      "sha256": "bbc3f9e3eac8ceb9b5726a063192934489902e932ccaf12edf7da8cc27f17376"
+    },
+    {
+      "path": "app/src/main/res/mipmap-hdpi/ic_launcher.png",
+      "bytes": 1694,
+      "sha256": "a539759c34a9937ad51a2ec98fae72931880657a3561d7a76e53424e5e523b3f"
+    },
+    {
+      "path": "app/src/main/res/mipmap-hdpi/ic_launcher_round.png",
+      "bytes": 2604,
+      "sha256": "0a863cb78620ecece901f75f254b4f40110edc32f072058a3d678caed8866ac8"
+    },
+    {
+      "path": "app/src/main/res/mipmap-mdpi/ic_launcher.png",
+      "bytes": 1461,
+      "sha256": "cfacec7ea306814fb7065f6c0555b61f3287878af8ebd9f6cc816bbfdc717945"
+    },
+    {
+      "path": "app/src/main/res/mipmap-mdpi/ic_launcher_round.png",
+      "bytes": 2035,
+      "sha256": "2de14851455e1fec0a5b257a02fac6912a8f435b02f44918fd7ab3220eafaeaf"
+    },
+    {
+      "path": "app/src/main/res/mipmap-xhdpi/ic_launcher.png",
+      "bytes": 2280,
+      "sha256": "0da573caff080ccd73fe0a86115a9432df0ffb4bff1a5886cca9bcaeca170d69"
+    },
+    {
+      "path": "app/src/main/res/mipmap-xhdpi/ic_launcher_round.png",
+      "bytes": 3596,
+      "sha256": "ba1bc54607f4f050239f971fecc3552ca8b48ef2da5af1cb41908fb9a79417ae"
+    },
+    {
+      "path": "app/src/main/res/mipmap-xxhdpi/ic_launcher.png",
+      "bytes": 2724,
+      "sha256": "dc0c80fe59c7ea24d946f168d2dd7fc98a56cf5aa3bcac82602fbd132fb983f6"
+    },
+    {
+      "path": "app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png",
+      "bytes": 4803,
+      "sha256": "f69aae9e7f99aae817eb1a9618040eec9f1200ce066467a2d02a03e4eeb87954"
+    },
+    {
+      "path": "app/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+      "bytes": 4020,
+      "sha256": "5a2a1c2fc2b06363f0b96aeafbea887c20430ce31942ea2756ec7cd0ef3e166d"
+    },
+    {
+      "path": "app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png",
+      "bytes": 6849,
+      "sha256": "0bbf222cdf03553a42baf373cd3d4b1670b9075206a5ab0da1249b6e3abf2250"
+    },
+    {
+      "path": "app/src/main/res/values/colors.xml",
+      "bytes": 315,
+      "sha256": "4d4a7e71e3f0de8941e8eb2fa0473db531b398822e9aa3b67cba8c643959b831"
+    },
+    {
+      "path": "app/src/main/res/values/strings.xml",
+      "bytes": 1062,
+      "sha256": "71ec4c81347b4629d8ea6431db837b334bf95e1c649e22f44fa5948d57e154b8"
+    },
+    {
+      "path": "app/src/main/res/values/themes.xml",
+      "bytes": 155,
+      "sha256": "e8288b65767f4f28854d168c7b19c308579d3703bdf3fc26c2b266e19148f465"
+    },
+    {
+      "path": "app/src/main/res/xml/backup_rules.xml",
+      "bytes": 479,
+      "sha256": "173c90cbeb773e6a65b430581a85720dc5c7ddba17d543cfefe3d2aed9b9a7a4"
+    },
+    {
+      "path": "app/src/main/res/xml/data_extraction_rules.xml",
+      "bytes": 552,
+      "sha256": "30ae995624fd57d839bf0d638900f8d2c17c703d6e7d6c8640708a8a7cac2402"
+    },
+    {
+      "path": "app/src/test/java/com/example/ExampleRobolectricTest.kt",
+      "bytes": 782,
+      "sha256": "60e69ca3198b9067eaf75ccf3bc3f53b656943f6dc48158c32a3008409532f4d"
+    },
+    {
+      "path": "app/src/test/java/com/example/ExampleUnitTest.kt",
+      "bytes": 110197,
+      "sha256": "e6b59a4426e5e022e96087fe7f2721778a40b8a671ced3aeaf4d576f52652110"
+    },
+    {
+      "path": "app/src/test/java/com/example/MerchantCheckoutTest.kt",
+      "bytes": 18446,
+      "sha256": "2482c6616f82c65f5526565759cd65d31a4a159cd1a20f8afa29593ddf30ffea"
+    },
+    {
+      "path": "app/src/test/java/com/example/MerchantHomeTest.kt",
+      "bytes": 17673,
+      "sha256": "b9d167b99cef460925855976a02905dc9e91900cdc5d48bac4305cf8e7d0bedf"
+    },
+    {
+      "path": "app/src/test/java/com/example/MerchantNavigationTest.kt",
+      "bytes": 7954,
+      "sha256": "0cbcbcc850ff08f5cdbcf1f606ff85e206c2a7eb028e50486932f2a87963356b"
+    },
+    {
+      "path": "app/src/test/java/com/example/MerchantPrivacyTest.kt",
+      "bytes": 22763,
+      "sha256": "166ec1e37d92b2dcd778be70db08b52e9e9ab050f1a988e906d0fb6730e76550"
+    },
+    {
+      "path": "app/src/test/java/com/example/MerchantRoleTest.kt",
+      "bytes": 1983,
+      "sha256": "cc3d1c46c7561a4ed816b0d2d882f71d096b9276a3a357dfe69b62cbc20b8730"
+    },
+    {
+      "path": "app/src/test/java/com/example/MerchantSaleLifecycleTest.kt",
+      "bytes": 3066,
+      "sha256": "84645e21b6cf5dc08c29a5a270316be976ee3c9aa39db653871a66b69b425789"
+    },
+    {
+      "path": "app/src/test/java/com/example/NativeVisualEvidenceTest.kt",
+      "bytes": 26990,
+      "sha256": "2030277e2b6ac9e7bb044f3ea77070bf438f184ebb1004d51c49431b095a08ba"
+    },
+    {
+      "path": "app/src/test/java/com/example/NewSaleScreenDesignTest.kt",
+      "bytes": 8423,
+      "sha256": "48ad1d6f2bf0a0607cbe677f5d8ef5e55aba83c852dbf6caf8d3f386a5e63d27"
+    },
+    {
+      "path": "app/src/test/java/com/example/PeopleHubPagerTest.kt",
+      "bytes": 15753,
+      "sha256": "79be08f53cc628a0c87e87e10790216cd93390d57d880d4631bd73d10738afbf"
+    },
+    {
+      "path": "app/src/test/java/com/example/PhaseOneWorkflowTest.kt",
+      "bytes": 1412,
+      "sha256": "22319c8b68e19118367b070985e3052da2d7a23e6e9bb085c46ecec74dbab33c"
+    },
+    {
+      "path": "app/src/test/java/com/example/Round2NavigationTest.kt",
+      "bytes": 11021,
+      "sha256": "be2f9269f52e029724ed973cf87155b838d86098816009aa53d44815391e31e1"
+    },
+    {
+      "path": "build.gradle.kts",
+      "bytes": 361,
+      "sha256": "aae50bb56871bbe6495e5fad0c011ae00ba6da06678ed4b5f7299bbf296a7f54"
+    },
+    {
+      "path": "gradle.properties",
+      "bytes": 1546,
+      "sha256": "f46953b0506c51c9af9d2bba4e41d36a11f6b2e4e76cc064b73a794a61b248a5"
+    },
+    {
+      "path": "gradle/libs.versions.toml",
+      "bytes": 6979,
+      "sha256": "7dc531ea3db5ab3a6f0785d30ec318c0945c6adb55232592b11fae6bfc4e4f71"
+    },
+    {
+      "path": "settings.gradle.kts",
+      "bytes": 552,
+      "sha256": "67185d16bb20834124bca4fc2d5467f7ccacb20184c144103000eafacb503791"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.MerchantHomeTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-08T21:20:08.492Z" hostname="pasta-hp-worker" time="0.723">
+  <properties/>
+  <testcase name="homeScreen_roleGating_ownerVsCashier_purchaseAffordanceAndFinancialPrivacy" classname="com.example.MerchantHomeTest" time="0.204"/>
+  <testcase name="homeScreen_emptyBasket_showsNewSalePrimaryAction_andNoResumeButton" classname="com.example.MerchantHomeTest" time="0.14"/>
+  <testcase name="homeScreen_stockSummaryRow_navigatesToCatalog_andNeverMutatesRepositoryStock" classname="com.example.MerchantHomeTest" time="0.135"/>
+  <testcase name="homeScreen_activeBasket_showsResumeButtonAsDominantAction_andNavigatesToReview" classname="com.example.MerchantHomeTest" time="0.144"/>
+  <testcase name="homeScreen_assertsNoMisleadingReceiveStockOrDemoBanners" classname="com.example.MerchantHomeTest" time="0.093"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.MerchantNavigationTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-11-07T21:27:32.908Z" hostname="pasta-hp-worker" time="0.007">
+  <properties/>
+  <testcase name="quickAddCancelKeepsSaleAndOrigin" classname="com.example.MerchantNavigationTest" time="0.001"/>
+  <testcase name="newCustomerQuickActionUsesCustomerDirectory" classname="com.example.MerchantNavigationTest" time="0.001"/>
+  <testcase name="purchaseEntryOpensFormAndBackDismissesItFirst" classname="com.example.MerchantNavigationTest" time="0.001"/>
+  <testcase name="historicalReceiptReturnsToSalesWithoutClearingActiveBasket" classname="com.example.MerchantNavigationTest" time="0.0"/>
+  <testcase name="lowStockEntryClearsInventoryFiltersWithoutMutatingSaleOrStock" classname="com.example.MerchantNavigationTest" time="0.001"/>
+  <testcase name="rootsReselectAndSaleOptionsPreserveDraft" classname="com.example.MerchantNavigationTest" time="0.0"/>
+  <testcase name="moneyChooserCancelRestoresExactOriginWithoutNavigation" classname="com.example.MerchantNavigationTest" time="0.001"/>
+  <testcase name="openMerchantActionConsumesPreviousPendingAndRoutesProductAndSupplierFromHome" classname="com.example.MerchantNavigationTest" time="0.0"/>
+  <testcase name="collectStartsChooserWithoutPosting" classname="com.example.MerchantNavigationTest" time="0.001"/>
+  <testcase name="quickCollectionShowsUpdatedAccountAndKeepsSuccessFeedback" classname="com.example.MerchantNavigationTest" time="0.0"/>
+  <testcase name="backRestoresSearchAndCategoryForEachWorkspace" classname="com.example.MerchantNavigationTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

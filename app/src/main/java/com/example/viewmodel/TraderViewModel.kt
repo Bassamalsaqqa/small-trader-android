@@ -1,5 +1,8 @@
 package com.example.viewmodel
 
+import com.example.ui.navigation.TraderNavigationPolicy
+import com.example.ui.navigation.MerchantAction
+import com.example.ui.navigation.allowed
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.OfflineDemoTraderRepository
@@ -19,6 +22,7 @@ import com.example.model.PrinterStatus
 import com.example.model.Product
 import com.example.model.ProductCategory
 import com.example.model.PurchaseBill
+import com.example.model.PurchaseLineItem
 import com.example.model.SaleDraft
 import com.example.model.StockMovement
 import com.example.model.Supplier
@@ -38,405 +42,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-
-data class TraderUiState(
-    val language: AppLanguage = AppLanguage.AR,
-    val isDarkTheme: Boolean = false,
-    val currentScreen: TraderScreen = TraderScreen.HOME,
-    val screenHistory: List<TraderScreen> = emptyList(),
-
-    // Business & Authentication
-    val currentSession: UserSession = SampleCatalog.demoStaff.first(),
-    val availableUsers: List<UserSession> = SampleCatalog.demoStaff,
-    val businessInfo: BusinessInfo = SampleCatalog.defaultBusiness,
-
-    // Products & Inventory
-    val products: List<Product> = emptyList(),
-    val stockMovements: List<StockMovement> = emptyList(),
-    val selectedProductForDetail: Product? = null,
-    val searchQuery: String = "",
-    val selectedCategory: ProductCategory = ProductCategory.ALL,
-    val lastInventoryActionMessageAr: String? = null,
-    val lastInventoryActionMessageEn: String? = null,
-    val isInventoryActionError: Boolean = false,
-
-    // Active Basket, Saved Drafts & POS
-    val basket: List<BasketItem> = emptyList(),
-    val savedDrafts: List<SaleDraft> = SampleCatalog.initialSaleDrafts(SampleCatalog.initialProducts),
-    val discountPreset: DiscountPreset = DiscountPreset.NONE,
-    val customDiscountText: String = "",
-    val customerNote: String = "",
-    val selectedCustomerId: String? = null,
-    val cashInputText: String = "",
-    val isSubmittingSale: Boolean = false,
-    val checkoutErrorAr: String? = null,
-    val checkoutErrorEn: String? = null,
-
-    // Invoices, Cash Shift & Accounting
-    val invoices: List<InvoiceRecord> = emptyList(),
-    val activeReceipt: InvoiceRecord? = null,
-    val isNewlyCompletedSale: Boolean = false,
-    val receiptShareCount: Int = 0,
-    val receiptCopyCount: Int = 0,
-    val lastSharedReceiptText: String? = null,
-    val startingDrawerCashIls: Double = 350.00,
-    val countedPhysicalCashText: String = "",
-    val isShiftClosedPreview: Boolean = false,
-    val shiftClosedTimestamp: String? = null,
-
-    // Customers & Balances
-    val customers: List<Customer> = emptyList(),
-    val customerTransactions: List<CustomerTransaction> = emptyList(),
-    val selectedCustomerForDetail: Customer? = null,
-    val lastCustomerPaymentMessageAr: String? = null,
-    val lastCustomerPaymentMessageEn: String? = null,
-
-    // Suppliers & Purchasing
-    val suppliers: List<Supplier> = emptyList(),
-    val purchaseBills: List<PurchaseBill> = emptyList(),
-    val supplierPayments: List<SupplierPayment> = emptyList(),
-    val selectedSupplierForDetail: Supplier? = null,
-    val lastSupplierActionMessageAr: String? = null,
-    val lastSupplierActionMessageEn: String? = null,
-    val isSupplierActionError: Boolean = false,
-
-    // Expenses
-    val expenses: List<ExpenseEntry> = emptyList(),
-    val lastExpenseActionMessageAr: String? = null,
-    val lastExpenseActionMessageEn: String? = null,
-    val isExpenseActionError: Boolean = false,
-
-    // Hardware: Barcode scanner simulation + Camera status
-    val isScannerSheetOpen: Boolean = false,
-    val isFlashlightOn: Boolean = false,
-    val manualBarcodeInput: String = "",
-    val lastScannedBannerAr: String? = null,
-    val lastScannedBannerEn: String? = null,
-    val isBannerError: Boolean = false,
-    val scanCountSession: Int = 0,
-
-    // Dialog states
-    val isCustomItemDialogOpen: Boolean = false,
-    val isPaymentCollectionDialogOpen: Boolean = false,
-    val isAddCustomerDialogOpen: Boolean = false,
-    val isAddExpenseDialogOpen: Boolean = false,
-    val isReceivePurchaseDialogOpen: Boolean = false,
-
-    // Hardware: Simulated Bluetooth printer state
-    val isPrinterSheetOpen: Boolean = false,
-    val availablePrinters: List<BluetoothPrinterDevice> = SampleCatalog.simulatedPrinters,
-    val connectedPrinter: BluetoothPrinterDevice? = SampleCatalog.simulatedPrinters.first(),
-    val printerStatus: PrinterStatus = PrinterStatus.READY,
-    val printProgressStepAr: String = "وضع المحاكاة: جاهز للمعاينة (58mm)",
-    val printProgressStepEn: String = "Simulation mode: Ready for preview (58mm)",
-    val printProgressFraction: Float = 0f,
-    val receiptPaperWidthMm: Int = 58
-) {
-    private fun matchesSearchQuery(product: Product, normalizedQuery: String): Boolean {
-        if (normalizedQuery.isEmpty()) return true
-        return normalizeForSearch(product.nameAr).contains(normalizedQuery) ||
-            normalizeForSearch(product.nameEn).contains(normalizedQuery) ||
-            normalizeForSearch(product.unitAr).contains(normalizedQuery) ||
-            normalizeForSearch(product.unitEn).contains(normalizedQuery) ||
-            product.barcode.contains(normalizedQuery)
-    }
-
-    val filteredProducts: List<Product>
-        get() {
-            val q = normalizeForSearch(WesternFormatters.sanitizeWesternDigits(searchQuery.trim()))
-            return products.filter { product ->
-                val matchesCategory = selectedCategory == ProductCategory.ALL || product.category == selectedCategory
-                matchesCategory && matchesSearchQuery(product, q)
-            }
-        }
-
-    val allCategoriesMatchCount: Int
-        get() {
-            val q = normalizeForSearch(WesternFormatters.sanitizeWesternDigits(searchQuery.trim()))
-            if (q.isEmpty()) return products.size
-            return products.count { product -> matchesSearchQuery(product, q) }
-        }
-
-    val basketItemCount: Int
-        get() = basket.sumOf { it.quantity }
-
-    val basketSubtotalIls: Double
-        get() = basket.fold(BigDecimal.ZERO) { acc, item ->
-            acc.add(BigDecimal(item.lineTotal.toString()))
-        }.setScale(2, RoundingMode.HALF_UP).toDouble()
-
-    // Exact, explicitly rounded money values for discounts
-    val calculatedDiscountIls: Double
-        get() {
-            val sub = basketSubtotalIls
-            if (sub <= 0.0) return 0.0
-            val subBd = BigDecimal(sub.toString()).setScale(2, RoundingMode.HALF_UP)
-            val rawDiscount = when (discountPreset) {
-                DiscountPreset.NONE -> BigDecimal.ZERO
-                DiscountPreset.PERCENT_5 -> subBd.multiply(BigDecimal("0.05")).setScale(2, RoundingMode.HALF_UP)
-                DiscountPreset.PERCENT_10 -> subBd.multiply(BigDecimal("0.10")).setScale(2, RoundingMode.HALF_UP)
-                DiscountPreset.ROUND_DOWN -> {
-                    val rounded5 = floor(sub / 5.0) * 5.0
-                    val diff = if (sub > 5.0 && sub - rounded5 > 0.0) sub - rounded5 else sub - floor(sub)
-                    BigDecimal(diff.toString()).setScale(2, RoundingMode.HALF_UP)
-                }
-                DiscountPreset.CUSTOM_ILS -> {
-                    val parsed = WesternFormatters.sanitizeWesternDigits(customDiscountText).toDoubleOrNull() ?: 0.0
-                    BigDecimal(parsed.toString()).setScale(2, RoundingMode.HALF_UP)
-                }
-            }
-            return rawDiscount.toDouble().coerceIn(0.0, sub)
-        }
-
-    val basketNetTotalIls: Double
-        get() {
-            val sub = BigDecimal(basketSubtotalIls.toString()).setScale(2, RoundingMode.HALF_UP)
-            val disc = BigDecimal(calculatedDiscountIls.toString()).setScale(2, RoundingMode.HALF_UP)
-            return sub.subtract(disc).setScale(2, RoundingMode.HALF_UP).toDouble().coerceAtLeast(0.0)
-        }
-
-    val cashTenderedIls: Double
-        get() = WesternFormatters.sanitizeWesternDigits(cashInputText).toDoubleOrNull() ?: 0.0
-
-    val changeDueIls: Double
-        get() {
-            val tendered = BigDecimal(cashTenderedIls.toString()).setScale(2, RoundingMode.HALF_UP)
-            val net = BigDecimal(basketNetTotalIls.toString()).setScale(2, RoundingMode.HALF_UP)
-            return tendered.subtract(net).setScale(2, RoundingMode.HALF_UP).toDouble().coerceAtLeast(0.0)
-        }
-
-    val remainingUnpaidIls: Double
-        get() {
-            val tendered = BigDecimal(cashTenderedIls.toString()).setScale(2, RoundingMode.HALF_UP)
-            val net = BigDecimal(basketNetTotalIls.toString()).setScale(2, RoundingMode.HALF_UP)
-            return net.subtract(tendered).setScale(2, RoundingMode.HALF_UP).toDouble().coerceAtLeast(0.0)
-        }
-
-    val isCashSufficient: Boolean
-        get() = basket.isNotEmpty() && cashTenderedIls + 0.005 >= basketNetTotalIls
-
-    val isExactCashTendered: Boolean
-        get() = isCashSufficient && changeDueIls <= 0.004
-
-    val selectedCustomer: Customer?
-        get() = customers.firstOrNull { it.id == selectedCustomerId }
-
-    val stockUnitsToDeduct: Int
-        get() = basket.filter { it.product.isStockTracked }.sumOf { it.quantity }
-
-    val customLinesCount: Int
-        get() = basket.count { !it.product.isStockTracked }
-
-    val projectedCustomerBalanceIfCreditIls: Double?
-        get() = selectedCustomer?.let { customer ->
-            BigDecimal(customer.balanceIls.toString())
-                .add(BigDecimal(basketNetTotalIls.toString()))
-                .setScale(2, RoundingMode.HALF_UP)
-                .toDouble()
-        }
-
-    val wouldCreditExceedCustomerLimit: Boolean
-        get() {
-            val customer = selectedCustomer ?: return false
-            val projected = projectedCustomerBalanceIfCreditIls ?: return false
-            return projected > customer.creditLimitIls + 0.001
-        }
-
-    val creditCeilingExcessIls: Double
-        get() {
-            val customer = selectedCustomer ?: return 0.0
-            val projected = projectedCustomerBalanceIfCreditIls ?: return 0.0
-            val projBd = BigDecimal(projected.toString()).setScale(2, RoundingMode.HALF_UP)
-            val limitBd = BigDecimal(customer.creditLimitIls.toString()).setScale(2, RoundingMode.HALF_UP)
-            return projBd.subtract(limitBd).setScale(2, RoundingMode.HALF_UP).toDouble().coerceAtLeast(0.0)
-        }
-
-    val checkoutErrorMessage: String?
-        get() = language.tr(checkoutErrorAr ?: "", checkoutErrorEn ?: "").takeIf { it.isNotBlank() }
-
-    // Defined Dates & Shift Boundaries
-    val todayDate: String
-        get() = WesternFormatters.currentDate()
-
-    val todayInvoices: List<InvoiceRecord>
-        get() = invoices.filter { it.timestamp.startsWith(todayDate) }
-
-    val todaySalesTotalIls: Double
-        get() = todayInvoices.fold(BigDecimal.ZERO) { acc, inv ->
-            acc.add(BigDecimal(inv.netTotalIls.toString()))
-        }.setScale(2, RoundingMode.HALF_UP).toDouble()
-
-    val todayInvoiceCount: Int
-        get() = todayInvoices.size
-
-    val averageBasketIls: Double
-        get() = if (todayInvoiceCount == 0) 0.0 else todaySalesTotalIls / todayInvoiceCount
-
-    val totalExpensesIls: Double
-        get() = expenses.fold(BigDecimal.ZERO) { acc, exp ->
-            acc.add(BigDecimal(exp.amountIls.toString()))
-        }.setScale(2, RoundingMode.HALF_UP).toDouble()
-
-    // Physical cash drawer reflects only net cash physically collected or disbursed in this shift
-    val shiftCashSalesIls: Double
-        get() = todayInvoices.fold(BigDecimal.ZERO) { acc, inv ->
-            val netCash = max(0.0, inv.cashReceivedIls - inv.changeReturnedIls)
-            acc.add(BigDecimal(netCash.toString()))
-        }.setScale(2, RoundingMode.HALF_UP).toDouble()
-
-    val shiftCustomerCollectionsIls: Double
-        get() = customerTransactions
-            .filter { it.date.startsWith(todayDate) && it.invoiceNumber == null && it.creditIls > 0.0 }
-            .fold(BigDecimal.ZERO) { acc, tx -> acc.add(BigDecimal(tx.creditIls.toString())) }
-            .setScale(2, RoundingMode.HALF_UP).toDouble()
-
-    val shiftSupplierDisbursementsIls: Double
-        get() {
-            val fromBills = purchaseBills
-                .filter { it.date.startsWith(todayDate) && it.paidIls > 0.0 }
-                .fold(BigDecimal.ZERO) { acc, bill -> acc.add(BigDecimal(bill.paidIls.toString())) }
-            val fromPayments = supplierPayments
-                .filter { it.date.startsWith(todayDate) && it.amountIls > 0.0 }
-                .fold(BigDecimal.ZERO) { acc, pay -> acc.add(BigDecimal(pay.amountIls.toString())) }
-            return fromBills.add(fromPayments).setScale(2, RoundingMode.HALF_UP).toDouble()
-        }
-
-    val shiftExpensesIls: Double
-        get() = expenses
-            .filter { it.date.startsWith(todayDate) && it.amountIls > 0.0 }
-            .fold(BigDecimal.ZERO) { acc, exp -> acc.add(BigDecimal(exp.amountIls.toString())) }
-            .setScale(2, RoundingMode.HALF_UP).toDouble()
-
-    val historicalExpensesIls: Double
-        get() = BigDecimal(totalExpensesIls.toString())
-            .subtract(BigDecimal(shiftExpensesIls.toString()))
-            .setScale(2, RoundingMode.HALF_UP)
-            .toDouble()
-            .coerceAtLeast(0.0)
-
-    val shiftCreditSalesIls: Double
-        get() = todayInvoices
-            .fold(BigDecimal.ZERO) { acc, inv -> acc.add(BigDecimal(inv.remainingDebitIls.toString())) }
-            .setScale(2, RoundingMode.HALF_UP)
-            .toDouble()
-
-    val drawerTotalCashIls: Double
-        get() {
-            val starting = BigDecimal(startingDrawerCashIls.toString())
-            val salesCash = BigDecimal(shiftCashSalesIls.toString())
-            val collections = BigDecimal(shiftCustomerCollectionsIls.toString())
-            val disbursements = BigDecimal(shiftSupplierDisbursementsIls.toString())
-            val exp = BigDecimal(shiftExpensesIls.toString())
-            return starting.add(salesCash).add(collections).subtract(disbursements).subtract(exp)
-                .setScale(2, RoundingMode.HALF_UP).toDouble()
-        }
-
-    val expectedBookCashIls: Double
-        get() = drawerTotalCashIls
-
-    val countedPhysicalCashIls: Double?
-        get() {
-            val sanitized = WesternFormatters.sanitizeWesternDigits(countedPhysicalCashText.trim())
-            if (sanitized.isEmpty()) return null
-            val parsed = sanitized.toDoubleOrNull() ?: return null
-            return BigDecimal(parsed.toString()).setScale(2, RoundingMode.HALF_UP).toDouble()
-        }
-
-    val shiftCashVarianceIls: Double?
-        get() {
-            val counted = countedPhysicalCashIls ?: return null
-            return BigDecimal(counted.toString())
-                .subtract(BigDecimal(expectedBookCashIls.toString()))
-                .setScale(2, RoundingMode.HALF_UP)
-                .toDouble()
-        }
-
-    val drawerCashSalesIls: Double get() = shiftCashSalesIls
-    val totalCustomerCollectionsIls: Double get() = shiftCustomerCollectionsIls
-    val totalSupplierDisbursementsIls: Double get() = shiftSupplierDisbursementsIls
-
-    // Separate customer debts (accounts receivable) from customer deposits/advances (store liabilities)
-    val totalCustomerDebtsIls: Double
-        get() = customers.filter { it.balanceIls > 0.0 }
-            .fold(BigDecimal.ZERO) { acc, c -> acc.add(BigDecimal(c.balanceIls.toString())) }
-            .setScale(2, RoundingMode.HALF_UP).toDouble()
-
-    val totalCustomerAdvancesIls: Double
-        get() = customers.filter { it.balanceIls < 0.0 }
-            .fold(BigDecimal.ZERO) { acc, c -> acc.add(BigDecimal((-c.balanceIls).toString())) }
-            .setScale(2, RoundingMode.HALF_UP).toDouble()
-
-    // Separate supplier payables (accounts payable) from supplier advances/prepayments (store assets)
-    val totalSupplierPayablesIls: Double
-        get() = suppliers.filter { it.balanceOwedIls > 0.0 }
-            .fold(BigDecimal.ZERO) { acc, s -> acc.add(BigDecimal(s.balanceOwedIls.toString())) }
-            .setScale(2, RoundingMode.HALF_UP).toDouble()
-
-    val totalSupplierAdvancesIls: Double
-        get() = suppliers.filter { it.balanceOwedIls < 0.0 }
-            .fold(BigDecimal.ZERO) { acc, s -> acc.add(BigDecimal((-s.balanceOwedIls).toString())) }
-            .setScale(2, RoundingMode.HALF_UP).toDouble()
-
-    val lowStockProducts: List<Product>
-        get() = products.filter { it.isLowStock }.sortedBy { it.stockCount }
-
-    val isRootDestination: Boolean
-        get() = currentScreen in ROOT_DESTINATIONS
-
-    val isStoreOperationDestination: Boolean
-        get() = currentScreen in STORE_OPERATION_DESTINATIONS
-
-    val isAccountOrSettingsDestination: Boolean
-        get() = currentScreen in ACCOUNT_SETTINGS_DESTINATIONS
-
-    val isCheckoutFlowDestination: Boolean
-        get() = currentScreen in CHECKOUT_FLOW_DESTINATIONS
-
-    fun quantityInBasket(productId: String): Int =
-        basket.firstOrNull { it.product.id == productId }?.quantity ?: 0
-
-    companion object {
-        val ROOT_DESTINATIONS = setOf(
-            TraderScreen.HOME,
-            TraderScreen.NEW_SALE,
-            TraderScreen.INVOICES_HISTORY,
-            TraderScreen.CUSTOMERS
-        )
-
-        val STORE_OPERATION_DESTINATIONS = setOf(
-            TraderScreen.PRODUCTS_CATALOG,
-            TraderScreen.SUPPLIERS,
-            TraderScreen.EXPENSES,
-            TraderScreen.FINANCIAL_REPORTS
-        )
-
-        val ACCOUNT_SETTINGS_DESTINATIONS = setOf(
-            TraderScreen.USER_PROFILE,
-            TraderScreen.BUSINESS_SETTINGS
-        )
-
-        val CHECKOUT_FLOW_DESTINATIONS = setOf(
-            TraderScreen.NEW_SALE,
-            TraderScreen.INVOICE_REVIEW,
-            TraderScreen.CASH_PAYMENT
-        )
-
-        fun normalizeForSearch(raw: String): String {
-            if (raw.isEmpty()) return ""
-            val sb = StringBuilder(raw.length)
-            for (ch in raw.lowercase()) {
-                when (ch) {
-                    'أ', 'إ', 'آ', 'ٱ' -> sb.append('ا')
-                    'ة' -> sb.append('ه')
-                    'ى' -> sb.append('ي')
-                    in '\u064B'..'\u065F', '\u0670', '\u0640' -> { /* strip Arabic diacritics & tatweel */ }
-                    else -> sb.append(ch)
-                }
-            }
-            return sb.toString().trim()
-        }
-    }
-}
 
 class TraderViewModel(
     private val repository: TraderRepository = OfflineDemoTraderRepository()
@@ -463,11 +68,57 @@ class TraderViewModel(
     private var bannerJob: Job? = null
     private var customItemCounter = 1
 
-    private fun syncFromRepository() {
+    private fun syncProductsAndInventory() {
+        val updatedProducts = repository.getProducts()
         _uiState.update { current ->
-            val updatedProducts = repository.getProducts()
-            val updatedCustomers = repository.getCustomers()
-            val updatedSuppliers = repository.getSuppliers()
+            current.copy(
+                products = updatedProducts,
+                stockMovements = repository.getStockMovements(),
+                selectedProductForDetail = current.selectedProductForDetail?.let { sel ->
+                    updatedProducts.firstOrNull { it.id == sel.id } ?: sel
+                }
+            )
+        }
+    }
+
+    private fun syncCustomers() {
+        val updatedCustomers = repository.getCustomers()
+        _uiState.update { current ->
+            current.copy(
+                customers = updatedCustomers,
+                customerTransactions = repository.getCustomerTransactions(),
+                selectedCustomerForDetail = current.selectedCustomerForDetail?.let { sel ->
+                    updatedCustomers.firstOrNull { it.id == sel.id } ?: sel
+                }
+            )
+        }
+    }
+
+    private fun syncSuppliersAndPurchases() {
+        val updatedSuppliers = repository.getSuppliers()
+        _uiState.update { current ->
+            current.copy(
+                suppliers = updatedSuppliers,
+                purchaseBills = repository.getPurchaseBills(),
+                supplierPayments = repository.getSupplierPayments(),
+                selectedSupplierForDetail = current.selectedSupplierForDetail?.let { sel ->
+                    updatedSuppliers.firstOrNull { it.id == sel.id } ?: sel
+                }
+            )
+        }
+    }
+
+    private fun syncExpenses() {
+        _uiState.update { current ->
+            current.copy(expenses = repository.getExpenses())
+        }
+    }
+
+    fun syncFromRepository() {
+        val updatedProducts = repository.getProducts()
+        val updatedCustomers = repository.getCustomers()
+        val updatedSuppliers = repository.getSuppliers()
+        _uiState.update { current ->
             current.copy(
                 products = updatedProducts,
                 stockMovements = repository.getStockMovements(),
@@ -512,10 +163,41 @@ class TraderViewModel(
     }
 
     fun switchUserSession(user: UserSession) {
-        _uiState.update { it.copy(currentSession = user) }
+        _uiState.update { state ->
+            val safe = TraderNavigationPolicy.allows(user, state.currentScreen)
+            state.copy(currentSession = user, currentScreen = if (safe) state.currentScreen else TraderScreen.HOME,
+                selectedRoot = if (safe) state.selectedRoot else TraderScreen.HOME,
+                screenHistory = state.screenHistory.filter { TraderNavigationPolicy.allows(user, it) },
+                pendingAction = null, isQuickActionOpen = false, isReceivePurchaseDialogOpen = false,
+                isAddExpenseDialogOpen = false, selectedSupplierForDetail = null)
+        }
+    }
+
+    fun setQuickActionOpen(open: Boolean) { _uiState.update { it.copy(isQuickActionOpen = open) } }
+    fun consumeAction() { _uiState.update { it.copy(pendingAction = null) } }
+    fun openMerchantAction(action: MerchantAction) {
+        if (!action.allowed(_uiState.value.currentSession)) return
+        _uiState.update { it.copy(pendingAction = null, isQuickActionOpen = false) }
+        when (action) {
+            MerchantAction.SALE -> navigateTo(TraderScreen.NEW_SALE)
+            MerchantAction.PURCHASE -> { navigateTo(TraderScreen.PURCHASES); openReceivePurchaseDialog(true) }
+            MerchantAction.CUSTOMER -> { navigateTo(TraderScreen.CUSTOMERS); openAddCustomerDialog(true) }
+            MerchantAction.EXPENSE -> { navigateTo(TraderScreen.EXPENSES); openAddExpenseDialog(true) }
+            MerchantAction.COLLECT, MerchantAction.PAY -> {
+                _uiState.update { it.copy(pendingAction = action) }
+            }
+            else -> {
+                navigateTo(when (action) {
+                    MerchantAction.PRODUCT -> TraderScreen.PRODUCTS_CATALOG
+                    else -> TraderScreen.SUPPLIERS
+                })
+                _uiState.update { it.copy(pendingAction = action) }
+            }
+        }
     }
 
     fun navigateTo(target: TraderScreen) {
+        if (!TraderNavigationPolicy.allows(_uiState.value.currentSession, target)) return
         _uiState.update { state ->
             if (state.currentScreen == target) {
                 state
@@ -524,14 +206,6 @@ class TraderViewModel(
                     target == TraderScreen.HOME -> emptyList()
                     target in TraderUiState.ROOT_DESTINATIONS -> {
                         listOf(TraderScreen.HOME)
-                    }
-                    target in TraderUiState.STORE_OPERATION_DESTINATIONS &&
-                        state.currentScreen in TraderUiState.STORE_OPERATION_DESTINATIONS -> {
-                        state.screenHistory.ifEmpty { listOf(TraderScreen.HOME) }
-                    }
-                    target in TraderUiState.ACCOUNT_SETTINGS_DESTINATIONS &&
-                        state.currentScreen in TraderUiState.ACCOUNT_SETTINGS_DESTINATIONS -> {
-                        state.screenHistory.ifEmpty { listOf(TraderScreen.HOME) }
                     }
                     target in state.screenHistory -> {
                         state.screenHistory.takeWhile { it != target }
@@ -547,6 +221,11 @@ class TraderViewModel(
                 }
                 state.copy(
                     currentScreen = target,
+                    selectedRoot = if (target in TraderUiState.ROOT_DESTINATIONS) target else state.selectedRoot,
+                    isQuickActionOpen = false,
+                    pendingAction = null,
+                    searchQuery = if (target == TraderScreen.PRODUCTS_CATALOG) state.inventorySearchQuery else if (target == TraderScreen.NEW_SALE) state.saleSearchQuery else state.searchQuery,
+                    selectedCategory = if (target == TraderScreen.PRODUCTS_CATALOG) state.inventoryCategory else if (target == TraderScreen.NEW_SALE) state.saleCategory else state.selectedCategory,
                     screenHistory = updatedHistory,
                     cashInputText = defaultCashText,
                     checkoutErrorAr = null,
@@ -558,6 +237,8 @@ class TraderViewModel(
 
     fun navigateBack(): Boolean {
         val current = _uiState.value
+        if (current.isQuickActionOpen) { setQuickActionOpen(false); return true }
+        if (current.pendingAction != null) { consumeAction(); return true }
         if (current.isScannerSheetOpen) {
             _uiState.update { it.copy(isScannerSheetOpen = false) }
             return true
@@ -591,6 +272,17 @@ class TraderViewModel(
         _uiState.update { state ->
             state.copy(
                 currentScreen = previous,
+                searchQuery = when (previous) {
+                    TraderScreen.NEW_SALE -> state.saleSearchQuery
+                    TraderScreen.PRODUCTS_CATALOG -> state.inventorySearchQuery
+                    else -> state.searchQuery
+                },
+                selectedCategory = when (previous) {
+                    TraderScreen.NEW_SALE -> state.saleCategory
+                    TraderScreen.PRODUCTS_CATALOG -> state.inventoryCategory
+                    else -> state.selectedCategory
+                },
+                selectedRoot = if (previous in TraderUiState.ROOT_DESTINATIONS) previous else state.selectedRoot,
                 screenHistory = state.screenHistory.dropLast(1)
             )
         }
@@ -599,11 +291,26 @@ class TraderViewModel(
 
     // Product Catalog & Inventory
     fun updateSearchQuery(query: String) {
-        _uiState.update { it.copy(searchQuery = query) }
+        _uiState.update { it.copy(searchQuery = query,
+            saleSearchQuery = if (it.currentScreen == TraderScreen.NEW_SALE) query else it.saleSearchQuery,
+            inventorySearchQuery = if (it.currentScreen == TraderScreen.PRODUCTS_CATALOG) query else it.inventorySearchQuery) }
+    }
+
+    fun openLowStockInventory() {
+        navigateTo(TraderScreen.PRODUCTS_CATALOG)
+        _uiState.update { it.copy(inventoryLowStockRequested = true,
+            inventorySearchQuery = "", searchQuery = "",
+            inventoryCategory = ProductCategory.ALL, selectedCategory = ProductCategory.ALL) }
+    }
+
+    fun consumeLowStockRequest() {
+        _uiState.update { it.copy(inventoryLowStockRequested = false) }
     }
 
     fun selectCategory(category: ProductCategory) {
-        _uiState.update { it.copy(selectedCategory = category) }
+        _uiState.update { state -> state.copy(selectedCategory = category,
+            saleCategory = if (state.currentScreen == TraderScreen.NEW_SALE) category else state.saleCategory,
+            inventoryCategory = if (state.currentScreen == TraderScreen.PRODUCTS_CATALOG) category else state.inventoryCategory) }
     }
 
     fun selectProductForDetail(product: Product) {
@@ -770,6 +477,7 @@ class TraderViewModel(
         _uiState.update { state ->
             state.copy(
                 basket = emptyList(),
+                saleSessionId = state.saleSessionId + 1,
                 discountPreset = DiscountPreset.NONE,
                 customDiscountText = "",
                 customerNote = "",
@@ -1156,6 +864,7 @@ class TraderViewModel(
                     receiptCopyCount = 0,
                     lastSharedReceiptText = null,
                     basket = emptyList(),
+                saleSessionId = current.saleSessionId + 1,
                     discountPreset = DiscountPreset.NONE,
                     customDiscountText = "",
                     customerNote = "",
@@ -1271,11 +980,17 @@ class TraderViewModel(
         }
     }
 
+    fun confirmCustomerCollection(customerId: String, paymentAmountIls: Double, note: String, paymentId: String): Boolean {
+        val saved = recordCustomerPayment(customerId, paymentAmountIls, note, paymentId)
+        if (saved) navigateTo(TraderScreen.CUSTOMER_DETAIL)
+        return saved
+    }
+
     fun recordCustomerPayment(customerId: String, paymentAmountIls: Double, note: String, paymentId: String = ""): Boolean {
         val pid = if (paymentId.isNotBlank()) paymentId else "cpay_${System.currentTimeMillis()}"
         val result = repository.recordCustomerPayment(customerId, paymentAmountIls, note, pid)
         return if (result.isSuccess) {
-            syncFromRepository()
+            syncCustomers()
             _uiState.update { state ->
                 val updatedCust = state.customers.firstOrNull { it.id == customerId }
                 val paidStr = WesternFormatters.formatIls(paymentAmountIls)
@@ -1309,7 +1024,7 @@ class TraderViewModel(
         val result = repository.createCustomer(name, phone, address)
         if (result.isSuccess) {
             val created = result.getOrNull()
-            syncFromRepository()
+            syncCustomers()
             _uiState.update {
                 it.copy(
                     isAddCustomerDialogOpen = false,
@@ -1325,7 +1040,14 @@ class TraderViewModel(
     }
 
     // Suppliers & Purchasing Operations
+    fun openSupplierPayment(supplier: Supplier) {
+        if (!_uiState.value.currentSession.canManageSuppliers()) return
+        selectSupplierForDetail(supplier)
+        _uiState.update { it.copy(pendingAction = MerchantAction.PAY) }
+    }
+
     fun selectSupplierForDetail(supplier: Supplier) {
+        if (!_uiState.value.currentSession.canManageSuppliers()) return
         _uiState.update { state ->
             val freshSupplier = state.suppliers.firstOrNull { it.id == supplier.id } ?: supplier
             state.copy(
@@ -1350,6 +1072,7 @@ class TraderViewModel(
     }
 
     fun openReceivePurchaseDialog(open: Boolean) {
+        if (open && !_uiState.value.currentSession.canManageSuppliers()) return
         _uiState.update { it.copy(isReceivePurchaseDialogOpen = open) }
     }
 
@@ -1357,21 +1080,41 @@ class TraderViewModel(
         supplierId: String,
         itemsSummary: String,
         totalIls: Double,
-        paidNowIls: Double
+        paidNowIls: Double,
+        expectedProductId: String? = null,
+        expectedQuantity: Int = 0
     ): Boolean {
         val session = _uiState.value.currentSession
-        val result = repository.recordPurchaseBill(supplierId, itemsSummary, totalIls, paidNowIls, session)
+        val result = repository.recordPurchaseBill(
+            supplierId = supplierId,
+            itemsSummary = itemsSummary,
+            totalIls = totalIls,
+            paidNowIls = paidNowIls,
+            operator = session,
+            expectedProductId = expectedProductId,
+            expectedQuantity = expectedQuantity
+        )
         return if (result.isSuccess) {
             val bill = result.getOrNull()
-            syncFromRepository()
+            syncSuppliersAndPurchases()
             _uiState.update { state ->
                 val billCode = bill?.let { WesternFormatters.formatBillCode(it.billNumber) } ?: ""
                 val remStr = bill?.let { WesternFormatters.formatIls(it.remainingPayableIls) } ?: ""
+                val stockNoteAr = if (expectedProductId != null && expectedQuantity > 0) {
+                    " — مسجل بانتظار استلام (${WesternFormatters.formatInt(expectedQuantity)} وحدة) مخزنياً"
+                } else {
+                    " — قيد مالي فقط دون إضافة مخزون تلقائي"
+                }
+                val stockNoteEn = if (expectedProductId != null && expectedQuantity > 0) {
+                    " — pending physical goods receipt (${expectedQuantity} units)"
+                } else {
+                    " — financial entry only, stock not auto-incremented"
+                }
                 state.copy(
                     isReceivePurchaseDialogOpen = false,
                     selectedSupplierForDetail = state.suppliers.firstOrNull { it.id == supplierId },
-                    lastSupplierActionMessageAr = "تم قيد فاتورة الشراء المالية $billCode (المتبقي للمورد: $remStr) — قيد مالي فقط دون إضافة مخزون تلقائي",
-                    lastSupplierActionMessageEn = "Financial purchase bill $billCode recorded (Payable added: $remStr) — financial entry only, stock not auto-incremented",
+                    lastSupplierActionMessageAr = "تم قيد فاتورة الشراء $billCode (المتبقي للمورد: $remStr)$stockNoteAr",
+                    lastSupplierActionMessageEn = "Purchase bill $billCode recorded (Payable added: $remStr)$stockNoteEn",
                     isSupplierActionError = false
                 )
             }
@@ -1393,37 +1136,82 @@ class TraderViewModel(
         }
     }
 
-    fun paySupplierAmount(
+    fun recordStructuredPurchaseBill(
+        supplierId: String,
+        lines: List<PurchaseLineItem>,
+        paidNowIls: Double,
+        note: String = ""
+    ): Result<PurchaseBill> {
+        val session = _uiState.value.currentSession
+        val result = repository.recordStructuredPurchaseBill(supplierId, lines, paidNowIls, session, note)
+        if (result.isSuccess) {
+            val created = result.getOrNull()
+            val updatedSuppliers = repository.getSuppliers()
+            val updatedBills = repository.getPurchaseBills()
+            val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
+            _uiState.update { state ->
+                state.copy(
+                    suppliers = updatedSuppliers,
+                    purchaseBills = updatedBills,
+                    selectedSupplierForDetail = updatedSup ?: state.selectedSupplierForDetail,
+                    lastSupplierActionMessageAr = "تم اعتماد فاتورة الشراء #${created?.billNumber ?: ""} بنجاح",
+                    lastSupplierActionMessageEn = "Purchase bill #${created?.billNumber ?: ""} recorded successfully",
+                    isSupplierActionError = false
+                )
+            }
+        } else {
+            val rawErr = result.exceptionOrNull()?.message ?: "Purchase bill rejected"
+            val parts = rawErr.split(" | ", limit = 2)
+            val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+            val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+            _uiState.update {
+                it.copy(
+                    lastSupplierActionMessageAr = errAr,
+                    lastSupplierActionMessageEn = errEn,
+                    isSupplierActionError = true
+                )
+            }
+            showBanner(errAr, errEn, isError = true)
+        }
+        return result
+    }
+
+    fun paySupplierAmountResult(
         supplierId: String,
         amountIls: Double,
-        note: String = "سداد نقدي للمورد من الصندوق"
-    ): Boolean {
+        note: String = "سداد نقدي للمورد من الصندوق",
+        paymentId: String = ""
+    ): Result<SupplierPayment> {
         val session = _uiState.value.currentSession
-        val result = repository.recordSupplierPayment(supplierId, amountIls, note, session)
-        return if (result.isSuccess) {
-            syncFromRepository()
+        val result = repository.recordSupplierPayment(supplierId, amountIls, note, session, paymentId)
+        if (result.isSuccess) {
+            val updatedSuppliers = repository.getSuppliers()
+            val updatedBills = repository.getPurchaseBills()
+            val updatedPayments = repository.getSupplierPayments()
+            val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
+            val paidStr = WesternFormatters.formatIls(amountIls)
+            val newOwed = updatedSup?.balanceOwedIls ?: 0.0
+            val msgAr = when {
+                newOwed > 0.005 -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatIls(newOwed)}"
+                newOwed < -0.005 -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatIls(-newOwed)}"
+                else -> "تم صرف $paidStr للمورد — أصبح حساب المورد خالصاً (0.00 ₪)"
+            }
+            val msgEn = when {
+                newOwed > 0.005 -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatIls(newOwed)}"
+                newOwed < -0.005 -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatIls(-newOwed)}"
+                else -> "Paid $paidStr to supplier — Supplier account settled (0.00 ₪)"
+            }
             _uiState.update { state ->
-                val updatedSup = state.suppliers.firstOrNull { it.id == supplierId }
-                val paidStr = WesternFormatters.formatIls(amountIls)
-                val newOwed = updatedSup?.balanceOwedIls ?: 0.0
-                val msgAr = when {
-                    newOwed > 0.005 -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatIls(newOwed)}"
-                    newOwed < -0.005 -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatIls(-newOwed)}"
-                    else -> "تم صرف $paidStr للمورد — أصبح حساب المورد خالصاً (0.00 ₪)"
-                }
-                val msgEn = when {
-                    newOwed > 0.005 -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatIls(newOwed)}"
-                    newOwed < -0.005 -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatIls(-newOwed)}"
-                    else -> "Paid $paidStr to supplier — Supplier account settled (0.00 ₪)"
-                }
                 state.copy(
-                    selectedSupplierForDetail = updatedSup,
+                    suppliers = updatedSuppliers,
+                    purchaseBills = updatedBills,
+                    supplierPayments = updatedPayments,
+                    selectedSupplierForDetail = updatedSup ?: state.selectedSupplierForDetail,
                     lastSupplierActionMessageAr = msgAr,
                     lastSupplierActionMessageEn = msgEn,
                     isSupplierActionError = false
                 )
             }
-            true
         } else {
             val rawErr = result.exceptionOrNull()?.message ?: "Supplier disbursement rejected"
             val parts = rawErr.split(" | ", limit = 2)
@@ -1437,12 +1225,20 @@ class TraderViewModel(
                 )
             }
             showBanner(errAr, errEn, isError = true)
-            false
         }
+        return result
     }
+
+    fun paySupplierAmount(
+        supplierId: String,
+        amountIls: Double,
+        note: String = "سداد نقدي للمورد من الصندوق",
+        paymentId: String = ""
+    ): Boolean = paySupplierAmountResult(supplierId, amountIls, note, paymentId).isSuccess
 
     // Expenses & Cash Outflow
     fun openAddExpenseDialog(open: Boolean) {
+        if (open && !_uiState.value.currentSession.canManageExpenses()) return
         _uiState.update { it.copy(isAddExpenseDialogOpen = open) }
     }
 
@@ -1460,7 +1256,7 @@ class TraderViewModel(
         val result = repository.recordExpense(title, category, amountIls, _uiState.value.currentSession)
         return if (result.isSuccess) {
             val recorded = result.getOrNull()
-            syncFromRepository()
+            syncExpenses()
             val amtStr = WesternFormatters.formatIls(recorded?.amountIls ?: amountIls)
             _uiState.update {
                 it.copy(
@@ -1768,6 +1564,7 @@ class TraderViewModel(
             current.copy(
                 savedDrafts = listOf(draft) + current.savedDrafts,
                 basket = emptyList(),
+                saleSessionId = current.saleSessionId + 1,
                 discountPreset = DiscountPreset.NONE,
                 customDiscountText = "",
                 customerNote = "",
@@ -1808,6 +1605,7 @@ class TraderViewModel(
         _uiState.update { current ->
             current.copy(
                 basket = restoredItems,
+                saleSessionId = current.saleSessionId + 1,
                 savedDrafts = current.savedDrafts.filterNot { it.id == draftId },
                 selectedCustomerId = draft.customerId,
                 customerNote = draft.customerNote,
@@ -1967,26 +1765,34 @@ class TraderViewModel(
         }
     }
 
-    fun confirmPhysicalGoodsReceipt(
+    fun confirmPhysicalGoodsReceiptResult(
         billId: String,
         productId: String,
         receivedQty: Int,
-        batchNote: String = ""
-    ): Boolean {
+        batchNote: String = "",
+        operationId: String = "",
+        lineId: String? = null
+    ): Result<StockMovement> {
         val session = _uiState.value.currentSession
-        val result = repository.confirmPhysicalGoodsReceipt(billId, productId, receivedQty, batchNote, session)
-        return if (result.isSuccess) {
+        val result = repository.confirmPhysicalGoodsReceipt(billId, productId, receivedQty, batchNote, session, operationId, lineId)
+        if (result.isSuccess) {
             val movement = result.getOrNull()
-            syncFromRepository()
-            val prod = _uiState.value.products.firstOrNull { it.id == productId }
+            val updatedProducts = repository.getProducts()
+            val updatedSuppliers = repository.getSuppliers()
+            val updatedBills = repository.getPurchaseBills()
+            val prod = updatedProducts.firstOrNull { it.id == productId }
             _uiState.update { state ->
                 state.copy(
+                    products = updatedProducts,
+                    stockMovements = repository.getStockMovements(),
+                    suppliers = updatedSuppliers,
+                    purchaseBills = updatedBills,
+                    supplierPayments = repository.getSupplierPayments(),
                     lastSupplierActionMessageAr = "تم اعتماد سند الاستلام المخزني (+${WesternFormatters.formatInt(receivedQty)} من «${prod?.nameAr ?: ""}») — المخزون الحالي: ${WesternFormatters.formatInt(movement?.resultingStock ?: 0)}",
                     lastSupplierActionMessageEn = "Physical Goods Receipt confirmed (+${WesternFormatters.formatInt(receivedQty)} of \"${prod?.nameEn ?: ""}\") — Stock: ${WesternFormatters.formatInt(movement?.resultingStock ?: 0)}",
                     isSupplierActionError = false
                 )
             }
-            true
         } else {
             val rawErr = result.exceptionOrNull()?.message ?: "Goods receipt rejected"
             val parts = rawErr.split(" | ", limit = 2)
@@ -2000,9 +1806,18 @@ class TraderViewModel(
                 )
             }
             showBanner(errAr, errEn, isError = true)
-            false
         }
+        return result
     }
+
+    fun confirmPhysicalGoodsReceipt(
+        billId: String,
+        productId: String,
+        receivedQty: Int,
+        batchNote: String = "",
+        operationId: String = "",
+        lineId: String? = null
+    ): Boolean = confirmPhysicalGoodsReceiptResult(billId, productId, receivedQty, batchNote, operationId, lineId).isSuccess
 
     fun updateStartingDrawerCash(openingIls: Double): Boolean {
         val session = _uiState.value.currentSession

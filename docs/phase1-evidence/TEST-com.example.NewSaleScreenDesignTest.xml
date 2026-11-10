@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.NewSaleScreenDesignTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-11-07T16:35:45.293Z" hostname="pasta-hp-worker" time="102.831">
+  <properties/>
+  <testcase name="newSaleScreen_rendersNormalSearchActiveBasketFilledAndCheckoutReadyStates_inLightAndDarkThemes" classname="com.example.NewSaleScreenDesignTest" time="8.457"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
