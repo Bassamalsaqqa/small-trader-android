@@ -146,4 +146,70 @@ class CanonicalJsonSerializerTest {
         assertEquals("[]", emptyList)
         assertTrue(emptyObj != emptyList)
     }
+
+    @Test
+    fun testCanonicalIntegerNegativeZeroForbidden() {
+        // Parser rejects "-0"
+        val ex1 = assertThrows(CanonicalSerializationException::class.java) {
+            StrictJsonParser.parse("{\"count\": -0}")
+        }
+        assertTrue(ex1.message!!.contains("negative zero '-0'", ignoreCase = true))
+
+        // Serializer rejects "-0" in StrictJsonNumber
+        val num = StrictJsonNumber("-0", isInt = true)
+        val ex2 = assertThrows(CanonicalSerializationException::class.java) {
+            CanonicalJsonSerializer.serialize(num)
+        }
+        assertTrue(ex2.message!!.contains("negative zero '-0'", ignoreCase = true))
+    }
+
+    @Test
+    fun testBoundedCanonicalIntegerDomain() {
+        // Safe integers 2^53 - 1 and -(2^53 - 1)
+        val maxSafe = 9007199254740991L
+        val minSafe = -9007199254740991L
+
+        assertEquals("9007199254740991", CanonicalJsonSerializer.serialize(maxSafe))
+        assertEquals("-9007199254740991", CanonicalJsonSerializer.serialize(minSafe))
+
+        // Parser accepts safe integers
+        val parsedMax = StrictJsonParser.parse("{\"val\": 9007199254740991}").asObject()
+        assertEquals(maxSafe, parsedMax.require("val").asLong())
+
+        // Numbers exceeding safe integer bounds rejected by serializer
+        assertThrows(CanonicalSerializationException::class.java) {
+            CanonicalJsonSerializer.serialize(9007199254740992L)
+        }
+        assertThrows(CanonicalSerializationException::class.java) {
+            CanonicalJsonSerializer.serialize(-9007199254740992L)
+        }
+
+        // Numbers exceeding safe integer bounds rejected by parser
+        assertThrows(CanonicalSerializationException::class.java) {
+            StrictJsonParser.parse("{\"val\": 9007199254740992}")
+        }
+        assertThrows(CanonicalSerializationException::class.java) {
+            StrictJsonParser.parse("{\"val\": -9007199254740992}")
+        }
+    }
+
+    @Test
+    fun testRecursionDepthAndPayloadBounds() {
+        // Depth bound: nesting > 32 rejected
+        var deepJson = "{\"leaf\": 1}"
+        for (i in 1..35) {
+            deepJson = "{\"nested\": $deepJson}"
+        }
+        val exDepth = assertThrows(CanonicalSerializationException::class.java) {
+            StrictJsonParser.parse(deepJson)
+        }
+        assertTrue(exDepth.message!!.contains("recursion depth exceeded"))
+
+        // String length bound > 64 KB rejected
+        val longString = "\"" + "a".repeat(70_000) + "\""
+        val exStr = assertThrows(CanonicalSerializationException::class.java) {
+            StrictJsonParser.parse(longString)
+        }
+        assertTrue(exStr.message!!.contains("string length exceeds maximum"))
+    }
 }

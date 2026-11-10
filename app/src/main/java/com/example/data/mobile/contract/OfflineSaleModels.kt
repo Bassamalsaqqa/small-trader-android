@@ -1,5 +1,7 @@
 package com.example.data.mobile.contract
 
+import java.math.BigDecimal
+
 /**
  * Packaging unit mapping documentation:
  * In client-facing contracts and sales drafts (SalesDraftIntent), packaging units are
@@ -20,6 +22,17 @@ data class OfflineSaleLine(
     val taxAmount: MoneyAmount,
     val lineTotal: MoneyAmount
 ) : CanonicalSerializable {
+    init {
+        // unitId vs productUnitId mapping equality per ADR-0001 Section 4
+        require(unitId == productUnitId) {
+            "unitId ($unitId) must match productUnitId ($productUnitId) for offline sale line mapping"
+        }
+        // Reject negative or zero line total according to schema
+        require(lineTotal.value > BigDecimal.ZERO) {
+            "lineTotal must be strictly positive according to schema, got ${lineTotal.lexeme}"
+        }
+    }
+
     override fun toCanonicalStructure(): Map<String, Any?> = mapOf(
         "product_id" to productId.value,
         "product_unit_id" to productUnitId.value,
@@ -32,7 +45,16 @@ data class OfflineSaleLine(
     )
 
     companion object {
+        private val ALLOWED_KEYS = setOf(
+            "product_id", "product_unit_id", "unit_id", "quantity",
+            "unit_price", "tax_rate", "tax_amount", "line_total"
+        )
+
         fun fromStrictJson(obj: StrictJsonObject): OfflineSaleLine {
+            val unexpected = obj.properties.keys - ALLOWED_KEYS
+            if (unexpected.isNotEmpty()) {
+                throw CanonicalSerializationException("Unexpected fields in OfflineSaleLine: $unexpected")
+            }
             return OfflineSaleLine(
                 productId = ServerUlid.parse(obj.require("product_id").asString()),
                 productUnitId = ServerUlid.parse(obj.require("product_unit_id").asString()),
@@ -58,6 +80,17 @@ data class OfflineSalePayment(
     init {
         require(mode == "full") { "Offline payment mode must be 'full', got '$mode'" }
         require(paymentMethod == "cash") { "Offline payment method must be 'cash', got '$paymentMethod'" }
+        require(amountSettled.value > BigDecimal.ZERO) {
+            "amountSettled must be strictly positive according to schema, got ${amountSettled.lexeme}"
+        }
+        require(amountTendered.value >= amountSettled.value) {
+            "amountTendered (${amountTendered.lexeme}) must be >= amountSettled (${amountSettled.lexeme})"
+        }
+        // Cash conservation: amountTendered == amountSettled + changeReturned
+        val expectedChange = amountTendered.value.subtract(amountSettled.value)
+        require(expectedChange.compareTo(changeReturned.value) == 0) {
+            "Cash tendered/change/settled conservation violated: tendered (${amountTendered.lexeme}) - settled (${amountSettled.lexeme}) != change (${changeReturned.lexeme})"
+        }
     }
 
     override fun toCanonicalStructure(): Map<String, Any?> = mapOf(
@@ -70,20 +103,29 @@ data class OfflineSalePayment(
     )
 
     companion object {
+        private val ALLOWED_KEYS = setOf(
+            "mode", "payment_method", "cash_account_id",
+            "amount_tendered", "amount_settled", "change_returned"
+        )
+
         fun fromStrictJson(obj: StrictJsonObject): OfflineSalePayment {
+            val unexpected = obj.properties.keys - ALLOWED_KEYS
+            if (unexpected.isNotEmpty()) {
+                throw CanonicalSerializationException("Unexpected fields in OfflineSalePayment: $unexpected")
+            }
             return OfflineSalePayment(
                 mode = obj.require("mode").asString(),
                 paymentMethod = obj.require("payment_method").asString(),
                 cashAccountId = ServerUlid.parse(obj.require("cash_account_id").asString()),
                 amountTendered = MoneyAmount.fromNonnegativeString(obj.require("amount_tendered").asString()),
-                amountSettled = MoneyAmount.fromNonnegativeString(obj.require("amount_settled").asString()),
+                amountSettled = MoneyAmount.fromPositiveString(obj.require("amount_settled").asString()),
                 changeReturned = MoneyAmount.fromNonnegativeString(obj.require("change_returned").asString())
             )
         }
     }
 }
 
-data class OfflineSaleEvent(
+class OfflineSaleEvent(
     val clientEventId: ClientUuid,
     val eventVersion: Int = 1,
     val companyId: ServerUlid,
@@ -97,18 +139,123 @@ data class OfflineSaleEvent(
     val cashAccountId: ServerUlid,
     val catalogSnapshotVersion: String,
     val localReceiptNumber: String,
-    val lines: List<OfflineSaleLine>,
+    lines: List<OfflineSaleLine>,
     val payment: OfflineSalePayment
 ) : CanonicalSerializable {
+
+    // Defensive copy: avoid mutable source alias so event remains strictly immutable after construction
+    val lines: List<OfflineSaleLine> = java.util.Collections.unmodifiableList(ArrayList(lines))
+
     init {
         require(eventVersion == 1) { "event_version must be 1, got $eventVersion" }
         require(ContractConstants.CURRENCY_CODE_REGEX.matches(currency)) {
             "currency must be 3-letter ISO code, got '$currency'"
         }
-        require(lines.isNotEmpty()) { "lines must contain at least 1 line item" }
-        require(lines.size <= ContractConstants.MAX_LINE_ITEMS) {
+        require(this.lines.isNotEmpty()) { "lines must contain at least 1 line item" }
+        require(this.lines.size <= ContractConstants.MAX_LINE_ITEMS) {
             "lines exceeds maximum allowed ${ContractConstants.MAX_LINE_ITEMS}"
         }
+        // Timestamp validation & bounds (RFC 3339 / ISO-8601 date-time)
+        try {
+            val instant = java.time.Instant.parse(capturedAt)
+            val year = instant.atZone(java.time.ZoneOffset.UTC).year
+            require(year in 2020..2100) { "capturedAt year $year is out of bounds [2020..2100]" }
+        } catch (e: java.time.format.DateTimeParseException) {
+            throw IllegalArgumentException("capturedAt '$capturedAt' is not a valid ISO-8601 date-time: ${e.message}", e)
+        }
+        // String caps
+        require(catalogSnapshotVersion.isNotEmpty() && catalogSnapshotVersion.length <= 64) {
+            "catalogSnapshotVersion length must be 1..64, got '${catalogSnapshotVersion.length}'"
+        }
+        require(localReceiptNumber.isNotEmpty() && localReceiptNumber.length <= 64) {
+            "localReceiptNumber length must be 1..64, got '${localReceiptNumber.length}'"
+        }
+        // Top-level cashAccountId vs payment cashAccountId equality
+        require(cashAccountId == payment.cashAccountId) {
+            "Top-level cashAccountId ($cashAccountId) does not match payment cashAccountId (${payment.cashAccountId})"
+        }
+        // Full settlement vs line sum
+        val lineSum = this.lines.fold(BigDecimal.ZERO) { acc, line -> acc.add(line.lineTotal.value) }
+        require(lineSum.compareTo(payment.amountSettled.value) == 0) {
+            "Payment amountSettled (${payment.amountSettled.lexeme}) does not match sum of line totals ($lineSum)"
+        }
+    }
+
+    fun copy(
+        clientEventId: ClientUuid = this.clientEventId,
+        eventVersion: Int = this.eventVersion,
+        companyId: ServerUlid = this.companyId,
+        actorId: ServerUlid = this.actorId,
+        deviceId: ClientUuid = this.deviceId,
+        deviceLeaseId: ClientUuid = this.deviceLeaseId,
+        capturedAt: String = this.capturedAt,
+        customerId: ServerUlid = this.customerId,
+        currency: String = this.currency,
+        warehouseId: ServerUlid = this.warehouseId,
+        cashAccountId: ServerUlid = this.cashAccountId,
+        catalogSnapshotVersion: String = this.catalogSnapshotVersion,
+        localReceiptNumber: String = this.localReceiptNumber,
+        lines: List<OfflineSaleLine> = this.lines,
+        payment: OfflineSalePayment = this.payment
+    ): OfflineSaleEvent = OfflineSaleEvent(
+        clientEventId = clientEventId,
+        eventVersion = eventVersion,
+        companyId = companyId,
+        actorId = actorId,
+        deviceId = deviceId,
+        deviceLeaseId = deviceLeaseId,
+        capturedAt = capturedAt,
+        customerId = customerId,
+        currency = currency,
+        warehouseId = warehouseId,
+        cashAccountId = cashAccountId,
+        catalogSnapshotVersion = catalogSnapshotVersion,
+        localReceiptNumber = localReceiptNumber,
+        lines = lines,
+        payment = payment
+    )
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is OfflineSaleEvent) return false
+        return clientEventId == other.clientEventId &&
+                eventVersion == other.eventVersion &&
+                companyId == other.companyId &&
+                actorId == other.actorId &&
+                deviceId == other.deviceId &&
+                deviceLeaseId == other.deviceLeaseId &&
+                capturedAt == other.capturedAt &&
+                customerId == other.customerId &&
+                currency == other.currency &&
+                warehouseId == other.warehouseId &&
+                cashAccountId == other.cashAccountId &&
+                catalogSnapshotVersion == other.catalogSnapshotVersion &&
+                localReceiptNumber == other.localReceiptNumber &&
+                lines == other.lines &&
+                payment == other.payment
+    }
+
+    override fun hashCode(): Int {
+        var result = clientEventId.hashCode()
+        result = 31 * result + eventVersion
+        result = 31 * result + companyId.hashCode()
+        result = 31 * result + actorId.hashCode()
+        result = 31 * result + deviceId.hashCode()
+        result = 31 * result + deviceLeaseId.hashCode()
+        result = 31 * result + capturedAt.hashCode()
+        result = 31 * result + customerId.hashCode()
+        result = 31 * result + currency.hashCode()
+        result = 31 * result + warehouseId.hashCode()
+        result = 31 * result + cashAccountId.hashCode()
+        result = 31 * result + catalogSnapshotVersion.hashCode()
+        result = 31 * result + localReceiptNumber.hashCode()
+        result = 31 * result + lines.hashCode()
+        result = 31 * result + payment.hashCode()
+        return result
+    }
+
+    override fun toString(): String {
+        return "OfflineSaleEvent(clientEventId=$clientEventId, companyId=$companyId, capturedAt='$capturedAt', lines=$lines, payment=$payment)"
     }
 
     override fun toCanonicalStructure(): Map<String, Any?> = mapOf(
@@ -133,7 +280,19 @@ data class OfflineSaleEvent(
         CanonicalJsonSerializer.computeDigest(this)
 
     companion object {
+        private val ALLOWED_KEYS = setOf(
+            "client_event_id", "event_version", "company_id", "actor_id",
+            "device_id", "device_lease_id", "captured_at", "customer_id",
+            "currency", "warehouse_id", "cash_account_id",
+            "catalog_snapshot_version", "local_receipt_number",
+            "lines", "payment"
+        )
+
         fun fromStrictJson(obj: StrictJsonObject): OfflineSaleEvent {
+            val unexpected = obj.properties.keys - ALLOWED_KEYS
+            if (unexpected.isNotEmpty()) {
+                throw CanonicalSerializationException("Unexpected fields in OfflineSaleEvent: $unexpected")
+            }
             val linesJson = obj.require("lines").asArray()
             val lines = linesJson.elements.map { OfflineSaleLine.fromStrictJson(it.asObject()) }
             return OfflineSaleEvent(
@@ -165,6 +324,10 @@ data class OfflineSaleIntakeRequest(
     val event: OfflineSaleEvent
 ) : CanonicalSerializable {
 
+    init {
+        validateEnvelopeBindings()
+    }
+
     fun validateEnvelopeBindings() {
         require(clientEventId == event.clientEventId) {
             "Envelope client_event_id ($clientEventId) does not match inner event client_event_id (${event.clientEventId})"
@@ -181,22 +344,44 @@ data class OfflineSaleIntakeRequest(
         }
     }
 
-    override fun toCanonicalStructure(): Map<String, Any?> = mapOf(
-        "client_event_id" to clientEventId.value,
-        "device_id" to deviceId.value,
-        "captured_at" to capturedAt,
-        "payload_digest" to payloadDigest.value,
-        "event" to event.toCanonicalStructure()
-    )
+    override fun toCanonicalStructure(): Map<String, Any?> {
+        validateEnvelopeBindings()
+        return mapOf(
+            "client_event_id" to clientEventId.value,
+            "device_id" to deviceId.value,
+            "captured_at" to capturedAt,
+            "payload_digest" to payloadDigest.value,
+            "event" to event.toCanonicalStructure()
+        )
+    }
 
     companion object {
+        private val ALLOWED_KEYS = setOf(
+            "client_event_id", "device_id", "captured_at", "payload_digest", "event"
+        )
+
         fun fromStrictJson(obj: StrictJsonObject): OfflineSaleIntakeRequest {
+            val unexpected = obj.properties.keys - ALLOWED_KEYS
+            if (unexpected.isNotEmpty()) {
+                throw CanonicalSerializationException("Unexpected fields in OfflineSaleIntakeRequest: $unexpected")
+            }
+
+            // Validate hash against original strict parsed canonical event BEFORE coercion; no silent normalization.
+            val rawEventObj = obj.require("event").asObject()
+            val rawComputedDigest = CanonicalJsonSerializer.computeDigest(rawEventObj)
+            val declaredDigest = PayloadDigest.parse(obj.require("payload_digest").asString())
+            if (declaredDigest != rawComputedDigest) {
+                throw CanonicalSerializationException(
+                    "Envelope payload_digest ($declaredDigest) does not match raw parsed event digest ($rawComputedDigest)"
+                )
+            }
+
             return OfflineSaleIntakeRequest(
                 clientEventId = ClientUuid.parse(obj.require("client_event_id").asString()),
                 deviceId = ClientUuid.parse(obj.require("device_id").asString()),
                 capturedAt = obj.require("captured_at").asString(),
-                payloadDigest = PayloadDigest.parse(obj.require("payload_digest").asString()),
-                event = OfflineSaleEvent.fromStrictJson(obj.require("event").asObject())
+                payloadDigest = declaredDigest,
+                event = OfflineSaleEvent.fromStrictJson(rawEventObj)
             )
         }
     }

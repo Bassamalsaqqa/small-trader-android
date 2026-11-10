@@ -153,6 +153,56 @@ class DecimalPrimitivesAndRoundingTest {
     }
 
     @Test
+    fun testConstructorAndCopyEnforceInvariantsOnAllPaths() {
+        // PositiveDecimalQuantity primary constructor & copy
+        assertThrows(IllegalArgumentException::class.java) {
+            PositiveDecimalQuantity("-1.000000")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            PositiveDecimalQuantity("0.000000")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            PositiveDecimalQuantity(BigDecimal("-5"))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            PositiveDecimalQuantity(BigDecimal.ZERO)
+        }
+        val validQty = PositiveDecimalQuantity("1.500000")
+        assertThrows(IllegalArgumentException::class.java) {
+            validQty.copy(lexeme = "-2.000000")
+        }
+
+        // NonnegativeDecimalQuantity accepts zero, rejects negative
+        val zeroQty = NonnegativeDecimalQuantity("0.000000")
+        assertEquals("0.000000", zeroQty.toPlainString())
+        assertEquals(0, zeroQty.value.compareTo(BigDecimal.ZERO))
+        val plainZero = NonnegativeDecimalQuantity("0")
+        assertEquals("0", plainZero.toPlainString())
+        assertEquals(0, plainZero.value.compareTo(BigDecimal.ZERO))
+        assertThrows(IllegalArgumentException::class.java) {
+            NonnegativeDecimalQuantity("-0.000001")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NonnegativeDecimalQuantity(BigDecimal("-1"))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            zeroQty.copy(lexeme = "-1.000000")
+        }
+
+        // MoneyAmount primary constructor & copy
+        assertThrows(IllegalArgumentException::class.java) {
+            MoneyAmount("-0.010000")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            MoneyAmount(BigDecimal("-10"))
+        }
+        val validMoney = MoneyAmount("10.000000")
+        assertThrows(IllegalArgumentException::class.java) {
+            validMoney.copy(lexeme = "-5.000000")
+        }
+    }
+
+    @Test
     fun testRejectsOverScaleDecimals() {
         // 7 decimals rejected (> 6 scale)
         assertThrows(IllegalArgumentException::class.java) {
@@ -180,12 +230,12 @@ class DecimalPrimitivesAndRoundingTest {
 
     @Test
     fun testTaxPercentageBounds0To100() {
-        // Valid boundaries
+        // Valid boundaries preserve exact lexeme
         assertEquals("0.000000", TaxPercentage.fromString("0.000000").toPlainString())
-        assertEquals("0.000000", TaxPercentage.fromString("0").toPlainString())
+        assertEquals("0", TaxPercentage.fromString("0").toPlainString())
         assertEquals("16.000000", TaxPercentage.fromString("16.000000").toPlainString())
         assertEquals("100.000000", TaxPercentage.fromString("100.000000").toPlainString())
-        assertEquals("100.000000", TaxPercentage.fromString("100").toPlainString())
+        assertEquals("100", TaxPercentage.fromString("100").toPlainString())
 
         // Over 100 rejected
         assertThrows(IllegalArgumentException::class.java) {
@@ -198,6 +248,50 @@ class DecimalPrimitivesAndRoundingTest {
         // Negative rejected
         assertThrows(IllegalArgumentException::class.java) {
             TaxPercentage.fromString("-0.000001")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TaxPercentage(BigDecimal("-1"))
+        }
+    }
+
+    @Test
+    fun testSalesLineCalculatorMinorUnitsValidation() {
+        val q = DecimalQuantity.fromPositiveString("1.000000")
+        val p = MoneyAmount.fromNonnegativeString("10.000000")
+        val tax = TaxPercentage.fromString("16.000000")
+
+        // Valid minor units 0..6
+        for (mu in 0..6) {
+            val res = SalesLineCalculator.calculate(
+                quantity = q,
+                unitPrice = p,
+                taxPercentage = tax,
+                taxInclusive = false,
+                minorUnits = mu
+            )
+            assertTrue(res.lineTotal.value > BigDecimal.ZERO)
+        }
+
+        // minorUnits < 0 rejected
+        assertThrows(IllegalArgumentException::class.java) {
+            SalesLineCalculator.calculate(
+                quantity = q,
+                unitPrice = p,
+                taxPercentage = tax,
+                taxInclusive = false,
+                minorUnits = -1
+            )
+        }
+
+        // minorUnits > 6 rejected
+        assertThrows(IllegalArgumentException::class.java) {
+            SalesLineCalculator.calculate(
+                quantity = q,
+                unitPrice = p,
+                taxPercentage = tax,
+                taxInclusive = false,
+                minorUnits = 7
+            )
         }
     }
 }
