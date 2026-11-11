@@ -65,3 +65,23 @@ responses. Do not select the representation by guessing financial intent.
 Missing tax identity, calculation mode, conversion snapshot or currency scale
 must fail closed; no default or legacy fallback may invent those economic terms.
 Existing revision 2 consumers stay pinned until that decision is reviewed.
+
+### Proposed Explicit API v2 Boundary
+Use explicit `/api/mobile/v2` paths for the breaking representation rather than
+custom header negotiation. Keep v1 revision-2 read/auth representations unchanged.
+Contract revision 3, API path v2 and offline event version 2 are distinct concepts.
+This decision still requires coordinated schema and runtime implementation.
+
+PR88's draft `MobileApiBoundary`, provider registration and exception hook currently
+recognize only v1. Mounting that middleware on v2 routes alone would bypass its
+prefix-specific checks. A separate reviewed v2 boundary must explicitly cover the
+default-OFF switch, authentication, company context setup/reset, input/schema
+validation, rate limits, redacted errors and exception handling. V1 staff/device
+tokens confer no implicit financial authority; token reuse requires an explicit,
+reviewed grant model and transaction-time checks.
+
+The durable receipt uniqueness domain `(company_id, client_event_id)` must span
+API versions. Adding an API version to that identity would allow duplicate posting
+through different routes. Original actor/device scope and current authorization
+must be checked before replay/status disclosure, including unsupported legacy
+version responses. No v2 route, middleware or permission is activated here.
