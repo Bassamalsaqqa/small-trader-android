@@ -196,18 +196,20 @@ The foundation is covered by 31 focused unit tests running under Robolectric 4.1
 | `OutboxTransactionRollbackTest` | 2 | Atomic transaction rollback on disk write failure / SQLite exception; composite foreign key constraint enforcement between delivery state and parent event. |
 | `OutboxIdempotencyAndConflictTest` | 5 | Same-event lost-ACK replay returns `Duplicate` without mutation; altered payload digest flags `Conflict` without replacing original event bytes; strict UTF-8 rejection of malformed bytes; defensive byte copying; privacy check avoiding sensitive payload logging. |
 | `OutboxClaimCasAndStaleRecoveryTest` | 5 | Compare-And-Set (CAS) claim prevents parallel drains across concurrent workers; deterministic stale lease recovery without `Thread.sleep`; timeout transitions to `UNKNOWN_ACK`; late confirmation with stale claim token is rejected; batch/lease boundary and overflow validation. |
-| `OutboxConfirmationVerificationTest` | 10 | Valid server acknowledgement confirms record and sets invoice/payment ULIDs; mismatched company ID rejected; tampered payload digest rejected; invalid server ULID rejected; events in `CONFLICT` state rejected; unclaimed `PENDING`/`AUTH_BLOCKED` states rejected; confirmed record exact mapping replay preserves original without mutation; conflicting mapping rejected; confirmed record cannot be demoted by late timeout, conflict, or auth denial; explicit status reconciliation path. |
+| `OutboxConfirmationVerificationTest` | 11 | Valid server acknowledgement confirms record and sets invoice/payment ULIDs; mismatched company ID rejected; tampered payload digest rejected; invalid server ULID rejected; events in `CONFLICT` state rejected; unclaimed `PENDING`/`AUTH_BLOCKED` states rejected; confirmed record exact mapping replay preserves original without mutation; conflicting mapping rejected; confirmed record cannot be demoted by late timeout, conflict, or auth denial; explicit status reconciliation path; separate invoice and payment public ID validation without payment=invoice wildcard. |
 | `OutboxTenantIsolationTest` | 5 | Cross-tenant read/claim isolation; cross-actor logout leakage prevention; device-level claim boundaries; cross-tenant same UUID collision succeeds independently; same-tenant other actor/device collision rejected with zero data leakage. |
 | `OutboxAuthDenialPreservationTest` | 2 | HTTP 401 auth denial locks queue, moves active records to `AUTH_BLOCKED`, preserves pending and conflict records, and restores queue upon re-authentication; persisted empty-queue auth lock across disk reopen and subsequent capture. |
 
 ### Test Count Parity Summary
-- **Outbox Unit Tests**: **31 passed** (0 failures, 0 errors, 0 skipped).
-- **Contract Unit Tests**: **33 passed** (`BoundaryCompatibilityTest`, `CanonicalJsonSerializerTest`, `DecimalPrimitivesAndRoundingTest`, `IdentifierPrimitivesTest`, `OfflineSaleContractGoldenParityTest`).
-- **Checkout & Lifecycle Unit Tests**: **8 passed** (`MerchantCheckoutTest`, `MerchantSaleLifecycleTest`).
-- **Total Selected Unit Tests**: **72 passed**.
-- **Lint**: `lintDebug` passed (BUILD SUCCESSFUL).
-- **Python Contract Validation Suite**: **120 checks passed** (`tools/validate-mobile-contract.py`).
-- **Contract Manifest SHA-256**: `a8d04a130bdb0bd909a7cfabdde93fb6f90c96cc07dbedfbd01971bdb07c6733` (frozen and verified).
+- **Outbox Unit Tests**: **32 passed** (0 failures, 0 errors, 0 skipped).
+- **Contract Unit Tests**: **40 passed** (`BoundaryCompatibilityTest` 3, `CanonicalJsonSerializerTest` 11, `ContractManifestDriftTest` 2, `DecimalPrimitivesAndRoundingTest` 7, `IdentifierPrimitivesTest` 4, `OfflineSaleContractGoldenParityTest` 8, `StringBoundaryParityTest` 5).
+- **Checkout & Lifecycle Unit Tests**: **8 passed** (`MerchantCheckoutTest` 6, `MerchantSaleLifecycleTest` 2).
+- **Total Selected Unit Tests**: **80 passed** (0 failures, 0 errors, 0 skipped).
+- **Lint**: `lintDebug` passed with 0 errors.
+- **Python Contract Validation Suite**: **210 checks passed** (both normal and `-O` optimized Python).
+- **Contract Manifest SHA-256**: `ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659` (Draft Revision 2 verified).
+- **Room Schema Hash**: Exported logical schema hash `6eddfecc8dabbb7ec370b858ec36714a` unchanged.
+- **Financial Readiness Boundary**: Blocked. Current offline cash financial schemas still lack public `lineTaxRateId` in sale preview; offline mode remains strictly OFF.
 
 
 ### Codex acknowledgement review
