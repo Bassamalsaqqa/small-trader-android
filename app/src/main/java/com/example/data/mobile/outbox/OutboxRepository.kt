@@ -6,6 +6,10 @@ import com.example.data.mobile.contract.OfflineSaleEvent
 import com.example.data.mobile.contract.PayloadDigest
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.StrictJsonParser
+import com.example.data.mobile.contract.v2.OfflineSaleEventV2
+import com.example.data.mobile.contract.v2.OfflineSaleIntakeRequestV2
+import com.example.data.mobile.contract.v2.PaymentDecimalConsistency
+import java.math.BigDecimal
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
@@ -36,6 +40,62 @@ interface OutboxRepository {
     fun captureSale(
         event: OfflineSaleEvent,
         rawUtf8Json: ByteArray? = null
+    ): CaptureResult
+
+    /**
+     * Atomically captures a validated Contract Revision 3 (API v2) offline sale event.
+     *
+     * Invariants enforced:
+     * - Strict UTF-8 validation with REPORT error action (rejection of malformed bytes without silent replacement).
+     * - Explicit scope parameters (companyId, actorId, deviceId) MUST match the captured event identity before
+     *   any existing row is queried or disclosed.
+     * - Mandatory qualified currencyMinorUnits (0..6): rejects null, negative, or > 6; no fallback to 2 or currency guessing.
+     * - Money semantics validation before database write:
+     *   - Payment settled must be strictly positive and conform to currencyMinorUnits scale.
+     *   - Cash tender conservation: amountTendered == amountSettled + changeReturned, with tendered and change
+     *     conforming to currencyMinorUnits scale.
+     *   - Sum of line totals must exactly equal amountSettled.
+     *   - Each lineTotal and taxAmount must conform to currencyMinorUnits scale.
+     *   - Quantity, unitPrice, and taxRate preserve up to 6 decimal scale according to candidate specification without silent rounding.
+     * - Defensive copies of byte payloads to eliminate mutable source aliasing.
+     * - Stored payload_bytes is the exact canonical UTF-8 JSON bytes of the event, with stable eventVersion = 2.
+     * - Same company, event unique identity spans v1/v2:
+     *   - Same identity + matching payload digest: idempotent duplicate replay (existing record unmodified).
+     *   - Same identity + altered digest: scope-owned conflict, marking CONFLICT without replacing original event bytes.
+     *   - Terminal confirmed state immutability: CONFIRMED records can never be demoted by altered captures.
+     *   - Cross-scope collision (same company, foreign actor or device): generic rejection with zero existing digests or state leakage.
+     *   - Top-level cross-tenant isolation: identical clientEventId under a different companyId is completely independent.
+     * - Persistent auth lock respect: captures occurring while auth is denied are stored as AUTH_BLOCKED atomically,
+     *   preserving cash and bytes while preventing worker drains; capture NEVER unlocks auth.
+     *
+     * NOTE: This storage API provides local persistence and durability invariants ONLY.
+     * It does NOT authorize cash sales, does NOT enforce offline business policy, does NOT issue
+     * token/lease/master authorization proofs, and does NOT claim live capture.
+     */
+    fun captureSaleV2(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        currencyMinorUnits: Int,
+        intakeRequest: OfflineSaleIntakeRequestV2,
+        rawUtf8Json: ByteArray? = null
+    ): CaptureResult
+
+    fun captureSaleV2(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        currencyMinorUnits: Int,
+        event: OfflineSaleEventV2,
+        rawUtf8Json: ByteArray? = null
+    ): CaptureResult
+
+    fun captureSaleV2(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        currencyMinorUnits: Int,
+        rawUtf8Json: ByteArray
     ): CaptureResult
 
     /**
@@ -200,55 +260,278 @@ class OutboxRepositoryImpl(
             "Canonical bytes digest ($byteDigest) does not match event digest ($computedDigest) for event ${event.clientEventId}"
         }
 
+        return executeCaptureTransaction(
+            companyIdStr = event.companyId.value,
+            actorIdStr = event.actorId.value,
+            deviceIdStr = event.deviceId.value,
+            deviceLeaseIdStr = event.deviceLeaseId.value,
+            clientEventIdStr = event.clientEventId.value,
+            capturedAtStr = event.capturedAt,
+            eventVersion = event.eventVersion,
+            payloadDigestStr = computedDigest.value,
+            canonicalBytes = canonicalBytes
+        )
+    }
+
+    override fun captureSaleV2(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        currencyMinorUnits: Int,
+        rawUtf8Json: ByteArray
+    ): CaptureResult {
+        // 1. Strict UTF-8 decoding
+        val decoder = StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+        val jsonString = try {
+            decoder.decode(ByteBuffer.wrap(rawUtf8Json)).toString()
+        } catch (e: CharacterCodingException) {
+            throw IllegalArgumentException("Malformed UTF-8 byte sequence in rawUtf8Json", e)
+        }
+
+        // 2. Strict JSON parsing
+        val parsedJson = StrictJsonParser.parse(jsonString).asObject()
+
+        // 3. Resolve intake request
+        val intakeReq = if ("event" in parsedJson.properties) {
+            OfflineSaleIntakeRequestV2.fromStrictJson(parsedJson)
+        } else if ("request" in parsedJson.properties && "event" !in parsedJson.properties) {
+            val reqObj = parsedJson.require("request").asObject()
+            OfflineSaleIntakeRequestV2.fromStrictJson(reqObj)
+        } else if ("lines" in parsedJson.properties && "payment" in parsedJson.properties) {
+            val event = OfflineSaleEventV2.fromStrictJson(parsedJson)
+            OfflineSaleIntakeRequestV2(
+                clientEventId = event.clientEventId,
+                deviceId = event.deviceId,
+                capturedAt = event.capturedAt,
+                payloadDigest = event.computePayloadDigest(),
+                event = event
+            )
+        } else {
+            throw IllegalArgumentException("Unrecognized JSON object structure for v2 offline sale intake")
+        }
+
+        return captureSaleV2(
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            currencyMinorUnits = currencyMinorUnits,
+            intakeRequest = intakeReq,
+            rawUtf8Json = rawUtf8Json
+        )
+    }
+
+    override fun captureSaleV2(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        currencyMinorUnits: Int,
+        event: OfflineSaleEventV2,
+        rawUtf8Json: ByteArray?
+    ): CaptureResult {
+        val intakeReq = OfflineSaleIntakeRequestV2(
+            clientEventId = event.clientEventId,
+            deviceId = event.deviceId,
+            capturedAt = event.capturedAt,
+            payloadDigest = event.computePayloadDigest(),
+            event = event
+        )
+        return captureSaleV2(
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            currencyMinorUnits = currencyMinorUnits,
+            intakeRequest = intakeReq,
+            rawUtf8Json = rawUtf8Json
+        )
+    }
+
+    override fun captureSaleV2(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        currencyMinorUnits: Int,
+        intakeRequest: OfflineSaleIntakeRequestV2,
+        rawUtf8Json: ByteArray?
+    ): CaptureResult {
+        val event = intakeRequest.event
+
+        // Guard 1: Scope parameters MUST match captured identity BEFORE disclosing existing row
+        require(companyId == event.companyId) {
+            "Explicit companyId ($companyId) does not match captured event companyId (${event.companyId})"
+        }
+        require(actorId == event.actorId) {
+            "Explicit actorId ($actorId) does not match captured event actorId (${event.actorId})"
+        }
+        require(deviceId == event.deviceId && deviceId == intakeRequest.deviceId) {
+            "Explicit deviceId ($deviceId) does not match captured event deviceId (${event.deviceId})"
+        }
+
+        // Guard 2: Mandatory qualified currencyMinorUnits in 0..6 (no fallback / guessing)
+        require(currencyMinorUnits in 0..6) {
+            "currencyMinorUnits must be between 0 and 6, got $currencyMinorUnits (no fallback or guessing permitted)"
+        }
+
+        // Guard 3: Validate money semantics and exact minor units before transaction
+        val payment = event.payment
+        val settledBd = PaymentDecimalConsistency.parseAndValidateMonetaryAmount(payment.amountSettled.toPlainString(), currencyMinorUnits)
+            ?: throw IllegalArgumentException("payment.amountSettled (${payment.amountSettled.lexeme}) has invalid scale for currencyMinorUnits=$currencyMinorUnits")
+        require(settledBd > BigDecimal.ZERO) {
+            "payment.amountSettled must be strictly positive according to schema, got ${payment.amountSettled.lexeme}"
+        }
+
+        val tenderedBd = PaymentDecimalConsistency.parseAndValidateMonetaryAmount(payment.amountTendered.toPlainString(), currencyMinorUnits)
+            ?: throw IllegalArgumentException("payment.amountTendered (${payment.amountTendered.lexeme}) has invalid scale for currencyMinorUnits=$currencyMinorUnits")
+
+        val changeBd = PaymentDecimalConsistency.parseAndValidateMonetaryAmount(payment.changeReturned.toPlainString(), currencyMinorUnits)
+            ?: throw IllegalArgumentException("payment.changeReturned (${payment.changeReturned.lexeme}) has invalid scale for currencyMinorUnits=$currencyMinorUnits")
+
+        require(tenderedBd.compareTo(settledBd.add(changeBd)) == 0) {
+            "Payment tender conservation violated: tendered ($tenderedBd) != settled ($settledBd) + change ($changeBd)"
+        }
+
+        var lineSum = BigDecimal.ZERO
+        for (line in event.lines) {
+            val lineTotalBd = PaymentDecimalConsistency.parseAndValidateMonetaryAmount(line.lineTotal.toPlainString(), currencyMinorUnits)
+                ?: throw IllegalArgumentException("line.lineTotal (${line.lineTotal.lexeme}) has invalid scale for currencyMinorUnits=$currencyMinorUnits")
+            require(lineTotalBd > BigDecimal.ZERO) {
+                "lineTotal must be strictly positive according to schema, got ${line.lineTotal.lexeme}"
+            }
+
+            val taxAmountBd = PaymentDecimalConsistency.parseAndValidateMonetaryAmount(line.taxAmount.toPlainString(), currencyMinorUnits)
+                ?: throw IllegalArgumentException("line.taxAmount (${line.taxAmount.lexeme}) has invalid scale for currencyMinorUnits=$currencyMinorUnits")
+            require(taxAmountBd >= BigDecimal.ZERO) {
+                "taxAmount must be non-negative, got ${line.taxAmount.lexeme}"
+            }
+
+            lineSum = lineSum.add(line.lineTotal.value)
+        }
+
+        require(lineSum.compareTo(settledBd) == 0) {
+            "Sum of line totals ($lineSum) does not match payment settled ($settledBd)"
+        }
+
+        // Guard 4: Canonical UTF-8 bytes and digest verification
+        val canonicalBytes = if (rawUtf8Json != null) {
+            val decoder = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+            val jsonString = try {
+                decoder.decode(ByteBuffer.wrap(rawUtf8Json)).toString()
+            } catch (e: CharacterCodingException) {
+                throw IllegalArgumentException("Malformed UTF-8 byte sequence in rawUtf8Json for event ${event.clientEventId}", e)
+            }
+            val parsedJson = StrictJsonParser.parse(jsonString).asObject()
+            val rawDigest = PayloadDigest.fromBytes(rawUtf8Json)
+
+            if ("event" in parsedJson.properties) {
+                val parsedReq = OfflineSaleIntakeRequestV2.fromStrictJson(parsedJson)
+                require(parsedReq == intakeRequest) {
+                    "Provided rawUtf8Json envelope does not match OfflineSaleIntakeRequestV2 (client_event_id: ${event.clientEventId})"
+                }
+                CanonicalJsonSerializer.serialize(event).toByteArray(Charsets.UTF_8)
+            } else if ("lines" in parsedJson.properties) {
+                val parsedEvent = OfflineSaleEventV2.fromStrictJson(parsedJson)
+                require(parsedEvent == event) {
+                    "Provided rawUtf8Json does not match OfflineSaleEventV2 (client_event_id: ${event.clientEventId})"
+                }
+                if (rawDigest == event.computePayloadDigest()) {
+                    rawUtf8Json.clone()
+                } else {
+                    CanonicalJsonSerializer.serialize(event).toByteArray(Charsets.UTF_8)
+                }
+            } else if ("request" in parsedJson.properties) {
+                val parsedReq = OfflineSaleIntakeRequestV2.fromStrictJson(parsedJson.require("request").asObject())
+                require(parsedReq == intakeRequest) {
+                    "Provided rawUtf8Json does not match OfflineSaleIntakeRequestV2 (client_event_id: ${event.clientEventId})"
+                }
+                CanonicalJsonSerializer.serialize(event).toByteArray(Charsets.UTF_8)
+            } else {
+                CanonicalJsonSerializer.serialize(event).toByteArray(Charsets.UTF_8)
+            }
+        } else {
+            CanonicalJsonSerializer.serialize(event).toByteArray(Charsets.UTF_8)
+        }
+
+        val computedDigest = event.computePayloadDigest()
+        val byteDigest = PayloadDigest.fromBytes(canonicalBytes)
+        require(computedDigest == byteDigest) {
+            "Canonical bytes digest ($byteDigest) does not match event digest ($computedDigest) for event ${event.clientEventId}"
+        }
+        require(computedDigest == intakeRequest.payloadDigest) {
+            "Event digest ($computedDigest) does not match intake request payload digest (${intakeRequest.payloadDigest})"
+        }
+
+        // Guard 5: Execute atomic capture transaction sharing verified machinery
+        return executeCaptureTransaction(
+            companyIdStr = event.companyId.value,
+            actorIdStr = event.actorId.value,
+            deviceIdStr = event.deviceId.value,
+            deviceLeaseIdStr = event.deviceLeaseId.value,
+            clientEventIdStr = event.clientEventId.value,
+            capturedAtStr = event.capturedAt,
+            eventVersion = event.eventVersion,
+            payloadDigestStr = computedDigest.value,
+            canonicalBytes = canonicalBytes
+        )
+    }
+
+    private fun executeCaptureTransaction(
+        companyIdStr: String,
+        actorIdStr: String,
+        deviceIdStr: String,
+        deviceLeaseIdStr: String,
+        clientEventIdStr: String,
+        capturedAtStr: String,
+        eventVersion: Int,
+        payloadDigestStr: String,
+        canonicalBytes: ByteArray
+    ): CaptureResult {
         val now = clock()
-
-        // 2. Perform atomic transaction
         return database.runInTransaction<CaptureResult> {
-            val companyIdStr = event.companyId.value
-            val eventIdStr = event.clientEventId.value
-
-            val existingEvent = database.outboxDao().getEvent(companyIdStr, eventIdStr)
+            val existingEvent = database.outboxDao().getEvent(companyIdStr, clientEventIdStr)
             if (existingEvent != null) {
                 // Check scope isolation: actor and device MUST match!
-                if (existingEvent.actorId != event.actorId.value || existingEvent.deviceId != event.deviceId.value) {
+                if (existingEvent.actorId != actorIdStr || existingEvent.deviceId != deviceIdStr) {
                     // Cross-scope capture collision!
                     // Must NOT mutate existing event or state.
                     // Must NOT return existing record to the caller (zero data leakage).
                     return@runInTransaction CaptureResult.ScopeRejected(
-                        clientEventId = eventIdStr,
+                        clientEventId = clientEventIdStr,
                         message = "Capture rejected: clientEventId already exists under another actor or device in company $companyIdStr"
                     )
                 }
 
-                val existingState = database.outboxDao().getDeliveryState(companyIdStr, eventIdStr)
-                    ?: throw IllegalStateException("Missing delivery state for existing event: $eventIdStr")
+                val existingState = database.outboxDao().getDeliveryState(companyIdStr, clientEventIdStr)
+                    ?: throw IllegalStateException("Missing delivery state for existing event: $clientEventIdStr")
 
-                if (existingEvent.payloadDigest == computedDigest.value) {
+                if (existingEvent.eventVersion == eventVersion && existingEvent.payloadDigest == payloadDigestStr) {
                     // Idempotent replay: return existing record unmodified
                     CaptureResult.Duplicate(OutboxRecord(existingEvent, existingState))
                 } else {
-                    // Altered payload conflict:
+                    // Altered payload / version conflict:
                     // Terminal immutability check: if existing record is CONFIRMED, it CANNOT be demoted to CONFLICT!
                     if (existingState.status == OutboxStatus.CONFIRMED.wireValue) {
                         CaptureResult.Conflict(
-                            clientEventId = eventIdStr,
+                            clientEventId = clientEventIdStr,
                             existingDigest = existingEvent.payloadDigest,
-                            incomingDigest = computedDigest.value,
+                            incomingDigest = payloadDigestStr,
                             existingRecord = OutboxRecord(existingEvent, existingState)
                         )
                     } else {
                         // Mark CONFLICT on delivery state with NO replacement of original event
                         database.outboxDao().markConflict(
                             companyId = companyIdStr,
-                            clientEventId = eventIdStr,
-                            reason = "Local conflict: incoming digest ${computedDigest.value} != existing ${existingEvent.payloadDigest}",
+                            clientEventId = clientEventIdStr,
+                            reason = "Local conflict: incoming digest $payloadDigestStr != existing ${existingEvent.payloadDigest}",
                             nowMillis = now
                         )
-                        val updatedState = database.outboxDao().getDeliveryState(companyIdStr, eventIdStr)!!
+                        val updatedState = database.outboxDao().getDeliveryState(companyIdStr, clientEventIdStr)!!
                         CaptureResult.Conflict(
-                            clientEventId = eventIdStr,
+                            clientEventId = clientEventIdStr,
                             existingDigest = existingEvent.payloadDigest,
-                            incomingDigest = computedDigest.value,
+                            incomingDigest = payloadDigestStr,
                             existingRecord = OutboxRecord(existingEvent, updatedState)
                         )
                     }
@@ -256,7 +539,7 @@ class OutboxRepositoryImpl(
             } else {
                 // New event insertion.
                 // Check if queue is locked due to auth denial:
-                val isLocked = database.outboxDao().isScopeLocked(companyIdStr, event.actorId.value, event.deviceId.value)
+                val isLocked = database.outboxDao().isScopeLocked(companyIdStr, actorIdStr, deviceIdStr)
                 val initialStatus = if (isLocked) {
                     OutboxStatus.AUTH_BLOCKED.wireValue
                 } else {
@@ -265,21 +548,21 @@ class OutboxRepositoryImpl(
                 val initialError = if (isLocked) "Captured while queue locked due to auth denial" else null
 
                 val eventEntity = OutboxEventEntity(
-                    clientEventId = eventIdStr,
+                    clientEventId = clientEventIdStr,
                     companyId = companyIdStr,
-                    actorId = event.actorId.value,
-                    deviceId = event.deviceId.value,
-                    deviceLeaseId = event.deviceLeaseId.value,
-                    capturedAt = event.capturedAt,
-                    payloadDigest = computedDigest.value,
+                    actorId = actorIdStr,
+                    deviceId = deviceIdStr,
+                    deviceLeaseId = deviceLeaseIdStr,
+                    capturedAt = capturedAtStr,
+                    payloadDigest = payloadDigestStr,
                     payloadBytes = canonicalBytes.clone(),
-                    eventVersion = event.eventVersion
+                    eventVersion = eventVersion
                 )
                 val stateEntity = OutboxDeliveryStateEntity(
-                    clientEventId = eventIdStr,
+                    clientEventId = clientEventIdStr,
                     companyId = companyIdStr,
-                    actorId = event.actorId.value,
-                    deviceId = event.deviceId.value,
+                    actorId = actorIdStr,
+                    deviceId = deviceIdStr,
                     status = initialStatus,
                     attemptCount = 0,
                     lastAttemptAt = null,
