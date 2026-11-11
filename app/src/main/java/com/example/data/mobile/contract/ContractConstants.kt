@@ -40,7 +40,7 @@ object ContractConstants {
     // Small Trader Restricted Canonical JSON Profile v1 bounds
     const val MAX_PAYLOAD_BYTES: Int = 1_048_576       // 1 MB payload bound
     const val MAX_NESTING_DEPTH: Int = 32              // Maximum recursion / nesting depth
-    const val MAX_STRING_LENGTH: Int = 65_536          // 64 KB string literal bound
+    const val MAX_STRING_LENGTH: Int = 65_536          // Decoded UTF-16 code units (not encoded bytes)
     const val MAX_SAFE_INTEGER: Long = 9_007_199_254_740_991L   // 2^53 - 1 (RFC 8785 IEEE 754 safe integer)
     const val MIN_SAFE_INTEGER: Long = -9_007_199_254_740_991L  // -(2^53 - 1)
 }

@@ -148,6 +148,9 @@ object CanonicalJsonSerializer {
     }
 
     fun escapeString(s: String): String {
+        if (s.length > ContractConstants.MAX_STRING_LENGTH) {
+            throw CanonicalSerializationException("JSON string length exceeds maximum allowed ${ContractConstants.MAX_STRING_LENGTH} UTF-16 code units")
+        }
         val out = StringBuilder()
         out.append('"')
         var i = 0
