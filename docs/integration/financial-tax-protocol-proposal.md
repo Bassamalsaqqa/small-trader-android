@@ -37,7 +37,7 @@ Mobile contract revision 2 lacks line tax identity (`tax_rate_id`), calculation 
    - Backend `product_units` stores `conversion_to_base`, but frozen offline event v1 lines omit conversion snapshots. A catalog digest alone cannot reconstruct historical ratios upon sync without explicit line snapshots or retained server catalog snapshots.
 6. **Room Database & Parser Reality**:
    - Room table `outbox_events` stores generic BLOB `payload_bytes` and integer `event_version`. Generic BLOB storage physically accommodates v2 without SQLite migration or Room schema bump.
-   - However, current typed Kotlin v1 capture models and parsers (`OfflineSaleIntakeRequest`, `StrictJsonParser`) reject v2 payloads until separately reviewed.
+   - However, current typed Kotlin v1 capture models (`OfflineSaleIntakeRequest` and event models) reject v2 payloads until separately reviewed. The generic `StrictJsonParser` validates JSON syntax, not event versions.
    - Room `OutboxStatus` defines exactly 6 states (`PENDING`, `IN_FLIGHT`, `UNKNOWN_ACK`, `CONFIRMED`, `CONFLICT`, `AUTH_BLOCKED`). There is no persisted `unsupported_version` status; unsupported v1 events map to `CONFLICT` with a safe reason string.
 
 ---
@@ -52,6 +52,7 @@ Mobile contract revision 2 lacks line tax identity (`tax_rate_id`), calculation 
 - **Tax Association Semantics**:
   - Catalog `tax_rate: null, tax_rate_id: null` denotes *absence of default tax association*, NEVER zero tax.
   - **New Proposed Rule**: Explicit "No Tax" UI selection transmits `tax_rate_id: null`, `tax_rate: "0.000000"`, `tax_inclusive: false`.
+- **Master validation**: Resolve public tax identity within the authenticated company, require an active master, and compare its exact percentage and inclusive/exclusive mode with the captured values. Never select a master by percentage alone. Revalidate inside the posting transaction; mismatches fail closed without repricing.
 - **Permissions & Stock Guards**:
   - Price override permission `sales.invoice.change_price` is preserved; actors with this permission do not trigger conflict on authorized custom prices.
   - Stock availability relies on canonical `StockAvailabilityQuery` at `$issueDate`, avoiding blanket catalog conflicts for non-stock items.
@@ -108,8 +109,9 @@ Deterministic calculation vector (`SalesLineCalculator.php` parity, ILS gross 50
 
 ### 3.4 Server Receipt & Idempotent Replay Architecture
 - **Dedicated Proposed Receipt**: Scoped with `UNIQUE(company_id, client_event_id)` and bound to the original `(actor_id, device_id)` on lookup and replay.
-- **Fresh Authentication**: Must revalidate actor credentials before disclosing status or payload digests.
+- **Fresh Authentication**: Validate token/device, current membership, password epoch and required permissions; check original actor/device scope before disclosing status or payload digests. Revalidate authority within the write transaction. Browser `CommandSessionGuard` requires browser session proof; a separately reviewed mobile authority boundary is needed without fabricating browser proof or weakening the guard.
 - **Single Transaction Execution**: The same transaction inserts/locks the unique receipt and invokes canonical writers (`SalesInvoiceCommands` and payment actions). On any failure, the entire transaction rolls back cleanly; no dangling committed "processing" rows are stored.
+- **Digest conflict**: The same company/event identity with different canonical payload bytes/digest returns generic HTTP 409 without posting or replacing the original receipt.
 - **Deterministic Replay**: Matching replayed `client_event_id` and digest returns the original durable outcome (`invoice_id`, `payment_id`, `invoice_number`, `grand_total`) without creating new drafts or confirmation tokens.
 
 ### 3.5 Outbox Delivery States & Security Boundaries
@@ -123,7 +125,7 @@ Deterministic calculation vector (`SalesLineCalculator.php` parity, ILS gross 50
 ### 4.1 Implementation Qualification Gates
 1. **MariaDB Concurrent Receipt Qualification**: Validate the unique insert and row-locking concurrency algorithm against concurrent worker races under real MariaDB isolation.
 2. **Currency Minor Units Writer Parity**: Qualify all server financial writers (`SalesDocumentRules::price`, calculators) to read `currencies.minor_units` rather than hardcoding JOD 3 / else 2 before client metadata parity. Reject unsupported currencies explicitly.
-3. **Conversion Ratio Snapshot Decision**: Authorize either explicit line `conversion_to_base` in event v2 or server-side historical catalog snapshot retention.
+3. **Conversion Ratio Snapshot Decision**: Prefer the minimal explicit line `conversion_to_base` snapshot over new server history infrastructure. Bind it into the digest; validate positive exact decimals and product/unit membership, then compare to the current canonical conversion under the transaction. A changed ratio conflicts without reinterpretation. Historical retention remains an alternative requiring separate justification.
 4. **Unapproved Operational Policies**: Device lease timeouts, negative stock overselling, and offline tax invoice legality remain strictly UNAPPROVED (default OFF/NULL).
 
 ### 4.2 Source Anchor Table
