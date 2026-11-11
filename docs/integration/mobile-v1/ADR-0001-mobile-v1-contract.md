@@ -98,22 +98,31 @@ Prior iterations suffered from informal contract specifications, toy validators,
 
 ---
 
-## 3. OpenAPI 3.1 Endpoint Architecture
+### 3. OpenAPI 3.1 Endpoint Architecture
 
-The contract defines 11 REST endpoints:
-- **7 POST Endpoints with Request & Response Payloads**:
-  1. `POST /api/mobile/v1/auth/challenge`
-  2. `POST /api/mobile/v1/auth/login`
-  3. `POST /api/mobile/v1/auth/logout`
-  4. `POST /api/mobile/v1/devices/{deviceId}/revoke`
-  5. `POST /api/mobile/v1/companies/{companyId}/sales/preview`
-  6. `POST /api/mobile/v1/companies/{companyId}/sales/commit`
-  7. `POST /api/mobile/v1/companies/{companyId}/offline-events`
-- **4 GET Endpoints (Query & Path Parameters Only, No Request Body)**:
-  8. `GET /api/mobile/v1/companies/{companyId}/bootstrap`
-  9. `GET /api/mobile/v1/companies/{companyId}/products`
-  10. `GET /api/mobile/v1/companies/{companyId}/customers`
-  11. `GET /api/mobile/v1/companies/{companyId}/offline-events/{clientEventId}/status`
+The contract defines 16 REST endpoints across explicit API versions:
+- **Preserved API v1 Endpoints (11 endpoints: Read/Auth & Historical Compatibility)**:
+  - *7 POST Endpoints with Request & Response Payloads*:
+    1. `POST /api/mobile/v1/auth/challenge`
+    2. `POST /api/mobile/v1/auth/login`
+    3. `POST /api/mobile/v1/auth/logout`
+    4. `POST /api/mobile/v1/devices/{deviceId}/revoke`
+    5. `POST /api/mobile/v1/companies/{companyId}/sales/preview` (mapped to `archived-v1-sale-preview-request.json` & response)
+    6. `POST /api/mobile/v1/companies/{companyId}/sales/commit`
+    7. `POST /api/mobile/v1/companies/{companyId}/offline-events` (mapped to `archived-v1-offline-sale-intake-request.json`)
+  - *4 GET Endpoints (Query & Path Parameters Only)*:
+    8. `GET /api/mobile/v1/companies/{companyId}/bootstrap` (mapped to `archived-v1-bootstrap-response.json`)
+    9. `GET /api/mobile/v1/companies/{companyId}/products`
+    10. `GET /api/mobile/v1/companies/{companyId}/customers`
+    11. `GET /api/mobile/v1/companies/{companyId}/offline-events/{clientEventId}/status`
+- **Agreed Breaking API v2 Endpoints (5 endpoints: Line Tax Identity, Intake v2 & Minor Units)**:
+  - *4 POST Endpoints with Request & Response Payloads*:
+    12. `POST /api/mobile/v2/companies/{companyId}/sales/preview` (mapped to `sale-preview-request.json` & response)
+    13. `POST /api/mobile/v2/companies/{companyId}/sales/commit` (mapped to `sale-commit-request.json` & response)
+    14. `POST /api/mobile/v2/companies/{companyId}/offline-events` (mapped to `offline-sale-intake-request.json` & response)
+  - *2 GET Endpoints*:
+    15. `GET /api/mobile/v2/companies/{companyId}/bootstrap` (mapped to `bootstrap-response.json` requiring `base_currency_minor_units`)
+    16. `GET /api/mobile/v2/companies/{companyId}/offline-events/{clientEventId}/status`
 
 All error responses across all endpoints standardize on `schemas/error-response.json` (RFC 7807/9457 Problem Details shape).
 
@@ -126,6 +135,7 @@ All error responses across all endpoints standardize on `schemas/error-response.
   UNIQUE KEY uq_mobile_event (company_id, client_event_id)
   ```
   Concurrency is resolved via atomic database constraint plus row locking (`lockForUpdate`) inside a database transaction.
+  The receipt uniqueness domain `(company_id, client_event_id)` spans API versions (must not duplicate across v1 and v2).
 - **Idempotent Replay Handling**:
   - If `(company_id, client_event_id)` matches an existing record and `request.payload_digest == existing.payload_digest`: return stored canonical outcome immediately. Do NOT regenerate invoices, numbers, or accounting lines.
   - If `request.payload_digest != existing.payload_digest`: reject immediately with **HTTP 409 Conflict** and structured conflict evidence.
@@ -156,51 +166,77 @@ Product tax_rate and tax_rate_id form a nullable pair. Null means NO PRODUCT DEF
 
 Raw JSON payload limit is 1 MiB of UTF-8 bytes. Each decoded JSON string is bounded at 65536 UTF-16 code units, checked after appending a full escaped surrogate pair. Unicode hex escapes accept unsigned ASCII hex digits only; unescaped controls are rejected. Integers must be within the exact safe integer domain [-9007199254740991,9007199254740991], consistently for parsed and raw values. Economic decimal input lexemes are preserved without trimming or rounding; floats are forbidden. Economic bounded-string validation must require a full match (a trailing newline must not pass a dollar-anchor check). These clarify parser requirements, not a change to immutable financial fields or digest vectors.
 
-## Coordinated DRAFT revision 3 (financial contract, line tax amendment, event v2, currency minor units)
+## Coordinated DRAFT revision 3 (financial contract, line tax amendment, event v2, currency minor units, explicit API v2)
 
-This explicit revision introduces proposed contract revision 3 for financial line tax identity, mode, and conversion snapshots, offline event version 2, and currency minor units metadata. Historical baseline is Git `ec8220934839ade0c4fe5408398ab1a313feb09c`, revision 2 manifest SHA-256 `ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659` (preserved unchanged as parent reference). Status: **PROPOSED NOT LIVE**. API prefix remains frozen at `/api/mobile/v1`.
+This explicit revision introduces proposed contract revision 3 for financial line tax identity, mode, and conversion snapshots, offline event version 2, currency minor units metadata, and explicit `/api/mobile/v2` breaking endpoint representations. Historical baseline is Git `ec8220934839ade0c4fe5408398ab1a313feb09c`, revision 2 manifest SHA-256 `ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659` (preserved unchanged as parent reference). Status: **PROPOSED NOT LIVE**.
 
-### Distinction Between Contract Revision and Event Version
-Contract revision (Revision 3) and offline event version (`event_version: 2`) are strictly distinct concepts. Contract revision tracks the evolution of the overall mobile API specification and schemas (ADR-0001, OpenAPI 3.1, JSON schemas). Event version tracks the wire representation of the offline event payload. Offline event version 1 is archived; new capture requires event version 2.
+### Distinction Between Endpoint Version (API v2), Contract Revision (Revision 3), and Event Version (v2)
+Three distinct version concepts are strictly separated:
+1. **Endpoint Version (`/api/mobile/v2`)**: The URL route prefix for breaking financial write endpoints. Existing `/api/mobile/v1` routes preserve parent revision-2 read/auth behavior and historical archived schemas (`archived-v1-*.json`) unchanged.
+2. **Contract Revision (Revision 3)**: The coordinated specification version covering schemas, OpenAPI 3.1, ADR-0001, test fixtures, and validation suites.
+3. **Offline Event Version (`event_version: 2`)**: The wire payload version for offline sales events. Offline intake on `/api/mobile/v2` strictly rejects `event_version: 1` with HTTP 409 Conflict without mutating stored client bytes.
+
+### Normative Online Canonical Intent Profile
+Online sale preview (`POST /api/mobile/v2/companies/{companyId}/sales/preview`) normalizes the complete economic intent into one normative canonical intent profile object before computing its canonical SHA-256 digest (`payload_digest`):
+- **Exact Field Selection**:
+  - `actor_id`: Authoritative staff ULID bound from authenticated Bearer session token.
+  - `company_id`: Authoritative company ULID bound from URL route parameter `{companyId}`.
+  - `currency`: ISO-4217 3-character uppercase currency code from request.
+  - `currency_minor_units`: Server-qualified currency minor units (integer `0..6`) from currency master context.
+  - `device_id`: Device UUID from request.
+  - `client_event_id`: Client transaction UUID from request.
+  - `customer_id`: Customer ULID from request.
+  - `warehouse_id`: Warehouse ULID from request.
+  - `lines`: Ordered array of line items preserving client submission order, each containing:
+    - `product_id`: Catalog product ULID.
+    - `product_unit_id`: Packaging unit ULID.
+    - `conversion_to_base`: Positive exact decimal string snapshot.
+    - `quantity`: Positive exact decimal string lexeme.
+    - `unit_price`: Nonnegative exact decimal string lexeme.
+    - `tax_rate_id`: Public nullable Crockford ULID.
+    - `tax_rate`: Exact percentage string snapshot (`0..100`, up to 6 decimals).
+    - `tax_inclusive`: Boolean flag.
+  - `payment`: Cash payment intent containing:
+    - `settlement_mode`: `"full"` | `"unpaid"` | `"partial"`.
+    - `payment_method`: `"cash"`.
+    - `cash_account_id`: Approved cash register ULID.
+    - `amount`: Exact monetary decimal string lexeme.
+- **Lexeme Preservation & No Floats**: All quantity and monetary values are strictly validated string decimal lexemes; IEEE-754 floats are forbidden. No implicit rounding, truncating, or repricing occurs prior to canonical hashing.
+- **Restricted JCS Serialization (RFC 8785 Subset)**: Object keys sorted by UTF-16 code units; characters < 0x20 escaped; no whitespace between tokens.
+- **Bound Preview Token Placeholder**: The computed SHA-256 digest is embedded in an illustrative opaque sample token (`preview_token`) consisting of base64-encoded JSON claims `{"version": 2, "company_id": "...", "digest": "sha256:..."}` and an illustrative signature suffix. The token is an illustrative opaque placeholder for contract binding, not fake cryptographic proof.
 
 ### Financial Line Schema Amendment
-Both online sale preview (`POST /sales/preview`) and offline event intake (`POST /offline-events`) lines are amended with explicit economic fields:
+Both online sale preview (`POST /api/mobile/v2/companies/{companyId}/sales/preview`) and offline event intake (`POST /api/mobile/v2/companies/{companyId}/offline-events`) require:
 1. `tax_rate_id`: Public nullable 26-character Crockford ULID (`^[0-7][0-9A-HJKMNP-TV-Z]{25}$`).
-2. `tax_rate`: Exact percentage snapshot string (`0..100`, up to 6 decimal places: `^(?:100(?:\.0{1,6})?|(?:0|[1-9][0-9]?)(?:\.[0-9]{1,6})?)$`).
+2. `tax_rate`: Exact percentage snapshot string (`0..100`, up to 6 decimal places: `^(?:100(?:\\.0{1,6})?|(?:0|[1-9][0-9]?)(?:\\.[0-9]{1,6})?)$`).
 3. `tax_inclusive`: Boolean flag (`true` for gross inclusive tax calculation, `false` for net exclusive tax calculation).
-4. `conversion_to_base`: Positive exact decimal string (`^(?:0\.(?=[0-9]{1,6}$)[0-9]*[1-9][0-9]*|[1-9][0-9]{0,13}(?:\.[0-9]{1,6})?)$`) matching the catalog packaging unit conversion multiplier.
+4. `conversion_to_base`: Positive exact decimal string (`^(?:0\\.(?=[0-9]{1,6}$)[0-9]*[1-9][0-9]*|[1-9][0-9]{0,13}(?:\\.[0-9]{1,6})?)$`) matching the catalog packaging unit conversion multiplier.
 
 ### Explicit No-Tax vs. Catalog Null Tax Pair
 - **Catalog Null Pair**: In `GET /products`, `tax_rate: null, tax_rate_id: null` denotes the *absence of a product default tax association*, NEVER zero tax or tax exemption. Mature products have no tax foreign keys.
-- **Explicit No-Tax Selection**: When an operator explicitly selects "No Tax" in the client UI, the line transmits `tax_rate_id: null`, `tax_rate: "0.000000"`, `tax_inclusive: false`. Any combination of `tax_rate_id: null` with non-zero rate or inclusive mode is strictly rejected by the proposed schema; corresponding server validation remains to be implemented.
+- **Explicit No-Tax Selection**: When an operator explicitly selects "No Tax" in the client UI, the line transmits `tax_rate_id: null`, `tax_rate: "0.000000"`, `tax_inclusive: false`. Any combination of `tax_rate_id: null` with non-zero rate or inclusive mode is strictly rejected by the schema and server validation.
 - **Server Master Resolution**: When `tax_rate_id` is non-null, the server resolves the public ULID to an active tax rate master within the authenticated company, revalidating exact percentage and tax mode under the database transaction. Fails closed on mismatch without repricing; never infers or guesses a master record by percentage alone.
 
-### Currency Minor Units in Bootstrap
-The bootstrap response (`GET /bootstrap`) includes `base_currency_minor_units` (integer `0..6`).
-- **Source Anchor & Qualification Requirement**: Backend `SalesDocumentRules::price` (`app/Services/Sales/SalesDocumentRules.php`) currently hardcodes `$currency === 'JOD' ? 3 : 2`. Client metadata parity requires qualifying all server financial writers to read `currencies.minor_units` before relying on dynamic currency decimals. No guessing currency metadata.
+### Source Currency Qualification & Financial Defaults
+- **Source Currency Codebase Inconsistency**: Backend `SalesDocumentRules::price` (`app/Services/Sales/SalesDocumentRules.php`) currently hardcodes `$currency === 'JOD' ? 3 : 2`. This is a codebase quirk/inconsistency, not a universal rule or universal rejection of other currencies. Dynamic currency minor unit parity requires qualifying all server financial writers to read `currencies.minor_units`. No client guessing of currency metadata.
+- **Zero Financial Defaults**: No financial defaults exist. Missing tax identity, tax mode, conversion snapshot, or currency scale fails closed; no fallback may invent economic terms.
+- **Offline Policy Null Lease**: When `offline_policy.enabled` is `false` (`availability: "unavailable"`), `device_lease` is strictly `null`. No offline lease is ever granted or retained when offline capture is disabled.
 
-### Canonical Tax Calculation Parity
-Calculations follow `SalesLineCalculator.php` (ROUND_HALF_UP at minor units):
-- ILS gross 50.000000, 16% inclusive, 2 minor units:
+### Arithmetic Qualification & Decimal Parity
+- **JSON Schema Syntax Limitation**: JSON Schema Draft 2020-12 validates string lexeme syntax and regex boundaries only. Multi-field arithmetic consistency is enforced by transactional server domain logic.
+- **Server Decimal Consistency Required**: Backend writers enforce exact arithmetic: line subtotals and taxes, header grand total balance, and cash tender balance (`amount_tendered == amount_settled + change_returned`, `amount_settled == grand_total`).
+- **Fixture Arithmetic Verification**: Fixture arithmetic tests in validation suites invoke genuine exact calculator helpers implementing `SalesLineCalculator.php` / `RoundingMode::HALF_UP` parity. They verify fixture correctness and do not claim universal server runtime validation.
+- **Reference Calculation (ILS gross 50.000000, 16% inclusive, 2 minor units)**:
   - `subtotal = 50.000000`
   - `net_before_tax = round(50.00 / 1.16, 2) = 43.100000`
   - `tax_amount = 50.00 - 43.10 = 6.900000` (NOT unrounded floating `6.896552`)
   - `line_total = 43.10 + 6.90 = 50.000000`
 
 ### Canonical Stale-Preview Behavior
-`computePreviewRevision` in `SalesInvoiceCommands.php` fingerprints current product and unit default prices. Any subsequent price edit invalidates the preview token, even if the acting user holds the `sales.invoice.change_price` override permission. The mobile client must preserve this canonical behavior: stale previews fail closed, requiring a fresh preview. Existing internal blocker names are not established mobile HTTP guarantees. No relaxed stale token rules, no silent refresh.
+`SalesInvoiceCommands::computePreviewRevision` fingerprints current product and unit default prices. Any subsequent price edit invalidates the preview token, even if the acting user holds the `sales.invoice.change_price` override permission. The mobile client must preserve this canonical behavior: stale previews fail closed, requiring a fresh preview. No relaxed stale token rules, no silent refresh, and no stale-preview exemption for price overrides.
 
-### Proposed Mobile Authority Boundary
-The mobile write transaction must re-verify the active bearer token, device installation UUID binding, tenant company membership, password epoch, and required granular permissions (`sales.create`) within the transaction. Browser `CommandSessionGuard` requires browser database session proof; the mobile client must NOT fabricate browser session records.
+### Proposed Mobile Authority Boundary & PR88 Middleware Requirements
+- **PR88 Boundary Scope**: PR88's draft `MobileApiBoundary`, provider registration, and exception hook only recognize the `/api/mobile/v1` prefix. Mounting middleware on `/api/mobile/v2` routes would bypass prefix-specific checks if unadapted. A separate reviewed v2 boundary must explicitly cover: default-OFF feature switch, authentication, company context setup/reset, input/schema validation, rate limits, redacted errors, and exception handling.
+- **Token Authority Isolation**: Existing v1 staff and device tokens confer no implicit financial authority on `/api/mobile/v2`; financial token/grant boundaries remain proposed qualifications with no runtime endpoints created here.
+- **Cross-Version Receipt Identity**: The durable receipt uniqueness domain `(company_id, client_event_id)` spans API versions. Original actor/device scope and current authorization must be verified before status or replay disclosure, including legacy unsupported version responses.
 
-### Immutable Durable Receipt & Idempotent Replay
-- Dedicated receipt table scoped with `UNIQUE(company_id, client_event_id)` bound to original `(actor_id, device_id)`.
-- Replay with identical payload bytes and digest returns the original durable outcome (`invoice_id`, `payment_id`, `invoice_number`, `grand_total`).
-- Altered payload bytes or digest under an existing `client_event_id` returns HTTP 409 Conflict.
-- High-concurrency unique insert and row-locking behavior requires qualification against real MariaDB test suites; schema fixtures assert contract consistency only.
-
-### Legacy v1 Unsupported Intake Mapping
-The v2 intake endpoint accepts only `event_version: 2`. Pre-existing offline events with `event_version: 1` encountering the endpoint receive HTTP 409 Conflict with detail `unsupported_event_version_1`. The client Room outbox transitions to `CONFLICT` state while preserving the original `payload_bytes`, `client_event_id`, and `payload_digest` without mutation.
-
-### Offline Policy Default
-Default offline policy remains strictly disabled (`enabled: false, availability: "unavailable"`) with null `device_lease`. No operational caps or numeric lease limits are authorized without explicit business approval.

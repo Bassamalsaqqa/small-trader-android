@@ -2,26 +2,35 @@
 """
 tools/validate-mobile-contract.py
 
-Comprehensive Small Trader Mobile V1 Contract Validation Suite:
+Comprehensive Small Trader Mobile Contract Validation Suite (Draft Revision 3):
 1. Validates all JSON Schemas in docs/integration/mobile-v1/schemas/ using genuine Draft 2020-12
 2. Validates OpenAPI 3.1 specification using openapi-spec-validator with path parameter,
-   security, query pagination/search, and status schema checks
-3. Validates all Golden Fixtures against schemas with Draft 2020-12 and envelope equality bindings
+   security, query pagination/search, and status schema checks across /api/mobile/v1 and /api/mobile/v2
+3. Validates all Golden Fixtures against schemas with Draft 2020-12 and envelope/profile equality bindings
    (both historical v1 compatibility vectors and current v2 / revision 3 payloads)
 4. Validates Golden Canonical JSON and SHA-256 Digest test vectors (Restricted JCS profile v1)
 5. Validates Regression Fixtures (contract consistency only; Laravel SalesLineCalculator ROUND_HALF_UP,
    16% tax percentage, line round sequence, canonical ILS 50 gross 16% inclusive parity,
    trailing-zero quantities, boundary magnitudes, lost-ACK replay, tenant mismatch,
    auth revocation, and legacy v1 intake conflict mapping)
-6. Runs meaningful Negative & Contract Validation Tests (bad refs, missing params, undefined schemes,
-   negative/zero quantities, IEEE-754 floats, extra properties, tampered digests, duplicate keys,
-   ULID acceptance & UUID entity rejection, tax > 100 rejection, six-place trailing-zero quantities,
-   packaging unit identity, preview token digest binding, MFA mutual exclusion,
-   explicit No-Tax pair rules, ULID bounds on tax_rate_id, tax_inclusive mode constraints,
-   conversion_to_base positive decimal constraints, legacy v1 intake rejection,
-   v2 digest tamper detection, missing/out-of-range currency minor units,
-   and revision 2 & revision 3 positive/negative suites)
-7. Verifies reproducible SHA-256 manifest (fails closed if missing without --generate-manifest)
+6. Runs meaningful Negative & Contract Validation Tests:
+   - Genuine schema rejection: bad refs, missing params, undefined schemes, negative/zero quantities,
+     IEEE-754 floats, extra properties, duplicate keys, ULID acceptance & UUID entity rejection,
+     tax > 100 rejection, six-place trailing-zero quantities, packaging unit identity,
+     MFA mutual exclusion, explicit No-Tax pair rules, ULID bounds on tax_rate_id,
+     tax_inclusive mode constraints, conversion_to_base positive decimal constraints,
+     legacy v1 intake rejection, missing/out-of-range currency minor units.
+   - Genuine verifier/helper calls (Checks 8, 9, 16, 23) replacing tautological comparisons:
+     envelope mismatch, v1 tampered digest, preview commit token binding, v2 tampered digest.
+   - Online canonical intent profile mutation tests (Check 26a-k): actor, company, device, event,
+     tax identity, tax inclusive mode, conversion to base, decimal lexeme, line order, payment,
+     and currency minor units tampering.
+   - Manifest verification mutation tests (Check 27a-e): real filesystem mutation test (temporary
+     untracked file restored cleanly), extra entry, duplicate entry, malformed line, checksum mismatch.
+   - Archive byte checks (Check 28): historical goldens and archived schemas match exact parent bytes.
+   - Revision 2 (89 cases) and Revision 3 (31 cases) positive/negative suites.
+7. Verifies reproducible SHA-256 manifest with exact set equality discovered vs stored,
+   failing closed on extra/missing/duplicate/malformed entries.
 
 Zero bare 'assert' statements — safe under python3 -O.
 
@@ -40,10 +49,11 @@ import os
 import json
 import hashlib
 import re
+import base64
 import decimal
 from decimal import Decimal, ROUND_HALF_UP, ROUND_HALF_EVEN
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 import jsonschema
 from jsonschema import Draft202012Validator, FormatChecker
@@ -53,12 +63,14 @@ import referencing
 from referencing import Registry, Resource
 import openapi_spec_validator
 
+
 def full_pattern(validator, pattern, instance, schema):
     # JSON Schema search semantics plus strict end boundary for this contract's anchored patterns.
     if isinstance(instance, str) and re.search(pattern, instance) is None:
         yield JsonSchemaValidationError("String does not match pattern")
     elif isinstance(instance, str) and pattern.endswith("$") and re.fullmatch(pattern[:-1], instance) is None:
         yield JsonSchemaValidationError("String must match the entire bounded lexeme")
+
 
 ContractValidator = extend(Draft202012Validator, {"pattern": full_pattern})
 
@@ -72,15 +84,36 @@ SCHEMAS_DIR = BASE_DIR / "schemas"
 FIXTURES_DIR = BASE_DIR / "fixtures"
 OPENAPI_FILE = BASE_DIR / "openapi.json"
 MANIFEST_FILE = BASE_DIR / "manifest.sha256"
+DECISIONS_FILE = REPO_ROOT / "docs" / "integration" / "mobile-v1-revision-3-decisions.md"
 
 
 # ---------------------------------------------------------------------------
-# Restricted Canonical JSON Profile v1 (RFC 8785 Subset)
+# Custom Exceptions for Contract Verifiers
 # ---------------------------------------------------------------------------
 
 class CanonicalSerializationError(Exception):
     pass
 
+
+class IntakeEnvelopeValidationError(Exception):
+    pass
+
+
+class CommitTokenBindingError(Exception):
+    pass
+
+
+class IntentProfileValidationError(Exception):
+    pass
+
+
+class ManifestValidationError(Exception):
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Restricted Canonical JSON Profile v1 (RFC 8785 Subset)
+# ---------------------------------------------------------------------------
 
 def escape_jcs_string(s: str) -> str:
     """Escapes string according to RFC 8785 rules."""
@@ -166,6 +199,249 @@ def parse_json_reject_duplicates(raw_str: str) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# Contract Verification Helpers (Genuine Validators replacing tautological checks)
+# ---------------------------------------------------------------------------
+
+def verify_offline_intake_envelope_and_digest(envelope: Dict[str, Any]) -> Tuple[bool, str]:
+    """
+    Genuine verification helper for offline intake transport delivery envelope:
+    1. Checks envelope client_event_id equals inner event client_event_id.
+    2. Checks envelope device_id equals inner event device_id.
+    3. Checks envelope captured_at equals inner event captured_at.
+    4. Computes restricted canonical SHA-256 digest of inner event.
+    5. Verifies envelope payload_digest matches computed digest.
+    Raises IntakeEnvelopeValidationError on any invariant violation.
+    """
+    if "event" not in envelope or not isinstance(envelope["event"], dict):
+        raise IntakeEnvelopeValidationError("Offline intake envelope missing required 'event' object")
+    ev = envelope["event"]
+
+    if envelope.get("client_event_id") != ev.get("client_event_id"):
+        raise IntakeEnvelopeValidationError(
+            f"Envelope client_event_id '{envelope.get('client_event_id')}' does not match "
+            f"event client_event_id '{ev.get('client_event_id')}'"
+        )
+    if envelope.get("device_id") != ev.get("device_id"):
+        raise IntakeEnvelopeValidationError(
+            f"Envelope device_id '{envelope.get('device_id')}' does not match "
+            f"event device_id '{ev.get('device_id')}'"
+        )
+    if envelope.get("captured_at") != ev.get("captured_at"):
+        raise IntakeEnvelopeValidationError(
+            f"Envelope captured_at '{envelope.get('captured_at')}' does not match "
+            f"event captured_at '{ev.get('captured_at')}'"
+        )
+
+    computed_digest = compute_restricted_sha256_digest(ev)
+    if envelope.get("payload_digest") != computed_digest:
+        raise IntakeEnvelopeValidationError(
+            f"Envelope payload_digest mismatch: supplied '{envelope.get('payload_digest')}', "
+            f"computed '{computed_digest}'"
+        )
+    return True, computed_digest
+
+
+def verify_sale_commit_token_binding(commit_payload: Dict[str, Any]) -> Tuple[bool, str]:
+    """
+    Genuine verifier for sale commit request preview_token digest binding:
+    1. Decodes opaque preview_token claims payload.
+    2. Extracts embedded digest and company_id.
+    3. Verifies request payload_digest matches digest bound in token.
+    Raises CommitTokenBindingError on token malformation or digest mismatch.
+    """
+    token = commit_payload.get("preview_token", "")
+    if not token or "." not in token:
+        raise CommitTokenBindingError("Invalid preview_token: expected token.sig structure")
+
+    token_part = token.split(".", 1)[0]
+    rem = len(token_part) % 4
+    if rem:
+        token_part += "=" * (4 - rem)
+
+    try:
+        claims_bytes = base64.b64decode(token_part)
+        claims = json.loads(claims_bytes.decode("utf-8"))
+    except Exception as e:
+        raise CommitTokenBindingError(f"Failed to decode preview_token claims: {e}")
+
+    bound_digest = claims.get("digest")
+    if not bound_digest:
+        raise CommitTokenBindingError("preview_token claims missing 'digest'")
+
+    request_digest = commit_payload.get("payload_digest")
+    if not request_digest:
+        raise CommitTokenBindingError("Commit request missing 'payload_digest'")
+
+    if request_digest != bound_digest:
+        raise CommitTokenBindingError(
+            f"Preview token binding mismatch: commit payload_digest '{request_digest}' "
+            f"does not match token-bound digest '{bound_digest}'"
+        )
+    return True, bound_digest
+
+
+def construct_online_sale_intent_profile(
+    context: Dict[str, Any],
+    request: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Constructs the normative online canonical intent profile by combining:
+    - Authoritative company context from route / tenant membership
+    - Authoritative staff actor context from authenticated token session
+    - Server-qualified currency minor units context (0..6)
+    - Client request parameters: device_id, client_event_id, customer_id, warehouse_id, currency,
+      ordered line items with exact decimal lexemes, and payment intent.
+    Preserves exact validated string decimal lexemes without implicit rounding or repricing.
+    """
+    actor_id = context.get("actor_id")
+    company_id = context.get("company_id")
+    minor_units = context.get("currency_minor_units")
+
+    if not actor_id or not company_id:
+        raise IntentProfileValidationError("Missing authoritative actor_id or company_id in context")
+    if minor_units is None or not (0 <= minor_units <= 6):
+        raise IntentProfileValidationError("Missing or invalid currency_minor_units (0..6) in context")
+
+    req_lines = request.get("lines", [])
+    if not req_lines:
+        raise IntentProfileValidationError("Online intent profile requires at least one line item")
+
+    profile_lines = []
+    for line in req_lines:
+        profile_lines.append({
+            "product_id": line["product_id"],
+            "product_unit_id": line["product_unit_id"],
+            "conversion_to_base": line["conversion_to_base"],
+            "quantity": line["quantity"],
+            "unit_price": line["unit_price"],
+            "tax_rate_id": line.get("tax_rate_id"),
+            "tax_rate": line["tax_rate"],
+            "tax_inclusive": line["tax_inclusive"],
+        })
+
+    payment = request.get("payment", {})
+    profile_payment = {
+        "settlement_mode": payment["settlement_mode"],
+        "payment_method": payment["payment_method"],
+        "cash_account_id": payment["cash_account_id"],
+        "amount": payment["amount"],
+    }
+
+    profile = {
+        "actor_id": actor_id,
+        "client_event_id": request["client_event_id"],
+        "company_id": company_id,
+        "currency": request["currency"],
+        "currency_minor_units": minor_units,
+        "customer_id": request["customer_id"],
+        "device_id": request["device_id"],
+        "lines": profile_lines,
+        "payment": profile_payment,
+        "warehouse_id": request["warehouse_id"],
+    }
+    return profile
+
+
+def verify_online_sale_intent_profile(
+    profile: Dict[str, Any],
+    expected_digest: str,
+    validator_hub: Optional["SchemaValidatorHub"] = None
+) -> Tuple[bool, str]:
+    """
+    Normative verification function for online sale canonical intent profiles:
+    1. Validates profile shape against online-sale-intent-profile.json schema (if validator_hub supplied).
+    2. Confirms no IEEE-754 floats are present anywhere in the profile.
+    3. Serializes profile to RFC 8785 restricted JCS bytes (UTF-16 key sorting, string decimal lexemes).
+    4. Computes SHA-256 digest and asserts equality against expected_digest.
+    Raises IntentProfileValidationError on schema violation, float detection, or digest mismatch.
+    """
+    if validator_hub is not None:
+        validator_hub.validate_instance(profile, "online-sale-intent-profile.json", "online-intent-profile")
+
+    def assert_no_floats(val, path="root"):
+        if isinstance(val, float):
+            raise IntentProfileValidationError(f"Forbidden float detected at {path}: {val!r}")
+        elif isinstance(val, dict):
+            for k, v in val.items():
+                assert_no_floats(v, f"{path}.{k}")
+        elif isinstance(val, list):
+            for i, item in enumerate(val):
+                assert_no_floats(item, f"{path}[{i}]")
+
+    assert_no_floats(profile)
+
+    computed = compute_restricted_sha256_digest(profile)
+    if computed != expected_digest:
+        raise IntentProfileValidationError(
+            f"Intent profile digest mismatch! Computed: '{computed}', expected: '{expected_digest}'"
+        )
+    return True, computed
+
+
+# ---------------------------------------------------------------------------
+# Exact Decimal Arithmetic Calculator Helper (SalesLineCalculator parity)
+# ---------------------------------------------------------------------------
+
+def calculate_canonical_line(
+    quantity_str: str,
+    unit_price_str: str,
+    tax_rate_str: str,
+    tax_inclusive: bool,
+    minor_units: int = 2
+) -> Dict[str, str]:
+    """
+    Genuine exact decimal calculator helper matching Laravel SalesLineCalculator.php parity:
+    - subtotal = round(quantity * unit_price, minor_units, ROUND_HALF_UP)
+    - If inclusive:
+        net = round(subtotal / (1 + rate), minor_units, ROUND_HALF_UP)
+        tax = subtotal - net
+        line_total = subtotal
+      If exclusive:
+        tax = round(subtotal * rate, minor_units, ROUND_HALF_UP)
+        line_total = subtotal + tax
+    - Formats all results as exact 6-decimal string lexemes.
+    Note: Fixture arithmetic tests invoke this helper to qualify contract fixtures;
+    live runtime accounting validation requires MariaDB transactional suites.
+    """
+    q = Decimal(quantity_str)
+    p = Decimal(unit_price_str)
+    scale = Decimal(10) ** -minor_units
+
+    sub = (q * p).quantize(scale, rounding=ROUND_HALF_UP)
+    rate = Decimal(tax_rate_str) / Decimal(100)
+
+    if tax_inclusive:
+        one_plus_rate = Decimal(1) + rate
+        net = (sub / one_plus_rate).quantize(scale, rounding=ROUND_HALF_UP)
+        tax = sub - net
+        tot = sub
+    else:
+        net = sub
+        tax = (sub * rate).quantize(scale, rounding=ROUND_HALF_UP)
+        tot = sub + tax
+
+    return {
+        "subtotal": f"{sub:.6f}",
+        "net_before_tax": f"{net:.6f}",
+        "tax_amount": f"{tax:.6f}",
+        "line_total": f"{tot:.6f}",
+    }
+
+
+def verify_payment_decimal_consistency(payment: Dict[str, Any], grand_total_str: str) -> bool:
+    """Verifies cash tender balance: amount_tendered == amount_settled + change_returned."""
+    tendered = Decimal(payment.get("amount_tendered", payment.get("amount", "0.000000")))
+    settled = Decimal(payment.get("amount_settled", payment.get("amount", "0.000000")))
+    change = Decimal(payment.get("change_returned", "0.000000"))
+    grand_total = Decimal(grand_total_str)
+
+    if payment.get("mode") == "full" or payment.get("settlement_mode") == "full":
+        if settled != grand_total:
+            return False
+    return tendered == (settled + change)
+
+
+# ---------------------------------------------------------------------------
 # Schema Registry & Validation Hub
 # ---------------------------------------------------------------------------
 
@@ -177,7 +453,7 @@ class SchemaValidatorHub:
         self._load_all_schemas()
 
     def _load_all_schemas(self):
-        for schema_path in SCHEMAS_DIR.glob("*.json"):
+        for schema_path in sorted(SCHEMAS_DIR.glob("*.json")):
             with open(schema_path, "r", encoding="utf-8") as f:
                 schema_data = json.load(f)
             schema_id = schema_data.get("$id", schema_path.name)
@@ -200,6 +476,73 @@ class SchemaValidatorHub:
                 [f" - at '{'/'.join(str(p) for p in err.path) or 'root'}': {err.message}" for err in errors]
             )
             raise JsonSchemaValidationError(f"Validation failed for {context} against {schema_name}:\n{err_msg}")
+
+
+# ---------------------------------------------------------------------------
+# Manifest Verification Engine (Exact Set Equality & Fail-Closed)
+# ---------------------------------------------------------------------------
+
+def generate_manifest_entries(base_dir: Path = BASE_DIR) -> Dict[str, str]:
+    """Discovers all target contract files and computes their SHA-256."""
+    entries = {}
+    target_files = []
+    target_files.append(base_dir / "ADR-0001-mobile-v1-contract.md")
+    target_files.append(base_dir / "openapi.json")
+    target_files.extend(sorted((base_dir / "schemas").glob("*.json")))
+    target_files.extend(sorted((base_dir / "fixtures").glob("*.json")))
+
+    for tf in target_files:
+        rel = tf.relative_to(base_dir).as_posix()
+        with open(tf, "rb") as f:
+            h = hashlib.sha256(f.read()).hexdigest()
+        entries[rel] = h
+    return entries
+
+
+def verify_manifest_content(
+    manifest_lines: List[str],
+    discovered_entries: Dict[str, str]
+) -> Tuple[bool, str]:
+    """
+    Validates manifest lines against discovered contract files:
+    1. Checks for malformed lines (must match '<sha256>  <rel_path>').
+    2. Detects duplicate entries.
+    3. Enforces EXACT SET EQUALITY: discovered_files == stored_files.
+    4. Validates SHA-256 checksum for every file.
+    """
+    stored_manifest: Dict[str, str] = {}
+    seen_paths = set()
+
+    for line_idx, line in enumerate(manifest_lines, start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        m = re.fullmatch(r"([0-9a-f]{64})  (\S.*)", stripped)
+        if not m:
+            return False, f"Malformed manifest entry on line {line_idx}: {stripped!r}"
+        sha, rel_path = m.groups()
+        if rel_path in seen_paths:
+            return False, f"Duplicate manifest entry detected on line {line_idx}: {rel_path}"
+        seen_paths.add(rel_path)
+        stored_manifest[rel_path] = sha
+
+    discovered_set = set(discovered_entries.keys())
+    stored_set = set(stored_manifest.keys())
+
+    missing_in_stored = discovered_set - stored_set
+    if missing_in_stored:
+        return False, f"Contract files discovered on disk but missing from manifest: {sorted(missing_in_stored)}"
+
+    extra_in_stored = stored_set - discovered_set
+    if extra_in_stored:
+        return False, f"Manifest contains entries not found on disk: {sorted(extra_in_stored)}"
+
+    for rel_path, actual_sha in discovered_entries.items():
+        expected_sha = stored_manifest[rel_path]
+        if expected_sha != actual_sha:
+            return False, f"Checksum mismatch for {rel_path}: expected {expected_sha}, got {actual_sha}"
+
+    return True, f"All {len(discovered_entries)} contract files match manifest.sha256 exactly"
 
 
 # ---------------------------------------------------------------------------
@@ -264,9 +607,10 @@ def run_suite() -> int:
         print(f"  FAIL: OpenAPI 3.1 meta-schema validation failed: {e}")
         return 1
 
-    # Verify semantic OpenAPI invariants
+    # Verify semantic OpenAPI invariants across both v1 and v2 prefixes
     paths = openapi_spec.get("paths", {})
     expected_endpoints = [
+        # Preserved API v1 endpoints
         "/api/mobile/v1/auth/challenge",
         "/api/mobile/v1/auth/login",
         "/api/mobile/v1/auth/logout",
@@ -278,6 +622,12 @@ def run_suite() -> int:
         "/api/mobile/v1/companies/{companyId}/sales/commit",
         "/api/mobile/v1/companies/{companyId}/offline-events",
         "/api/mobile/v1/companies/{companyId}/offline-events/{clientEventId}/status",
+        # Agreed breaking API v2 endpoints
+        "/api/mobile/v2/companies/{companyId}/bootstrap",
+        "/api/mobile/v2/companies/{companyId}/sales/preview",
+        "/api/mobile/v2/companies/{companyId}/sales/commit",
+        "/api/mobile/v2/companies/{companyId}/offline-events",
+        "/api/mobile/v2/companies/{companyId}/offline-events/{clientEventId}/status",
     ]
 
     for ep in expected_endpoints:
@@ -305,7 +655,7 @@ def run_suite() -> int:
                 print(f"  FAIL: Path param mismatch on {method.upper()} {ep}: expected {path_param_names}, got {declared_path_params}")
                 return 1
 
-            # Path parameter pattern check for companyId (must be ULID)
+            # Path parameter pattern check for companyId (must be strict Crockford ULID)
             for p in declared_params:
                 if p.get("name") == "companyId" and p.get("in") == "path":
                     schema = p.get("schema", {})
@@ -343,7 +693,7 @@ def run_suite() -> int:
         ("golden-auth-logout.json", "response", "auth-logout-response.json"),
         ("golden-device-revoke.json", "request", "device-revoke-request.json"),
         ("golden-device-revoke.json", "response", "device-revoke-response.json"),
-        ("golden-bootstrap.json", None, "bootstrap-response.json"),
+        ("golden-bootstrap.json", None, "archived-v1-bootstrap-response.json"),
         ("golden-product-catalog.json", None, "product-catalog-response.json"),
         ("golden-customer-directory.json", None, "customer-directory-response.json"),
         ("golden-sale-preview.json", "request", "archived-v1-sale-preview-request.json"),
@@ -354,10 +704,12 @@ def run_suite() -> int:
         ("golden-offline-sale-intake.json", "response", "offline-sale-intake-response.json"),
         ("golden-sale-event-status.json", None, "sale-event-status-response.json"),
         # Current v2 / Revision 3 fixtures
+        ("golden-bootstrap-v2.json", None, "bootstrap-response.json"),
         ("golden-offline-sale-intake-v2.json", "request", "offline-sale-intake-request.json"),
         ("golden-offline-sale-intake-v2.json", "response", "offline-sale-intake-response.json"),
         ("golden-sale-preview-v2.json", "request", "sale-preview-request.json"),
         ("golden-sale-preview-v2.json", "response", "sale-preview-response.json"),
+        ("golden-online-sale-intent-profile.json", "intent_profile", "online-sale-intent-profile.json"),
     ]
 
     for fix_name, sub_key, schema_name in fixtures_map:
@@ -373,52 +725,78 @@ def run_suite() -> int:
         print(f"  OK: {fix_name} [{sub_key or 'root'}] conforms to {schema_name}")
         passed_checks += 1
 
-    # Verify historical golden offline intake envelope equality and digest (v1)
+    # Verify historical golden offline intake envelope equality and digest (v1) via genuine helper
     with open(FIXTURES_DIR / "golden-offline-sale-intake.json", "r", encoding="utf-8") as f:
         off_req_v1 = json.load(f)["request"]
 
-    if off_req_v1["client_event_id"] != off_req_v1["event"]["client_event_id"]:
-        print("  FAIL: v1 Envelope client_event_id does not match event client_event_id")
-        return 1
-    if off_req_v1["device_id"] != off_req_v1["event"]["device_id"]:
-        print("  FAIL: v1 Envelope device_id does not match event device_id")
-        return 1
-    if off_req_v1["captured_at"] != off_req_v1["event"]["captured_at"]:
-        print("  FAIL: v1 Envelope captured_at does not match event captured_at")
+    try:
+        _, computed_digest_v1 = verify_offline_intake_envelope_and_digest(off_req_v1)
+    except IntakeEnvelopeValidationError as e:
+        print(f"  FAIL: Historical v1 offline intake helper failed: {e}")
         return 1
 
-    computed_digest_v1 = compute_restricted_sha256_digest(off_req_v1["event"])
-    if computed_digest_v1 != off_req_v1["payload_digest"]:
-        print(f"  FAIL: v1 Offline intake payload_digest mismatch!\n    Computed: {computed_digest_v1}\n    In req:   {off_req_v1['payload_digest']}")
-        return 1
     if computed_digest_v1 != "sha256:d442ce49a7609a9a42bb5165990d481d1c7c563cb8030403487099a9919728d9":
         print(f"  FAIL: Historical v1 digest drift detected: {computed_digest_v1}")
         return 1
     print(f"  OK: Historical v1 offline intake golden matches payload_digest: {computed_digest_v1}")
     passed_checks += 1
 
-    # Verify new v2 golden offline intake envelope equality and digest (v2)
+    # Verify current v2 golden offline intake envelope equality and digest (v2) via genuine helper
     with open(FIXTURES_DIR / "golden-offline-sale-intake-v2.json", "r", encoding="utf-8") as f:
         off_req_v2 = json.load(f)["request"]
 
-    if off_req_v2["client_event_id"] != off_req_v2["event"]["client_event_id"]:
-        print("  FAIL: v2 Envelope client_event_id does not match event client_event_id")
-        return 1
-    if off_req_v2["device_id"] != off_req_v2["event"]["device_id"]:
-        print("  FAIL: v2 Envelope device_id does not match event device_id")
-        return 1
-    if off_req_v2["captured_at"] != off_req_v2["event"]["captured_at"]:
-        print("  FAIL: v2 Envelope captured_at does not match event captured_at")
+    try:
+        _, computed_digest_v2 = verify_offline_intake_envelope_and_digest(off_req_v2)
+    except IntakeEnvelopeValidationError as e:
+        print(f"  FAIL: v2 Offline intake helper failed: {e}")
         return 1
 
-    computed_digest_v2 = compute_restricted_sha256_digest(off_req_v2["event"])
-    if computed_digest_v2 != off_req_v2["payload_digest"]:
-        print(f"  FAIL: v2 Offline intake payload_digest mismatch!\n    Computed: {computed_digest_v2}\n    In req:   {off_req_v2['payload_digest']}")
-        return 1
     if computed_digest_v2 != "sha256:18f0403bbda6e05eab2805eb20c9c9f9e22d86fb922eda1482db85d24dba30a3":
         print(f"  FAIL: v2 digest mismatch against deterministic vector: {computed_digest_v2}")
         return 1
     print(f"  OK: Event v2 offline intake golden matches payload_digest: {computed_digest_v2}")
+    passed_checks += 1
+
+    # Verify online sale preview v2 canonical intent profile and digest derivation
+    with open(FIXTURES_DIR / "golden-sale-preview-v2.json", "r", encoding="utf-8") as f:
+        preview_v2_fix = json.load(f)
+
+    # Derive intent profile from route/token context and request
+    derived_profile = construct_online_sale_intent_profile(
+        preview_v2_fix["context"],
+        preview_v2_fix["request"]
+    )
+    expected_v2_preview_digest = "sha256:93b9aa677275388defe694390ab756d4b08f122087ec084b8dbd8b421ffc45fd"
+
+    try:
+        _, computed_v2_preview_digest = verify_online_sale_intent_profile(
+            derived_profile,
+            expected_v2_preview_digest,
+            validator_hub
+        )
+    except IntentProfileValidationError as e:
+        print(f"  FAIL: Online sale preview v2 intent profile verification failed: {e}")
+        return 1
+
+    if computed_v2_preview_digest != preview_v2_fix["response"]["payload_digest"]:
+        print(
+            f"  FAIL: Response payload_digest '{preview_v2_fix['response']['payload_digest']}' "
+            f"does not match computed intent digest '{computed_v2_preview_digest}'"
+        )
+        return 1
+    print(f"  OK: Online sale preview v2 intent profile verified with deterministic digest: {computed_v2_preview_digest}")
+    passed_checks += 1
+
+    # Verify preview_token binding inside golden-sale-preview-v2.json response
+    try:
+        verify_sale_commit_token_binding({
+            "preview_token": preview_v2_fix["response"]["preview_token"],
+            "payload_digest": preview_v2_fix["response"]["payload_digest"]
+        })
+    except CommitTokenBindingError as e:
+        print(f"  FAIL: Preview token placeholder in v2 preview fixture is invalid: {e}")
+        return 1
+    print("  OK: Sample opaque preview_token placeholder bound to canonical digest verified")
     passed_checks += 1
 
     # 4. Golden Canonical JSON Vectors (Restricted Profile v1)
@@ -472,94 +850,43 @@ def run_suite() -> int:
     print("  OK: Altered payload conflict fixture verified (digest mismatch -> 409 Conflict schema)")
     passed_checks += 1
 
-    # 5b. Decimal exact arithmetic with Laravel SalesLineCalculator & TaxPercentage parity
+    # 5b. Decimal exact arithmetic with genuine SalesLineCalculator parity helper
     with open(FIXTURES_DIR / "regression-decimal-edge-cases.json", "r", encoding="utf-8") as f:
         dec_data = json.load(f)
     for tc in dec_data["test_cases"]:
         tc_name = tc["name"]
         if tc_name == "sales_line_calculator_exclusive_16_percent":
-            q = Decimal(tc["quantity"])
-            p = Decimal(tc["unit_price"])
-            sub = (q * p).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            sub_6 = f"{sub:.6f}"
-            if sub_6 != tc["subtotal"]:
-                print(f"  FAIL: Subtotal mismatch in {tc_name}: {sub_6} != {tc['subtotal']}")
+            res = calculate_canonical_line(tc["quantity"], tc["unit_price"], tc["tax_rate"], tax_inclusive=False)
+            if res["subtotal"] != tc["subtotal"]:
+                print(f"  FAIL: Subtotal mismatch in {tc_name}: {res['subtotal']} != {tc['subtotal']}")
                 return 1
-            tax_rate = Decimal(tc["tax_rate"]) / Decimal(100)
-            tax_amt = (sub * tax_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            tax_6 = f"{tax_amt:.6f}"
-            if tax_6 != tc["tax_amount"]:
-                print(f"  FAIL: Tax amount mismatch in {tc_name}: {tax_6} != {tc['tax_amount']}")
+            if res["tax_amount"] != tc["tax_amount"]:
+                print(f"  FAIL: Tax amount mismatch in {tc_name}: {res['tax_amount']} != {tc['tax_amount']}")
                 return 1
-            tot = sub + tax_amt
-            tot_6 = f"{tot:.6f}"
-            if tot_6 != tc["line_total"]:
-                print(f"  FAIL: Total mismatch in {tc_name}: {tot_6} != {tc['line_total']}")
+            if res["line_total"] != tc["line_total"]:
+                print(f"  FAIL: Total mismatch in {tc_name}: {res['line_total']} != {tc['line_total']}")
                 return 1
-        elif tc_name == "sales_line_calculator_inclusive_16_percent":
-            q = Decimal(tc["quantity"])
-            p = Decimal(tc["unit_price"])
-            sub = (q * p).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            sub_6 = f"{sub:.6f}"
-            if sub_6 != tc["subtotal"]:
-                print(f"  FAIL: Subtotal mismatch in {tc_name}: {sub_6} != {tc['subtotal']}")
+        elif tc_name in ["sales_line_calculator_inclusive_16_percent", "canonical_tax_example_ils_gross_50_incl_16"]:
+            res = calculate_canonical_line(tc["quantity"], tc["unit_price"], tc["tax_rate"], tax_inclusive=True)
+            if res["subtotal"] != tc["subtotal"]:
+                print(f"  FAIL: Subtotal mismatch in {tc_name}: {res['subtotal']} != {tc['subtotal']}")
                 return 1
-            rate = Decimal(tc["tax_rate"]) / Decimal(100)
-            one_plus_rate = Decimal(1) + rate
-            net = (sub / one_plus_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            net_6 = f"{net:.6f}"
-            if net_6 != tc["net_before_tax"]:
-                print(f"  FAIL: Net mismatch in {tc_name}: {net_6} != {tc['net_before_tax']}")
+            if res["net_before_tax"] != tc["net_before_tax"]:
+                print(f"  FAIL: Net mismatch in {tc_name}: {res['net_before_tax']} != {tc['net_before_tax']}")
                 return 1
-            tax_amt = sub - net
-            tax_6 = f"{tax_amt:.6f}"
-            if tax_6 != tc["tax_amount"]:
-                print(f"  FAIL: Tax mismatch in {tc_name}: {tax_6} != {tc['tax_amount']}")
+            if res["tax_amount"] != tc["tax_amount"]:
+                print(f"  FAIL: Tax mismatch in {tc_name}: {res['tax_amount']} != {tc['tax_amount']}")
                 return 1
-            tot = net + tax_amt
-            tot_6 = f"{tot:.6f}"
-            if tot_6 != tc["line_total"]:
-                print(f"  FAIL: Total mismatch in {tc_name}: {tot_6} != {tc['line_total']}")
+            if res["line_total"] != tc["line_total"]:
+                print(f"  FAIL: Total mismatch in {tc_name}: {res['line_total']} != {tc['line_total']}")
                 return 1
-        elif tc_name == "canonical_tax_example_ils_gross_50_incl_16":
-            q = Decimal(tc["quantity"])
-            p = Decimal(tc["unit_price"])
-            sub = (q * p).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            sub_6 = f"{sub:.6f}"
-            if sub_6 != tc["subtotal"]:
-                print(f"  FAIL: Subtotal mismatch in {tc_name}: {sub_6} != {tc['subtotal']}")
-                return 1
-            rate = Decimal(tc["tax_rate"]) / Decimal(100)
-            one_plus_rate = Decimal(1) + rate
-            net = (sub / one_plus_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            net_6 = f"{net:.6f}"
-            if net_6 != tc["net_before_tax"]:
-                print(f"  FAIL: Net mismatch in {tc_name}: {net_6} != {tc['net_before_tax']}")
-                return 1
-            tax_amt = sub - net
-            tax_6 = f"{tax_amt:.6f}"
-            if tax_6 != tc["tax_amount"]:
-                print(f"  FAIL: Tax mismatch in {tc_name}: {tax_6} != {tc['tax_amount']}")
-                return 1
-            tot = net + tax_amt
-            tot_6 = f"{tot:.6f}"
-            if tot_6 != tc["line_total"]:
-                print(f"  FAIL: Total mismatch in {tc_name}: {tot_6} != {tc['line_total']}")
-                return 1
-            # Explicitly verify rejection of unrounded floating divergence
-            if tax_6 == tc["unrounded_tax_divergence"]:
-                print(f"  FAIL: Tax amount matched unrounded divergence {tc['unrounded_tax_divergence']} instead of 6.900000!")
+            if "unrounded_tax_divergence" in tc and res["tax_amount"] == tc["unrounded_tax_divergence"]:
+                print(f"  FAIL: Tax amount matched unrounded divergence {tc['unrounded_tax_divergence']}!")
                 return 1
         elif tc_name == "trailing_zero_quantity_support":
-            q = Decimal(tc["quantity"])
-            p = Decimal(tc["unit_price"])
-            sub = (q * p).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            rate = Decimal(tc["tax_rate"]) / Decimal(100)
-            tax_amt = (sub * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            tot = sub + tax_amt
-            tot_6 = f"{tot:.6f}"
-            if tot_6 != tc["line_total"]:
-                print(f"  FAIL: Total mismatch in {tc_name}: {tot_6} != {tc['line_total']}")
+            res = calculate_canonical_line(tc["quantity"], tc["unit_price"], tc["tax_rate"], tax_inclusive=False)
+            if res["line_total"] != tc["line_total"]:
+                print(f"  FAIL: Total mismatch in {tc_name}: {res['line_total']} != {tc['line_total']}")
                 return 1
         elif tc_name == "half_up_vs_half_even_parity":
             val = Decimal(tc["amount"])
@@ -585,7 +912,7 @@ def run_suite() -> int:
                 print("  FAIL: max_money magnitude boundary mismatch")
                 return 1
 
-    print("  OK: Decimal exact arithmetic regression verified (Laravel RoundingMode::HALF_UP & TaxPercentage parity, canonical ILS 50 gross -> 6.900000 tax)")
+    print("  OK: Decimal exact arithmetic regression verified (invoking genuine SalesLineCalculator helper)")
     passed_checks += 1
 
     # 5c. Lost ACK replay
@@ -719,30 +1046,30 @@ def run_suite() -> int:
     bad_qty_payload = json.loads(json.dumps(off_req_v2))
     bad_qty_payload["event"]["lines"][0]["quantity"] = "-2.000000"
     try:
-        validator_hub.validate_instance(bad_qty_payload, "offline-sale-intake-request.json", "negative-qty")
+        validator_hub.validate_instance(bad_qty_payload, "offline-sale-intake-request.json", "negative-quantity")
         print("  FAIL Negative 4: Negative quantity was accepted!")
         return 1
     except JsonSchemaValidationError:
         print("  OK: Negative 4 passed (negative quantity rejected by schema)")
         passed_checks += 1
 
-    # Negative 5: Negative monetary amount in offline sale intake
-    bad_amt_payload = json.loads(json.dumps(off_req_v2))
-    bad_amt_payload["event"]["lines"][0]["unit_price"] = "-25.000000"
+    # Negative 5: Negative unit price in offline sale intake
+    bad_price_payload = json.loads(json.dumps(off_req_v2))
+    bad_price_payload["event"]["lines"][0]["unit_price"] = "-25.000000"
     try:
-        validator_hub.validate_instance(bad_amt_payload, "offline-sale-intake-request.json", "negative-price")
+        validator_hub.validate_instance(bad_price_payload, "offline-sale-intake-request.json", "negative-price")
         print("  FAIL Negative 5: Negative unit price was accepted!")
         return 1
     except JsonSchemaValidationError:
         print("  OK: Negative 5 passed (negative unit price rejected by schema)")
         passed_checks += 1
 
-    # Negative 6: Floating point number instead of decimal string
-    bad_float_payload = json.loads(json.dumps(off_req_v2))
-    bad_float_payload["event"]["lines"][0]["unit_price"] = 25.0  # numeric float!
+    # Negative 6: IEEE-754 float in JSON payload
+    float_price_payload = json.loads(json.dumps(off_req_v2))
+    float_price_payload["event"]["lines"][0]["unit_price"] = 25.50  # float instead of string!
     try:
-        validator_hub.validate_instance(bad_float_payload, "offline-sale-intake-request.json", "float-price")
-        print("  FAIL Negative 6: Float unit price was accepted by schema!")
+        validator_hub.validate_instance(float_price_payload, "offline-sale-intake-request.json", "float-price")
+        print("  FAIL Negative 6: Float unit price was accepted!")
         return 1
     except JsonSchemaValidationError:
         print("  OK: Negative 6 passed (float unit price rejected by schema type constraint)")
@@ -759,23 +1086,27 @@ def run_suite() -> int:
         print("  OK: Negative 7 passed (additional unauthorized property rejected)")
         passed_checks += 1
 
-    # Negative 8: Envelope vs Event client_event_id mismatch
+    # Negative 8: Envelope vs Event client_event_id mismatch (Genuine verifier call)
     mismatched_env = json.loads(json.dumps(off_req_v2))
     mismatched_env["client_event_id"] = "00000000-0000-0000-0000-000000000000"
-    if mismatched_env["client_event_id"] == mismatched_env["event"]["client_event_id"]:
-        print("  FAIL Negative 8: Envelope mismatch was not detected")
+    try:
+        verify_offline_intake_envelope_and_digest(mismatched_env)
+        print("  FAIL Negative 8: Envelope mismatch was not detected by intake verifier helper!")
         return 1
-    print("  OK: Negative 8 passed (envelope vs event client_event_id mismatch caught)")
-    passed_checks += 1
+    except IntakeEnvelopeValidationError:
+        print("  OK: Negative 8 passed [Contract Shape / Pre-Ingestion Invariant] (envelope vs event client_event_id mismatch caught by verifier)")
+        passed_checks += 1
 
-    # Negative 9: Tampered digest in intake request
+    # Negative 9: Tampered digest in intake request (Genuine verifier call)
     tampered_intake = json.loads(json.dumps(off_req_v2))
     tampered_intake["payload_digest"] = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-    if compute_restricted_sha256_digest(tampered_intake["event"]) == tampered_intake["payload_digest"]:
-        print("  FAIL Negative 9: Tampered digest passed equality check!")
+    try:
+        verify_offline_intake_envelope_and_digest(tampered_intake)
+        print("  FAIL Negative 9: Tampered digest passed intake verifier helper!")
         return 1
-    print("  OK: Negative 9 passed (tampered payload digest caught)")
-    passed_checks += 1
+    except IntakeEnvelopeValidationError:
+        print("  OK: Negative 9 passed [Contract Shape / Pre-Ingestion Invariant] (tampered payload digest caught by verifier)")
+        passed_checks += 1
 
     # Negative 10: Canonical serializer rejecting float and duplicate JSON keys
     try:
@@ -807,16 +1138,16 @@ def run_suite() -> int:
     passed_checks += 1
 
     # Check 12 (ULID Strict Crockford Acceptance & UUID Entity Rejection)
-    with open(FIXTURES_DIR / "golden-bootstrap.json", "r", encoding="utf-8") as f:
-        valid_boot = json.load(f)
+    with open(FIXTURES_DIR / "golden-bootstrap-v2.json", "r", encoding="utf-8") as f:
+        valid_boot_v2 = json.load(f)
 
     # 12a: Positive validation: valid Crockford ULID accepted
-    validator_hub.validate_instance(valid_boot, "bootstrap-response.json", "valid-ulid-bootstrap")
+    validator_hub.validate_instance(valid_boot_v2, "bootstrap-response.json", "valid-ulid-bootstrap")
     print("  OK: Check 12a passed (strict Crockford ULID accepted for server entity public IDs)")
     passed_checks += 1
 
     # 12b: Negative validation: UUID rejected for server entity company_id
-    uuid_as_ulid = json.loads(json.dumps(valid_boot))
+    uuid_as_ulid = json.loads(json.dumps(valid_boot_v2))
     uuid_as_ulid["company_id"] = "c1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c"  # UUID rejected for server company
     try:
         validator_hub.validate_instance(uuid_as_ulid, "bootstrap-response.json", "uuid-as-company-id")
@@ -827,7 +1158,7 @@ def run_suite() -> int:
         passed_checks += 1
 
     # 12c: Negative validation: Malformed Crockford characters rejected (I, L, O, U, or lowercase)
-    bad_char_ulid = json.loads(json.dumps(valid_boot))
+    bad_char_ulid = json.loads(json.dumps(valid_boot_v2))
     bad_char_ulid["company_id"] = "01JCV8X9M2NQW3TYZ4R5S6789I"  # contains 'I'
     try:
         validator_hub.validate_instance(bad_char_ulid, "bootstrap-response.json", "invalid-char-ulid")
@@ -848,28 +1179,31 @@ def run_suite() -> int:
         print("  OK: Check 13 passed (Tax percentage > 100 strictly rejected by schema)")
         passed_checks += 1
 
-    # Check 14 (Six-place trailing-zero quantities accepted, zero/neg/over-scale rejected)
-    trailing_zero_payload = json.loads(json.dumps(off_req_v2))
-    trailing_zero_payload["event"]["lines"][0]["quantity"] = "0.100000"  # trailing zero positive quantity
-    validator_hub.validate_instance(trailing_zero_payload, "offline-sale-intake-request.json", "trailing-zero-qty")
+    # Check 14 (Positive quantity constraints: accept trailing zero '0.100000', reject '0.000000' and over-scale)
+    # 14a: trailing zero quantity '0.100000' accepted
+    trailing_zero_qty = json.loads(json.dumps(off_req_v2))
+    trailing_zero_qty["event"]["lines"][0]["quantity"] = "0.100000"
+    validator_hub.validate_instance(trailing_zero_qty, "offline-sale-intake-request.json", "trailing-zero-quantity")
     print("  OK: Check 14a passed (six-place trailing zero quantity '0.100000' accepted)")
     passed_checks += 1
 
-    zero_qty_payload = json.loads(json.dumps(off_req_v2))
-    zero_qty_payload["event"]["lines"][0]["quantity"] = "0.000000"  # all-zero positive quantity rejected
+    # 14b: all-zero quantity '0.000000' rejected
+    all_zero_qty = json.loads(json.dumps(off_req_v2))
+    all_zero_qty["event"]["lines"][0]["quantity"] = "0.000000"
     try:
-        validator_hub.validate_instance(zero_qty_payload, "offline-sale-intake-request.json", "zero-qty")
-        print("  FAIL Check 14b: All-zero quantity '0.000000' was accepted by positive quantity schema!")
+        validator_hub.validate_instance(all_zero_qty, "offline-sale-intake-request.json", "all-zero-quantity")
+        print("  FAIL Check 14b: All-zero quantity '0.000000' was accepted!")
         return 1
     except JsonSchemaValidationError:
         print("  OK: Check 14b passed (all-zero quantity '0.000000' rejected by positive quantity schema)")
         passed_checks += 1
 
-    overscale_qty_payload = json.loads(json.dumps(off_req_v2))
-    overscale_qty_payload["event"]["lines"][0]["quantity"] = "0.1000001"  # 7 decimals rejected
+    # 14c: over-scale quantity (> 6 decimals) rejected
+    over_scale_qty = json.loads(json.dumps(off_req_v2))
+    over_scale_qty["event"]["lines"][0]["quantity"] = "1.1234567"
     try:
-        validator_hub.validate_instance(overscale_qty_payload, "offline-sale-intake-request.json", "overscale-qty")
-        print("  FAIL Check 14c: Over-scale quantity (7 decimals) was accepted!")
+        validator_hub.validate_instance(over_scale_qty, "offline-sale-intake-request.json", "over-scale-quantity")
+        print("  FAIL Check 14c: Over-scale quantity (>6 decimals) was accepted!")
         return 1
     except JsonSchemaValidationError:
         print("  OK: Check 14c passed (over-scale quantity > 6 decimals rejected)")
@@ -886,16 +1220,27 @@ def run_suite() -> int:
         print("  OK: Check 15 passed (product packaging unit id required on line items)")
         passed_checks += 1
 
-    # Check 16 (Preview digest and commit token binding verification)
+    # Check 16 (Preview digest and commit token binding verification via genuine verifier)
     with open(FIXTURES_DIR / "golden-sale-commit.json", "r", encoding="utf-8") as f:
         commit_fix = json.load(f)["request"]
+
+    # Verify golden commit passes token binding check
+    try:
+        verify_sale_commit_token_binding(commit_fix)
+    except CommitTokenBindingError as e:
+        print(f"  FAIL Check 16: Golden commit failed binding verification: {e}")
+        return 1
+
+    # Tamper payload_digest in commit request: must be rejected by genuine verifier
     tampered_commit = json.loads(json.dumps(commit_fix))
     tampered_commit["payload_digest"] = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-    if tampered_commit["payload_digest"] == commit_fix["payload_digest"]:
-        print("  FAIL Check 16: Tampered commit digest matched original!")
+    try:
+        verify_sale_commit_token_binding(tampered_commit)
+        print("  FAIL Check 16: Tampered commit digest was accepted by token binding verifier!")
         return 1
-    print("  OK: Check 16 passed (preview token digest binding mismatch caught)")
-    passed_checks += 1
+    except CommitTokenBindingError:
+        print("  OK: Check 16 passed [Contract Shape / Pre-Ingestion Invariant] (preview token digest binding mismatch caught by verifier)")
+        passed_checks += 1
 
     # Check 17 (MFA code and recovery code mutual exclusion in auth login)
     with open(FIXTURES_DIR / "golden-auth-login.json", "r", encoding="utf-8") as f:
@@ -911,147 +1256,145 @@ def run_suite() -> int:
         print("  OK: Check 17 passed (mfa_code and recovery_code mutually exclusive constraint enforced)")
         passed_checks += 1
 
-    # Check 18 (taxpairNoTax: ExplicitNoTax null+0+false vs invalid null pair)
-    with open(FIXTURES_DIR / "golden-sale-preview-v2.json", "r", encoding="utf-8") as f:
-        prev_v2_req = json.load(f)["request"]
-
-    # 18a: Positive: null tax_rate_id with "0.000000" and false accepted
-    valid_no_tax = json.loads(json.dumps(prev_v2_req))
-    valid_no_tax["lines"][0]["tax_rate_id"] = None
-    valid_no_tax["lines"][0]["tax_rate"] = "0.000000"
-    valid_no_tax["lines"][0]["tax_inclusive"] = False
-    validator_hub.validate_instance(valid_no_tax, "sale-preview-request.json", "check-18a-valid-no-tax")
+    # Check 18 (ExplicitNoTax: null tax_rate_id requires rate '0.000000' and inclusive false)
+    # 18a: Valid ExplicitNoTax (null + 0.000000 + false) accepted
+    valid_no_tax_payload = json.loads(json.dumps(off_req_v2))
+    valid_no_tax_payload["event"]["lines"][0]["tax_rate_id"] = None
+    valid_no_tax_payload["event"]["lines"][0]["tax_rate"] = "0.000000"
+    valid_no_tax_payload["event"]["lines"][0]["tax_inclusive"] = False
+    valid_no_tax_payload["event"]["lines"][0]["tax_amount"] = "0.000000"
+    validator_hub.validate_instance(valid_no_tax_payload, "offline-sale-intake-request.json", "explicit-no-tax-valid")
     print("  OK: Check 18a passed (ExplicitNoTax null+0+false accepted)")
     passed_checks += 1
 
-    # 18b: Negative: null tax_rate_id with non-zero tax_rate rejected
-    bad_no_tax_rate = json.loads(json.dumps(prev_v2_req))
-    bad_no_tax_rate["lines"][0]["tax_rate_id"] = None
-    bad_no_tax_rate["lines"][0]["tax_rate"] = "16.000000"
-    bad_no_tax_rate["lines"][0]["tax_inclusive"] = False
+    # 18b: Invalid ExplicitNoTax: null tax_rate_id with non-zero tax_rate rejected
+    bad_no_tax_rate = json.loads(json.dumps(off_req_v2))
+    bad_no_tax_rate["event"]["lines"][0]["tax_rate_id"] = None
+    bad_no_tax_rate["event"]["lines"][0]["tax_rate"] = "16.000000"  # non-zero rate without tax_rate_id!
+    bad_no_tax_rate["event"]["lines"][0]["tax_inclusive"] = False
     try:
-        validator_hub.validate_instance(bad_no_tax_rate, "sale-preview-request.json", "check-18b-bad-no-tax-rate")
+        validator_hub.validate_instance(bad_no_tax_rate, "offline-sale-intake-request.json", "bad-no-tax-rate")
         print("  FAIL Check 18b: null tax_rate_id with non-zero rate was accepted!")
         return 1
     except JsonSchemaValidationError:
         print("  OK: Check 18b passed (null tax_rate_id with non-zero tax_rate rejected)")
         passed_checks += 1
 
-    # 18c: Negative: null tax_rate_id with tax_inclusive true rejected
-    bad_no_tax_mode = json.loads(json.dumps(prev_v2_req))
-    bad_no_tax_mode["lines"][0]["tax_rate_id"] = None
-    bad_no_tax_mode["lines"][0]["tax_rate"] = "0.000000"
-    bad_no_tax_mode["lines"][0]["tax_inclusive"] = True
+    # 18c: Invalid ExplicitNoTax: null tax_rate_id with tax_inclusive true rejected
+    bad_no_tax_incl = json.loads(json.dumps(off_req_v2))
+    bad_no_tax_incl["event"]["lines"][0]["tax_rate_id"] = None
+    bad_no_tax_incl["event"]["lines"][0]["tax_rate"] = "0.000000"
+    bad_no_tax_incl["event"]["lines"][0]["tax_inclusive"] = True  # inclusive true without tax_rate_id!
     try:
-        validator_hub.validate_instance(bad_no_tax_mode, "sale-preview-request.json", "check-18c-bad-no-tax-mode")
+        validator_hub.validate_instance(bad_no_tax_incl, "offline-sale-intake-request.json", "bad-no-tax-inclusive")
         print("  FAIL Check 18c: null tax_rate_id with tax_inclusive true was accepted!")
         return 1
     except JsonSchemaValidationError:
         print("  OK: Check 18c passed (null tax_rate_id with tax_inclusive true rejected)")
         passed_checks += 1
 
-    # Check 19 (ULIDbounds: tax_rate_id Crockford ULID bounds)
-    # 19a: Positive Crockford ULID accepted
-    valid_tax_ulid = json.loads(json.dumps(prev_v2_req))
-    valid_tax_ulid["lines"][0]["tax_rate_id"] = "01JCV8X9M2NQW3TYZ4R5S6789A"
-    validator_hub.validate_instance(valid_tax_ulid, "sale-preview-request.json", "check-19a-tax-ulid")
+    # Check 19 (tax_rate_id ULID bounds: Crockford ULID accepted, invalid char / UUID rejected)
+    # 19a: Valid Crockford ULID accepted
+    valid_tax_ulid = json.loads(json.dumps(off_req_v2))
+    valid_tax_ulid["event"]["lines"][0]["tax_rate_id"] = "01JCV8X9MDPTRSVWXYZ0123456"
+    validator_hub.validate_instance(valid_tax_ulid, "offline-sale-intake-request.json", "valid-tax-rate-ulid")
     print("  OK: Check 19a passed (valid Crockford ULID accepted for tax_rate_id)")
     passed_checks += 1
 
-    # 19b: Negative: malformed Crockford character I rejected
-    bad_tax_char = json.loads(json.dumps(prev_v2_req))
-    bad_tax_char["lines"][0]["tax_rate_id"] = "01JCV8X9M2NQW3TYZ4R5S6789I"
+    # 19b: Invalid Crockford character (I) rejected
+    bad_char_tax_ulid = json.loads(json.dumps(off_req_v2))
+    bad_char_tax_ulid["event"]["lines"][0]["tax_rate_id"] = "01JCV8X9MDPTRSVWXYZ012345I"  # contains 'I'
     try:
-        validator_hub.validate_instance(bad_tax_char, "sale-preview-request.json", "check-19b-bad-tax-char")
-        print("  FAIL Check 19b: Malformed ULID for tax_rate_id was accepted!")
+        validator_hub.validate_instance(bad_char_tax_ulid, "offline-sale-intake-request.json", "invalid-char-tax-ulid")
+        print("  FAIL Check 19b: tax_rate_id containing 'I' was accepted!")
         return 1
     except JsonSchemaValidationError:
         print("  OK: Check 19b passed (tax_rate_id Crockford character I strictly rejected)")
         passed_checks += 1
 
-    # 19c: Negative: UUID string rejected for tax_rate_id
-    bad_tax_uuid = json.loads(json.dumps(prev_v2_req))
-    bad_tax_uuid["lines"][0]["tax_rate_id"] = "c1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c"
+    # 19c: UUID rejected for tax_rate_id
+    uuid_tax_id = json.loads(json.dumps(off_req_v2))
+    uuid_tax_id["event"]["lines"][0]["tax_rate_id"] = "c1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c"
     try:
-        validator_hub.validate_instance(bad_tax_uuid, "sale-preview-request.json", "check-19c-tax-uuid")
-        print("  FAIL Check 19c: UUID string was accepted as tax_rate_id!")
+        validator_hub.validate_instance(uuid_tax_id, "offline-sale-intake-request.json", "uuid-as-tax-rate-id")
+        print("  FAIL Check 19c: UUID was accepted for tax_rate_id!")
         return 1
     except JsonSchemaValidationError:
         print("  OK: Check 19c passed (UUID rejected for tax_rate_id by ULID schema constraint)")
         passed_checks += 1
 
-    # Check 20 (taxmode: boolean constraint)
-    # 20a: Positive boolean accepted
-    valid_tax_mode = json.loads(json.dumps(prev_v2_req))
-    valid_tax_mode["lines"][0]["tax_inclusive"] = False
-    validator_hub.validate_instance(valid_tax_mode, "sale-preview-request.json", "check-20a-tax-mode")
+    # Check 20 (tax_inclusive boolean constraint: boolean accepted, strings rejected)
+    # 20a: Boolean tax_inclusive accepted
+    bool_tax_incl = json.loads(json.dumps(off_req_v2))
+    bool_tax_incl["event"]["lines"][0]["tax_inclusive"] = False
+    validator_hub.validate_instance(bool_tax_incl, "offline-sale-intake-request.json", "bool-tax-inclusive")
     print("  OK: Check 20a passed (tax_inclusive boolean accepted)")
     passed_checks += 1
 
-    # 20b: Negative string "true" rejected
-    bad_tax_mode_str = json.loads(json.dumps(prev_v2_req))
-    bad_tax_mode_str["lines"][0]["tax_inclusive"] = "true"
+    # 20b: Non-boolean string 'true' rejected
+    str_tax_incl = json.loads(json.dumps(off_req_v2))
+    str_tax_incl["event"]["lines"][0]["tax_inclusive"] = "true"  # string instead of boolean!
     try:
-        validator_hub.validate_instance(bad_tax_mode_str, "sale-preview-request.json", "check-20b-bad-tax-mode-str")
-        print("  FAIL Check 20b: string 'true' was accepted for tax_inclusive!")
+        validator_hub.validate_instance(str_tax_incl, "offline-sale-intake-request.json", "str-tax-inclusive")
+        print("  FAIL Check 20b: String 'true' was accepted for tax_inclusive!")
         return 1
     except JsonSchemaValidationError:
         print("  OK: Check 20b passed (non-boolean tax_inclusive string strictly rejected)")
         passed_checks += 1
 
-    # Check 21 (conversionpositive: positive exact decimal snapshot matching catalog regex)
-    # 21a: Positive conversion_to_base accepted
-    valid_conv = json.loads(json.dumps(prev_v2_req))
-    valid_conv["lines"][0]["conversion_to_base"] = "0.500000"
-    validator_hub.validate_instance(valid_conv, "sale-preview-request.json", "check-21a-valid-conv")
+    # Check 21 (conversion_to_base positive decimal constraints)
+    # 21a: Valid positive decimal accepted
+    valid_conv = json.loads(json.dumps(off_req_v2))
+    valid_conv["event"]["lines"][0]["conversion_to_base"] = "12.500000"
+    validator_hub.validate_instance(valid_conv, "offline-sale-intake-request.json", "valid-conversion")
     print("  OK: Check 21a passed (conversion_to_base positive decimal accepted)")
     passed_checks += 1
 
-    # 21b: Negative zero conversion rejected
-    zero_conv = json.loads(json.dumps(prev_v2_req))
-    zero_conv["lines"][0]["conversion_to_base"] = "0.000000"
+    # 21b: Zero conversion_to_base rejected
+    zero_conv = json.loads(json.dumps(off_req_v2))
+    zero_conv["event"]["lines"][0]["conversion_to_base"] = "0.000000"
     try:
-        validator_hub.validate_instance(zero_conv, "sale-preview-request.json", "check-21b-zero-conv")
-        print("  FAIL Check 21b: zero conversion was accepted!")
+        validator_hub.validate_instance(zero_conv, "offline-sale-intake-request.json", "zero-conversion")
+        print("  FAIL Check 21b: Zero conversion_to_base was accepted!")
         return 1
     except JsonSchemaValidationError:
         print("  OK: Check 21b passed (zero conversion_to_base rejected by positive regex)")
         passed_checks += 1
 
-    # 21c: Negative conversion rejected
-    neg_conv = json.loads(json.dumps(prev_v2_req))
-    neg_conv["lines"][0]["conversion_to_base"] = "-1.000000"
+    # 21c: Negative conversion_to_base rejected
+    neg_conv = json.loads(json.dumps(off_req_v2))
+    neg_conv["event"]["lines"][0]["conversion_to_base"] = "-1.000000"
     try:
-        validator_hub.validate_instance(neg_conv, "sale-preview-request.json", "check-21c-neg-conv")
-        print("  FAIL Check 21c: negative conversion was accepted!")
+        validator_hub.validate_instance(neg_conv, "offline-sale-intake-request.json", "neg-conversion")
+        print("  FAIL Check 21c: Negative conversion_to_base was accepted!")
         return 1
     except JsonSchemaValidationError:
         print("  OK: Check 21c passed (negative conversion_to_base rejected)")
         passed_checks += 1
 
-    # 21d: Float conversion rejected
-    float_conv = json.loads(json.dumps(prev_v2_req))
-    float_conv["lines"][0]["conversion_to_base"] = 1.0
+    # 21d: Float conversion_to_base rejected
+    float_conv = json.loads(json.dumps(off_req_v2))
+    float_conv["event"]["lines"][0]["conversion_to_base"] = 1.0  # float!
     try:
-        validator_hub.validate_instance(float_conv, "sale-preview-request.json", "check-21d-float-conv")
-        print("  FAIL Check 21d: float conversion was accepted!")
+        validator_hub.validate_instance(float_conv, "offline-sale-intake-request.json", "float-conversion")
+        print("  FAIL Check 21d: Float conversion_to_base was accepted!")
         return 1
     except JsonSchemaValidationError:
         print("  OK: Check 21d passed (float conversion_to_base rejected)")
         passed_checks += 1
 
-    # 21e: Overscale conversion rejected (>6 decimals)
-    overscale_conv = json.loads(json.dumps(prev_v2_req))
-    overscale_conv["lines"][0]["conversion_to_base"] = "1.0000001"
+    # 21e: Over-scale conversion_to_base (>6 decimals) rejected
+    over_scale_conv = json.loads(json.dumps(off_req_v2))
+    over_scale_conv["event"]["lines"][0]["conversion_to_base"] = "1.1234567"
     try:
-        validator_hub.validate_instance(overscale_conv, "sale-preview-request.json", "check-21e-overscale-conv")
-        print("  FAIL Check 21e: overscale conversion was accepted!")
+        validator_hub.validate_instance(over_scale_conv, "offline-sale-intake-request.json", "overscale-conversion")
+        print("  FAIL Check 21e: Over-scale conversion_to_base was accepted!")
         return 1
     except JsonSchemaValidationError:
         print("  OK: Check 21e passed (overscale conversion_to_base > 6 decimals rejected)")
         passed_checks += 1
 
-    # Check 22 (v1unsupported: offline intake accepts only event_version 2)
+    # Check 22 (offline intake event_version constraints)
     # 22a: event_version 1 rejected by v2 intake schema
     v1_intake_test = json.loads(json.dumps(off_req_v2))
     v1_intake_test["event"]["event_version"] = 1
@@ -1069,18 +1412,20 @@ def run_suite() -> int:
     print("  OK: Check 22b passed (event_version 2 accepted by v2 intake schema)")
     passed_checks += 1
 
-    # Check 23 (newdigesttamper: v2 intake detects tampered payload digest)
+    # Check 23 (v2 intake detects tampered payload digest via genuine verifier)
     tampered_v2 = json.loads(json.dumps(off_req_v2))
     tampered_v2["payload_digest"] = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-    if compute_restricted_sha256_digest(tampered_v2["event"]) == tampered_v2["payload_digest"]:
-        print("  FAIL Check 23: Tampered v2 digest matched!")
+    try:
+        verify_offline_intake_envelope_and_digest(tampered_v2)
+        print("  FAIL Check 23: Tampered v2 digest was accepted by verifier helper!")
         return 1
-    print("  OK: Check 23 passed (tampered v2 payload digest caught)")
-    passed_checks += 1
+    except IntakeEnvelopeValidationError:
+        print("  OK: Check 23 passed [Contract Shape / Pre-Ingestion Invariant] (tampered v2 payload digest caught by verifier)")
+        passed_checks += 1
 
-    # Check 24 (missingcurrencyminorunits: bootstrap base_currency_minor_units constraints)
-    # 24a: Missing base_currency_minor_units rejected
-    missing_minor = json.loads(json.dumps(valid_boot))
+    # Check 24 (bootstrap base_currency_minor_units constraints)
+    # 24a: Missing base_currency_minor_units rejected in v2 bootstrap
+    missing_minor = json.loads(json.dumps(valid_boot_v2))
     del missing_minor["base_currency_minor_units"]
     try:
         validator_hub.validate_instance(missing_minor, "bootstrap-response.json", "check-24a-missing-minor-units")
@@ -1091,39 +1436,262 @@ def run_suite() -> int:
         passed_checks += 1
 
     # 24b: base_currency_minor_units out of range (>6) rejected
-    over_minor = json.loads(json.dumps(valid_boot))
-    over_minor["base_currency_minor_units"] = 7
+    out_of_range_minor = json.loads(json.dumps(valid_boot_v2))
+    out_of_range_minor["base_currency_minor_units"] = 7
     try:
-        validator_hub.validate_instance(over_minor, "bootstrap-response.json", "check-24b-over-minor-units")
-        print("  FAIL Check 24b: base_currency_minor_units 7 was accepted!")
+        validator_hub.validate_instance(out_of_range_minor, "bootstrap-response.json", "check-24b-minor-out-of-range")
+        print("  FAIL Check 24b: base_currency_minor_units > 6 was accepted!")
         return 1
     except JsonSchemaValidationError:
         print("  OK: Check 24b passed (base_currency_minor_units > 6 rejected)")
         passed_checks += 1
 
     # 24c: base_currency_minor_units within 0..6 accepted
-    valid_minor_jod = json.loads(json.dumps(valid_boot))
+    valid_minor_jod = json.loads(json.dumps(valid_boot_v2))
     valid_minor_jod["base_currency_minor_units"] = 3
     validator_hub.validate_instance(valid_minor_jod, "bootstrap-response.json", "check-24c-jod-minor-units")
     print("  OK: Check 24c passed (base_currency_minor_units 3 JOD accepted)")
     passed_checks += 1
 
-    # Check 25: Canonical tax arithmetic verification (ILS gross 50 incl 16% -> 6.900000 tax, not 6.896552)
-    gross_ils = Decimal("50.00")
-    rate_16 = Decimal("0.16")
-    calc_net = (gross_ils / (Decimal(1) + rate_16)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    calc_tax = gross_ils - calc_net
-    calc_tot = calc_net + calc_tax
-    if f"{calc_tax:.6f}" != "6.900000":
-        print(f"  FAIL Check 25: Canonical tax amount mismatch: {calc_tax:.6f} != 6.900000")
+    # Check 25: Canonical tax arithmetic verification (SalesLineCalculator parity, ILS gross 50 incl 16% -> 6.900000 tax)
+    line_res = calculate_canonical_line("2.000000", "25.000000", "16.000000", tax_inclusive=True, minor_units=2)
+    if line_res["tax_amount"] != "6.900000":
+        print(f"  FAIL Check 25: Canonical tax amount mismatch: {line_res['tax_amount']} != 6.900000")
         return 1
-    if f"{calc_tax:.6f}" == "6.896552":
+    if line_res["tax_amount"] == "6.896552":
         print("  FAIL Check 25: Canonical tax calculation used unrounded floating 6.896552!")
         return 1
-    if f"{calc_tot:.6f}" != "50.000000":
-        print(f"  FAIL Check 25: Canonical line total mismatch: {calc_tot:.6f} != 50.000000")
+    if line_res["line_total"] != "50.000000":
+        print(f"  FAIL Check 25: Canonical line total mismatch: {line_res['line_total']} != 50.000000")
         return 1
-    print("  OK: Check 25 passed (canonical tax arithmetic verified: ILS gross 50 incl 16% -> tax 6.900000, not 6.896552)")
+
+    # Verify payment tendered-settled-change consistency
+    payment_ok = verify_payment_decimal_consistency(
+        {
+            "mode": "full",
+            "amount_tendered": "50.000000",
+            "amount_settled": "50.000000",
+            "change_returned": "0.000000"
+        },
+        "50.000000"
+    )
+    if not payment_ok:
+        print("  FAIL Check 25: Payment tendered-settled-change balance check failed!")
+        return 1
+    print("  OK: Check 25 passed [Contract Shape / Pre-Ingestion Invariant] (canonical tax arithmetic and payment balance verified)")
+    passed_checks += 1
+
+    # Check 26: Online Canonical Intent Profile Tampering Mutation Tests
+    # Actively invokes verify_online_sale_intent_profile and asserts failure on any tampered field
+    with open(FIXTURES_DIR / "golden-online-sale-intent-profile.json", "r", encoding="utf-8") as f:
+        intent_golden = json.load(f)
+    base_profile = intent_golden["intent_profile"]
+    canonical_digest = intent_golden["payload_digest"]
+
+    # 26a: Actor tampering
+    t_actor = json.loads(json.dumps(base_profile))
+    t_actor["actor_id"] = "01JCV8X9M8T1V2W3X4Y5Z67899"
+    try:
+        verify_online_sale_intent_profile(t_actor, canonical_digest, validator_hub)
+        print("  FAIL Check 26a: Actor tampering was not detected!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 26a passed (actor tampering caught by intent profile verifier)")
+        passed_checks += 1
+
+    # 26b: Company tampering
+    t_company = json.loads(json.dumps(base_profile))
+    t_company["company_id"] = "01JCV8X9M2NQW3TYZ4R5S6789B"
+    try:
+        verify_online_sale_intent_profile(t_company, canonical_digest, validator_hub)
+        print("  FAIL Check 26b: Company tampering was not detected!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 26b passed (company tampering caught by intent profile verifier)")
+        passed_checks += 1
+
+    # 26c: Device tampering
+    t_device = json.loads(json.dumps(base_profile))
+    t_device["device_id"] = "8e2b8bc6-f80c-4034-8c88-59368d1f2e11"
+    try:
+        verify_online_sale_intent_profile(t_device, canonical_digest, validator_hub)
+        print("  FAIL Check 26c: Device tampering was not detected!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 26c passed (device tampering caught by intent profile verifier)")
+        passed_checks += 1
+
+    # 26d: Event tampering
+    t_event = json.loads(json.dumps(base_profile))
+    t_event["client_event_id"] = "3fa85f64-5717-4562-b3fc-2c963f66afa7"
+    try:
+        verify_online_sale_intent_profile(t_event, canonical_digest, validator_hub)
+        print("  FAIL Check 26d: Event tampering was not detected!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 26d passed (event tampering caught by intent profile verifier)")
+        passed_checks += 1
+
+    # 26e: Tax identity tampering
+    t_tax_id = json.loads(json.dumps(base_profile))
+    t_tax_id["lines"][0]["tax_rate_id"] = "01J9Z5K3MN0000000000000031"
+    try:
+        verify_online_sale_intent_profile(t_tax_id, canonical_digest, validator_hub)
+        print("  FAIL Check 26e: Tax identity tampering was not detected!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 26e passed (tax identity tampering caught by intent profile verifier)")
+        passed_checks += 1
+
+    # 26f: Tax inclusive tampering
+    t_tax_incl = json.loads(json.dumps(base_profile))
+    t_tax_incl["lines"][0]["tax_inclusive"] = False
+    try:
+        verify_online_sale_intent_profile(t_tax_incl, canonical_digest, validator_hub)
+        print("  FAIL Check 26f: Tax inclusive tampering was not detected!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 26f passed (tax inclusive mode tampering caught by intent profile verifier)")
+        passed_checks += 1
+
+    # 26g: Conversion to base tampering
+    t_conv = json.loads(json.dumps(base_profile))
+    t_conv["lines"][0]["conversion_to_base"] = "1.000001"
+    try:
+        verify_online_sale_intent_profile(t_conv, canonical_digest, validator_hub)
+        print("  FAIL Check 26g: Conversion to base tampering was not detected!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 26g passed (conversion to base tampering caught by intent profile verifier)")
+        passed_checks += 1
+
+    # 26h: Decimal lexeme tampering (altered string lexeme)
+    t_lexeme = json.loads(json.dumps(base_profile))
+    t_lexeme["lines"][0]["unit_price"] = "25.000001"
+    try:
+        verify_online_sale_intent_profile(t_lexeme, canonical_digest, validator_hub)
+        print("  FAIL Check 26h: Decimal lexeme tampering was not detected!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 26h passed (decimal lexeme tampering caught by intent profile verifier)")
+        passed_checks += 1
+
+    # 26i: Line order tampering
+    multi_line_profile = json.loads(json.dumps(base_profile))
+    second_line = json.loads(json.dumps(base_profile["lines"][0]))
+    second_line["product_id"] = "01JCV8X9M6A1B2C3D4E5F6G7H9"
+    second_line["unit_price"] = "30.000000"
+    multi_line_profile["lines"].append(second_line)
+    multiline_digest = compute_restricted_sha256_digest(multi_line_profile)
+
+    # Swap line order
+    t_order = json.loads(json.dumps(multi_line_profile))
+    t_order["lines"] = [second_line, multi_line_profile["lines"][0]]
+    try:
+        verify_online_sale_intent_profile(t_order, multiline_digest, validator_hub)
+        print("  FAIL Check 26i: Line order tampering was not detected!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 26i passed (line order tampering caught by intent profile verifier)")
+        passed_checks += 1
+
+    # 26j: Payment tampering
+    t_payment = json.loads(json.dumps(base_profile))
+    t_payment["payment"]["amount"] = "50.000001"
+    try:
+        verify_online_sale_intent_profile(t_payment, canonical_digest, validator_hub)
+        print("  FAIL Check 26j: Payment tampering was not detected!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 26j passed (payment tampering caught by intent profile verifier)")
+        passed_checks += 1
+
+    # 26k: Currency minor units tampering
+    t_minor = json.loads(json.dumps(base_profile))
+    t_minor["currency_minor_units"] = 3
+    try:
+        verify_online_sale_intent_profile(t_minor, canonical_digest, validator_hub)
+        print("  FAIL Check 26k: Currency minor units tampering was not detected!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 26k passed (currency minor units tampering caught by intent profile verifier)")
+        passed_checks += 1
+
+    # Check 27: Manifest Verification Mutation Tests (Exact Set Equality & Rejection Gates)
+    discovered_now = generate_manifest_entries(BASE_DIR)
+    valid_manifest_lines = [f"{sha}  {rel}\n" for rel, sha in sorted(discovered_now.items())]
+
+    # 27a: Real filesystem mutation test (temporary untracked file restored cleanly)
+    temp_probe = FIXTURES_DIR / "temp_probe_mutation_test.json"
+    try:
+        temp_probe.write_text('{"temp_mutation": true}\n', encoding="utf-8")
+        discovered_with_temp = generate_manifest_entries(BASE_DIR)
+        ok, err_msg = verify_manifest_content(valid_manifest_lines, discovered_with_temp)
+        if ok or "missing from manifest" not in err_msg:
+            print("  FAIL Check 27a: Temporary untracked file was not caught by manifest verifier!")
+            return 1
+    finally:
+        temp_probe.unlink(missing_ok=True)
+    print("  OK: Check 27a passed (real filesystem mutation test: untracked file caught and cleanly restored)")
+    passed_checks += 1
+
+    # 27b: Extra entry in stored manifest
+    extra_lines = valid_manifest_lines + ["e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  schemas/nonexistent-file.json\n"]
+    ok, err_msg = verify_manifest_content(extra_lines, discovered_now)
+    if ok or "entries not found on disk" not in err_msg:
+        print("  FAIL Check 27b: Extra manifest entry was not caught!")
+        return 1
+    print("  OK: Check 27b passed (extra manifest entry detected and rejected)")
+    passed_checks += 1
+
+    # 27c: Duplicate line in stored manifest
+    dup_lines = valid_manifest_lines + [valid_manifest_lines[0]]
+    ok, err_msg = verify_manifest_content(dup_lines, discovered_now)
+    if ok or "Duplicate manifest entry" not in err_msg:
+        print("  FAIL Check 27c: Duplicate manifest entry was not caught!")
+        return 1
+    print("  OK: Check 27c passed (duplicate manifest entry detected and rejected)")
+    passed_checks += 1
+
+    # 27d: Malformed line in stored manifest
+    malformed_lines = valid_manifest_lines + ["invalid_sha_format  schemas/error-response.json\n"]
+    ok, err_msg = verify_manifest_content(malformed_lines, discovered_now)
+    if ok or "Malformed manifest entry" not in err_msg:
+        print("  FAIL Check 27d: Malformed manifest line was not caught!")
+        return 1
+    print("  OK: Check 27d passed (malformed manifest entry detected and rejected)")
+    passed_checks += 1
+
+    # 27e: Checksum mismatch in stored manifest
+    tampered_hash_lines = ["0000000000000000000000000000000000000000000000000000000000000000  " + valid_manifest_lines[0].split("  ")[1]] + valid_manifest_lines[1:]
+    ok, err_msg = verify_manifest_content(tampered_hash_lines, discovered_now)
+    if ok or "Checksum mismatch" not in err_msg:
+        print("  FAIL Check 27e: Tampered manifest checksum was not caught!")
+        return 1
+    print("  OK: Check 27e passed (checksum mismatch detected and rejected)")
+    passed_checks += 1
+
+    # Check 28: Archive Byte Checks (Historical goldens & archived schemas match parent PR4 ec822093 exact hashes)
+    parent_historical_hashes = {
+        "fixtures/golden-auth-challenge.json": "caa87ae65f5e5f5fd0a03dee862f8e28324352ab7da4f33ee3994b8874553154",
+        "fixtures/golden-auth-login.json": "a7b81ff81658ad87fac002eb2ccea637813960b7b84ef3d6b0dc0a08234b9428",
+        "fixtures/golden-auth-logout.json": "fff2d09fa25005485221b9aaad71246967616ff7bbde38dc775d652e129f67dc",
+        "fixtures/golden-device-revoke.json": "6ddcabf5d3fd22062f91636ada39bfc9bcc4f9bfd038220d2c93b526b92c2ce6",
+        "fixtures/golden-bootstrap.json": "3d75cc1bfd209580cb243ca5f87e35f5a2f8637feadf2877c9a96ce6453c3a74",
+        "fixtures/golden-product-catalog.json": "a184914a64b0096169f4e73cdb0f533ac68106cd57dbff4192ee90cfa4ed5f7d",
+        "fixtures/golden-customer-directory.json": "4c49c5f0abc4d1ddc730b23d3daf503e5da8feccbcc7f9a83e53751b0dc14596",
+        "fixtures/golden-sale-preview.json": "cc7f668dbc79e12c2156d68000a21452874ce730d4e0827a3ddb5e914d325d26",
+        "fixtures/golden-sale-commit.json": "de76866b03bedb867860b273c59492e4d36d3af31281ef267d46da81ef5be542",
+        "fixtures/golden-offline-sale-intake.json": "08c1fd367a48a4e2692be5bd7a0981ca87f8bf59e457f52ac795dba78e460524",
+        "fixtures/golden-sale-event-status.json": "55b54ff7a0b259b3b378ebbec36ed5bb182e5bec5554ac307112c9d1381fb6d8",
+        "fixtures/golden-canonical-vectors.json": "910e2c1d6f0e55218b42a03b195fb04560054a4b97b8bea7bd7090e53174a8c6",
+    }
+    for rel_hist, exp_sha in parent_historical_hashes.items():
+        actual_sha = hashlib.sha256((BASE_DIR / rel_hist).read_bytes()).hexdigest()
+        if actual_sha != exp_sha:
+            print(f"  FAIL Check 28: Historical golden '{rel_hist}' drift detected!\n    Expected: {exp_sha}\n    Actual:   {actual_sha}")
+            return 1
+    print("  OK: Check 28 passed (all historical compatibility goldens match parent PR4 exact bytes)")
     passed_checks += 1
 
     # Revision 2 positive/negative read/auth fixtures
@@ -1162,13 +1730,15 @@ def run_suite() -> int:
 
     # 7. Verify reproducible manifest SHA-256 (fail closed if absent)
     print("\n[Step 7] Verifying Reproducible SHA-256 Manifest...")
-    manifest_entries = generate_manifest_entries()
+    manifest_entries = generate_manifest_entries(BASE_DIR)
 
     if "--generate-manifest" in sys.argv:
         with open(MANIFEST_FILE, "w", encoding="utf-8") as f:
             for rel_path, sha in sorted(manifest_entries.items()):
                 f.write(f"{sha}  {rel_path}\n")
+        manifest_sha = hashlib.sha256(MANIFEST_FILE.read_bytes()).hexdigest()
         print(f"  OK: Successfully generated new manifest at {MANIFEST_FILE}")
+        print(f"  Manifest SHA-256: {manifest_sha}")
         passed_checks += 1
     else:
         if not MANIFEST_FILE.exists():
@@ -1178,45 +1748,18 @@ def run_suite() -> int:
 
         with open(MANIFEST_FILE, "r", encoding="utf-8") as f:
             lines = f.readlines()
-        stored_manifest = {}
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split(maxsplit=1)
-            if len(parts) == 2:
-                stored_manifest[parts[1]] = parts[0]
 
-        for rel_path, actual_sha in manifest_entries.items():
-            if rel_path not in stored_manifest:
-                print(f"  FAIL: File {rel_path} not in manifest.sha256")
-                return 1
-            if stored_manifest[rel_path] != actual_sha:
-                print(f"  FAIL: Checksum mismatch for {rel_path}!\n    Expected: {stored_manifest[rel_path]}\n    Actual:   {actual_sha}")
-                return 1
-            passed_checks += 1
-        print(f"  OK: All {len(manifest_entries)} contract files match manifest.sha256 exactly")
+        ok, msg = verify_manifest_content(lines, manifest_entries)
+        if not ok:
+            print(f"  FAIL: {msg}")
+            return 1
+        print(f"  OK: {msg}")
+        passed_checks += 1
 
     print("\n" + "=" * 70)
     print(f"SUCCESS: All {passed_checks} contract, schema, fixture, regression, and negative tests passed!")
     print("=" * 70)
     return 0
-
-
-def generate_manifest_entries() -> Dict[str, str]:
-    entries = {}
-    target_files = []
-    target_files.append(BASE_DIR / "ADR-0001-mobile-v1-contract.md")
-    target_files.append(OPENAPI_FILE)
-    target_files.extend(sorted(SCHEMAS_DIR.glob("*.json")))
-    target_files.extend(sorted(FIXTURES_DIR.glob("*.json")))
-
-    for tf in target_files:
-        rel = tf.relative_to(BASE_DIR).as_posix()
-        with open(tf, "rb") as f:
-            h = hashlib.sha256(f.read()).hexdigest()
-        entries[rel] = h
-    return entries
 
 
 if __name__ == "__main__":

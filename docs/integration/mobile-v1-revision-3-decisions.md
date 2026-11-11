@@ -2,8 +2,8 @@
 
 Previous Android Git head: `ec8220934839ade0c4fe5408398ab1a313feb09c` (PR4 rev2).
 Previous manifest SHA-256: `ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659` (preserved unchanged as parent rev2 reference).
-Revision 3 manifest SHA-256: `f5c5bdcd125b95511cce866283d534696c1b4480127c506adc60f543aaae6283`.
-API prefix remains `/api/mobile/v1`; this is an explicit draft contract revision 3, not a silent mirror rewrite. Status: **PROPOSED NOT LIVE**.
+Revision 3 manifest SHA-256: `5774161028c9c576bbd6ea66af8e500d0586e904aeaf9759a6ec9f159cc9291d`.
+API paths preserve `/api/mobile/v1` for revision 2 read/auth representations and introduce explicit `/api/mobile/v2` paths for breaking financial endpoints; this is an explicit draft contract revision 3, not a silent mirror rewrite. Status: **PROPOSED NOT LIVE**.
 
 Read the revision 3 section of ADR-0001 for normative contract specifications. Proposal evidence and source anchors were independently verified against PR9 remote `4a249ca7416f8c45478aa2f163df1369d02172ea` (`docs/integration/financial-tax-protocol-proposal.md`) and Account backend commit `f8a0cf7012c4875bec7320d42e0f8dde58593b52`.
 
@@ -85,3 +85,17 @@ API versions. Adding an API version to that identity would allow duplicate posti
 through different routes. Original actor/device scope and current authorization
 must be checked before replay/status disclosure, including unsupported legacy
 version responses. No v2 route, middleware or permission is activated here.
+
+### Normative Online Canonical Intent Profile & Preview Token
+Online preview (`POST /api/mobile/v2/sales/preview`) computes an explicit canonical intent profile rather than hashing raw request payload omitting context.
+- **Field selection**: Authoritative context (`company_id`, `actor_id`, `currency_minor_units`) from route/token + request (`device_id`, `client_event_id`, `customer_id`, `warehouse_id`, `currency`, `lines`, `payment`).
+- **Exact Decimal Lexemes**: All financial quantities (`price`, `subtotal`, `net_before_tax`, `tax_amount`, `line_total`, `tax_rate`, `conversion_to_base`, `grand_total`, `tendered_amount`, `settled_amount`, `change_amount`) are preserved as exact validated strings without floating point conversion or implicit rounding.
+- **Restricted JCS UTF-16 code unit sorting**: Canonical JSON serializes object keys sorted by UTF-16 code units without whitespace.
+- **Digest & Token**: SHA-256 digest is derived from canonical profile bytes (`sha256:93b9aa677275388defe694390ab756d4b08f122087ec084b8dbd8b421ffc45fd` for golden preview v2). Preview token is an illustrative opaque placeholder (`eyJ...sig_...`) representing server binding, without claiming client cryptographic proof.
+- **Tampering Rejection**: Any alteration to actor, company, device, event, tax identity, tax inclusive flag, conversion multiplier, decimal lexeme, line ordering, or payment fields alters the canonical profile bytes and digest, causing validation and commit rejection.
+
+### Arithmetic vs Schema Qualification
+- JSON Schema enforces syntax, format, and regex patterns only (e.g. ULID regex, exact decimal regex `^[0-9]+(\\.[0-9]{1,6})?$`).
+- True financial arithmetic (line subtotal, tax amount, line total, document grand total, tendered - settled = change) requires server decimal computation with ROUND_HALF_UP at qualified currency minor units.
+- Contract fixtures and tests verify genuine arithmetic using an exact Decimal calculator helper; they do not assert universal server validation until backend implementation is qualified.
+
