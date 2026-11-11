@@ -93,8 +93,10 @@ acceptance remain release blockers. This playbook does not establish readiness.
 
 Laravel releases follow its existing deployment SOP and controlled release
 checklist. The [Laravel release addendum draft](https://github.com/Bassamalsaqqa/account/blob/t3/laravel-release-guidance/docs/RELEASING.md)
-([PR 90](https://github.com/Bassamalsaqqa/account/pull/90)) awaits correction and review;
-it is not an accepted deployment procedure. Preserve compatibility with the previous pilot APK. A server
+([PR 90](https://github.com/Bassamalsaqqa/account/pull/90)) passed document review at
+`97a1493c469887f67c6594aac33dfeedd19d0e8d`; it remains an unmerged draft. Document
+review does not verify release artifacts or authorize deployment. Preserve compatibility
+with the previous pilot APK. A server
 rollback requires checking the current database schema; never assume reverting
 code also reverts schema safely. Pending mobile sales must retain their identity
 and bytes through updates or forward fixes.
