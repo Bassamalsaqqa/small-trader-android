@@ -1,0 +1,360 @@
+package com.example.data.mobile.contract
+
+/**
+ * Typed JSON element tree preserving exact types, string decimals, and distinguishing
+ * objects from arrays and integers from floating-point numbers.
+ */
+sealed interface StrictJsonElement {
+    fun asObject(): StrictJsonObject =
+        this as? StrictJsonObject ?: throw CanonicalSerializationException("Expected JSON object, got ${this::class.simpleName}")
+
+    fun asArray(): StrictJsonArray =
+        this as? StrictJsonArray ?: throw CanonicalSerializationException("Expected JSON array, got ${this::class.simpleName}")
+
+    fun asString(): String =
+        (this as? StrictJsonString)?.value ?: throw CanonicalSerializationException("Expected JSON string, got ${this::class.simpleName}")
+
+    fun asInt(): Int {
+        val num = this as? StrictJsonNumber ?: throw CanonicalSerializationException("Expected JSON number, got ${this::class.simpleName}")
+        if (!num.isInt) {
+            throw CanonicalSerializationException("Expected integer, got floating-point number: ${num.rawString}")
+        }
+        return num.rawString.toIntOrNull()
+            ?: throw CanonicalSerializationException("Integer '${num.rawString}' exceeds 32-bit integer range")
+    }
+
+    fun asLong(): Long {
+        val num = this as? StrictJsonNumber ?: throw CanonicalSerializationException("Expected JSON number, got ${this::class.simpleName}")
+        if (!num.isInt) {
+            throw CanonicalSerializationException("Expected integer, got floating-point number: ${num.rawString}")
+        }
+        val longVal = num.rawString.toLongOrNull()
+            ?: throw CanonicalSerializationException("Integer '${num.rawString}' exceeds 64-bit integer range")
+        if (longVal < ContractConstants.MIN_SAFE_INTEGER || longVal > ContractConstants.MAX_SAFE_INTEGER) {
+            throw CanonicalSerializationException("Integer '${num.rawString}' exceeds canonical safe integer domain")
+        }
+        return longVal
+    }
+}
+
+data class StrictJsonObject(val properties: Map<String, StrictJsonElement>) : StrictJsonElement {
+    operator fun get(key: String): StrictJsonElement? = properties[key]
+    fun require(key: String): StrictJsonElement =
+        properties[key] ?: throw CanonicalSerializationException("Missing required property '$key'")
+}
+
+data class StrictJsonArray(val elements: List<StrictJsonElement>) : StrictJsonElement {
+    operator fun get(index: Int): StrictJsonElement = elements[index]
+    val size: Int get() = elements.size
+}
+
+data class StrictJsonString(val value: String) : StrictJsonElement
+
+data class StrictJsonNumber(val rawString: String, val isInt: Boolean) : StrictJsonElement
+
+data class StrictJsonBoolean(val value: Boolean) : StrictJsonElement
+
+object StrictJsonNull : StrictJsonElement {
+    override fun toString(): String = "null"
+}
+
+/**
+ * Pure Kotlin parser that enforces Small Trader contract parsing rules:
+ * 1. Strictly rejects duplicate object keys (Negative 10b parity).
+ * 2. Detects and rejects lone / unpaired Unicode surrogates.
+ * 3. Preserves exact string decimal numbers and flags floating-point representations.
+ * 4. Strictly distinguishes objects from lists and null from missing.
+ * 5. Rejects oversized payloads, unbounded recursion (>32), and strings > 64 KB.
+ * 6. Strictly rejects canonical integer negative zero ('-0') and bounds integers to [-(2^53-1), 2^53-1].
+ */
+class StrictJsonParser private constructor(private val src: String) {
+    private var pos: Int = 0
+    private val len: Int = src.length
+    private var currentDepth: Int = 0
+
+    init {
+        if (src.toByteArray(Charsets.UTF_8).size > ContractConstants.MAX_PAYLOAD_BYTES) {
+            throw CanonicalSerializationException("Payload size $len exceeds maximum allowed ${ContractConstants.MAX_PAYLOAD_BYTES}")
+        }
+    }
+
+    private fun parseValue(): StrictJsonElement {
+        skipWhitespace()
+        if (pos >= len) {
+            throw CanonicalSerializationException("Unexpected end of JSON input")
+        }
+        return when (val c = src[pos]) {
+            '{' -> parseObject()
+            '[' -> parseArray()
+            '"' -> parseString()
+            't', 'f' -> parseBoolean()
+            'n' -> parseNull()
+            '-', in '0'..'9' -> parseNumber()
+            else -> throw CanonicalSerializationException("Unexpected character '$c' at position $pos")
+        }
+    }
+
+    private fun parseObject(): StrictJsonObject {
+        currentDepth++
+        if (currentDepth > ContractConstants.MAX_NESTING_DEPTH) {
+            throw CanonicalSerializationException("JSON recursion depth exceeded maximum allowed ${ContractConstants.MAX_NESTING_DEPTH}")
+        }
+        try {
+            consume('{')
+            skipWhitespace()
+            val props = LinkedHashMap<String, StrictJsonElement>()
+            if (peek() == '}') {
+                consume('}')
+                return StrictJsonObject(props)
+            }
+            while (true) {
+                skipWhitespace()
+                if (peek() != '"') {
+                    throw CanonicalSerializationException("Expected string property key at position $pos, got '${peek()}'")
+                }
+                val key = (parseString() as StrictJsonString).value
+                if (props.containsKey(key)) {
+                    throw CanonicalSerializationException("Duplicate JSON key detected: '$key'")
+                }
+                skipWhitespace()
+                consume(':')
+                skipWhitespace()
+                val value = parseValue()
+                props[key] = value
+                skipWhitespace()
+                val next = peek()
+                if (next == ',') {
+                    consume(',')
+                } else if (next == '}') {
+                    consume('}')
+                    break
+                } else {
+                    throw CanonicalSerializationException("Expected ',' or '}' at position $pos, got '$next'")
+                }
+            }
+            return StrictJsonObject(props)
+        } finally {
+            currentDepth--
+        }
+    }
+
+    private fun parseArray(): StrictJsonArray {
+        currentDepth++
+        if (currentDepth > ContractConstants.MAX_NESTING_DEPTH) {
+            throw CanonicalSerializationException("JSON recursion depth exceeded maximum allowed ${ContractConstants.MAX_NESTING_DEPTH}")
+        }
+        try {
+            consume('[')
+            skipWhitespace()
+            val items = mutableListOf<StrictJsonElement>()
+            if (peek() == ']') {
+                consume(']')
+                return StrictJsonArray(items)
+            }
+            while (true) {
+                skipWhitespace()
+                val value = parseValue()
+                items.add(value)
+                skipWhitespace()
+                val next = peek()
+                if (next == ',') {
+                    consume(',')
+                } else if (next == ']') {
+                    consume(']')
+                    break
+                } else {
+                    throw CanonicalSerializationException("Expected ',' or ']' at position $pos, got '$next'")
+                }
+            }
+            return StrictJsonArray(items)
+        } finally {
+            currentDepth--
+        }
+    }
+
+    private fun parseString(): StrictJsonString {
+        consume('"')
+        val sb = StringBuilder()
+        while (pos < len) {
+            val c = src[pos++]
+            if (c == '"') {
+                return StrictJsonString(sb.toString())
+            }
+            if (c < ' ') {
+                throw CanonicalSerializationException("Unescaped control character in JSON string")
+            }
+            if (c == '\\') {
+                if (pos >= len) throw CanonicalSerializationException("Unterminated escape sequence in string")
+                when (val esc = src[pos++]) {
+                    '"' -> sb.append('"')
+                    '\\' -> sb.append('\\')
+                    '/' -> sb.append('/')
+                    'b' -> sb.append('\b')
+                    'f' -> sb.append('\u000C')
+                    'n' -> sb.append('\n')
+                    'r' -> sb.append('\r')
+                    't' -> sb.append('\t')
+                    'u' -> {
+                        if (pos + 4 > len) throw CanonicalSerializationException("Incomplete \\u hex escape in string")
+                        val hex = src.substring(pos, pos + 4)
+                        pos += 4
+                        if (!hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                            throw CanonicalSerializationException("Unicode escape requires four ASCII hex digits")
+                        }
+                        val code = hex.toIntOrNull(16)
+                            ?: throw CanonicalSerializationException("Invalid hex in \\u escape: $hex")
+                        val char1 = code.toChar()
+                        if (Character.isHighSurrogate(char1)) {
+                            if (pos + 6 <= len && src.substring(pos, pos + 2) == "\\u") {
+                                val hex2 = src.substring(pos + 2, pos + 6)
+                                val code2 = if (hex2.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) hex2.toIntOrNull(16) else null
+                                if (code2 != null && Character.isLowSurrogate(code2.toChar())) {
+                                    pos += 6
+                                    sb.append(char1)
+                                    sb.append(code2.toChar())
+                                    checkDecodedStringLength(sb)
+                                    continue
+                                }
+                            }
+                            throw CanonicalSerializationException("Unpaired high Unicode surrogate detected: 0x${Integer.toHexString(code)}")
+                        } else if (Character.isLowSurrogate(char1)) {
+                            throw CanonicalSerializationException("Unpaired low Unicode surrogate detected: 0x${Integer.toHexString(code)}")
+                        }
+                        sb.append(char1)
+                    }
+                    else -> throw CanonicalSerializationException("Invalid escape sequence '\\$esc' in string")
+                }
+            } else {
+                if (Character.isHighSurrogate(c)) {
+                    if (pos < len && Character.isLowSurrogate(src[pos])) {
+                        sb.append(c)
+                        sb.append(src[pos++])
+                    } else {
+                        throw CanonicalSerializationException("Unpaired high Unicode surrogate detected: 0x${Integer.toHexString(c.code)}")
+                    }
+                } else if (Character.isLowSurrogate(c)) {
+                    throw CanonicalSerializationException("Unpaired low Unicode surrogate detected: 0x${Integer.toHexString(c.code)}")
+                } else {
+                    sb.append(c)
+                }
+            }
+            checkDecodedStringLength(sb)
+        }
+        throw CanonicalSerializationException("Unterminated string literal")
+    }
+
+    private fun checkDecodedStringLength(value: StringBuilder) {
+        if (value.length > ContractConstants.MAX_STRING_LENGTH) {
+            throw CanonicalSerializationException("JSON string length exceeds maximum allowed ${ContractConstants.MAX_STRING_LENGTH} UTF-16 code units")
+        }
+    }
+
+    private fun parseNumber(): StrictJsonNumber {
+        val start = pos
+        val isNegative = if (peek() == '-') {
+            consume('-')
+            true
+        } else false
+
+        val intStart = pos
+        while (pos < len && src[pos] in '0'..'9') {
+            pos++
+        }
+        val intDigits = src.substring(intStart, pos)
+        if (intDigits.isEmpty()) {
+            throw CanonicalSerializationException("Expected digits for number at position $pos")
+        }
+
+        var isFloat = false
+        if (pos < len && src[pos] == '.') {
+            isFloat = true
+            pos++
+            val fracStart = pos
+            while (pos < len && src[pos] in '0'..'9') {
+                pos++
+            }
+            if (pos == fracStart) {
+                throw CanonicalSerializationException("Expected digits after decimal point at position $pos")
+            }
+        }
+        if (pos < len && (src[pos] == 'e' || src[pos] == 'E')) {
+            isFloat = true
+            pos++
+            if (pos < len && (src[pos] == '+' || src[pos] == '-')) {
+                pos++
+            }
+            val expStart = pos
+            while (pos < len && src[pos] in '0'..'9') {
+                pos++
+            }
+            if (pos == expStart) {
+                throw CanonicalSerializationException("Expected digits for exponent at position $pos")
+            }
+        }
+        val raw = src.substring(start, pos)
+
+        if (!isFloat) {
+            if (isNegative && intDigits.all { it == '0' }) {
+                throw CanonicalSerializationException("Canonical integer negative zero '-0' is strictly forbidden")
+            }
+            if (intDigits.length > 1 && intDigits.startsWith("0")) {
+                throw CanonicalSerializationException("Leading zeros in integer numbers are forbidden: $raw")
+            }
+            val longVal = raw.toLongOrNull()
+                ?: throw CanonicalSerializationException("Integer '$raw' exceeds 64-bit integer range")
+            if (longVal < ContractConstants.MIN_SAFE_INTEGER || longVal > ContractConstants.MAX_SAFE_INTEGER) {
+                throw CanonicalSerializationException("Integer '$raw' exceeds canonical safe integer domain [-(2^53-1), 2^53-1]")
+            }
+        }
+
+        return StrictJsonNumber(raw, isInt = !isFloat)
+    }
+
+    private fun parseBoolean(): StrictJsonBoolean {
+        if (src.startsWith("true", pos)) {
+            pos += 4
+            return StrictJsonBoolean(true)
+        }
+        if (src.startsWith("false", pos)) {
+            pos += 5
+            return StrictJsonBoolean(false)
+        }
+        throw CanonicalSerializationException("Invalid boolean token at position $pos")
+    }
+
+    private fun parseNull(): StrictJsonNull {
+        if (src.startsWith("null", pos)) {
+            pos += 4
+            return StrictJsonNull
+        }
+        throw CanonicalSerializationException("Invalid null token at position $pos")
+    }
+
+    private fun skipWhitespace() {
+        while (pos < len && (src[pos] == ' ' || src[pos] == '\t' || src[pos] == '\n' || src[pos] == '\r')) {
+            pos++
+        }
+    }
+
+    private fun peek(): Char = if (pos < len) src[pos] else throw CanonicalSerializationException("Unexpected end of JSON")
+
+    private fun consume(expected: Char) {
+        if (pos >= len || src[pos] != expected) {
+            val actual = if (pos < len) "'${src[pos]}'" else "EOF"
+            throw CanonicalSerializationException("Expected '$expected' at position $pos, got $actual")
+        }
+        pos++
+    }
+
+    companion object {
+        fun parse(jsonStr: String): StrictJsonElement {
+            val parser = StrictJsonParser(jsonStr)
+            val result = parser.parseValue()
+            parser.skipWhitespace()
+            if (parser.pos < parser.len) {
+                throw CanonicalSerializationException("Extra trailing characters after JSON value at position ${parser.pos}")
+            }
+            return result
+        }
+    }
+}
