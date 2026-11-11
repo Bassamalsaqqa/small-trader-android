@@ -132,6 +132,21 @@ interface OutboxRepository {
     ): Boolean
 
     /**
+     * Marks an in-flight claimed record as CONFLICT following a 409 business conflict
+     * or non-submittable legacy version.
+     * Requires active lease, matching claim token, and matching tenant/actor/device scope.
+     * Never demotes a CONFIRMED record and never modifies an unowned or expired claim.
+     */
+    fun markClaimConflict(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        clientEventId: ClientUuid,
+        claimToken: String,
+        reason: String
+    ): Boolean
+
+    /**
      * Confirms delivery strictly upon verified server acknowledgement via worker claim.
      *
      * Invariants:
@@ -696,6 +711,43 @@ class OutboxRepositoryImpl(
                 deviceId = deviceId.value,
                 claimToken = claimToken,
                 errorMessage = errorMessage,
+                nowMillis = now
+            )
+            updated == 1
+        }
+    }
+
+    override fun markClaimConflict(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        clientEventId: ClientUuid,
+        claimToken: String,
+        reason: String
+    ): Boolean {
+        require(claimToken.isNotBlank()) { "claimToken must not be blank" }
+        val now = clock()
+        return database.runInTransaction<Boolean> {
+            val state = database.outboxDao().getDeliveryState(companyId.value, clientEventId.value)
+                ?: return@runInTransaction false
+
+            if (state.companyId != companyId.value || state.actorId != actorId.value || state.deviceId != deviceId.value) {
+                return@runInTransaction false
+            }
+            if (state.status != OutboxStatus.IN_FLIGHT.wireValue || state.claimToken != claimToken) {
+                return@runInTransaction false
+            }
+            if (state.claimExpiresAt != null && state.claimExpiresAt < now) {
+                return@runInTransaction false
+            }
+
+            val updated = database.outboxDao().markClaimConflict(
+                clientEventId = clientEventId.value,
+                companyId = companyId.value,
+                actorId = actorId.value,
+                deviceId = deviceId.value,
+                claimToken = claimToken,
+                reason = reason,
                 nowMillis = now
             )
             updated == 1

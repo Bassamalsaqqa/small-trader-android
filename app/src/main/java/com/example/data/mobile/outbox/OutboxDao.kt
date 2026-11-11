@@ -203,6 +203,30 @@ abstract class OutboxDao {
 
     @Query("""
         UPDATE outbox_delivery_states
+        SET status = 'conflict',
+            error_message = :reason,
+            claim_token = NULL,
+            claim_expires_at = NULL,
+            updated_at = :nowMillis
+        WHERE company_id = :companyId
+          AND client_event_id = :clientEventId
+          AND actor_id = :actorId
+          AND device_id = :deviceId
+          AND claim_token = :claimToken
+          AND status = 'in_flight'
+    """)
+    abstract fun markClaimConflict(
+        clientEventId: String,
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        claimToken: String,
+        reason: String,
+        nowMillis: Long
+    ): Int
+
+    @Query("""
+        UPDATE outbox_delivery_states
         SET status = 'confirmed',
             invoice_ulid = :invoiceUlid,
             payment_ulid = :paymentUlid,
