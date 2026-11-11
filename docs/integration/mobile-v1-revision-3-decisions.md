@@ -2,7 +2,7 @@
 
 Previous Android Git head: `ec8220934839ade0c4fe5408398ab1a313feb09c` (PR4 rev2).
 Previous manifest SHA-256: `ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659` (preserved unchanged as parent rev2 reference).
-Revision 3 manifest SHA-256: `cc731f40dfee0e58f96e25f5f5c6d5a7e539eba45d39895b892726c72fc8a517`.
+Revision 3 manifest SHA-256: `f5c5bdcd125b95511cce866283d534696c1b4480127c506adc60f543aaae6283`.
 API prefix remains `/api/mobile/v1`; this is an explicit draft contract revision 3, not a silent mirror rewrite. Status: **PROPOSED NOT LIVE**.
 
 Read the revision 3 section of ADR-0001 for normative contract specifications. Proposal evidence and source anchors were independently verified against PR9 remote `4a249ca7416f8c45478aa2f163df1369d02172ea` (`docs/integration/financial-tax-protocol-proposal.md`) and Account backend commit `f8a0cf7012c4875bec7320d42e0f8dde58593b52`.
@@ -53,3 +53,15 @@ The write transaction revalidates the bearer token, device installation UUID bin
 - Legacy v1 financial goldens (`golden-offline-sale-intake.json`, `golden-sale-preview.json`, `golden-canonical-vectors.json`) and schemas (`archived-v1-*.json`) are preserved verbatim as compatibility material without byte or digest mutation.
 - New v2 intake accepts only `event_version: 2`. Legacy v1 events encountering v2 intake return HTTP 409 with reason `unsupported_event_version_1`, mapping to client Room outbox `CONFLICT` state without mutating stored bytes, UUID, or digest.
 - Offline policy remains disabled (`enabled: false, availability: "unavailable"`).
+
+### Blocking Representation Rollout Decision
+Revision 2 and revision 3 currently share `/api/mobile/v1` paths but are not
+bidirectionally wire compatible. Revision 2 strict clients reject new response
+properties; revision 3 requires fields absent from revision 2 requests/responses.
+Separate draft isolation does not resolve deployment compatibility. Before any
+consumer repin, backend mirror update or activation, specify and test an explicit
+endpoint version or representation negotiation mechanism for both requests and
+responses. Do not select the representation by guessing financial intent.
+Missing tax identity, calculation mode, conversion snapshot or currency scale
+must fail closed; no default or legacy fallback may invent those economic terms.
+Existing revision 2 consumers stay pinned until that decision is reviewed.
