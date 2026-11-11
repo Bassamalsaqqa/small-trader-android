@@ -379,9 +379,9 @@ def construct_online_sale_intent_profile(
     minor_units = context["currency_minor_units"]
 
     ulid_regex = r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
-    if not isinstance(actor_id, str) or not re.match(ulid_regex, actor_id):
+    if not isinstance(actor_id, str) or not re.fullmatch(ulid_regex, actor_id):
         raise IntentProfileValidationError(f"Invalid actor_id ULID in context: {actor_id!r}")
-    if not isinstance(company_id, str) or not re.match(ulid_regex, company_id):
+    if not isinstance(company_id, str) or not re.fullmatch(ulid_regex, company_id):
         raise IntentProfileValidationError(f"Invalid company_id ULID in context: {company_id!r}")
 
     if isinstance(minor_units, bool) or not isinstance(minor_units, int) or not (0 <= minor_units <= 6):
@@ -2052,6 +2052,17 @@ def run_suite() -> int:
     except IntentProfileValidationError:
         print("  OK: Check 32e passed (non-ULID UUID actor_id in context rejected)")
         passed_checks += 1
+
+    # Context identities must not accept a final newline via regex dollar anchors.
+    for identity_key in ("actor_id", "company_id"):
+        bad_context = dict(preview_v2_fix["context"])
+        bad_context[identity_key] += "\n"
+        try:
+            construct_online_sale_intent_profile(bad_context, preview_v2_fix["request"], validator_hub)
+            print(f"  FAIL: Context {identity_key} accepted a trailing newline")
+            return 1
+        except IntentProfileValidationError:
+            passed_checks += 1
 
     # Check 33: Invalid settlement amounts boundaries, lexemes, and negative amounts
     # 33a: unpaid with positive amount rejected
