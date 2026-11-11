@@ -454,7 +454,18 @@ fun ProductsCatalogScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = lang.tr(
+                text = if (state.searchQuery.isBlank() && stockFilter == CatalogStockFilter.ALL) {
+                    val total = state.products.count {
+                        state.selectedCategory == ProductCategory.ALL || it.category == state.selectedCategory
+                    }
+                    if (total > displayedProducts.size) lang.tr(
+                        "عرض ${WesternFormatters.formatInt(displayedProducts.size)} من أصل ${WesternFormatters.formatInt(total)}",
+                        "Showing ${WesternFormatters.formatInt(displayedProducts.size)} of ${WesternFormatters.formatInt(total)}"
+                    ) else lang.tr(
+                        "${WesternFormatters.formatInt(displayedProducts.size)} صنف",
+                        "${WesternFormatters.formatInt(displayedProducts.size)} items"
+                    )
+                } else lang.tr(
                     "${WesternFormatters.formatInt(displayedProducts.size)} صنف",
                     "${WesternFormatters.formatInt(displayedProducts.size)} items"
                 ),

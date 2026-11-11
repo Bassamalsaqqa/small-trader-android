@@ -20,9 +20,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Payments
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
+import com.example.data.ProductSearch
+import com.example.model.ProductCategory
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -741,6 +746,16 @@ fun ReceivePurchaseBillDialog(
     var inlineError by rememberSaveable { mutableStateOf<String?>(null) }
 
     val trackedProducts = remember(state.products) { state.products.filter { it.isStockTracked } }
+    var productSearchQuery by rememberSaveable { mutableStateOf("") }
+    val filteredTrackedProducts = remember(trackedProducts, productSearchQuery) {
+        ProductSearch.search(
+            products = trackedProducts,
+            query = productSearchQuery,
+            category = ProductCategory.ALL,
+            limit = 30,
+            stockTrackedOnly = true
+        )
+    }
 
     val structuredLines = rememberSaveable(saver = PurchaseLineListSaver) { mutableStateListOf<PurchaseLineItem>() }
 
@@ -784,17 +799,16 @@ fun ReceivePurchaseBillDialog(
             if (!isSubmitting) onDismiss()
         },
         shape = RoundedCornerShape(12.dp),
-        title = {
-            Text(
-                text = lang.tr("فاتورة مشتريات وتوريد", "Purchase & Inward Bill"),
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
-        },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                Text(
+                    text = lang.tr("فاتورة مشتريات وتوريد", "Purchase & Inward Bill"),
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                )
+
                 if (inlineError != null) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
@@ -808,7 +822,7 @@ fun ReceivePurchaseBillDialog(
                             text = inlineError!!,
                             color = MaterialTheme.colorScheme.onErrorContainer,
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                         )
                     }
                 }
@@ -816,47 +830,54 @@ fun ReceivePurchaseBillDialog(
                 // Bill Mode Selector
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     FilterChip(
                         selected = billMode == PurchaseBillMode.STRUCTURED,
+                        enabled = !isSubmitting,
                         onClick = {
                             billMode = PurchaseBillMode.STRUCTURED
                             inlineError = null
                         },
-                        label = { Text(lang.tr("فاتورة أصناف مخزنية", "Itemized Stock Bill")) },
+                        label = { Text(lang.tr("فاتورة أصناف مخزنية", "Itemized Stock Bill"), style = MaterialTheme.typography.labelSmall) },
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.testTag("purchase_bill_mode_structured")
                     )
                     FilterChip(
                         selected = billMode == PurchaseBillMode.FINANCIAL_ONLY,
+                        enabled = !isSubmitting,
                         onClick = {
                             billMode = PurchaseBillMode.FINANCIAL_ONLY
                             inlineError = null
                         },
-                        label = { Text(lang.tr("قيد مالي فقط", "Financial-Only Bill")) },
+                        label = { Text(lang.tr("قيد مالي فقط", "Financial-Only Bill"), style = MaterialTheme.typography.labelSmall) },
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.testTag("purchase_bill_mode_financial")
                     )
                 }
 
                 // Supplier Picker
-                Text(
-                    text = lang.tr("المورد:", "Supplier:"),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                LazyRow(
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    items(suppliers, key = { it.id }) { s ->
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(
+                        text = lang.tr("المورد:", "Supplier:"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    LazyRow(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(suppliers, key = { it.id }) { s ->
                             FilterChip(
                                 selected = s.id == selectedSupplierId,
+                                enabled = !isSubmitting,
                                 onClick = { selectedSupplierId = s.id },
-                                label = { Text(s.name(lang)) },
-                                shape = RoundedCornerShape(10.dp),
+                                label = { Text(s.name(lang), style = MaterialTheme.typography.labelSmall) },
+                                shape = RoundedCornerShape(8.dp),
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = MaterialTheme.colorScheme.primary,
                                     selectedLabelColor = MaterialTheme.colorScheme.onPrimary
@@ -872,16 +893,17 @@ fun ReceivePurchaseBillDialog(
                         purchaseDesc = it
                         inlineError = null
                     },
-                    label = {
+                    enabled = !isSubmitting,
+                    placeholder = {
                         Text(
                             if (billMode == PurchaseBillMode.STRUCTURED) {
-                                lang.tr("بيان الفاتورة (اختياري، يولد تلقائياً)", "Bill Summary (Optional, Auto-generated)")
+                                lang.tr("بيان الفاتورة (اختياري)", "Bill Summary (Optional)")
                             } else {
                                 lang.tr("بيان الفاتورة / الأصناف *", "Bill Summary / Items *")
-                            }
+                            },
+                            style = MaterialTheme.typography.bodySmall
                         )
                     },
-                    placeholder = { Text(lang.tr("مثال: توريد زيت زيتون وزعتر", "e.g. Olive Oil & Zaatar")) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
@@ -890,34 +912,89 @@ fun ReceivePurchaseBillDialog(
                 )
 
                 if (billMode == PurchaseBillMode.STRUCTURED && trackedProducts.isNotEmpty()) {
-                    Text(
-                        text = lang.tr("إضافة صنف لمخزون الفاتورة:", "Add item to bill inventory:"),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        items(trackedProducts, key = { it.id }) { p ->
-                            FilterChip(
-                                selected = linkedProductId == p.id,
-                                onClick = {
-                                    linkedProductId = p.id
-                                    if (purchaseDesc.isBlank()) {
-                                        purchaseDesc = "توريد ${p.name(lang)}"
-                                    }
-                                    if (unitCostText.isBlank()) {
-                                        unitCostText = WesternFormatters.formatNumber(p.costIls).removeSuffix(".00")
-                                    }
-                                    if (linkedQuantityText.isBlank()) {
-                                        linkedQuantityText = "1"
-                                    }
-                                },
-                                label = { Text(p.name(lang)) },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.testTag("chip_product_${p.id}")
+                    // Primary search input placed strictly ABOVE candidate results
+                    OutlinedTextField(
+                        value = productSearchQuery,
+                        onValueChange = { productSearchQuery = it },
+                        enabled = !isSubmitting,
+                        placeholder = {
+                            Text(
+                                lang.tr("ابحث بالاسم أو الباركود...", "Search item by name or barcode..."),
+                                style = MaterialTheme.typography.bodySmall
                             )
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                        },
+                        trailingIcon = {
+                            if (productSearchQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { productSearchQuery = "" },
+                                    enabled = !isSubmitting,
+                                    modifier = Modifier.size(48.dp).testTag("clear_purchase_product_search")
+                                ) {
+                                    Icon(Icons.Default.Clear, contentDescription = lang.tr("مسح", "Clear"), modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("purchase_product_search_input")
+                    )
+
+                    // Candidates or zero-result feedback strictly below search input
+                    if (filteredTrackedProducts.isEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = lang.tr(
+                                    "لا توجد أصناف مخزنية مطابقة لـ «$productSearchQuery»",
+                                    "No inventory items matching «$productSearchQuery»"
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            TextButton(
+                                onClick = { productSearchQuery = "" },
+                                enabled = !isSubmitting,
+                                modifier = Modifier.testTag("clear_purchase_search_no_results")
+                            ) {
+                                Text(lang.tr("مسح البحث", "Clear"))
+                            }
+                        }
+                    } else {
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(filteredTrackedProducts, key = { it.id }) { p ->
+                                FilterChip(
+                                    selected = linkedProductId == p.id,
+                                    enabled = !isSubmitting,
+                                    onClick = {
+                                        linkedProductId = p.id
+                                        if (purchaseDesc.isBlank()) {
+                                            purchaseDesc = "توريد ${p.name(lang)}"
+                                        }
+                                        if (unitCostText.isBlank()) {
+                                            unitCostText = WesternFormatters.formatNumber(p.costIls).removeSuffix(".00")
+                                        }
+                                        if (linkedQuantityText.isBlank()) {
+                                            linkedQuantityText = "1"
+                                        }
+                                    },
+                                    label = { Text("${p.name(lang)} (${p.unit(lang)})", style = MaterialTheme.typography.labelSmall) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.testTag("chip_product_${p.id}")
+                                )
+                            }
                         }
                     }
 
@@ -932,6 +1009,7 @@ fun ReceivePurchaseBillDialog(
                                     linkedQuantityText = WesternFormatters.sanitizeWesternDigits(it)
                                     inlineError = null
                                 },
+                                enabled = !isSubmitting,
                                 label = { Text(lang.tr("الكمية", "Quantity")) },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
@@ -946,6 +1024,7 @@ fun ReceivePurchaseBillDialog(
                                     unitCostText = WesternFormatters.sanitizeWesternDigits(it)
                                     inlineError = null
                                 },
+                                enabled = !isSubmitting,
                                 label = { Text(lang.tr("تكلفة الوحدة (₪)", "Unit Cost (₪)")) },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 singleLine = true,
@@ -989,7 +1068,7 @@ fun ReceivePurchaseBillDialog(
                                     inlineError = null
                                 }
                             },
-                            enabled = canAddCandidate,
+                            enabled = !isSubmitting && canAddCandidate,
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1035,13 +1114,14 @@ fun ReceivePurchaseBillDialog(
                                             onClick = {
                                                 structuredLines.removeAt(idx)
                                             },
+                                            enabled = !isSubmitting,
                                             modifier = Modifier
-                                                .size(32.dp)
+                                                .size(48.dp)
                                                 .testTag("btn_remove_line_${line.productId}")
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.DeleteOutline,
-                                                contentDescription = "Remove",
+                                                contentDescription = lang.tr("إزالة الصنف", "Remove item"),
                                                 tint = MaterialTheme.colorScheme.error,
                                                 modifier = Modifier.size(18.dp)
                                             )
@@ -1067,6 +1147,7 @@ fun ReceivePurchaseBillDialog(
                         }
                     },
                     readOnly = (billMode == PurchaseBillMode.STRUCTURED),
+                    enabled = !isSubmitting,
                     label = {
                         Text(
                             if (billMode == PurchaseBillMode.STRUCTURED) {
@@ -1105,6 +1186,7 @@ fun ReceivePurchaseBillDialog(
                         purchasePaid = WesternFormatters.sanitizeWesternDigits(it)
                         inlineError = null
                     },
+                    enabled = !isSubmitting,
                     label = { Text(lang.tr("المدفوع نقداً الآن من الصندوق (₪)", "Paid Cash Now (₪)")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
@@ -1134,6 +1216,30 @@ fun ReceivePurchaseBillDialog(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
                         )
                     }
+                }
+
+                // Prototype demo boundary notice
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = lang.tr(
+                            "نسخة تجريبية: تُحفظ الفاتورة محلياً، ويُسجّل استلام البضاعة بشكل منفصل.",
+                            "Demo: Bills are saved locally; goods receipt is recorded separately."
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         },
