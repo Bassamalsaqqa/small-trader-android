@@ -2,11 +2,13 @@ package com.example.data.mobile.contract
 
 /**
  * Authoritative constants and contract constraints for Small Trader Mobile V1 API.
- * Contract Manifest SHA-256: a8d04a130bdb0bd909a7cfabdde93fb6f90c96cc07dbedfbd01971bdb07c6733
+ * Contract Revision: 2 (Draft)
+ * Contract Manifest SHA-256: ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659
  */
 object ContractConstants {
     const val CONTRACT_VERSION: String = "mobile-v1"
-    const val MANIFEST_SHA256: String = "a8d04a130bdb0bd909a7cfabdde93fb6f90c96cc07dbedfbd01971bdb07c6733"
+    const val CONTRACT_REVISION: Int = 2
+    const val MANIFEST_SHA256: String = "ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659"
 
     // Server entity public ID: strict 26-character Crockford Base32 ULID starting with [0-7]
     val CROCKFORD_ULID_REGEX: Regex = Regex("^[0-7][0-9A-HJKMNP-TV-Z]{25}\$")
