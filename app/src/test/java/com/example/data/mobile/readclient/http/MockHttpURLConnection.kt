@@ -16,8 +16,9 @@ class MockHttpURLConnection(
     var statusCodeToReturn: Int = 200,
     var responseBodyBytes: ByteArray = ByteArray(0),
     var errorBodyBytes: ByteArray? = null,
-    var responseHeadersToReturn: Map<String, List<String>> = emptyMap(),
+    var responseHeadersToReturn: Map<String?, List<String?>?> = emptyMap(),
     var inputStreamException: Throwable? = null,
+    var errorStreamException: Throwable? = null,
     var outputStreamException: Throwable? = null
 ) : HttpURLConnection(url) {
 
@@ -55,12 +56,13 @@ class MockHttpURLConnection(
     }
 
     override fun getHeaderField(name: String): String? {
-        val entry = responseHeadersToReturn.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }
-        return entry?.value?.firstOrNull()
+        val entry = responseHeadersToReturn.entries.firstOrNull { it.key != null && it.key.equals(name, ignoreCase = true) }
+        return entry?.value?.filterNotNull()?.firstOrNull()
     }
 
+    @Suppress("UNCHECKED_CAST")
     override fun getHeaderFields(): Map<String, List<String>> =
-        responseHeadersToReturn
+        responseHeadersToReturn as Map<String, List<String>>
 
     override fun getInputStream(): InputStream {
         if (!connected) connect()
@@ -77,6 +79,7 @@ class MockHttpURLConnection(
     }
 
     override fun getErrorStream(): InputStream? {
+        errorStreamException?.let { throw it }
         val bytes = errorBodyBytes ?: return null
         val stream = ByteArrayInputStream(bytes)
         return object : InputStream() {

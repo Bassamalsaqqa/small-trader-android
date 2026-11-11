@@ -84,6 +84,8 @@ class HttpUrlConnectionTransportSecurityTest {
                 transport.execute(req)
             }
             assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex.category)
+            assertEquals("Disallowed HTTP method or endpoint path", ex.message)
+            assertFalse("Error message must not leak requested path", ex.message!!.contains(path))
         }
 
         assertEquals(0, factory.callCount)
@@ -129,6 +131,31 @@ class HttpUrlConnectionTransportSecurityTest {
     }
 
     @Test
+    fun testGetWithBodyRejectedBeforeFactory() {
+        val factory = TrackingFactory()
+        val transport = HttpUrlConnectionTransport(
+            configuredOrigin = configuredOrigin,
+            connectionFactory = factory
+        )
+
+        val getWithBody = TransportRequest(
+            method = HttpMethod.GET,
+            path = validProductsPath,
+            baseOrigin = configuredOrigin,
+            headers = mapOf("Accept" to "application/json"),
+            body = "{\"illegal\":\"body_on_get\"}"
+        )
+
+        val ex = assertThrows(HttpTransportException::class.java) {
+            transport.execute(getWithBody)
+        }
+
+        assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex.category)
+        assertEquals("GET requests must not contain a request body", ex.message)
+        assertEquals(0, factory.callCount)
+    }
+
+    @Test
     fun testDisallowedHeadersRejectedBeforeFactory() {
         val factory = TrackingFactory()
         val transport = HttpUrlConnectionTransport(
@@ -149,7 +176,8 @@ class HttpUrlConnectionTransportSecurityTest {
             transport.execute(requestWithCookie)
         }
         assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex1.category)
-        assertTrue(ex1.message!!.contains("Disallowed request header"))
+        assertEquals("Disallowed request header", ex1.message)
+        assertFalse("Error message must not leak header name", ex1.message!!.contains("Cookie"))
 
         val requestWithArbitraryHeader = TransportRequest(
             method = HttpMethod.GET,
@@ -164,6 +192,8 @@ class HttpUrlConnectionTransportSecurityTest {
             transport.execute(requestWithArbitraryHeader)
         }
         assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex2.category)
+        assertEquals("Disallowed request header", ex2.message)
+        assertFalse("Error message must not leak header name", ex2.message!!.contains("X-Custom-Auth"))
 
         assertEquals(0, factory.callCount)
     }
@@ -176,31 +206,83 @@ class HttpUrlConnectionTransportSecurityTest {
             connectionFactory = factory
         )
 
-        val badAccept = TransportRequest(
+        val badAccepts = listOf(
+            "text/html",
+            "text/html; application/json",
+            "application/json-evil",
+            "*/*"
+        )
+        for (badAccept in badAccepts) {
+            val req = TransportRequest(
+                method = HttpMethod.GET,
+                path = validBootstrapPath,
+                baseOrigin = configuredOrigin,
+                headers = mapOf("Accept" to badAccept)
+            )
+            val ex = assertThrows(HttpTransportException::class.java) {
+                transport.execute(req)
+            }
+            assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex.category)
+            assertEquals("Controlled header 'Accept' must specify application/json", ex.message)
+        }
+
+        val badContentTypes = listOf(
+            "text/plain",
+            "application/json-evil",
+            "text/html; charset=utf-8",
+            "application/xml"
+        )
+        for (badContentType in badContentTypes) {
+            val req = TransportRequest(
+                method = HttpMethod.POST,
+                path = validChallengePath,
+                baseOrigin = configuredOrigin,
+                headers = mapOf(
+                    "Accept" to "application/json",
+                    "Content-Type" to badContentType
+                ),
+                body = "{}"
+            )
+            val ex = assertThrows(HttpTransportException::class.java) {
+                transport.execute(req)
+            }
+            assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex.category)
+            assertEquals("Controlled header 'Content-Type' must specify application/json", ex.message)
+        }
+
+        // Duplicate Accept headers rejected
+        val duplicateAcceptReq = TransportRequest(
             method = HttpMethod.GET,
             path = validBootstrapPath,
             baseOrigin = configuredOrigin,
-            headers = mapOf("Accept" to "text/html")
+            headers = mapOf(
+                "Accept" to "application/json",
+                "accept" to "application/json"
+            )
         )
-        val ex1 = assertThrows(HttpTransportException::class.java) {
-            transport.execute(badAccept)
+        val dupAcceptEx = assertThrows(HttpTransportException::class.java) {
+            transport.execute(duplicateAcceptReq)
         }
-        assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex1.category)
+        assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, dupAcceptEx.category)
+        assertEquals("Duplicate Accept header", dupAcceptEx.message)
 
-        val badContentType = TransportRequest(
+        // Duplicate Content-Type headers rejected
+        val duplicateContentTypeReq = TransportRequest(
             method = HttpMethod.POST,
             path = validChallengePath,
             baseOrigin = configuredOrigin,
             headers = mapOf(
                 "Accept" to "application/json",
-                "Content-Type" to "text/plain"
+                "Content-Type" to "application/json",
+                "content-type" to "application/json"
             ),
             body = "{}"
         )
-        val ex2 = assertThrows(HttpTransportException::class.java) {
-            transport.execute(badContentType)
+        val dupContentTypeEx = assertThrows(HttpTransportException::class.java) {
+            transport.execute(duplicateContentTypeReq)
         }
-        assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex2.category)
+        assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, dupContentTypeEx.category)
+        assertEquals("Duplicate Content-Type header", dupContentTypeEx.message)
 
         assertEquals(0, factory.callCount)
     }
@@ -227,7 +309,39 @@ class HttpUrlConnectionTransportSecurityTest {
             transport.execute(noBearer)
         }
         assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex1.category)
-        assertTrue(ex1.message!!.contains("must begin with 'Bearer '"))
+        assertEquals("Controlled header 'Authorization' must begin with 'Bearer '", ex1.message)
+
+        // Leading whitespace after "Bearer " (token starts with space)
+        val leadingSpaceToken = TransportRequest(
+            method = HttpMethod.GET,
+            path = validBootstrapPath,
+            baseOrigin = configuredOrigin,
+            headers = mapOf(
+                "Accept" to "application/json",
+                "Authorization" to "Bearer  1|sanctum_valid_token_test_1234567890_abcdef"
+            )
+        )
+        val exLeading = assertThrows(HttpTransportException::class.java) {
+            transport.execute(leadingSpaceToken)
+        }
+        assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, exLeading.category)
+        assertEquals("Invalid Bearer token in Authorization header", exLeading.message)
+
+        // Trailing whitespace in Authorization token
+        val trailingSpaceToken = TransportRequest(
+            method = HttpMethod.GET,
+            path = validBootstrapPath,
+            baseOrigin = configuredOrigin,
+            headers = mapOf(
+                "Accept" to "application/json",
+                "Authorization" to "Bearer 1|sanctum_valid_token_test_1234567890_abcdef "
+            )
+        )
+        val exTrailing = assertThrows(HttpTransportException::class.java) {
+            transport.execute(trailingSpaceToken)
+        }
+        assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, exTrailing.category)
+        assertEquals("Invalid Bearer token in Authorization header", exTrailing.message)
 
         // CRLF injection in token
         val crlfToken = TransportRequest(
@@ -244,6 +358,21 @@ class HttpUrlConnectionTransportSecurityTest {
         }
         assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex2.category)
 
+        // Tab character in token
+        val tabToken = TransportRequest(
+            method = HttpMethod.GET,
+            path = validBootstrapPath,
+            baseOrigin = configuredOrigin,
+            headers = mapOf(
+                "Accept" to "application/json",
+                "Authorization" to "Bearer valid_token_with_\ttab_12345"
+            )
+        )
+        val exTab = assertThrows(HttpTransportException::class.java) {
+            transport.execute(tabToken)
+        }
+        assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, exTab.category)
+
         // Control characters in token
         val controlCharToken = TransportRequest(
             method = HttpMethod.GET,
@@ -258,6 +387,98 @@ class HttpUrlConnectionTransportSecurityTest {
             transport.execute(controlCharToken)
         }
         assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex3.category)
+
+        // Token too short (< 20 characters)
+        val shortToken = TransportRequest(
+            method = HttpMethod.GET,
+            path = validBootstrapPath,
+            baseOrigin = configuredOrigin,
+            headers = mapOf(
+                "Accept" to "application/json",
+                "Authorization" to "Bearer short_token_123"
+            )
+        )
+        val exShort = assertThrows(HttpTransportException::class.java) {
+            transport.execute(shortToken)
+        }
+        assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, exShort.category)
+
+        // Token too long (> 2048 characters)
+        val longToken = TransportRequest(
+            method = HttpMethod.GET,
+            path = validBootstrapPath,
+            baseOrigin = configuredOrigin,
+            headers = mapOf(
+                "Accept" to "application/json",
+                "Authorization" to "Bearer " + "a".repeat(2049)
+            )
+        )
+        val exLong = assertThrows(HttpTransportException::class.java) {
+            transport.execute(longToken)
+        }
+        assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, exLong.category)
+
+        // Case-insensitive duplicate Authorization headers rejected
+        val duplicateAuthReq = TransportRequest(
+            method = HttpMethod.GET,
+            path = validBootstrapPath,
+            baseOrigin = configuredOrigin,
+            headers = mapOf(
+                "Authorization" to "Bearer $validToken",
+                "authorization" to "Bearer $validToken"
+            )
+        )
+        val exDup = assertThrows(HttpTransportException::class.java) {
+            transport.execute(duplicateAuthReq)
+        }
+        assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, exDup.category)
+        assertEquals("Duplicate Authorization header", exDup.message)
+
+        assertEquals(0, factory.callCount)
+    }
+
+    @Test
+    fun testRequestBodyBoundingAndSurrogateProtection() {
+        val factory = TrackingFactory()
+        val transport = HttpUrlConnectionTransport(
+            configuredOrigin = configuredOrigin,
+            connectionFactory = factory
+        )
+
+        // Body exceeding 1 MiB rejected before factory
+        val oversizeBody = "a".repeat(1024 * 1024 + 1)
+        val oversizeReq = TransportRequest(
+            method = HttpMethod.POST,
+            path = validChallengePath,
+            baseOrigin = configuredOrigin,
+            headers = mapOf(
+                "Accept" to "application/json",
+                "Content-Type" to "application/json"
+            ),
+            body = oversizeBody
+        )
+        val ex1 = assertThrows(HttpTransportException::class.java) {
+            transport.execute(oversizeReq)
+        }
+        assertEquals(HttpTransportException.CATEGORY_PAYLOAD_TOO_LARGE, ex1.category)
+
+        // Body with invalid unpaired UTF-16 surrogate
+        val malformedSurrogateBody = "{\"name\":\"unpaired\uD800surrogate\"}"
+        val malformedReq = TransportRequest(
+            method = HttpMethod.POST,
+            path = validChallengePath,
+            baseOrigin = configuredOrigin,
+            headers = mapOf(
+                "Accept" to "application/json",
+                "Content-Type" to "application/json"
+            ),
+            body = malformedSurrogateBody
+        )
+        val ex2 = assertThrows(HttpTransportException::class.java) {
+            transport.execute(malformedReq)
+        }
+        assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex2.category)
+        assertTrue(ex2.message!!.contains("malformed or unmappable UTF-8"))
 
         assertEquals(0, factory.callCount)
     }

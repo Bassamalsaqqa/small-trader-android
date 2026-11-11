@@ -3,25 +3,22 @@ package com.example.data.mobile.readclient.http
 import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.readclient.AuthChallengeRequest
-import com.example.data.mobile.readclient.AuthLoginRequest
-import com.example.data.mobile.readclient.AuthLogoutRequest
 import com.example.data.mobile.readclient.HttpMethod
-import com.example.data.mobile.readclient.PaginationQuery
 import com.example.data.mobile.readclient.ReadClientResult
 import com.example.data.mobile.readclient.SmallTraderReadClient
 import com.example.data.mobile.readclient.TransportRequest
-import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
 import com.sun.net.httpserver.HttpServer
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.net.CookieHandler
 import java.net.InetSocketAddress
+import java.net.PasswordAuthentication
+import java.net.URI
 import java.nio.charset.StandardCharsets
 
 /**
@@ -213,8 +210,82 @@ class HttpUrlConnectionTransportLoopbackServerTest {
     }
 
     @Test
+    fun testRealLoopbackEmpty401ResponseReturnsAuthoritativeStatusCode() {
+        server!!.createContext("/api/mobile/v1/companies/${validCompanyUlid.value}/bootstrap", HttpHandler { exchange ->
+            exchange.sendResponseHeaders(401, -1) // No response body (content-length = -1 in HttpServer)
+            exchange.close()
+        })
+
+        val transport = HttpUrlConnectionTransport(baseOrigin, allowHttpLoopback = true)
+        val req = TransportRequest(
+            method = HttpMethod.GET,
+            path = "/api/mobile/v1/companies/${validCompanyUlid.value}/bootstrap",
+            baseOrigin = baseOrigin,
+            headers = mapOf(
+                "Accept" to "application/json",
+                "Authorization" to "Bearer $validToken"
+            )
+        )
+
+        val response = transport.execute(req)
+        assertEquals(401, response.statusCode)
+        assertEquals("", response.body)
+    }
+
+    @Test
+    fun testLoopbackAmbientCookieHandlerAndAuthenticatorPlatformEvidence() {
+        // Hermetic evidence demonstrating platform HttpURLConnection behavior when ambient handlers exist.
+        // Restores only test-owned state in finally.
+        val previousCookieHandler = CookieHandler.getDefault()
+
+        var serverReceivedCookie: String? = null
+        var serverReceivedAuth: String? = null
+
+        server!!.createContext("/api/mobile/v1/companies/${validCompanyUlid.value}/products", HttpHandler { exchange ->
+            serverReceivedCookie = exchange.requestHeaders.getFirst("Cookie")
+            serverReceivedAuth = exchange.requestHeaders.getFirst("Authorization")
+            val bytes = "{\"data\":\"ok\"}".toByteArray(StandardCharsets.UTF_8)
+            exchange.responseHeaders.set("Content-Type", "application/json")
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.write(bytes)
+            exchange.close()
+        })
+
+        try {
+            CookieHandler.setDefault(object : CookieHandler() {
+                override fun get(uri: URI?, requestHeaders: Map<String, List<String>>?): Map<String, List<String>> {
+                    return mapOf("Cookie" to listOf("ambient_session=leak_test"))
+                }
+                override fun put(uri: URI?, responseHeaders: Map<String, List<String>>?) {}
+            })
+
+            val transport = HttpUrlConnectionTransport(baseOrigin, allowHttpLoopback = true)
+            val req = TransportRequest(
+                method = HttpMethod.GET,
+                path = "/api/mobile/v1/companies/${validCompanyUlid.value}/products",
+                baseOrigin = baseOrigin,
+                headers = mapOf(
+                    "Accept" to "application/json",
+                    "Authorization" to "Bearer $validToken"
+                )
+            )
+
+            val response = transport.execute(req)
+            assertEquals(200, response.statusCode)
+
+            // Evidence: HttpURLConnection platform implementation consults CookieHandler.getDefault()
+            // and appends ambient cookies over the wire. This proves that platform HttpURLConnection
+            // cannot provide per-instance cookie isolation without dedicated client (e.g. OkHttp)
+            // or without mutating process globals.
+            assertEquals("Bearer $validToken", serverReceivedAuth)
+            assertEquals("ambient_session=leak_test", serverReceivedCookie)
+        } finally {
+            CookieHandler.setDefault(previousCookieHandler)
+        }
+    }
+
+    @Test
     fun testRealLoopbackIntegrationWithSmallTraderReadClient() {
-        // Wire a realistic auth challenge response
         val challengeJson = "{\"challenge_id\":\"8e2b8bc6-f80c-4034-8c88-59368d1f2e10\",\"nonce\":\"test_nonce_abcdef1234567890abcdef1234567890\",\"expires_at\":\"2026-11-11T21:00:00Z\"}"
         server!!.createContext("/api/mobile/v1/auth/challenge", HttpHandler { exchange ->
             val bytes = challengeJson.toByteArray(StandardCharsets.UTF_8)

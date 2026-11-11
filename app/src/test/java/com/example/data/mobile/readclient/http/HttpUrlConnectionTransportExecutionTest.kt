@@ -8,8 +8,8 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
+import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
-import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.CancellationException
 
@@ -60,6 +60,7 @@ class HttpUrlConnectionTransportExecutionTest {
         assertTrue(conn.disconnected)
         assertTrue(conn.inputStreamClosed)
         assertFalse(conn.instanceFollowRedirects)
+        assertFalse("useCaches must be false per connection", conn.useCaches)
         assertEquals("GET", conn.requestMethod)
         assertEquals(HttpUrlConnectionTransport.DEFAULT_CONNECT_TIMEOUT_MS, conn.connectTimeout)
         assertEquals(HttpUrlConnectionTransport.DEFAULT_READ_TIMEOUT_MS, conn.readTimeout)
@@ -72,6 +73,77 @@ class HttpUrlConnectionTransportExecutionTest {
         assertTrue(urlString.contains("cursor=opaque%2Ftoken%2Bchunk%3D%3D"))
         assertTrue(urlString.contains("limit=25"))
         assertTrue(urlString.contains("search=coffee+%26+pastries"))
+    }
+
+    @Test
+    fun testGlobalRedirectUnchangedAndInstanceFlagRetained() {
+        val originalGlobalRedirect = HttpURLConnection.getFollowRedirects()
+        try {
+            // Set global redirect state to true
+            HttpURLConnection.setFollowRedirects(true)
+            assertTrue("Global follow redirects must be true before execute", HttpURLConnection.getFollowRedirects())
+
+            var capturedConnection: MockHttpURLConnection? = null
+            val factory = HttpUrlConnectionFactory { url ->
+                MockHttpURLConnection(
+                    url = url,
+                    statusCodeToReturn = 200,
+                    responseBodyBytes = "{}".toByteArray(StandardCharsets.UTF_8),
+                    responseHeadersToReturn = mapOf("Content-Type" to listOf("application/json"))
+                ).also { capturedConnection = it }
+            }
+
+            val transport = HttpUrlConnectionTransport(configuredOrigin, connectionFactory = factory)
+            val req = TransportRequest(
+                method = HttpMethod.GET,
+                path = validBootstrapPath,
+                baseOrigin = configuredOrigin,
+                headers = mapOf("Accept" to "application/json")
+            )
+
+            transport.execute(req)
+
+            // Global process-wide follow redirects MUST remain unchanged (true)
+            assertTrue(
+                "execute() must NOT mutate process-global HttpURLConnection.setFollowRedirects",
+                HttpURLConnection.getFollowRedirects()
+            )
+            // But the individual connection instance MUST have instanceFollowRedirects = false
+            assertFalse(
+                "connection.instanceFollowRedirects must be strictly false",
+                capturedConnection!!.instanceFollowRedirects
+            )
+        } finally {
+            HttpURLConnection.setFollowRedirects(originalGlobalRedirect)
+        }
+    }
+
+    @Test
+    fun testPerConnectionUseCachesDisabledAndDefaultUseCachesUnmutated() {
+        var capturedConnection: MockHttpURLConnection? = null
+        val factory = HttpUrlConnectionFactory { url ->
+            MockHttpURLConnection(
+                url = url,
+                statusCodeToReturn = 200,
+                responseBodyBytes = "{}".toByteArray(StandardCharsets.UTF_8),
+                responseHeadersToReturn = mapOf("Content-Type" to listOf("application/json"))
+            ).also { capturedConnection = it }
+        }
+
+        val transport = HttpUrlConnectionTransport(configuredOrigin, connectionFactory = factory)
+        val req = TransportRequest(
+            method = HttpMethod.GET,
+            path = validBootstrapPath,
+            baseOrigin = configuredOrigin,
+            headers = mapOf("Accept" to "application/json")
+        )
+
+        transport.execute(req)
+
+        val conn = capturedConnection!!
+        assertFalse("Per-connection useCaches must be disabled", conn.useCaches)
+        // defaultUseCaches on URLConnection should remain untouched (typically true)
+        assertTrue("defaultUseCaches global protocol defaults must not be mutated to false", conn.defaultUseCaches)
     }
 
     @Test
@@ -156,6 +228,35 @@ class HttpUrlConnectionTransportExecutionTest {
         // Verifies exactly ONE request was made (no following of redirect)
         assertEquals(1, requestCount)
         assertFalse(capturedConnection!!.instanceFollowRedirects)
+    }
+
+    @Test
+    fun test3xxResponseReadsInputStreamBody() {
+        val redirectPayload = "{\"message\":\"Moved Temporarily\"}"
+        val factory = HttpUrlConnectionFactory { url ->
+            MockHttpURLConnection(
+                url = url,
+                statusCodeToReturn = 307,
+                responseBodyBytes = redirectPayload.toByteArray(StandardCharsets.UTF_8),
+                responseHeadersToReturn = mapOf(
+                    "Location" to listOf("https://api.smalltrader.example/next"),
+                    "Content-Type" to listOf("application/json")
+                )
+            )
+        }
+
+        val transport = HttpUrlConnectionTransport(configuredOrigin, connectionFactory = factory)
+        val req = TransportRequest(
+            method = HttpMethod.GET,
+            path = validBootstrapPath,
+            baseOrigin = configuredOrigin,
+            headers = mapOf("Accept" to "application/json")
+        )
+
+        val response = transport.execute(req)
+        assertEquals(307, response.statusCode)
+        assertEquals("https://api.smalltrader.example/next", response.headers["Location"])
+        assertEquals(redirectPayload, response.body)
     }
 
     @Test
@@ -291,6 +392,93 @@ class HttpUrlConnectionTransportExecutionTest {
         val conn = capturedConnection!!
         assertTrue(conn.errorStreamClosed)
         assertTrue(conn.disconnected)
+    }
+
+    @Test
+    fun test401WithNullErrorStreamReturnsAuthoritativeStatusWithEmptyBody() {
+        var capturedConnection: MockHttpURLConnection? = null
+
+        val factory = HttpUrlConnectionFactory { url ->
+            MockHttpURLConnection(
+                url = url,
+                statusCodeToReturn = 401,
+                responseBodyBytes = ByteArray(0),
+                errorBodyBytes = null, // null errorStream, e.g. empty 401 response
+                responseHeadersToReturn = mapOf("Content-Type" to listOf("application/json"))
+            ).also { capturedConnection = it }
+        }
+
+        val transport = HttpUrlConnectionTransport(configuredOrigin, connectionFactory = factory)
+
+        val req = TransportRequest(
+            method = HttpMethod.GET,
+            path = validBootstrapPath,
+            baseOrigin = configuredOrigin,
+            headers = mapOf("Accept" to "application/json")
+        )
+
+        val response = transport.execute(req)
+
+        // Verifies authoritative 401 status code is returned even when error body is absent
+        assertEquals(401, response.statusCode)
+        assertEquals("", response.body)
+        assertTrue(capturedConnection!!.disconnected)
+    }
+
+    @Test
+    fun testTimeoutDuringErrorStreamReadingThrowsNetworkTimeoutException() {
+        val factory = HttpUrlConnectionFactory { url ->
+            MockHttpURLConnection(
+                url = url,
+                statusCodeToReturn = 500,
+                errorStreamException = SocketTimeoutException("Read timed out on error stream")
+            )
+        }
+
+        val transport = HttpUrlConnectionTransport(configuredOrigin, connectionFactory = factory)
+
+        val req = TransportRequest(
+            method = HttpMethod.GET,
+            path = validBootstrapPath,
+            baseOrigin = configuredOrigin,
+            headers = mapOf("Accept" to "application/json")
+        )
+
+        val ex = assertThrows(HttpTransportException::class.java) {
+            transport.execute(req)
+        }
+
+        assertEquals(HttpTransportException.CATEGORY_TIMEOUT, ex.category)
+        assertEquals("Network socket timeout occurred", ex.message)
+    }
+
+    @Test
+    fun testResponseHeadersNullSafeHandling() {
+        val factory = HttpUrlConnectionFactory { url ->
+            // Simulates status line with null key and a list containing a null entry
+            val rawMap = HashMap<String?, List<String?>?>()
+            rawMap[null] = listOf("HTTP/1.1 200 OK")
+            rawMap["Content-Type"] = listOf("application/json", null)
+            MockHttpURLConnection(
+                url = url,
+                statusCodeToReturn = 200,
+                responseBodyBytes = "{}".toByteArray(StandardCharsets.UTF_8),
+                responseHeadersToReturn = rawMap
+            )
+        }
+
+        val transport = HttpUrlConnectionTransport(configuredOrigin, connectionFactory = factory)
+        val req = TransportRequest(
+            method = HttpMethod.GET,
+            path = validBootstrapPath,
+            baseOrigin = configuredOrigin,
+            headers = mapOf("Accept" to "application/json")
+        )
+
+        val response = transport.execute(req)
+        assertEquals(200, response.statusCode)
+        assertFalse(response.headers.containsKey(""))
+        assertEquals("application/json", response.headers["Content-Type"])
     }
 
     @Test
