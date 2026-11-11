@@ -9,11 +9,14 @@ import com.example.data.mobile.readclient.ValidationUtils
 import okhttp3.Authenticator
 import okhttp3.Call
 import okhttp3.CookieJar
+import okhttp3.Interceptor
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.RequestBody
 import okhttp3.Response
+import okio.BufferedSink
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
@@ -30,6 +33,7 @@ import java.util.Collections
 import java.util.Locale
 import java.util.concurrent.CancellationException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Minimal, hardened, Android API 24+ compatible HTTP transport adapter for Small Trader Read Client.
@@ -111,6 +115,8 @@ class OkHttpTransport(
             .followRedirects(false)
             .followSslRedirects(false)
             .retryOnConnectionFailure(false)
+            .addInterceptor(NoRetryApplicationInterceptor())
+            .addNetworkInterceptor(NoRetryNetworkInterceptor())
             .connectTimeout(connectTimeoutMs.toLong(), TimeUnit.MILLISECONDS)
             .readTimeout(readTimeoutMs.toLong(), TimeUnit.MILLISECONDS)
             .writeTimeout(readTimeoutMs.toLong(), TimeUnit.MILLISECONDS)
@@ -274,6 +280,9 @@ class OkHttpTransport(
         val requestBuilder = Request.Builder()
             .url(targetUrl)
 
+        val callExecutionState = CallExecutionState()
+        requestBuilder.tag(CallExecutionState::class.java, callExecutionState)
+
         requestBuilder.header("Accept", "application/json")
         if (preparedRequestBodyBytes != null || request.method == HttpMethod.POST) {
             requestBuilder.header("Content-Type", "application/json; charset=utf-8")
@@ -287,7 +296,7 @@ class OkHttpTransport(
             HttpMethod.POST -> {
                 val mediaType = "application/json; charset=utf-8".toMediaType()
                 val bytes = preparedRequestBodyBytes ?: ByteArray(0)
-                bytes.toRequestBody(mediaType)
+                createOneShotRequestBody(bytes, mediaType)
             }
         }
 
@@ -447,6 +456,69 @@ class OkHttpTransport(
                 HttpTransportException.CATEGORY_MALFORMED_UTF8,
                 "Response body contained malformed or unmappable UTF-8 byte sequences"
             )
+        }
+    }
+
+    private fun createOneShotRequestBody(bytes: ByteArray, mediaType: MediaType): RequestBody {
+        return object : RequestBody() {
+            override fun contentType(): MediaType = mediaType
+            override fun contentLength(): Long = bytes.size.toLong()
+            override fun writeTo(sink: BufferedSink) {
+                sink.write(bytes)
+            }
+            override fun isOneShot(): Boolean = true
+        }
+    }
+
+    private class CallExecutionState {
+        val wireRequestsAttempted = AtomicInteger(0)
+        @Volatile var preservedRetryAfterHeaders: List<String>? = null
+    }
+
+    private class NoRetryNetworkInterceptor : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val request = chain.request()
+            val state = request.tag(CallExecutionState::class.java)
+            if (state != null) {
+                val attempts = state.wireRequestsAttempted.incrementAndGet()
+                if (attempts > 1) {
+                    throw HttpTransportException(
+                        HttpTransportException.CATEGORY_SECURITY_VIOLATION,
+                        "Automatic network retry or follow-up is prohibited"
+                    )
+                }
+            }
+
+            val response = chain.proceed(request)
+
+            val retryAfterHeaders = response.headers("Retry-After")
+            return if (retryAfterHeaders.isNotEmpty()) {
+                state?.preservedRetryAfterHeaders = retryAfterHeaders
+                response.newBuilder()
+                    .removeHeader("Retry-After")
+                    .build()
+            } else {
+                response
+            }
+        }
+    }
+
+    private class NoRetryApplicationInterceptor : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val request = chain.request()
+            val state = request.tag(CallExecutionState::class.java)
+            val response = chain.proceed(request)
+
+            val preservedHeaders = state?.preservedRetryAfterHeaders
+            return if (preservedHeaders != null && response.headers("Retry-After").isEmpty()) {
+                val builder = response.newBuilder()
+                for (value in preservedHeaders) {
+                    builder.addHeader("Retry-After", value)
+                }
+                builder.build()
+            } else {
+                response
+            }
         }
     }
 

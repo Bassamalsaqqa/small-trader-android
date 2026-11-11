@@ -59,6 +59,8 @@ OkHttpClient.Builder()
     .followRedirects(false)
     .followSslRedirects(false)
     .retryOnConnectionFailure(false)
+    .addInterceptor(NoRetryApplicationInterceptor())
+    .addNetworkInterceptor(NoRetryNetworkInterceptor())
     .connectTimeout(connectTimeoutMs.toLong(), TimeUnit.MILLISECONDS)
     .readTimeout(readTimeoutMs.toLong(), TimeUnit.MILLISECONDS)
     .writeTimeout(readTimeoutMs.toLong(), TimeUnit.MILLISECONDS)
@@ -68,6 +70,7 @@ OkHttpClient.Builder()
 - **Guaranteed Isolation**: `CookieJar.NO_COOKIES` and `Authenticator.NONE` ensure OkHttp never queries `CookieHandler.getDefault()` or `Authenticator.getDefault()`.
 - **Zero Process-Global Mutations**: No static setters are ever invoked.
 - **Dedicated Private Instance**: Arbitrary caller client injection is strictly disallowed, preventing external code from injecting clients configured with cookie persistence or arbitrary interceptors.
+- **No Automatic Retries Guarantee**: In addition to `retryOnConnectionFailure(false)`, explicit cooperating application and network interceptors (`NoRetryApplicationInterceptor`, `NoRetryNetworkInterceptor`) together with one-shot POST request bodies (`isOneShot() = true`) guarantee zero additional wire requests on `503 Retry-After: 0`, `408`, `421`, `401`, `407`, and `3xx`, while preserving the server's initial status code, body, and response headers intact.
 
 ---
 
@@ -104,10 +107,26 @@ OkHttpClient.Builder()
 - Any CRLF characters remain safely percent-encoded query characters (`%0D%0A`), preventing header injection.
 - Cursors are validated as bounded opaque tokens (`EndpointSecurity.validateCursor`) up to 255 characters. Valid contract characters (`/`, `=`, `+`, `-`, `_`, `.`) are safely percent-encoded and never parsed or followed as URLs.
 
-### 4.5 Per-Connection Redirect & Cache Suppression
-- Automatic redirects are disabled per-client via `followRedirects(false)` and `followSslRedirects(false)`.
-- Caching is disabled per-client via `cache(null)`.
-- 3xx redirects (301, 302, 303, 307, 308) return their HTTP status code directly to the foundation. Credentials are never forwarded to redirected URLs.
+### 4.5 Prohibition of Automatic Wire Retries & Follow-Ups (503 Retry-After: 0, 408, 421, 401, 407, 3xx)
+The transport enforces an authoritative guarantee: **No automatic retries or follow-up requests are transmitted over the wire within a single `execute()` call**. This guarantee is crucial for authentication and challenge flows (preventing duplicate submission of nonce tokens or credentials) as well as operational determinism (surfacing the server's authoritative response rather than concealing transient load shed).
+
+Primary bytecode inspection of OkHttp 4.10.0 (`RetryAndFollowUpInterceptor.kt`) reveals that while `retryOnConnectionFailure(false)` disables route failure retries and 408 Request Timeout retries, certain follow-up loops remain active by default:
+1. **503 Service Unavailable with `Retry-After: 0`**:
+   - OkHttp 4.10's `followUpRequest` explicitly checks `if (retryAfter(userResponse, Integer.MAX_VALUE) == 0) return userResponse.request`. This triggers an automatic loop and second wire request regardless of `retryOnConnectionFailure(false)`.
+   - **Mechanism**: `NoRetryNetworkInterceptor` intercepts the raw wire response immediately above `CallServerInterceptor`. If `Retry-After` is present, it caches the header in the per-call `CallExecutionState` and strips `Retry-After` from the response passed upward to `RetryAndFollowUpInterceptor`. Because the header is absent, OkHttp evaluates default delay (`Integer.MAX_VALUE > 0`) and returns `null` from `followUpRequest`, cleanly preventing any follow-up loop. The outer `NoRetryApplicationInterceptor` then restores the exact `Retry-After` header before returning to the caller. The initial 503 status code, body, and headers are fully surfaced.
+2. **408 Request Timeout**:
+   - In OkHttp 4.10, `followUpRequest` for 408 checks `if (!client.retryOnConnectionFailure) return null`. With `retryOnConnectionFailure(false)` configured, 408 returns `null` immediately and never retries. `Retry-After` neutralization provides additional defense-in-depth.
+3. **HTTP/2 Connection Coalescing (421 Misdirected Request)**:
+   - OkHttp 4.10's 421 handler retries only when `exchange.isCoalescedConnection` is `true`, which occurs when an existing connection to Host A is reused for Host B because both resolve to the same IP and share a SAN TLS certificate.
+   - **Proof of Scope**: Because `OkHttpTransport` strictly verifies and pins all requests to `this.validatedOrigin`, no cross-host requests ever share this client's connection pool. Within a single origin, `isCoalescedConnection` is strictly `false`. Furthermore, one-shot POST request bodies (`RequestBody.isOneShot() = true`) cause 421 to return `null` immediately. The initial 421 response is returned directly without blanket HTTP/2 protocol degradation.
+4. **401 Unauthorized & 407 Proxy Authentication Required**:
+   - Delegated to `client.authenticator` and `client.proxyAuthenticator`. Because both are explicitly configured as `Authenticator.NONE`, `authenticate()` unconditionally returns `null`, surfacing the initial challenge response without attempting credentials or retry loops.
+5. **3xx Redirects (301, 302, 303, 307, 308)**:
+   - Configured with `followRedirects(false)` and `followSslRedirects(false)`. `buildRedirectRequest` returns `null`, preventing redirect follow-ups and credential leakage.
+6. **One-Shot POST Payloads**:
+   - For POST requests, `createOneShotRequestBody()` overrides `isOneShot(): Boolean = true`. In OkHttp's `RetryAndFollowUpInterceptor`, any follow-up request with a one-shot body aborts follow-up execution immediately and returns the original response.
+7. **Wire Request Execution Guard**:
+   - `CallExecutionState.wireRequestsAttempted` is tracked atomically in `NoRetryNetworkInterceptor`. If any additional wire request is ever initiated for the same call execution, it is rejected with `HttpTransportException(CATEGORY_SECURITY_VIOLATION)`.
 
 ### 4.6 Standard TLS Verification
 - Uses the platform's default TLS chain and hostname verifier.
@@ -156,11 +175,11 @@ Tests executed with `./gradlew testDebugUnitTest`:
 | `readclient` | `SmallTraderReadClientWorkflowTest` | 21 | PASSED |
 | `readclient.http` | `OkHttpTransportSecurityTest` | 12 | PASSED |
 | `readclient.http` | `OkHttpTransportLoopbackServerTest` | 12 | PASSED |
-| `readclient.http` | `OkHttpMockWebServerTest` | 7 | PASSED |
+| `readclient.http` | `OkHttpMockWebServerTest` | 14 | PASSED |
 | `readclient.http` | `PlatformHttpUrlConnectionAmbientEvidenceTest` | 2 | PASSED |
-| **Total Core Suite** | **15 test classes** | **123** | **100% PASSED** (0 failures, 0 skipped) |
+| **Total Core Suite** | **15 test classes** | **130** | **100% PASSED** (0 failures, 0 skipped) |
 
-*Full test suite run: 263 total tests passed across 31 test classes, 0 failures, 1 skipped.*
+*Note on test scope*: Verification is reported on the focused mobile unit test suite (130 passing unit tests across 15 test classes). Unverified claims of 263 full repository test passes are explicitly removed, as broader repo test suites include out-of-scope visual Compose and Robolectric instrumentation tests.
 
 ### 5.2 Contract & Schema Verification
 - Python contract validation (`python3 tools/validate-mobile-contract.py` and `python3 -O tools/validate-mobile-contract.py`):
@@ -174,3 +193,8 @@ Tests executed with `./gradlew testDebugUnitTest`:
 - All automated unit tests execute hermetically on JDK 21 (`/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9`) using `MockWebServer` and an in-process local JDK `HttpServer` bound strictly to loopback `127.0.0.1`.
 - Hermetic loopback tests do not claim to prove on-device TLS certificates or real device networking.
 - Broad Android instrumentation visual test runs are not executed due to known native visual emulator evidence hangs; verification relies on focused mobile unit test suites and official contract parity validators.
+
+### 5.5 Pull Request Governance & Review Status
+- **Draft PR Status**: PR #12 is maintained as a Draft pull request against base PR #10 (`t3/android-auth-read-client`).
+- **Owner Approval**: Repository owner merge approval has **not** been given. PR #12 must not be merged or deployed without explicit repository owner approval.
+
