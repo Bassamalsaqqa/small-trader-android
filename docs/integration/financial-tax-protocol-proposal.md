@@ -54,7 +54,7 @@ Mobile contract revision 2 lacks line tax identity (`tax_rate_id`), calculation 
   - **New Proposed Rule**: Explicit "No Tax" UI selection transmits `tax_rate_id: null`, `tax_rate: "0.000000"`, `tax_inclusive: false`.
 - **Master validation**: Resolve public tax identity within the authenticated company, require an active master, and compare its exact percentage and inclusive/exclusive mode with the captured values. Never select a master by percentage alone. Revalidate inside the posting transaction; mismatches fail closed without repricing.
 - **Permissions & Stock Guards**:
-  - Price override permission `sales.invoice.change_price` is preserved; actors with this permission do not trigger conflict on authorized custom prices.
+  - Price override permission `sales.invoice.change_price` permits an authorized custom price at preview. It does not exempt the actor from stale-token checks: `computePreviewRevision` fingerprints current product and unit default prices, so later edits can invalidate the preview even for an override actor. Preserve this canonical behavior; never silently refresh or repost a stale preview.
   - Stock availability relies on canonical `StockAvailabilityQuery` at `$issueDate`, avoiding blanket catalog conflicts for non-stock items.
 
 ### 3.2 Packaging Unit Conversion Snapshot
