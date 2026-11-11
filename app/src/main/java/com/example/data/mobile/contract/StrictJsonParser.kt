@@ -198,13 +198,16 @@ class StrictJsonParser private constructor(private val src: String) {
                         if (pos + 4 > len) throw CanonicalSerializationException("Incomplete \\u hex escape in string")
                         val hex = src.substring(pos, pos + 4)
                         pos += 4
+                        if (!hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                            throw CanonicalSerializationException("Unicode escape requires four ASCII hex digits")
+                        }
                         val code = hex.toIntOrNull(16)
                             ?: throw CanonicalSerializationException("Invalid hex in \\u escape: $hex")
                         val char1 = code.toChar()
                         if (Character.isHighSurrogate(char1)) {
                             if (pos + 6 <= len && src.substring(pos, pos + 2) == "\\u") {
                                 val hex2 = src.substring(pos + 2, pos + 6)
-                                val code2 = hex2.toIntOrNull(16)
+                                val code2 = if (hex2.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) hex2.toIntOrNull(16) else null
                                 if (code2 != null && Character.isLowSurrogate(code2.toChar())) {
                                     pos += 6
                                     sb.append(char1)

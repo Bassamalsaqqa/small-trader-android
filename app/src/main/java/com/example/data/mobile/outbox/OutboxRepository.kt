@@ -411,7 +411,8 @@ class OutboxRepositoryImpl(
 
         return database.runInTransaction<Boolean> {
             val event = database.outboxDao().getEvent(companyId.value, clientEventId.value)
-                ?: throw InvalidAcknowledgementException("No event found for clientEventId: $clientEventId in company: $companyId")
+                ?.takeIf { it.actorId == actorId.value && it.deviceId == deviceId.value }
+                ?: throw InvalidAcknowledgementException("No event found for requested scope")
 
             if (event.companyId != companyId.value) {
                 throw InvalidAcknowledgementException(
@@ -509,7 +510,8 @@ class OutboxRepositoryImpl(
 
         return database.runInTransaction<Boolean> {
             val event = database.outboxDao().getEvent(companyId.value, clientEventId.value)
-                ?: throw InvalidAcknowledgementException("No event found for clientEventId: $clientEventId in company: $companyId")
+                ?.takeIf { it.actorId == actorId.value && it.deviceId == deviceId.value }
+                ?: throw InvalidAcknowledgementException("No event found for requested scope")
 
             if (event.companyId != companyId.value) {
                 throw InvalidAcknowledgementException("Company ID mismatch on reconciliation")

@@ -27,7 +27,7 @@ import androidx.room.Index
         )
     ]
 )
-data class OutboxEventEntity(
+class OutboxEventEntity(
     @ColumnInfo(name = "client_event_id")
     val clientEventId: String,
 
@@ -49,12 +49,15 @@ data class OutboxEventEntity(
     @ColumnInfo(name = "payload_digest")
     val payloadDigest: String,
 
-    @ColumnInfo(name = "payload_bytes", typeAffinity = ColumnInfo.BLOB)
-    val payloadBytes: ByteArray,
+    payloadBytes: ByteArray,
 
     @ColumnInfo(name = "event_version")
     val eventVersion: Int = 1
 ) {
+    @ColumnInfo(name = "payload_bytes", typeAffinity = ColumnInfo.BLOB)
+    val payloadBytes: ByteArray = payloadBytes.clone()
+        get() = field.clone()
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is OutboxEventEntity) return false

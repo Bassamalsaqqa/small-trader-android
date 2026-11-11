@@ -168,6 +168,13 @@ class OutboxIdempotencyAndConflictTest {
         val storedRecord = repository.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId)
         assertNotNull(storedRecord)
         assertEquals(originalFirstByte, storedRecord!!.payloadBytes[0])
+        // Direct entity access must not expose the backing bytes either.
+        storedRecord.event.payloadBytes.fill(0)
+        storedRecord.payloadBytes.fill(0)
+        assertEquals(originalFirstByte, storedRecord.payloadBytes[0])
+        assertEquals(event.computePayloadDigest().value,
+            com.example.data.mobile.contract.PayloadDigest.fromBytes(storedRecord.payloadBytes).value)
+
     }
 
     @Test

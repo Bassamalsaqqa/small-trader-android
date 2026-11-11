@@ -6,7 +6,7 @@
     "entities": [
       {
         "tableName": "outbox_events",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`client_event_id` TEXT NOT NULL, `company_id` TEXT NOT NULL, `actor_id` TEXT NOT NULL, `device_id` TEXT NOT NULL, `device_lease_id` TEXT NOT NULL, `captured_at` TEXT NOT NULL, `payload_digest` TEXT NOT NULL, `payload_bytes` BLOB NOT NULL, `event_version` INTEGER NOT NULL, PRIMARY KEY(`company_id`, `client_event_id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`client_event_id` TEXT NOT NULL, `company_id` TEXT NOT NULL, `actor_id` TEXT NOT NULL, `device_id` TEXT NOT NULL, `device_lease_id` TEXT NOT NULL, `captured_at` TEXT NOT NULL, `payload_digest` TEXT NOT NULL, `event_version` INTEGER NOT NULL, `payload_bytes` BLOB NOT NULL, PRIMARY KEY(`company_id`, `client_event_id`))",
         "fields": [
           {
             "fieldPath": "clientEventId",
@@ -51,15 +51,15 @@
             "notNull": true
           },
           {
-            "fieldPath": "payloadBytes",
-            "columnName": "payload_bytes",
-            "affinity": "BLOB",
-            "notNull": true
-          },
-          {
             "fieldPath": "eventVersion",
             "columnName": "event_version",
             "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadBytes",
+            "columnName": "payload_bytes",
+            "affinity": "BLOB",
             "notNull": true
           }
         ],

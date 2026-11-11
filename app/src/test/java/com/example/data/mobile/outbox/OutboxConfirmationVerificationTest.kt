@@ -421,4 +421,30 @@ class OutboxConfirmationVerificationTest {
         assertEquals(OutboxTestFixtures.SAMPLE_INVOICE_ULID.value, record.deliveryState.invoiceUlid)
         assertEquals(OutboxTestFixtures.SAMPLE_PAYMENT_ULID.value, record.deliveryState.paymentUlid)
     }
+    @Test
+    fun testForeignScopeCannotLearnStoredDigestThroughEitherAcknowledgementPath() {
+        val event = OutboxTestFixtures.createSampleEvent()
+        repository.captureSale(event)
+        val foreignActor = ServerUlid.parse("01JCV8X9MBV4W5X6Y7Z8777777")
+        val foreignDevice = ClientUuid.random()
+        val incorrectDigest = PayloadDigest.parse("sha256:" + "0".repeat(64))
+        for ((actor, device) in listOf(foreignActor to event.deviceId, event.actorId to foreignDevice)) {
+            val workerError = assertThrows(InvalidAcknowledgementException::class.java) {
+                repository.confirmDelivery(event.companyId, actor, device, event.clientEventId,
+                    incorrectDigest, OutboxTestFixtures.SAMPLE_INVOICE_ULID,
+                    OutboxTestFixtures.SAMPLE_PAYMENT_ULID, "2026-11-10T12:01:00Z", "foreign-token")
+            }
+            val statusError = assertThrows(InvalidAcknowledgementException::class.java) {
+                repository.reconcileDeliveryConfirmation(event.companyId, actor, device, event.clientEventId,
+                    incorrectDigest, OutboxTestFixtures.SAMPLE_INVOICE_ULID,
+                    OutboxTestFixtures.SAMPLE_PAYMENT_ULID, "2026-11-10T12:01:00Z")
+            }
+            for (error in listOf(workerError, statusError)) {
+                assertEquals("No event found for requested scope", error.message)
+                assertFalse(error.message.orEmpty().contains(event.computePayloadDigest().value))
+            }
+        }
+        assertEquals(OutboxStatus.PENDING,
+            repository.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId)!!.status)
+    }
 }

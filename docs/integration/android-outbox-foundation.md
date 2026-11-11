@@ -213,3 +213,8 @@ The foundation is covered by 31 focused unit tests running under Robolectric 4.1
 ### Codex acknowledgement review
 
 Worker acknowledgements require separate invoice and payment public IDs. No compatibility API invents a payment ID from an invoice ID. Confirmed replay compares both stored IDs exactly; absent payment mapping is not a wildcard. Both worker and status-reconciliation tests reject a changed payment mapping while preserving the original receipt.
+
+
+### Independent Codex boundary findings
+
+Acknowledgement and reconciliation resolve the complete company/actor/device scope before accessing a stored digest, with generic foreign-scope errors. Payload entities own a private cloned array and return copies even through direct entity access; callers cannot mutate a delivery object's bytes behind its digest. The strict JSON parser accepts only four unsigned ASCII hexadecimal digits per Unicode escape and rejects literal control characters. Focused regression tests exercise the review reproductions.
