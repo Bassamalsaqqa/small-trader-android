@@ -38,6 +38,7 @@ interface TraderRepository {
 
     // Product & Inventory
     fun getProducts(): List<Product>
+    fun searchProducts(query: String, category: ProductCategory = ProductCategory.ALL, limit: Int = 30): List<Product>
     fun findProductById(id: String): Product?
     fun updateProductPrice(productId: String, newPriceIls: Double, operator: UserSession): Result<Unit>
     fun adjustProductStock(productId: String, adjustment: Int, reason: String, operator: UserSession): Result<StockMovement>
@@ -101,12 +102,14 @@ data class RecordedGrnOperation(
  * In-memory reference implementation strictly adhering to accounting, stock, and role integrity.
  * This class is the single authoritative domain engine for local POS demo operations.
  */
-class OfflineDemoTraderRepository : TraderRepository {
+class OfflineDemoTraderRepository(
+    initialProducts: List<Product> = SampleCatalog.initialProducts
+) : TraderRepository {
 
     private var currentSession: UserSession = SampleCatalog.demoStaff.first()
     private val businessInfo: BusinessInfo = SampleCatalog.defaultBusiness
 
-    private val products = SampleCatalog.initialProducts.toMutableList()
+    private val products = initialProducts.toMutableList()
     private val stockMovements = SampleCatalog.initialStockMovements.toMutableList()
     private val invoices = SampleCatalog.initialInvoices(SampleCatalog.initialProducts).toMutableList()
     private val customers = SampleCatalog.initialCustomers.toMutableList()
@@ -122,6 +125,25 @@ class OfflineDemoTraderRepository : TraderRepository {
     override fun getBusinessInfo(): BusinessInfo = businessInfo
 
     override fun getProducts(): List<Product> = products.toList()
+    override fun searchProducts(query: String, category: ProductCategory, limit: Int): List<Product> {
+        val q = Product.normalizeKey(WesternFormatters.sanitizeWesternDigits(query.trim()))
+        val categoryFiltered = if (category == ProductCategory.ALL) {
+            products
+        } else {
+            products.filter { it.category == category }
+        }
+        if (q.isEmpty()) {
+            return categoryFiltered.take(limit)
+        }
+        return categoryFiltered
+            .mapNotNull { prod ->
+                val score = prod.computeSearchScore(q)
+                if (score > 0) prod to score else null
+            }
+            .sortedByDescending { it.second }
+            .map { it.first }
+            .take(limit)
+    }
     override fun findProductById(id: String): Product? = products.firstOrNull { it.id == id }
 
     override fun getStockMovements(): List<StockMovement> = stockMovements.toList()

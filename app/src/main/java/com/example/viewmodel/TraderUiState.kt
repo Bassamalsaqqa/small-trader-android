@@ -147,7 +147,7 @@ data class TraderUiState(
 ) {
     private fun matchesSearchQuery(product: Product, normalizedQuery: String): Boolean {
         if (normalizedQuery.isEmpty()) return true
-        return product.normalizedSearchTokens.contains(normalizedQuery)
+        return product.computeSearchScore(normalizedQuery) > 0
     }
 
     @Volatile
@@ -173,9 +173,22 @@ data class TraderUiState(
                 return cachedResult
             }
             val q = normalizeForSearch(WesternFormatters.sanitizeWesternDigits(currentQuery.trim()))
-            val result = currentProducts.filter { product ->
-                val matchesCategory = currentCategory == ProductCategory.ALL || product.category == currentCategory
-                matchesCategory && matchesSearchQuery(product, q)
+            val categoryFiltered = if (currentCategory == ProductCategory.ALL) {
+                currentProducts
+            } else {
+                currentProducts.filter { it.category == currentCategory }
+            }
+            val result = if (q.isEmpty()) {
+                categoryFiltered.take(30)
+            } else {
+                categoryFiltered
+                    .mapNotNull { prod ->
+                        val score = prod.computeSearchScore(q)
+                        if (score > 0) prod to score else null
+                    }
+                    .sortedByDescending { it.second }
+                    .map { it.first }
+                    .take(30)
             }
             cachedFilteredQuery = currentQuery
             cachedFilteredCategory = currentCategory
@@ -205,10 +218,8 @@ data class TraderUiState(
             val q = normalizeForSearch(WesternFormatters.sanitizeWesternDigits(currentQuery.trim()))
             val count = if (q.isEmpty()) {
                 currentProducts.size
-            } else if (selectedCategory == ProductCategory.ALL) {
-                filteredProducts.size
             } else {
-                currentProducts.count { product -> matchesSearchQuery(product, q) }
+                currentProducts.count { matchesSearchQuery(it, q) }
             }
             cachedCountQuery = currentQuery
             cachedCountProductsRef = currentProducts

@@ -79,6 +79,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -468,6 +470,9 @@ private fun PosSearchAndCategoryHeader(
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
+                            .semantics {
+                                contentDescription = lang.tr("البحث عن الأصناف بالاسم أو الباركود", "Search products by name or barcode")
+                            }
                             .testTag("product_search_input")
                     )
                 }

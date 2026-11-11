@@ -20,8 +20,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Payments
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -741,6 +743,22 @@ fun ReceivePurchaseBillDialog(
     var inlineError by rememberSaveable { mutableStateOf<String?>(null) }
 
     val trackedProducts = remember(state.products) { state.products.filter { it.isStockTracked } }
+    var productSearchQuery by rememberSaveable { mutableStateOf("") }
+    val filteredTrackedProducts = remember(trackedProducts, productSearchQuery) {
+        val q = Product.normalizeKey(WesternFormatters.sanitizeWesternDigits(productSearchQuery.trim()))
+        if (q.isEmpty()) {
+            trackedProducts.take(30)
+        } else {
+            trackedProducts
+                .mapNotNull { prod ->
+                    val score = prod.computeSearchScore(q)
+                    if (score > 0) prod to score else null
+                }
+                .sortedByDescending { it.second }
+                .map { it.first }
+                .take(30)
+        }
+    }
 
     val structuredLines = rememberSaveable(saver = PurchaseLineListSaver) { mutableStateListOf<PurchaseLineItem>() }
 
@@ -895,11 +913,12 @@ fun ReceivePurchaseBillDialog(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
                     LazyRow(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        items(trackedProducts, key = { it.id }) { p ->
+                        items(filteredTrackedProducts, key = { it.id }) { p ->
                             FilterChip(
                                 selected = linkedProductId == p.id,
                                 onClick = {
@@ -920,6 +939,35 @@ fun ReceivePurchaseBillDialog(
                             )
                         }
                     }
+
+                    OutlinedTextField(
+                        value = productSearchQuery,
+                        onValueChange = { productSearchQuery = it },
+                        placeholder = {
+                            Text(
+                                lang.tr("ابحث بالاسم أو الباركود أو الرمز...", "Search item by name or barcode..."),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                        },
+                        trailingIcon = {
+                            if (productSearchQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { productSearchQuery = "" },
+                                    modifier = Modifier.size(24.dp).testTag("clear_purchase_product_search")
+                                ) {
+                                    Icon(Icons.Default.Clear, contentDescription = lang.tr("مسح", "Clear"), modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("purchase_product_search_input")
+                    )
 
                     if (linkedProductId != null) {
                         Row(

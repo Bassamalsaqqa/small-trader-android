@@ -116,16 +116,31 @@ data class Product(
         get() = isStockTracked && stockCount <= minStockThreshold
 
     val normalizedSearchTokens: String = normalizeKey("$nameAr $nameEn $unitAr $unitEn $barcode")
-    val normalizedNameAr: String get() = normalizeKey(nameAr)
-    val normalizedNameEn: String get() = normalizeKey(nameEn)
-    val normalizedUnitAr: String get() = normalizeKey(unitAr)
-    val normalizedUnitEn: String get() = normalizeKey(unitEn)
+    val normalizedBarcode: String = normalizeKey(barcode)
+    val normalizedNameAr: String = normalizeKey(nameAr)
+    val normalizedNameEn: String = normalizeKey(nameEn)
+    val normalizedUnitAr: String = normalizeKey(unitAr)
+    val normalizedUnitEn: String = normalizeKey(unitEn)
+
+    fun computeSearchScore(normalizedQuery: String): Int {
+        if (normalizedQuery.isEmpty()) return 0
+        if (normalizedBarcode == normalizedQuery) return 1000
+        if (id == normalizedQuery) return 950
+        if (normalizedBarcode.startsWith(normalizedQuery)) return 800
+        if (normalizedNameAr == normalizedQuery || normalizedNameEn == normalizedQuery) return 700
+        if (normalizedNameAr.startsWith(normalizedQuery) || normalizedNameEn.startsWith(normalizedQuery)) return 600
+        if (normalizedNameAr.contains(" $normalizedQuery") || normalizedNameEn.contains(" $normalizedQuery")) return 500
+        if (normalizedNameAr.contains(normalizedQuery) || normalizedNameEn.contains(normalizedQuery)) return 400
+        if (normalizedSearchTokens.contains(normalizedQuery)) return 200
+        return 0
+    }
 
     companion object {
         fun normalizeKey(raw: String): String {
             if (raw.isEmpty()) return ""
-            val sb = StringBuilder(raw.length)
-            for (ch in raw.lowercase()) {
+            val sanitized = WesternFormatters.sanitizeWesternDigits(raw)
+            val sb = StringBuilder(sanitized.length)
+            for (ch in sanitized.lowercase()) {
                 when (ch) {
                     'أ', 'إ', 'آ', 'ٱ' -> sb.append('ا')
                     'ة' -> sb.append('ه')
