@@ -99,3 +99,23 @@ Online preview (`POST /api/mobile/v2/sales/preview`) computes an explicit canoni
 - True financial arithmetic (line subtotal, tax amount, line total, document grand total, tendered - settled = change) requires server decimal computation with ROUND_HALF_UP at qualified currency minor units.
 - Contract fixtures and tests verify genuine arithmetic using an exact Decimal calculator helper; they do not assert universal server validation until backend implementation is qualified.
 
+### Normative Online Intent Profile Invariants & Payment Parity
+In response to secondary audit review of `construct_online_sale_intent_profile` and `verify_payment_decimal_consistency`, four contract invariants were corrected:
+1. **Nullable Payment Normalization & Unpaid Support**:
+   - Contract permits omission or explicit `null` for `payment_method` and `cash_account_id` ONLY when `settlement_mode: "unpaid"`. Both forms canonically normalize to `null` in the canonical intent profile.
+   - For `full` and `partial` settlement modes, `payment_method` (`"cash"`) and `cash_account_id` (Crockford ULID) are mandatory economic fields and never default to null.
+   - Missing required economic fields fail closed; no defaulting occurs.
+2. **Mandatory Raw Request Validation & Zero Implicit NoTax**:
+   - `construct_online_sale_intent_profile` mandates raw request validation against `sale-preview-request.json` before any projection. Unknown root, line, or payment properties are rejected.
+   - Missing `tax_rate_id` on any line item throws `IntentProfileValidationError`, eliminating the previous `line.get("tax_rate_id")` bug that silently defaulted missing tax IDs to implicit NoTax. Explicit No-Tax requires an explicit `null` with `tax_rate: "0.000000"` and `tax_inclusive: false`.
+   - Strict context validation enforces exact known keys `{"actor_id", "company_id", "currency_minor_units"}` and rejects boolean as integer (`currency_minor_units`).
+3. **Genuine Payment Decimal Consistency**:
+   - `verify_payment_decimal_consistency` separates offline cash tender conservation (`amount_tendered == amount_settled + change_returned`, `amount_settled == grand_total`, `mode: "full"`) from online payment intent (`settlement_mode`).
+   - Online payment semantics strictly adhere to backend `ImmediateSaleCommands.php`:
+     - `unpaid`: `Decimal(amount) == 0`. Exact string decimal lexemes (e.g. `'0.000'`) are preserved verbatim without monetary rounding or format normalization.
+     - `partial`: `0 < Decimal(amount) < grand_total` (positive and strictly below grand total).
+     - `full`: `Decimal(amount) >= grand_total` (exact decimal comparison allowing tendered excess / change).
+   - Eliminates the tautological `amount == amount + 0` fallback.
+4. **Schema Helper vs Server Implementation Scope**:
+   - Verifier functions in `tools/validate-mobile-contract.py` are schema/contract validation helpers for testing and fixture qualification; authoritative transactional validation, state transitions, and ledger posting remain exclusively in Laravel backend services.
+

@@ -128,6 +128,47 @@
           "pattern": "^(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{1,6})?$"
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "settlement_mode": {
+                "const": "unpaid"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payment_method": {
+                "type": "null"
+              },
+              "cash_account_id": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "settlement_mode": {
+                "enum": ["full", "partial"]
+              }
+            }
+          },
+          "then": {
+            "required": ["payment_method", "cash_account_id"],
+            "properties": {
+              "payment_method": {
+                "const": "cash"
+              },
+              "cash_account_id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ],
       "additionalProperties": false
     }
   },

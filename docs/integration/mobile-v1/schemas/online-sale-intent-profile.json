@@ -122,13 +122,20 @@
           ]
         },
         "payment_method": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "enum": [
-            "cash"
+            "cash",
+            null
           ]
         },
         "cash_account_id": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
         },
         "amount": {
@@ -136,6 +143,49 @@
           "pattern": "^(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{1,6})?$"
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "settlement_mode": {
+                "const": "unpaid"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payment_method": {
+                "type": "null"
+              },
+              "cash_account_id": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "settlement_mode": {
+                "enum": [
+                  "full",
+                  "partial"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payment_method": {
+                "const": "cash"
+              },
+              "cash_account_id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ],
       "additionalProperties": false
     },
     "warehouse_id": {

@@ -28,6 +28,12 @@ Comprehensive Small Trader Mobile Contract Validation Suite (Draft Revision 3):
    - Manifest verification mutation tests (Check 27a-e): real filesystem mutation test (temporary
      untracked file restored cleanly), extra entry, duplicate entry, malformed line, checksum mismatch.
    - Archive byte checks (Check 28): historical goldens and archived schemas match exact parent bytes.
+   - Positive each mode with omitted/null/valid cash fields, digest derivation & tampering (Check 29a-d).
+   - Missing required taxID rejection throwing typed error, never implicit NoTax (Check 30a-b).
+   - Unknown raw request fields rejection at root/line/payment before projection (Check 31a-c).
+   - Context strict known keys, ULID format, and boolean minor units rejection (Check 32a-e).
+   - Payment consistency boundaries, invalid lexemes, and negative amounts rejection (Check 33a-h).
+   - Missing required economic fields for full/partial never default (Check 34a-f).
    - Revision 2 (89 cases) and Revision 3 (31 cases) positive/negative suites.
 7. Verifies reproducible SHA-256 manifest with exact set equality discovered vs stored,
    failing closed on extra/missing/duplicate/malformed entries.
@@ -109,6 +115,54 @@ class IntentProfileValidationError(Exception):
 
 class ManifestValidationError(Exception):
     pass
+
+
+# ---------------------------------------------------------------------------
+# Schema Registry & Validation Hub
+# ---------------------------------------------------------------------------
+
+class SchemaValidatorHub:
+    def __init__(self):
+        self.schemas: Dict[str, Dict[str, Any]] = {}
+        self.resources: Dict[str, Resource] = {}
+        self.registry = Registry()
+        self._load_all_schemas()
+
+    def _load_all_schemas(self):
+        for schema_path in sorted(SCHEMAS_DIR.glob("*.json")):
+            with open(schema_path, "r", encoding="utf-8") as f:
+                schema_data = json.load(f)
+            schema_id = schema_data.get("$id", schema_path.name)
+            self.schemas[schema_path.name] = schema_data
+            res = Resource.from_contents(schema_data)
+            self.resources[schema_id] = res
+            self.resources[schema_path.name] = res
+
+        for uri, res in self.resources.items():
+            self.registry = self.registry.with_resource(uri, res)
+
+    def validate_instance(self, instance: Any, schema_name: str, context: str = ""):
+        if schema_name not in self.schemas:
+            raise ValueError(f"Schema not found in registry: {schema_name}")
+        schema_data = self.schemas[schema_name]
+        validator = ContractValidator(schema_data, registry=self.registry, format_checker=FormatChecker())
+        errors = sorted(validator.iter_errors(instance), key=lambda e: e.path)
+        if errors:
+            err_msg = "\n".join(
+                [f" - at '{'/'.join(str(p) for p in err.path) or 'root'}': {err.message}" for err in errors]
+            )
+            raise JsonSchemaValidationError(f"Validation failed for {context} against {schema_name}:\n{err_msg}")
+
+
+_DEFAULT_VALIDATOR_HUB: Optional[SchemaValidatorHub] = None
+
+
+def get_schema_validator_hub() -> SchemaValidatorHub:
+    global _DEFAULT_VALIDATOR_HUB
+    if _DEFAULT_VALIDATOR_HUB is None:
+        _DEFAULT_VALIDATOR_HUB = SchemaValidatorHub()
+    return _DEFAULT_VALIDATOR_HUB
+
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +336,8 @@ def verify_sale_commit_token_binding(commit_payload: Dict[str, Any]) -> Tuple[bo
 
 def construct_online_sale_intent_profile(
     context: Dict[str, Any],
-    request: Dict[str, Any]
+    request: Dict[str, Any],
+    validator_hub: Optional["SchemaValidatorHub"] = None
 ) -> Dict[str, Any]:
     """
     Constructs the normative online canonical intent profile by combining:
@@ -291,40 +346,111 @@ def construct_online_sale_intent_profile(
     - Server-qualified currency minor units context (0..6)
     - Client request parameters: device_id, client_event_id, customer_id, warehouse_id, currency,
       ordered line items with exact decimal lexemes, and payment intent.
-    Preserves exact validated string decimal lexemes without implicit rounding or repricing.
-    """
-    actor_id = context.get("actor_id")
-    company_id = context.get("company_id")
-    minor_units = context.get("currency_minor_units")
+    Preserves exact validated string decimal lexemes without implicit rounding, truncation, or repricing.
 
-    if not actor_id or not company_id:
-        raise IntentProfileValidationError("Missing authoritative actor_id or company_id in context")
-    if minor_units is None or not (0 <= minor_units <= 6):
-        raise IntentProfileValidationError("Missing or invalid currency_minor_units (0..6) in context")
+    Mandatory validation invariants:
+    1. Context must contain strictly the known keys {'actor_id', 'company_id', 'currency_minor_units'}.
+       actor_id and company_id must match Crockford ULID regex; currency_minor_units must be an int
+       in 0..6 (strictly rejecting boolean as integer, since bool is an int subclass in Python).
+    2. Raw request must be validated against sale-preview-request.json BEFORE any projection.
+       Fails closed on unknown root, line, or payment fields, or missing required fields.
+    3. Missing required tax_rate_id on line items throws IntentProfileValidationError; never defaults to
+       implicit NoTax (ExplicitNoTax requires explicit null, never omitted key).
+    4. Normalizes nullable payment fields explicitly only for fields the contract permits omission:
+       omitted payment_method and cash_account_id canonically map to None (null in JSON) ONLY for
+       unpaid settlement mode; missing required economic fields for full/partial never default to null.
+    """
+    if not isinstance(context, dict):
+        raise IntentProfileValidationError("Context must be a dictionary")
+
+    expected_context_keys = {"actor_id", "company_id", "currency_minor_units"}
+    if set(context.keys()) != expected_context_keys:
+        extra_keys = set(context.keys()) - expected_context_keys
+        missing_keys = expected_context_keys - set(context.keys())
+        msg_parts = []
+        if extra_keys:
+            msg_parts.append(f"unknown extra keys {sorted(extra_keys)}")
+        if missing_keys:
+            msg_parts.append(f"missing keys {sorted(missing_keys)}")
+        raise IntentProfileValidationError(f"Invalid context keys: {', '.join(msg_parts)}")
+
+    actor_id = context["actor_id"]
+    company_id = context["company_id"]
+    minor_units = context["currency_minor_units"]
+
+    ulid_regex = r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    if not isinstance(actor_id, str) or not re.match(ulid_regex, actor_id):
+        raise IntentProfileValidationError(f"Invalid actor_id ULID in context: {actor_id!r}")
+    if not isinstance(company_id, str) or not re.match(ulid_regex, company_id):
+        raise IntentProfileValidationError(f"Invalid company_id ULID in context: {company_id!r}")
+
+    if isinstance(minor_units, bool) or not isinstance(minor_units, int) or not (0 <= minor_units <= 6):
+        raise IntentProfileValidationError(
+            f"Invalid currency_minor_units in context (must be int 0..6, reject bool): {minor_units!r}"
+        )
+
+    if not isinstance(request, dict):
+        raise IntentProfileValidationError("Request must be a dictionary")
+
+    hub = validator_hub or get_schema_validator_hub()
+    try:
+        hub.validate_instance(request, "sale-preview-request.json", "sale-preview-request")
+    except JsonSchemaValidationError as e:
+        raise IntentProfileValidationError(f"Raw request schema validation failed: {e}") from e
 
     req_lines = request.get("lines", [])
     if not req_lines:
         raise IntentProfileValidationError("Online intent profile requires at least one line item")
 
     profile_lines = []
-    for line in req_lines:
+    for idx, line in enumerate(req_lines):
+        if not isinstance(line, dict):
+            raise IntentProfileValidationError(f"Line item at index {idx} must be a dictionary")
+        if "tax_rate_id" not in line:
+            raise IntentProfileValidationError(
+                f"Missing required 'tax_rate_id' on line {idx} (ExplicitNoTax requires explicit null, never omitted key)"
+            )
         profile_lines.append({
             "product_id": line["product_id"],
             "product_unit_id": line["product_unit_id"],
             "conversion_to_base": line["conversion_to_base"],
             "quantity": line["quantity"],
             "unit_price": line["unit_price"],
-            "tax_rate_id": line.get("tax_rate_id"),
+            "tax_rate_id": line["tax_rate_id"],
             "tax_rate": line["tax_rate"],
             "tax_inclusive": line["tax_inclusive"],
         })
 
-    payment = request.get("payment", {})
+    payment = request["payment"]
+    settlement_mode = payment["settlement_mode"]
+    amount = payment["amount"]
+
+    if settlement_mode == "unpaid":
+        profile_method = payment.get("payment_method")
+        profile_cash_account = payment.get("cash_account_id")
+        if profile_method is not None or profile_cash_account is not None:
+            raise IntentProfileValidationError(
+                "An unpaid sale cannot carry payment method or cash account instructions"
+            )
+    elif settlement_mode in ("full", "partial"):
+        if "payment_method" not in payment or payment["payment_method"] is None:
+            raise IntentProfileValidationError(
+                f"Missing required payment_method for {settlement_mode} settlement mode (never defaults)"
+            )
+        if "cash_account_id" not in payment or payment["cash_account_id"] is None:
+            raise IntentProfileValidationError(
+                f"Missing required cash_account_id for {settlement_mode} settlement mode (never defaults)"
+            )
+        profile_method = payment["payment_method"]
+        profile_cash_account = payment["cash_account_id"]
+    else:
+        raise IntentProfileValidationError(f"Unsupported settlement_mode: {settlement_mode!r}")
+
     profile_payment = {
-        "settlement_mode": payment["settlement_mode"],
-        "payment_method": payment["payment_method"],
-        "cash_account_id": payment["cash_account_id"],
-        "amount": payment["amount"],
+        "settlement_mode": settlement_mode,
+        "payment_method": profile_method,
+        "cash_account_id": profile_cash_account,
+        "amount": amount,
     }
 
     profile = {
@@ -349,14 +475,17 @@ def verify_online_sale_intent_profile(
 ) -> Tuple[bool, str]:
     """
     Normative verification function for online sale canonical intent profiles:
-    1. Validates profile shape against online-sale-intent-profile.json schema (if validator_hub supplied).
+    1. Validates profile shape against online-sale-intent-profile.json schema (mandatory validation).
     2. Confirms no IEEE-754 floats are present anywhere in the profile.
     3. Serializes profile to RFC 8785 restricted JCS bytes (UTF-16 key sorting, string decimal lexemes).
     4. Computes SHA-256 digest and asserts equality against expected_digest.
     Raises IntentProfileValidationError on schema violation, float detection, or digest mismatch.
     """
-    if validator_hub is not None:
-        validator_hub.validate_instance(profile, "online-sale-intent-profile.json", "online-intent-profile")
+    hub = validator_hub or get_schema_validator_hub()
+    try:
+        hub.validate_instance(profile, "online-sale-intent-profile.json", "online-intent-profile")
+    except JsonSchemaValidationError as e:
+        raise IntentProfileValidationError(f"Profile schema validation failed: {e}") from e
 
     def assert_no_floats(val, path="root"):
         if isinstance(val, float):
@@ -429,53 +558,71 @@ def calculate_canonical_line(
 
 
 def verify_payment_decimal_consistency(payment: Dict[str, Any], grand_total_str: str) -> bool:
-    """Verifies cash tender balance: amount_tendered == amount_settled + change_returned."""
-    tendered = Decimal(payment.get("amount_tendered", payment.get("amount", "0.000000")))
-    settled = Decimal(payment.get("amount_settled", payment.get("amount", "0.000000")))
-    change = Decimal(payment.get("change_returned", "0.000000"))
-    grand_total = Decimal(grand_total_str)
+    """
+    Verifies payment consistency according to authoritative contract and canonical account rules:
+    - Offline cash intake: verifies exact cash tender conservation:
+        amount_tendered == amount_settled + change_returned
+        amount_settled == grand_total
+        mode == "full"
+        Preserves exact conservation without fallback.
+    - Online payment intent:
+        settlement_mode == "unpaid": amount == 0
+        settlement_mode == "partial": 0 < amount < grand_total (positive below qualified grand total)
+        settlement_mode == "full": amount >= grand_total (allowing tendered excess / change)
+    Returns False on invalid lexemes, negative amounts, or invariant violations.
+    """
+    if not isinstance(payment, dict):
+        return False
 
-    if payment.get("mode") == "full" or payment.get("settlement_mode") == "full":
+    try:
+        grand_total = Decimal(grand_total_str)
+    except Exception:
+        return False
+
+    if grand_total < Decimal("0"):
+        return False
+
+    # 1. Offline payment tender conservation branch
+    if "amount_tendered" in payment or "amount_settled" in payment:
+        if "amount_tendered" not in payment or "amount_settled" not in payment or "change_returned" not in payment:
+            return False
+        try:
+            tendered = Decimal(str(payment["amount_tendered"]))
+            settled = Decimal(str(payment["amount_settled"]))
+            change = Decimal(str(payment["change_returned"]))
+        except Exception:
+            return False
+
+        if tendered < Decimal("0") or settled < Decimal("0") or change < Decimal("0"):
+            return False
+        if payment.get("mode") != "full":
+            return False
         if settled != grand_total:
             return False
-    return tendered == (settled + change)
+        return tendered == (settled + change)
 
+    # 2. Online payment intent branch
+    if "settlement_mode" in payment:
+        mode = payment["settlement_mode"]
+        if "amount" not in payment:
+            return False
+        try:
+            amount = Decimal(str(payment["amount"]))
+        except Exception:
+            return False
 
-# ---------------------------------------------------------------------------
-# Schema Registry & Validation Hub
-# ---------------------------------------------------------------------------
+        if amount < Decimal("0"):
+            return False
 
-class SchemaValidatorHub:
-    def __init__(self):
-        self.schemas: Dict[str, Dict[str, Any]] = {}
-        self.resources: Dict[str, Resource] = {}
-        self.registry = Registry()
-        self._load_all_schemas()
+        if mode == "unpaid":
+            return amount == Decimal("0")
+        elif mode == "partial":
+            return Decimal("0") < amount < grand_total
+        elif mode == "full":
+            return amount >= grand_total
+        return False
 
-    def _load_all_schemas(self):
-        for schema_path in sorted(SCHEMAS_DIR.glob("*.json")):
-            with open(schema_path, "r", encoding="utf-8") as f:
-                schema_data = json.load(f)
-            schema_id = schema_data.get("$id", schema_path.name)
-            self.schemas[schema_path.name] = schema_data
-            res = Resource.from_contents(schema_data)
-            self.resources[schema_id] = res
-            self.resources[schema_path.name] = res
-
-        for uri, res in self.resources.items():
-            self.registry = self.registry.with_resource(uri, res)
-
-    def validate_instance(self, instance: Any, schema_name: str, context: str = ""):
-        if schema_name not in self.schemas:
-            raise ValueError(f"Schema not found in registry: {schema_name}")
-        schema_data = self.schemas[schema_name]
-        validator = ContractValidator(schema_data, registry=self.registry, format_checker=FormatChecker())
-        errors = sorted(validator.iter_errors(instance), key=lambda e: e.path)
-        if errors:
-            err_msg = "\n".join(
-                [f" - at '{'/'.join(str(p) for p in err.path) or 'root'}': {err.message}" for err in errors]
-            )
-            raise JsonSchemaValidationError(f"Validation failed for {context} against {schema_name}:\n{err_msg}")
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -1693,6 +1840,371 @@ def run_suite() -> int:
             return 1
     print("  OK: Check 28 passed (all historical compatibility goldens match parent PR4 exact bytes)")
     passed_checks += 1
+
+    # Check 29: Positive each settlement mode with omitted/null/valid cash fields & digest derived per mode & tampering
+    # 29a: Unpaid mode with omitted optional cash fields (payment {settlement_mode: 'unpaid', amount: '0.000'})
+    req_unpaid_omitted = json.loads(json.dumps(preview_v2_fix["request"]))
+    req_unpaid_omitted["payment"] = {
+        "settlement_mode": "unpaid",
+        "amount": "0.000",
+    }
+    profile_unpaid_omitted = construct_online_sale_intent_profile(preview_v2_fix["context"], req_unpaid_omitted, validator_hub)
+    if profile_unpaid_omitted["payment"]["payment_method"] is not None or profile_unpaid_omitted["payment"]["cash_account_id"] is not None:
+        print("  FAIL Check 29a: Omitted payment fields did not normalize to null in unpaid intent profile!")
+        return 1
+    if profile_unpaid_omitted["payment"]["amount"] != "0.000":
+        print(f"  FAIL Check 29a: Exact string lexeme '0.000' mutated: {profile_unpaid_omitted['payment']['amount']!r}")
+        return 1
+    unpaid_omitted_digest = compute_restricted_sha256_digest(profile_unpaid_omitted)
+    verify_online_sale_intent_profile(profile_unpaid_omitted, unpaid_omitted_digest, validator_hub)
+    if not verify_payment_decimal_consistency(profile_unpaid_omitted["payment"], "50.000000"):
+        print("  FAIL Check 29a: Valid unpaid payment consistency rejected!")
+        return 1
+    tampered_unpaid_amount = json.loads(json.dumps(profile_unpaid_omitted))
+    tampered_unpaid_amount["payment"]["amount"] = "0.001"
+    try:
+        verify_online_sale_intent_profile(tampered_unpaid_amount, unpaid_omitted_digest, validator_hub)
+        print("  FAIL Check 29a: Tampered unpaid amount accepted!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 29a passed (unpaid mode with omitted cash fields accepted, normalized null, digest verified, tampering rejected)")
+        passed_checks += 1
+
+    # 29b: Unpaid mode with explicit null cash fields (payment {settlement_mode: 'unpaid', payment_method: null, cash_account_id: null, amount: '0.000000'})
+    req_unpaid_null = json.loads(json.dumps(preview_v2_fix["request"]))
+    req_unpaid_null["payment"] = {
+        "settlement_mode": "unpaid",
+        "payment_method": None,
+        "cash_account_id": None,
+        "amount": "0.000000",
+    }
+    profile_unpaid_null = construct_online_sale_intent_profile(preview_v2_fix["context"], req_unpaid_null, validator_hub)
+    if profile_unpaid_null["payment"]["payment_method"] is not None or profile_unpaid_null["payment"]["cash_account_id"] is not None:
+        print("  FAIL Check 29b: Explicit null payment fields did not normalize to null in unpaid intent profile!")
+        return 1
+    unpaid_null_digest = compute_restricted_sha256_digest(profile_unpaid_null)
+    verify_online_sale_intent_profile(profile_unpaid_null, unpaid_null_digest, validator_hub)
+    if not verify_payment_decimal_consistency(profile_unpaid_null["payment"], "50.000000"):
+        print("  FAIL Check 29b: Valid unpaid null payment consistency rejected!")
+        return 1
+    tampered_unpaid_mode = json.loads(json.dumps(profile_unpaid_null))
+    tampered_unpaid_mode["payment"]["settlement_mode"] = "full"
+    try:
+        verify_online_sale_intent_profile(tampered_unpaid_mode, unpaid_null_digest, validator_hub)
+        print("  FAIL Check 29b: Tampered unpaid mode accepted!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 29b passed (unpaid mode with explicit null cash fields accepted, digest verified, tampering rejected)")
+        passed_checks += 1
+
+    # 29c: Partial mode with valid cash fields (payment {settlement_mode: 'partial', payment_method: 'cash', cash_account_id: ..., amount: '20.000000'})
+    req_partial = json.loads(json.dumps(preview_v2_fix["request"]))
+    req_partial["payment"] = {
+        "settlement_mode": "partial",
+        "payment_method": "cash",
+        "cash_account_id": "01JCV8X9MAJ3K4M5N6P7Q8R9S0",
+        "amount": "20.000000",
+    }
+    profile_partial = construct_online_sale_intent_profile(preview_v2_fix["context"], req_partial, validator_hub)
+    partial_digest = compute_restricted_sha256_digest(profile_partial)
+    verify_online_sale_intent_profile(profile_partial, partial_digest, validator_hub)
+    if not verify_payment_decimal_consistency(profile_partial["payment"], "50.000000"):
+        print("  FAIL Check 29c: Valid partial payment consistency rejected!")
+        return 1
+    tampered_partial_acct = json.loads(json.dumps(profile_partial))
+    tampered_partial_acct["payment"]["cash_account_id"] = "01JCV8X9MAJ3K4M5N6P7Q8R9S1"
+    try:
+        verify_online_sale_intent_profile(tampered_partial_acct, partial_digest, validator_hub)
+        print("  FAIL Check 29c: Tampered partial cash account accepted!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 29c passed (partial mode with valid cash fields accepted, digest verified, tampering rejected)")
+        passed_checks += 1
+
+    # 29d: Full mode with valid cash fields and tendered excess (payment {settlement_mode: 'full', amount: '60.000000'})
+    req_full_excess = json.loads(json.dumps(preview_v2_fix["request"]))
+    req_full_excess["payment"]["amount"] = "60.000000"
+    profile_full_excess = construct_online_sale_intent_profile(preview_v2_fix["context"], req_full_excess, validator_hub)
+    full_excess_digest = compute_restricted_sha256_digest(profile_full_excess)
+    verify_online_sale_intent_profile(profile_full_excess, full_excess_digest, validator_hub)
+    if not verify_payment_decimal_consistency(profile_full_excess["payment"], "50.000000"):
+        print("  FAIL Check 29d: Full mode tendered excess (60.000000 >= 50.000000) rejected!")
+        return 1
+    tampered_full_price = json.loads(json.dumps(profile_full_excess))
+    tampered_full_price["lines"][0]["unit_price"] = "26.000000"
+    try:
+        verify_online_sale_intent_profile(tampered_full_price, full_excess_digest, validator_hub)
+        print("  FAIL Check 29d: Tampered full excess price accepted!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 29d passed (full mode with tendered excess accepted, digest verified, tampering rejected)")
+        passed_checks += 1
+
+    # Check 30: Missing required taxID rejection (never default to implicit NoTax)
+    # 30a: construct_online_sale_intent_profile rejects line missing tax_rate_id key with zero rate and false inclusive
+    bad_req_missing_tax_id = json.loads(json.dumps(preview_v2_fix["request"]))
+    del bad_req_missing_tax_id["lines"][0]["tax_rate_id"]
+    bad_req_missing_tax_id["lines"][0]["tax_rate"] = "0.000000"
+    bad_req_missing_tax_id["lines"][0]["tax_inclusive"] = False
+    try:
+        construct_online_sale_intent_profile(preview_v2_fix["context"], bad_req_missing_tax_id, validator_hub)
+        print("  FAIL Check 30a: Line missing tax_rate_id was accepted and defaulted to implicit NoTax!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 30a passed (missing tax_rate_id throws IntentProfileValidationError, never implicit NoTax)")
+        passed_checks += 1
+
+    # 30b: Direct schema validation of request missing tax_rate_id rejects with JsonSchemaValidationError
+    try:
+        validator_hub.validate_instance(bad_req_missing_tax_id, "sale-preview-request.json", "missing-tax-rate-id-check")
+        print("  FAIL Check 30b: Raw request missing tax_rate_id accepted by sale-preview-request.json!")
+        return 1
+    except JsonSchemaValidationError:
+        print("  OK: Check 30b passed (raw request missing tax_rate_id rejected by sale-preview-request.json)")
+        passed_checks += 1
+
+    # Check 31: Unknown raw request fields rejected at each level before projection
+    # 31a: Unknown root field
+    bad_root_field_req = json.loads(json.dumps(preview_v2_fix["request"]))
+    bad_root_field_req["unknown_root_property"] = "malicious_payload"
+    try:
+        construct_online_sale_intent_profile(preview_v2_fix["context"], bad_root_field_req, validator_hub)
+        print("  FAIL Check 31a: Unknown root field was silently dropped instead of rejected!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 31a passed (unknown root field rejected before projection)")
+        passed_checks += 1
+
+    # 31b: Unknown line item field
+    bad_line_field_req = json.loads(json.dumps(preview_v2_fix["request"]))
+    bad_line_field_req["lines"][0]["unknown_line_property"] = "malicious_line_payload"
+    try:
+        construct_online_sale_intent_profile(preview_v2_fix["context"], bad_line_field_req, validator_hub)
+        print("  FAIL Check 31b: Unknown line field was silently dropped instead of rejected!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 31b passed (unknown line field rejected before projection)")
+        passed_checks += 1
+
+    # 31c: Unknown payment field
+    bad_payment_field_req = json.loads(json.dumps(preview_v2_fix["request"]))
+    bad_payment_field_req["payment"]["unknown_payment_property"] = "malicious_payment_payload"
+    try:
+        construct_online_sale_intent_profile(preview_v2_fix["context"], bad_payment_field_req, validator_hub)
+        print("  FAIL Check 31c: Unknown payment field was silently dropped instead of rejected!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 31c passed (unknown payment field rejected before projection)")
+        passed_checks += 1
+
+    # Check 32: Context strict known keys and type validation
+    # 32a: currency_minor_units as boolean True rejected (reject bool as int)
+    bad_ctx_bool_true = json.loads(json.dumps(preview_v2_fix["context"]))
+    bad_ctx_bool_true["currency_minor_units"] = True
+    try:
+        construct_online_sale_intent_profile(bad_ctx_bool_true, preview_v2_fix["request"], validator_hub)
+        print("  FAIL Check 32a: boolean True accepted as currency_minor_units!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 32a passed (context currency_minor_units boolean True rejected)")
+        passed_checks += 1
+
+    # 32b: currency_minor_units as boolean False rejected
+    bad_ctx_bool_false = json.loads(json.dumps(preview_v2_fix["context"]))
+    bad_ctx_bool_false["currency_minor_units"] = False
+    try:
+        construct_online_sale_intent_profile(bad_ctx_bool_false, preview_v2_fix["request"], validator_hub)
+        print("  FAIL Check 32b: boolean False accepted as currency_minor_units!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 32b passed (context currency_minor_units boolean False rejected)")
+        passed_checks += 1
+
+    # 32c: Context with extra key rejected
+    bad_ctx_extra = json.loads(json.dumps(preview_v2_fix["context"]))
+    bad_ctx_extra["unexpected_context_key"] = "extra_value"
+    try:
+        construct_online_sale_intent_profile(bad_ctx_extra, preview_v2_fix["request"], validator_hub)
+        print("  FAIL Check 32c: Context with extra key was accepted!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 32c passed (context with extra unknown key rejected)")
+        passed_checks += 1
+
+    # 32d: Context missing key rejected
+    bad_ctx_missing = json.loads(json.dumps(preview_v2_fix["context"]))
+    del bad_ctx_missing["company_id"]
+    try:
+        construct_online_sale_intent_profile(bad_ctx_missing, preview_v2_fix["request"], validator_hub)
+        print("  FAIL Check 32d: Context missing company_id was accepted!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 32d passed (context missing required key rejected)")
+        passed_checks += 1
+
+    # 32e: Non-ULID actor_id / company_id rejected
+    bad_ctx_uuid = json.loads(json.dumps(preview_v2_fix["context"]))
+    bad_ctx_uuid["actor_id"] = "3fa85f64-5717-4562-b3fc-2c963f66afa6"  # UUID, not ULID
+    try:
+        construct_online_sale_intent_profile(bad_ctx_uuid, preview_v2_fix["request"], validator_hub)
+        print("  FAIL Check 32e: Non-ULID UUID accepted for actor_id in context!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 32e passed (non-ULID UUID actor_id in context rejected)")
+        passed_checks += 1
+
+    # Check 33: Invalid settlement amounts boundaries, lexemes, and negative amounts
+    # 33a: unpaid with positive amount rejected
+    if verify_payment_decimal_consistency({"settlement_mode": "unpaid", "amount": "0.000001"}, "50.000000"):
+        print("  FAIL Check 33a: Unpaid with positive amount 0.000001 accepted!")
+        return 1
+    if verify_payment_decimal_consistency({"settlement_mode": "unpaid", "amount": "50.000000"}, "50.000000"):
+        print("  FAIL Check 33a: Unpaid with positive amount 50.000000 accepted!")
+        return 1
+    print("  OK: Check 33a passed (unpaid mode with positive amount rejected)")
+    passed_checks += 1
+
+    # 33b: partial with zero amount rejected
+    if verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "0.000000"}, "50.000000"):
+        print("  FAIL Check 33b: Partial with zero amount accepted!")
+        return 1
+    print("  OK: Check 33b passed (partial mode with zero amount rejected)")
+    passed_checks += 1
+
+    # 33c: partial with amount equal to or greater than grand total rejected
+    if verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "50.000000"}, "50.000000"):
+        print("  FAIL Check 33c: Partial with amount equal to grand total accepted!")
+        return 1
+    if verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "55.000000"}, "50.000000"):
+        print("  FAIL Check 33c: Partial with amount greater than grand total accepted!")
+        return 1
+    print("  OK: Check 33c passed (partial mode with amount >= grand total rejected)")
+    passed_checks += 1
+
+    # 33d: full mode with amount less than grand total rejected
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "49.999999"}, "50.000000"):
+        print("  FAIL Check 33d: Full mode with amount < grand total accepted!")
+        return 1
+    print("  OK: Check 33d passed (full mode with amount < grand total rejected)")
+    passed_checks += 1
+
+    # 33e: Negative payment amount rejected
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "-50.000000"}, "50.000000"):
+        print("  FAIL Check 33e: Full mode with negative amount accepted!")
+        return 1
+    if verify_payment_decimal_consistency({"settlement_mode": "unpaid", "amount": "-0.000001"}, "50.000000"):
+        print("  FAIL Check 33e: Unpaid mode with negative amount accepted!")
+        return 1
+    print("  OK: Check 33e passed (negative payment amount rejected)")
+    passed_checks += 1
+
+    # 33f: Invalid decimal string lexemes rejected
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "not_a_number"}, "50.000000"):
+        print("  FAIL Check 33f: Non-numeric string lexeme accepted!")
+        return 1
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "50.00.00"}, "50.000000"):
+        print("  FAIL Check 33f: Malformed decimal string lexeme accepted!")
+        return 1
+    print("  OK: Check 33f passed (malformed decimal string lexeme rejected)")
+    passed_checks += 1
+
+    # 33g: Offline payment tender balance mismatch rejected
+    bad_offline_tender = {
+        "mode": "full",
+        "amount_tendered": "50.000000",
+        "amount_settled": "50.000000",
+        "change_returned": "5.000000",
+    }
+    if verify_payment_decimal_consistency(bad_offline_tender, "50.000000"):
+        print("  FAIL Check 33g: Offline payment tender balance mismatch accepted!")
+        return 1
+    print("  OK: Check 33g passed (offline payment tender balance mismatch rejected)")
+    passed_checks += 1
+
+    # 33h: Offline payment settled amount != grand total rejected
+    bad_offline_settled = {
+        "mode": "full",
+        "amount_tendered": "40.000000",
+        "amount_settled": "40.000000",
+        "change_returned": "0.000000",
+    }
+    if verify_payment_decimal_consistency(bad_offline_settled, "50.000000"):
+        print("  FAIL Check 33h: Offline payment settled amount != grand total accepted!")
+        return 1
+    print("  OK: Check 33h passed (offline payment settled != grand total rejected)")
+    passed_checks += 1
+
+    # Check 34: Missing required economic fields for full/partial never default
+    # 34a: Full mode with omitted payment_method rejected
+    bad_full_no_method = json.loads(json.dumps(preview_v2_fix["request"]))
+    del bad_full_no_method["payment"]["payment_method"]
+    try:
+        construct_online_sale_intent_profile(preview_v2_fix["context"], bad_full_no_method, validator_hub)
+        print("  FAIL Check 34a: Full mode with omitted payment_method accepted!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 34a passed (full mode with omitted payment_method rejected)")
+        passed_checks += 1
+
+    # 34b: Full mode with null payment_method rejected
+    bad_full_null_method = json.loads(json.dumps(preview_v2_fix["request"]))
+    bad_full_null_method["payment"]["payment_method"] = None
+    try:
+        construct_online_sale_intent_profile(preview_v2_fix["context"], bad_full_null_method, validator_hub)
+        print("  FAIL Check 34b: Full mode with null payment_method accepted!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 34b passed (full mode with null payment_method rejected)")
+        passed_checks += 1
+
+    # 34c: Full mode with omitted cash_account_id rejected
+    bad_full_no_acct = json.loads(json.dumps(preview_v2_fix["request"]))
+    del bad_full_no_acct["payment"]["cash_account_id"]
+    try:
+        construct_online_sale_intent_profile(preview_v2_fix["context"], bad_full_no_acct, validator_hub)
+        print("  FAIL Check 34c: Full mode with omitted cash_account_id accepted!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 34c passed (full mode with omitted cash_account_id rejected)")
+        passed_checks += 1
+
+    # 34d: Full mode with null cash_account_id rejected
+    bad_full_null_acct = json.loads(json.dumps(preview_v2_fix["request"]))
+    bad_full_null_acct["payment"]["cash_account_id"] = None
+    try:
+        construct_online_sale_intent_profile(preview_v2_fix["context"], bad_full_null_acct, validator_hub)
+        print("  FAIL Check 34d: Full mode with null cash_account_id accepted!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 34d passed (full mode with null cash_account_id rejected)")
+        passed_checks += 1
+
+    # 34e: Partial mode with null cash_account_id rejected
+    bad_partial_null_acct = json.loads(json.dumps(req_partial))
+    bad_partial_null_acct["payment"]["cash_account_id"] = None
+    try:
+        construct_online_sale_intent_profile(preview_v2_fix["context"], bad_partial_null_acct, validator_hub)
+        print("  FAIL Check 34e: Partial mode with null cash_account_id accepted!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 34e passed (partial mode with null cash_account_id rejected)")
+        passed_checks += 1
+
+    # 34f: Unpaid mode with non-null payment_method rejected
+    bad_unpaid_with_cash = json.loads(json.dumps(preview_v2_fix["request"]))
+    bad_unpaid_with_cash["payment"] = {
+        "settlement_mode": "unpaid",
+        "payment_method": "cash",
+        "cash_account_id": "01JCV8X9MAJ3K4M5N6P7Q8R9S0",
+        "amount": "0.000000",
+    }
+    try:
+        construct_online_sale_intent_profile(preview_v2_fix["context"], bad_unpaid_with_cash, validator_hub)
+        print("  FAIL Check 34f: Unpaid mode carrying cash payment method was accepted!")
+        return 1
+    except IntentProfileValidationError:
+        print("  OK: Check 34f passed (unpaid mode with non-null payment method rejected)")
+        passed_checks += 1
 
     # Revision 2 positive/negative read/auth fixtures
     cases_rev2 = json.loads((FIXTURES_DIR / "revision-2-validation-cases.json").read_text())

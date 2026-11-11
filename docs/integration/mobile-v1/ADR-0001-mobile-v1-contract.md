@@ -198,12 +198,36 @@ Online sale preview (`POST /api/mobile/v2/companies/{companyId}/sales/preview`) 
     - `tax_inclusive`: Boolean flag.
   - `payment`: Cash payment intent containing:
     - `settlement_mode`: `"full"` | `"unpaid"` | `"partial"`.
-    - `payment_method`: `"cash"`.
-    - `cash_account_id`: Approved cash register ULID.
-    - `amount`: Exact monetary decimal string lexeme.
+    - `payment_method`: `"cash"` for full/partial; `null` for unpaid (omitted fields in valid request canonically normalize to `null`).
+    - `cash_account_id`: Approved cash register Crockford ULID for full/partial; `null` for unpaid (omitted fields in valid request canonically normalize to `null`).
+    - `amount`: Exact monetary decimal string lexeme (`Decimal(amount) == 0` for unpaid; `0 < Decimal(amount) < grand_total` for partial; `Decimal(amount) >= grand_total` for full, allowing tendered excess). Preserves exact string representation (e.g. `'0.000'`) without rounding or lexeme mutation.
 - **Lexeme Preservation & No Floats**: All quantity and monetary values are strictly validated string decimal lexemes; IEEE-754 floats are forbidden. No implicit rounding, truncating, or repricing occurs prior to canonical hashing.
 - **Restricted JCS Serialization (RFC 8785 Subset)**: Object keys sorted by UTF-16 code units; characters < 0x20 escaped; no whitespace between tokens.
 - **Bound Preview Token Placeholder**: The computed SHA-256 digest is embedded in an illustrative opaque sample token (`preview_token`) consisting of base64-encoded JSON claims `{"version": 2, "company_id": "...", "digest": "sha256:..."}` and an illustrative signature suffix. The token is an illustrative opaque placeholder for contract binding, not fake cryptographic proof.
+
+### Normative Online Canonical Intent Profile Projection & Payment Semantics
+> [!IMPORTANT]
+> The helper functions in `tools/validate-mobile-contract.py` (`construct_online_sale_intent_profile`, `verify_online_sale_intent_profile`, `verify_payment_decimal_consistency`) are contract and schema test verifiers, NOT server implementations. The authoritative server domain logic and ledger posting reside in backend Laravel services (`ImmediateSaleCommands.php`, `SalesInvoiceCommands.php`, `SalesLineCalculator.php`).
+
+1. **Mandatory Pre-Projection Schema Validation**:
+   - The raw incoming request is validated against `sale-preview-request.json` before any projection occurs. Any unknown property at the root, line, or payment level is rejected immediately with `IntentProfileValidationError`.
+   - Line items must explicitly specify `tax_rate_id`. Missing `tax_rate_id` throws a clear fixed typed `IntentProfileValidationError`; it never defaults or falls back to implicit NoTax. Explicit No-Tax requires an explicit `null` value with `tax_rate: "0.000000"` and `tax_inclusive: false`.
+   - The route and session context must contain strictly known keys `{"actor_id", "company_id", "currency_minor_units"}`. ULID formats are strictly enforced, and `currency_minor_units` must be an integer in `0..6`, explicitly rejecting booleans as integers (`isinstance(b, int)` trap).
+
+2. **Source-Backed Payment Semantics Parity (`ImmediateSaleCommands.php`)**:
+   - **Unpaid Settlement (`settlement_mode: "unpaid"`)**:
+     - An unpaid sale carries zero payment tender (`Decimal(amount) == 0`). String decimal lexemes (e.g. `'0.000'`) are preserved verbatim without monetary rounding or format conversion.
+     - Per canonical rules (`ImmediateSaleCommands::intent`), an unpaid sale cannot carry cash payment instructions. `payment_method` and `cash_account_id` may be omitted from client requests or supplied as explicit `null`.
+     - In the canonical intent profile, omitted payment method and cash account canonically normalize to `null`. If non-null payment instructions are supplied with `unpaid` mode, validation fails closed.
+   - **Partial Settlement (`settlement_mode: "partial"`)**:
+     - `payment_method: "cash"` and an approved company cash register `cash_account_id` are required economic fields and must not be omitted or null.
+     - The payment amount must be positive and strictly below the qualified grand total (`0 < Decimal(amount) < grand_total`), matching `ImmediateSaleCommands` allocation checks (`! $allocated->isLessThan($total)`).
+   - **Full Settlement (`settlement_mode: "full"`)**:
+     - `payment_method: "cash"` and `cash_account_id` are required economic fields and must not be omitted or null.
+     - Full settlement requires the tendered amount to be at least the qualified grand total (`Decimal(amount) >= grand_total`), matching `ImmediateSaleCommands` which allows tendered excess/change (`$consumed <= $amount`, where `$consumed = $total`).
+   - **Offline Cash Tender Conservation**:
+     - Offline transactions retain distinct `amount_tendered`, `amount_settled`, and `change_returned` fields (`mode: "full"`).
+     - Conservation invariant `amount_tendered == amount_settled + change_returned` and `amount_settled == grand_total` is strictly verified without falling back to online `amount` or tautological self-comparisons.
 
 ### Financial Line Schema Amendment
 Both online sale preview (`POST /api/mobile/v2/companies/{companyId}/sales/preview`) and offline event intake (`POST /api/mobile/v2/companies/{companyId}/offline-events`) require:
