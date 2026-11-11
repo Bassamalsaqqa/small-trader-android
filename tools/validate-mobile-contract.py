@@ -32,9 +32,9 @@ Comprehensive Small Trader Mobile Contract Validation Suite (Draft Revision 3):
    - Missing required taxID rejection throwing typed error, never implicit NoTax (Check 30a-b).
    - Unknown raw request fields rejection at root/line/payment before projection (Check 31a-c).
    - Context strict known keys, ULID format, and boolean minor units rejection (Check 32a-e).
-   - Payment consistency boundaries, invalid lexemes, and negative amounts rejection (Check 33a-h).
+   - Payment consistency boundaries, zero total rejection, currency scale validation, overprecision rejection, trailing zeros, invalid lexemes, and negative amounts rejection (Check 33a-n).
    - Missing required economic fields for full/partial never default (Check 34a-f).
-   - Source-backed adaptation test illustrations for offline cash net retained settled, unpaid command choice mapping, partial allocation, and full overpayment rejection (Check 35a-d).
+   - Source-backed adaptation test illustrations for offline cash net retained settled, unpaid command choice mapping, partial allocation, full overpayment rejection, missing resolver/date failure, and foreign resolver isolation without secrets leak (Check 35a-f).
    - Revision 2 (89 cases) and Revision 3 (31 cases) positive/negative suites.
 7. Verifies reproducible SHA-256 manifest with exact set equality discovered vs stored,
    failing closed on extra/missing/duplicate/malformed entries.
@@ -58,9 +58,10 @@ import hashlib
 import re
 import base64
 import decimal
+import datetime
 from decimal import Decimal, ROUND_HALF_UP, ROUND_HALF_EVEN
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional, Callable
 
 import jsonschema
 from jsonschema import Draft202012Validator, FormatChecker
@@ -512,12 +513,53 @@ def verify_online_sale_intent_profile(
 # Exact Decimal Arithmetic Calculator Helper (SalesLineCalculator parity)
 # ---------------------------------------------------------------------------
 
+DECIMAL_MONEY_REGEX = re.compile(r"^(?:0|[1-9][0-9]{0,13})(?:\.[0-9]{1,6})?$")
+
+
+def validate_currency_minor_units(cmu: Any) -> bool:
+    """
+    Validates currency minor units:
+    Must be an explicit integer between 0 and 6.
+    Rejects booleans (isinstance(True, int) trap), missing/None, non-integers, and out-of-bounds scales.
+    Never guesses 2.
+    """
+    if cmu is None or isinstance(cmu, bool) or not isinstance(cmu, int):
+        return False
+    return 0 <= cmu <= 6
+
+
+def parse_and_validate_monetary_amount(val: Any, cmu: int) -> Optional[Decimal]:
+    """
+    Validates that a monetary amount:
+    1. Is a string lexeme (no IEEE-754 floats, no ints, no booleans, no None).
+    2. Strictly matches DECIMAL_MONEY_REGEX (finite, no NaN, no Infinity, no scientific exponent notation).
+    3. Exactly represents an integer number of currency minor units (cmu 0..6) using exact Decimal
+       arithmetic without rounding (RoundingMode::UNNECESSARY parity). Trailing zeros (e.g. 50.000000 at cmu 2)
+       are accepted, while fractions beyond cmu (e.g. 0.000001 at cmu 2) are strictly rejected.
+    Returns Decimal object if valid, None if invalid (fail closed).
+    """
+    if not isinstance(val, str) or isinstance(val, bool):
+        return None
+    if not DECIMAL_MONEY_REGEX.match(val):
+        return None
+    try:
+        d = Decimal(val)
+    except Exception:
+        return None
+    if not d.is_finite():
+        return None
+    cents = d * (Decimal(10) ** cmu)
+    if cents != cents.to_integral_value():
+        return None
+    return d
+
+
 def calculate_canonical_line(
     quantity_str: str,
     unit_price_str: str,
     tax_rate_str: str,
     tax_inclusive: bool,
-    minor_units: int = 2
+    minor_units: int,
 ) -> Dict[str, str]:
     """
     Genuine exact decimal calculator helper matching Laravel SalesLineCalculator.php parity:
@@ -530,9 +572,14 @@ def calculate_canonical_line(
         tax = round(subtotal * rate, minor_units, ROUND_HALF_UP)
         line_total = subtotal + tax
     - Formats all results as exact 6-decimal string lexemes.
-    Note: Fixture arithmetic tests invoke this helper to qualify contract fixtures;
-    live runtime accounting validation requires MariaDB transactional suites.
+    - Preserves quantities and packaging conversion to 6 decimal precision, and tax rate to 6 percent,
+      independent of currency minor units.
+    - minor_units is mandatory explicit context (int 0..6; booleans, invalid scales, and missing context
+      fail closed; never guesses 2).
     """
+    if not validate_currency_minor_units(minor_units):
+        raise ValueError(f"minor_units must be an explicit integer between 0 and 6 (got {minor_units!r})")
+
     q = Decimal(quantity_str)
     p = Decimal(unit_price_str)
     scale = Decimal(10) ** -minor_units
@@ -558,69 +605,95 @@ def calculate_canonical_line(
     }
 
 
-def verify_payment_decimal_consistency(payment: Dict[str, Any], grand_total_str: str) -> bool:
+def verify_payment_decimal_consistency(
+    payment: Any,
+    grand_total_str: Any,
+    currency_minor_units: Any = None,
+) -> bool:
     """
     Verifies payment consistency according to authoritative contract and canonical account rules:
+    - Pre-conditions / Fail-Closed Invariants:
+        * payment must be a dictionary.
+        * currency_minor_units is mandatory explicit context (int 0..6; booleans, invalid scales, and missing context return False; no guessing 2).
+        * grand_total_str must be a valid monetary decimal string representing integer currency minor units without rounding,
+          and MUST be strictly positive (grand_total > 0). First-release policy permits positive financial grand total ONLY;
+          total <= 0 is rejected for all paid, unpaid, and offline sales (no zero-invoice/receipt workaround).
     - Offline cash intake: verifies exact cash tender conservation:
-        amount_tendered == amount_settled + change_returned
-        amount_settled == grand_total
-        mode == "full"
-        Preserves exact conservation without fallback.
+        * amount_tendered == amount_settled + change_returned
+        * amount_settled == grand_total (strictly positive)
+        * mode == "full"
+        * amount_tendered, amount_settled, change_returned must all represent integer currency minor units without rounding.
     - Online payment intent:
-        settlement_mode == "unpaid": amount == 0
-        settlement_mode == "partial": 0 < amount < grand_total (positive below qualified grand total)
-        settlement_mode == "full": amount == grand_total (exact grand total; excess is unallocated customer credit, not returned change, and is rejected under the first-release exact policy)
-    Returns False on invalid lexemes, negative amounts, or invariant violations.
+        * settlement_mode == "unpaid": amount == 0 (grand_total strictly positive)
+        * settlement_mode == "partial": 0 < amount < grand_total (positive below qualified grand total)
+        * settlement_mode == "full": amount == grand_total (exact grand total; excess is unallocated customer credit, not returned change,
+          and is rejected under the first-release exact policy). Amount must be strictly positive (> 0).
+    Fails closed (returns False) on malformed lexemes, NaN, Infinity, floats, exponent notations,
+    negative amounts, overprecision beyond currency minor units, or invariant violations without crashing.
     """
     if not isinstance(payment, dict):
         return False
 
-    try:
-        grand_total = Decimal(grand_total_str)
-    except Exception:
+    if not validate_currency_minor_units(currency_minor_units):
         return False
 
-    if grand_total < Decimal("0"):
+    cmu: int = currency_minor_units
+
+    gt = parse_and_validate_monetary_amount(grand_total_str, cmu)
+    if gt is None:
+        return False
+
+    # Positive financial grand total ONLY policy: total <= 0 strictly rejected
+    if gt <= Decimal("0"):
         return False
 
     # 1. Offline payment tender conservation branch
     if "amount_tendered" in payment or "amount_settled" in payment:
-        if "amount_tendered" not in payment or "amount_settled" not in payment or "change_returned" not in payment:
-            return False
-        try:
-            tendered = Decimal(str(payment["amount_tendered"]))
-            settled = Decimal(str(payment["amount_settled"]))
-            change = Decimal(str(payment["change_returned"]))
-        except Exception:
+        if (
+            "amount_tendered" not in payment
+            or "amount_settled" not in payment
+            or "change_returned" not in payment
+        ):
             return False
 
-        if tendered < Decimal("0") or settled < Decimal("0") or change < Decimal("0"):
+        tendered = parse_and_validate_monetary_amount(payment.get("amount_tendered"), cmu)
+        settled = parse_and_validate_monetary_amount(payment.get("amount_settled"), cmu)
+        change = parse_and_validate_monetary_amount(payment.get("change_returned"), cmu)
+
+        if tendered is None or settled is None or change is None:
             return False
+
         if payment.get("mode") != "full":
             return False
-        if settled != grand_total:
+
+        # Settled amount must be strictly positive (PostCustomerPaymentAction requirement)
+        if settled <= Decimal("0"):
             return False
+
+        if settled != gt:
+            return False
+
         return tendered == (settled + change)
 
     # 2. Online payment intent branch
     if "settlement_mode" in payment:
-        mode = payment["settlement_mode"]
+        mode = payment.get("settlement_mode")
         if "amount" not in payment:
             return False
-        try:
-            amount = Decimal(str(payment["amount"]))
-        except Exception:
-            return False
 
-        if amount < Decimal("0"):
+        amt = parse_and_validate_monetary_amount(payment.get("amount"), cmu)
+        if amt is None:
             return False
 
         if mode == "unpaid":
-            return amount == Decimal("0")
+            # Unpaid requires amount == 0, with strictly positive grand total (> 0)
+            return amt == Decimal("0")
         elif mode == "partial":
-            return Decimal("0") < amount < grand_total
+            # Partial requires 0 < amount < grand_total
+            return Decimal("0") < amt < gt
         elif mode == "full":
-            return amount == grand_total
+            # Full requires exact match: amount == grand_total (and since gt > 0, amount > 0)
+            return amt == gt
         return False
 
     return False
@@ -629,82 +702,201 @@ def verify_payment_decimal_consistency(payment: Dict[str, Any], grand_total_str:
 def adapt_offline_cash_to_canonical_receipt(
     payment: Dict[str, Any],
     grand_total_str: str,
+    currency_minor_units: int,
+    reviewed_payment_date: Optional[str] = None,
+    cash_account_resolver: Optional[Callable[..., int]] = None,
+    company_id: Optional[str] = None,
+    customer_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Source-backed adaptation test illustration (contract qualification, NOT backend code implementation):
+    Source-backed adaptation test illustration (contract qualification, NOT server implementation):
     Adapts offline cash tender capture (amount_tendered, amount_settled, change_returned)
-    to proposed canonical receipt posting parameters.
-    The authoritative canonical receipt amount is NET RETAINED settled (amount_settled),
-    NOT amount_tendered when change is given.
-    Example: tender 60.000000, total 50.000000, change 10.000000 -> canonical receipt amount 50.000000.
+    to proposed canonical receipt parameters.
+
+    Authoritative notes:
+    1. The helper result is an illustrative audit mapping, NOT a direct PostCustomerPaymentActionDTO.
+    2. Offline audit bytes and digest retain tender and change separately in 'audit'.
+    3. The authoritative canonical receipt amount is NET RETAINED settled (amount_settled),
+       NOT amount_tendered when change is returned.
+       Example: tender 60.000000, total 50.000000, change 10.000000 -> canonical receipt amount 50.000000.
+    4. Wire audit fields (amount_tendered, change_returned) are NEVER passed unchecked into PostCustomerPaymentAction.
+    5. When parameterized with company-scoped customer_id, reviewed_payment_date, and cash_account_resolver,
+       a separate canonical command payload is produced with resolved internal positive integer money_account_id.
     """
-    if not verify_payment_decimal_consistency(payment, grand_total_str):
-        raise ValueError("Invalid offline cash payment tender conservation")
-    return {
-        "mode": "full",
-        "payment_method": "cash",
-        "receipt_amount": str(payment["amount_settled"]),
-        "change_returned": str(payment["change_returned"]),
-        "amount_tendered": str(payment["amount_tendered"]),
+    if not validate_currency_minor_units(currency_minor_units):
+        raise ValueError(f"currency_minor_units must be an explicit integer in 0..6 (got {currency_minor_units!r})")
+
+    if not verify_payment_decimal_consistency(payment, grand_total_str, currency_minor_units):
+        raise ValueError("Invalid offline cash payment tender conservation or non-positive settled amount")
+
+    settled_str = str(payment["amount_settled"])
+    tendered_str = str(payment["amount_tendered"])
+    change_str = str(payment["change_returned"])
+
+    res: Dict[str, Any] = {
+        "audit": {
+            "mode": "full",
+            "payment_method": "cash",
+            "amount_tendered": tendered_str,
+            "amount_settled": settled_str,
+            "change_returned": change_str,
+        },
+        "receipt_command": {
+            "mode": "full",
+            "payment_method": "cash",
+            "receipt_amount": settled_str,
+        },
+        # Net retained settled amount (preserved for compatibility, never tendered amount)
+        "receipt_amount": settled_str,
+        "amount_tendered": tendered_str,
+        "change_returned": change_str,
     }
+
+    # Parameterized canonical command payload (if fully sourced)
+    if reviewed_payment_date is not None and cash_account_resolver is not None:
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", reviewed_payment_date):
+            raise ValueError(f"reviewed_payment_date must be valid Y-m-d format, got {reviewed_payment_date!r}")
+        try:
+            datetime.date.fromisoformat(reviewed_payment_date)
+        except Exception as e:
+            raise ValueError(f"reviewed_payment_date is not a valid calendar date: {reviewed_payment_date}") from e
+        if customer_id is None or isinstance(customer_id, bool) or not isinstance(customer_id, int) or customer_id <= 0:
+            raise ValueError("customer_id must be a positive integer for canonical receipt command")
+        wire_acct = payment.get("cash_account_id")
+        if not wire_acct:
+            raise ValueError("cash_account_id required to resolve money_account_id")
+        try:
+            import inspect
+            sig = inspect.signature(cash_account_resolver)
+            if len(sig.parameters) >= 2:
+                internal_id = cash_account_resolver(company_id or "", wire_acct)
+            else:
+                internal_id = cash_account_resolver(wire_acct)
+        except Exception as e:
+            raise ValueError(f"Cash account resolution failed: {e}") from e
+
+        if isinstance(internal_id, bool) or not isinstance(internal_id, int) or internal_id <= 0:
+            raise ValueError(f"Resolved money_account_id must be a positive integer, got {internal_id!r}")
+
+        res["canonical_command"] = {
+            "customer_id": customer_id,
+            "money_account_id": internal_id,
+            "payment_date": reviewed_payment_date,
+            "payment_method": "cash",
+            "amount": settled_str,
+            "exchange_rate": "1.0000000000",
+        }
+
+    return res
 
 
 def adapt_online_payment_to_canonical_choice(
     intent_profile: Dict[str, Any],
     grand_total_str: str,
-    reviewed_payment_date: str = "2026-11-11",
+    currency_minor_units: int,
+    reviewed_payment_date: Optional[str] = None,
+    cash_account_resolver: Optional[Callable[..., int]] = None,
 ) -> Dict[str, Any]:
     """
-    Source-backed adaptation test illustration (contract qualification, NOT backend code implementation):
+    Source-backed adaptation test illustration (contract qualification, NOT server implementation):
     Maps validated online payment intent profile to backend ImmediateSaleCommands $choice array.
+
+    Enforces canonical qualification invariants:
     - ONLY AFTER strict wire and intent profile validation and digest derivation:
       - unpaid: maps EXACTLY to {'mode': 'unpaid'}, stripping wire payment fields
         (amount, payment_method, cash_account_id) from the command input so that
         ImmediateSaleCommands::intent (array_diff(array_keys($choice), ['mode']) === [])
         succeeds, without altering the wire profile or its JCS payload digest.
+        Neither reviewed_payment_date nor cash_account_resolver is required.
         Crucial: Stripping applies ONLY to validated payment snapshot fields; does NOT apply
         a general null filter across the payload (line tax_rate_id: null MUST remain explicit
         canonical NoTax).
-      - full: under first-release exact policy (amount == grand_total), maps wire amount to
-        received_amount and invoice_amount allocation; rejects over/under payment.
-      - partial: base currency cash no-change, maps wire amount to canonical received_amount
-        and invoice_amount allocation; FX 1.0000000000, explicit reviewed payment date,
-        active cash account, and payment_currency_amount matching allocation.
+      - full: under first-release exact policy (amount == grand_total, both strictly positive),
+        maps wire amount to received_amount and invoice_amount allocation; rejects over/under payment.
+        Requires explicit reviewed_payment_date (no invented default) and company-scoped active cash account
+        resolver mapping wire ULID to internal positive integer money_account_id.
+      - partial: base currency cash no-change (0 < amount < grand_total), maps wire amount to canonical
+        received_amount and invoice_amount allocation; FX 1.0000000000, explicit reviewed_payment_date (no default),
+        and resolved internal positive integer money_account_id.
     """
+    if not validate_currency_minor_units(currency_minor_units):
+        raise ValueError(f"currency_minor_units must be an explicit integer in 0..6 (got {currency_minor_units!r})")
+
     payment = intent_profile.get("payment", {})
-    if not verify_payment_decimal_consistency(payment, grand_total_str):
-        raise ValueError("Online payment decimal consistency violation")
+    if not verify_payment_decimal_consistency(payment, grand_total_str, currency_minor_units):
+        raise ValueError("Online payment decimal consistency or domain bound violation")
 
     mode = payment.get("settlement_mode")
     if mode == "unpaid":
-        # Strips wire payment fields from choice; wire profile & digest remain unaltered
+        # Strips wire payment fields from choice; wire profile & digest remain unaltered.
+        # No cash_account_resolver or reviewed_payment_date needed.
         return {"mode": "unpaid"}
-    elif mode == "full":
+
+    elif mode in ("full", "partial"):
+        # reviewed_payment_date is mandatory with NO invented default
+        if reviewed_payment_date is None or not isinstance(reviewed_payment_date, str):
+            raise ValueError("reviewed_payment_date is mandatory for full/partial settlement (no default permitted)")
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", reviewed_payment_date):
+            raise ValueError(f"reviewed_payment_date must be valid Y-m-d format, got {reviewed_payment_date!r}")
+        try:
+            datetime.date.fromisoformat(reviewed_payment_date)
+        except Exception as e:
+            raise ValueError(f"reviewed_payment_date is not a valid calendar date: {reviewed_payment_date}") from e
+
+        # cash_account_resolver is mandatory
+        if cash_account_resolver is None or not callable(cash_account_resolver):
+            raise ValueError("cash_account_resolver is mandatory for full/partial settlement (company-scoped resolver required)")
+
+        company_id = intent_profile.get("company_id")
+        wire_acct_id = payment.get("cash_account_id")
+        if not wire_acct_id:
+            raise ValueError("Missing cash_account_id in payment intent profile")
+
+        try:
+            import inspect
+            sig = inspect.signature(cash_account_resolver)
+            if len(sig.parameters) >= 2:
+                internal_money_account_id = cash_account_resolver(company_id, wire_acct_id)
+            else:
+                internal_money_account_id = cash_account_resolver(wire_acct_id)
+        except Exception as e:
+            raise ValueError(f"Cash account resolution failed for ULID {wire_acct_id}: {e}") from e
+
+        if (
+            isinstance(internal_money_account_id, bool)
+            or not isinstance(internal_money_account_id, int)
+            or internal_money_account_id <= 0
+        ):
+            raise ValueError(f"Resolved money_account_id must be a positive integer, got {internal_money_account_id!r}")
+
         amt = Decimal(str(payment["amount"]))
         total = Decimal(grand_total_str)
-        if amt != total:
-            raise ValueError(f"Full settlement amount {amt} must equal grand total {total}")
-        return {
-            "mode": "full",
-            "payment_method": "cash",
-            "money_account_id": payment["cash_account_id"],
-            "payment_date": reviewed_payment_date,
-            "amount": str(payment["amount"]),
-            "exchange_rate": "1.0000000000",
-            "invoice_amount": grand_total_str,
-            "payment_currency_amount": str(payment["amount"]),
-        }
-    elif mode == "partial":
-        return {
-            "mode": "partial",
-            "payment_method": "cash",
-            "money_account_id": payment["cash_account_id"],
-            "payment_date": reviewed_payment_date,
-            "amount": str(payment["amount"]),
-            "exchange_rate": "1.0000000000",
-            "invoice_amount": str(payment["amount"]),
-            "payment_currency_amount": str(payment["amount"]),
-        }
+
+        if mode == "full":
+            if amt != total:
+                raise ValueError(f"Full settlement amount {amt} must equal grand total {total}")
+            return {
+                "mode": "full",
+                "payment_method": "cash",
+                "money_account_id": internal_money_account_id,
+                "payment_date": reviewed_payment_date,
+                "amount": str(payment["amount"]),
+                "exchange_rate": "1.0000000000",
+                "invoice_amount": grand_total_str,
+                "payment_currency_amount": str(payment["amount"]),
+            }
+        else:  # partial
+            return {
+                "mode": "partial",
+                "payment_method": "cash",
+                "money_account_id": internal_money_account_id,
+                "payment_date": reviewed_payment_date,
+                "amount": str(payment["amount"]),
+                "exchange_rate": "1.0000000000",
+                "invoice_amount": str(payment["amount"]),
+                "payment_currency_amount": str(payment["amount"]),
+            }
+
     raise ValueError(f"Unsupported settlement mode: {mode}")
 
 
@@ -1086,7 +1278,7 @@ def run_suite() -> int:
     for tc in dec_data["test_cases"]:
         tc_name = tc["name"]
         if tc_name == "sales_line_calculator_exclusive_16_percent":
-            res = calculate_canonical_line(tc["quantity"], tc["unit_price"], tc["tax_rate"], tax_inclusive=False)
+            res = calculate_canonical_line(tc["quantity"], tc["unit_price"], tc["tax_rate"], tax_inclusive=False, minor_units=2)
             if res["subtotal"] != tc["subtotal"]:
                 print(f"  FAIL: Subtotal mismatch in {tc_name}: {res['subtotal']} != {tc['subtotal']}")
                 return 1
@@ -1097,7 +1289,7 @@ def run_suite() -> int:
                 print(f"  FAIL: Total mismatch in {tc_name}: {res['line_total']} != {tc['line_total']}")
                 return 1
         elif tc_name in ["sales_line_calculator_inclusive_16_percent", "canonical_tax_example_ils_gross_50_incl_16"]:
-            res = calculate_canonical_line(tc["quantity"], tc["unit_price"], tc["tax_rate"], tax_inclusive=True)
+            res = calculate_canonical_line(tc["quantity"], tc["unit_price"], tc["tax_rate"], tax_inclusive=True, minor_units=2)
             if res["subtotal"] != tc["subtotal"]:
                 print(f"  FAIL: Subtotal mismatch in {tc_name}: {res['subtotal']} != {tc['subtotal']}")
                 return 1
@@ -1114,7 +1306,7 @@ def run_suite() -> int:
                 print(f"  FAIL: Tax amount matched unrounded divergence {tc['unrounded_tax_divergence']}!")
                 return 1
         elif tc_name == "trailing_zero_quantity_support":
-            res = calculate_canonical_line(tc["quantity"], tc["unit_price"], tc["tax_rate"], tax_inclusive=False)
+            res = calculate_canonical_line(tc["quantity"], tc["unit_price"], tc["tax_rate"], tax_inclusive=False, minor_units=2)
             if res["line_total"] != tc["line_total"]:
                 print(f"  FAIL: Total mismatch in {tc_name}: {res['line_total']} != {tc['line_total']}")
                 return 1
@@ -1703,7 +1895,8 @@ def run_suite() -> int:
             "amount_settled": "50.000000",
             "change_returned": "0.000000"
         },
-        "50.000000"
+        "50.000000",
+        currency_minor_units=2,
     )
     if not payment_ok:
         print("  FAIL Check 25: Payment tendered-settled-change balance check failed!")
@@ -1940,7 +2133,7 @@ def run_suite() -> int:
         return 1
     unpaid_omitted_digest = compute_restricted_sha256_digest(profile_unpaid_omitted)
     verify_online_sale_intent_profile(profile_unpaid_omitted, unpaid_omitted_digest, validator_hub)
-    if not verify_payment_decimal_consistency(profile_unpaid_omitted["payment"], "50.000000"):
+    if not verify_payment_decimal_consistency(profile_unpaid_omitted["payment"], "50.000000", currency_minor_units=2):
         print("  FAIL Check 29a: Valid unpaid payment consistency rejected!")
         return 1
     tampered_unpaid_amount = json.loads(json.dumps(profile_unpaid_omitted))
@@ -1967,7 +2160,7 @@ def run_suite() -> int:
         return 1
     unpaid_null_digest = compute_restricted_sha256_digest(profile_unpaid_null)
     verify_online_sale_intent_profile(profile_unpaid_null, unpaid_null_digest, validator_hub)
-    if not verify_payment_decimal_consistency(profile_unpaid_null["payment"], "50.000000"):
+    if not verify_payment_decimal_consistency(profile_unpaid_null["payment"], "50.000000", currency_minor_units=2):
         print("  FAIL Check 29b: Valid unpaid null payment consistency rejected!")
         return 1
     tampered_unpaid_mode = json.loads(json.dumps(profile_unpaid_null))
@@ -1991,7 +2184,7 @@ def run_suite() -> int:
     profile_partial = construct_online_sale_intent_profile(preview_v2_fix["context"], req_partial, validator_hub)
     partial_digest = compute_restricted_sha256_digest(profile_partial)
     verify_online_sale_intent_profile(profile_partial, partial_digest, validator_hub)
-    if not verify_payment_decimal_consistency(profile_partial["payment"], "50.000000"):
+    if not verify_payment_decimal_consistency(profile_partial["payment"], "50.000000", currency_minor_units=2):
         print("  FAIL Check 29c: Valid partial payment consistency rejected!")
         return 1
     tampered_partial_acct = json.loads(json.dumps(profile_partial))
@@ -2013,7 +2206,7 @@ def run_suite() -> int:
         print(f"  FAIL Check 29d: Full exact cash 50 digest mutated! Expected {expected_v2_preview_digest}, got {full_exact_digest}")
         return 1
     verify_online_sale_intent_profile(profile_full_exact, full_exact_digest, validator_hub)
-    if not verify_payment_decimal_consistency(profile_full_exact["payment"], "50.000000"):
+    if not verify_payment_decimal_consistency(profile_full_exact["payment"], "50.000000", currency_minor_units=2):
         print("  FAIL Check 29d: Full mode exact total (50.000000 == 50.000000) rejected!")
         return 1
     tampered_full_price = json.loads(json.dumps(profile_full_exact))
@@ -2152,60 +2345,60 @@ def run_suite() -> int:
 
     # Check 33: Invalid settlement amounts boundaries, lexemes, and negative amounts
     # 33a: unpaid with positive amount rejected
-    if verify_payment_decimal_consistency({"settlement_mode": "unpaid", "amount": "0.000001"}, "50.000000"):
+    if verify_payment_decimal_consistency({"settlement_mode": "unpaid", "amount": "0.000001"}, "50.000000", 2):
         print("  FAIL Check 33a: Unpaid with positive amount 0.000001 accepted!")
         return 1
-    if verify_payment_decimal_consistency({"settlement_mode": "unpaid", "amount": "50.000000"}, "50.000000"):
+    if verify_payment_decimal_consistency({"settlement_mode": "unpaid", "amount": "50.000000"}, "50.000000", 2):
         print("  FAIL Check 33a: Unpaid with positive amount 50.000000 accepted!")
         return 1
     print("  OK: Check 33a passed (unpaid mode with positive amount rejected)")
     passed_checks += 1
 
     # 33b: partial with zero amount rejected
-    if verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "0.000000"}, "50.000000"):
+    if verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "0.000000"}, "50.000000", 2):
         print("  FAIL Check 33b: Partial with zero amount accepted!")
         return 1
     print("  OK: Check 33b passed (partial mode with zero amount rejected)")
     passed_checks += 1
 
     # 33c: partial with amount equal to or greater than grand total rejected
-    if verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "50.000000"}, "50.000000"):
+    if verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "50.000000"}, "50.000000", 2):
         print("  FAIL Check 33c: Partial with amount equal to grand total accepted!")
         return 1
-    if verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "55.000000"}, "50.000000"):
+    if verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "55.000000"}, "50.000000", 2):
         print("  FAIL Check 33c: Partial with amount greater than grand total accepted!")
         return 1
     print("  OK: Check 33c passed (partial mode with amount >= grand total rejected)")
     passed_checks += 1
 
     # 33d: full mode with amount not equal to grand total rejected (both under and overpayment)
-    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "49.999999"}, "50.000000"):
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "49.999999"}, "50.000000", 2):
         print("  FAIL Check 33d: Full mode with amount < grand total accepted!")
         return 1
-    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "50.000001"}, "50.000000"):
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "50.000001"}, "50.000000", 2):
         print("  FAIL Check 33d: Full mode with amount > grand total accepted!")
         return 1
-    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "60.000000"}, "50.000000"):
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "60.000000"}, "50.000000", 2):
         print("  FAIL Check 33d: Full mode overpayment (60.000000 > 50.000000) accepted!")
         return 1
     print("  OK: Check 33d passed (full mode with amount != grand total rejected: under and overpayment)")
     passed_checks += 1
 
     # 33e: Negative payment amount rejected
-    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "-50.000000"}, "50.000000"):
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "-50.000000"}, "50.000000", 2):
         print("  FAIL Check 33e: Full mode with negative amount accepted!")
         return 1
-    if verify_payment_decimal_consistency({"settlement_mode": "unpaid", "amount": "-0.000001"}, "50.000000"):
+    if verify_payment_decimal_consistency({"settlement_mode": "unpaid", "amount": "-0.000001"}, "50.000000", 2):
         print("  FAIL Check 33e: Unpaid mode with negative amount accepted!")
         return 1
     print("  OK: Check 33e passed (negative payment amount rejected)")
     passed_checks += 1
 
     # 33f: Invalid decimal string lexemes rejected
-    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "not_a_number"}, "50.000000"):
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "not_a_number"}, "50.000000", 2):
         print("  FAIL Check 33f: Non-numeric string lexeme accepted!")
         return 1
-    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "50.00.00"}, "50.000000"):
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "50.00.00"}, "50.000000", 2):
         print("  FAIL Check 33f: Malformed decimal string lexeme accepted!")
         return 1
     print("  OK: Check 33f passed (malformed decimal string lexeme rejected)")
@@ -2218,7 +2411,7 @@ def run_suite() -> int:
         "amount_settled": "50.000000",
         "change_returned": "5.000000",
     }
-    if verify_payment_decimal_consistency(bad_offline_tender, "50.000000"):
+    if verify_payment_decimal_consistency(bad_offline_tender, "50.000000", 2):
         print("  FAIL Check 33g: Offline payment tender balance mismatch accepted!")
         return 1
     print("  OK: Check 33g passed (offline payment tender balance mismatch rejected)")
@@ -2231,10 +2424,126 @@ def run_suite() -> int:
         "amount_settled": "40.000000",
         "change_returned": "0.000000",
     }
-    if verify_payment_decimal_consistency(bad_offline_settled, "50.000000"):
+    if verify_payment_decimal_consistency(bad_offline_settled, "50.000000", 2):
         print("  FAIL Check 33h: Offline payment settled amount != grand total accepted!")
         return 1
     print("  OK: Check 33h passed (offline payment settled != grand total rejected)")
+    passed_checks += 1
+
+    # 33i: Zero or non-positive grand total rejected (first-release positive financial grand total only policy, full0/unpaid0/offline0 rejected)
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "0.000000"}, "0.000000", 2):
+        print("  FAIL Check 33i: Full settlement with zero grand total accepted!")
+        return 1
+    if verify_payment_decimal_consistency({"settlement_mode": "unpaid", "amount": "0.000000"}, "0.000000", 2):
+        print("  FAIL Check 33i: Unpaid settlement with zero grand total accepted!")
+        return 1
+    zero_offline = {
+        "mode": "full",
+        "amount_tendered": "0.000000",
+        "amount_settled": "0.000000",
+        "change_returned": "0.000000",
+    }
+    if verify_payment_decimal_consistency(zero_offline, "0.000000", 2):
+        print("  FAIL Check 33i: Offline settlement with zero grand total accepted!")
+        return 1
+    zero_settled_offline = {
+        "mode": "full",
+        "amount_tendered": "10.000000",
+        "amount_settled": "0.000000",
+        "change_returned": "10.000000",
+    }
+    if verify_payment_decimal_consistency(zero_settled_offline, "0.000000", 2):
+        print("  FAIL Check 33i: Offline zero settled amount accepted!")
+        return 1
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "-50.000000"}, "-50.000000", 2):
+        print("  FAIL Check 33i: Negative grand total accepted!")
+        return 1
+    print("  OK: Check 33i passed (zero/negative grand total rejected for full, unpaid, and offline)")
+    passed_checks += 1
+
+    # 33j: Currency minor units scale validation & rejection of boolean/invalid/missing (no guessing 2)
+    for bad_cmu in (True, False, -1, 7, "2", None):
+        if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "50.000000"}, "50.000000", bad_cmu):
+            print(f"  FAIL Check 33j: Invalid currency_minor_units {bad_cmu!r} accepted!")
+            return 1
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "50.000000"}, "50.000000"):
+        print("  FAIL Check 33j: Missing currency_minor_units accepted (implicit guessing 2)!")
+        return 1
+    print("  OK: Check 33j passed (invalid currency minor units boolean/out-of-range/missing strictly rejected)")
+    passed_checks += 1
+
+    # 33k: Minimum positive amount allowed at currency minor unit scale (0.01 at cmu 2, 0.001 at cmu 3, 0.000001 at cmu 6)
+    if not verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "0.010000"}, "50.000000", 2):
+        print("  FAIL Check 33k: Minimum positive amount 0.010000 rejected at cmu 2!")
+        return 1
+    if not verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "0.010000"}, "0.010000", 2):
+        print("  FAIL Check 33k: Minimum positive full amount 0.010000 rejected at cmu 2!")
+        return 1
+    if not verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "0.001000"}, "50.000000", 3):
+        print("  FAIL Check 33k: Minimum positive amount 0.001000 rejected at cmu 3!")
+        return 1
+    if not verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "0.001000"}, "0.001000", 3):
+        print("  FAIL Check 33k: Minimum positive full amount 0.001000 rejected at cmu 3!")
+        return 1
+    if not verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "0.000001"}, "50.000000", 6):
+        print("  FAIL Check 33k: Minimum positive amount 0.000001 rejected at cmu 6!")
+        return 1
+    if not verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "0.000001"}, "0.000001", 6):
+        print("  FAIL Check 33k: Minimum positive full amount 0.000001 rejected at cmu 6!")
+        return 1
+    print("  OK: Check 33k passed (minimum positive allowed at currency minor unit scale)")
+    passed_checks += 1
+
+    # 33l: Overprecision beyond currency minor units strictly rejected without rounding (e.g. ILS partial 0.000001 at cmu 2)
+    if verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "0.000001"}, "50.000000", 2):
+        print("  FAIL Check 33l: Overprecision partial amount 0.000001 accepted at cmu 2 (ILS)!")
+        return 1
+    if verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "10.005000"}, "50.000000", 2):
+        print("  FAIL Check 33l: Overprecision partial amount 10.005000 accepted at cmu 2!")
+        return 1
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "50.005000"}, "50.005000", 2):
+        print("  FAIL Check 33l: Overprecision full amount 50.005000 accepted at cmu 2!")
+        return 1
+    if verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "10.000500"}, "50.000000", 3):
+        print("  FAIL Check 33l: Overprecision partial amount 10.000500 accepted at cmu 3 (JOD)!")
+        return 1
+    bad_overprecision_offline = {
+        "mode": "full",
+        "amount_tendered": "60.000001",
+        "amount_settled": "50.000000",
+        "change_returned": "10.000001",
+    }
+    if verify_payment_decimal_consistency(bad_overprecision_offline, "50.000000", 2):
+        print("  FAIL Check 33l: Overprecision in offline tender accepted at cmu 2!")
+        return 1
+    print("  OK: Check 33l passed (overprecision beyond currency minor units rejected without rounding)")
+    passed_checks += 1
+
+    # 33m: Trailing zeros representing integer currency minor units accepted (50.000000 at cmu 2)
+    if not verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "50.000000"}, "50.000000", 2):
+        print("  FAIL Check 33m: Trailing zeros 50.000000 rejected at cmu 2!")
+        return 1
+    if not verify_payment_decimal_consistency({"settlement_mode": "partial", "amount": "20.500000"}, "50.000000", 2):
+        print("  FAIL Check 33m: Trailing zeros 20.500000 rejected at cmu 2!")
+        return 1
+    if not verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "50.000000"}, "50.000000", 3):
+        print("  FAIL Check 33m: Trailing zeros 50.000000 rejected at cmu 3!")
+        return 1
+    print("  OK: Check 33m passed (trailing zeros representing integer currency minor units accepted)")
+    passed_checks += 1
+
+    # 33n: Malformed / NaN / Infinity / float / scientific exponent lexemes fail closed with return False (no crash)
+    for bad_lexeme in ("NaN", "-NaN", "Infinity", "-Infinity", "+50.00", "1e5", "1.5E2", 50.0, None, [], {}):
+        if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": bad_lexeme}, "50.000000", 2):
+            print(f"  FAIL Check 33n: Malformed/non-finite lexeme {bad_lexeme!r} accepted in amount!")
+            return 1
+        if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "50.000000"}, bad_lexeme, 2):
+            print(f"  FAIL Check 33n: Malformed/non-finite grand total {bad_lexeme!r} accepted!")
+            return 1
+    if verify_payment_decimal_consistency("not_a_dict", "50.000000", 2):
+        print("  FAIL Check 33n: Non-dict payment accepted!")
+        return 1
+    print("  OK: Check 33n passed (malformed/NaN/Infinity/float/exponent lexemes fail closed with return False)")
     passed_checks += 1
 
     # Check 34: Missing required economic fields for full/partial never default
@@ -2309,7 +2618,7 @@ def run_suite() -> int:
         print("  OK: Check 34f passed (unpaid mode with non-null payment method rejected)")
         passed_checks += 1
 
-    # Check 35: Source-backed adaptation test illustrations (contract qualification, not backend implementation)
+    # Check 35: Source-backed adaptation test illustrations (contract qualification, not server implementation)
     # 35a: Offline cash capture adaptation: tender 60 / total 50 / change 10 -> canonical receipt 50 (net retained settled)
     offline_tender_example = {
         "mode": "full",
@@ -2317,18 +2626,37 @@ def run_suite() -> int:
         "amount_settled": "50.000000",
         "change_returned": "10.000000",
     }
-    canonical_receipt = adapt_offline_cash_to_canonical_receipt(offline_tender_example, "50.000000")
+    canonical_receipt = adapt_offline_cash_to_canonical_receipt(offline_tender_example, "50.000000", currency_minor_units=2)
     if canonical_receipt["receipt_amount"] != "50.000000":
         print(f"  FAIL Check 35a: Proposed canonical receipt amount was {canonical_receipt['receipt_amount']!r}, expected net retained 50.000000!")
         return 1
     if canonical_receipt["receipt_amount"] == canonical_receipt["amount_tendered"]:
         print("  FAIL Check 35a: Proposed canonical receipt amount incorrectly used tendered instead of settled!")
         return 1
-    print("  OK: Check 35a passed (offline cash capture adapted to net retained settled amount, tender 60/total 50/change 10 -> receipt 50)")
+    # Verify audit fields are preserved separately and not leaked unchecked into receipt_command
+    if canonical_receipt["audit"]["amount_tendered"] != "60.000000" or canonical_receipt["audit"]["change_returned"] != "10.000000":
+        print("  FAIL Check 35a: Offline audit fields not retained in audit dict!")
+        return 1
+    if "amount_tendered" in canonical_receipt["receipt_command"] or "change_returned" in canonical_receipt["receipt_command"]:
+        print("  FAIL Check 35a: Wire audit fields improperly leaked into receipt_command payload!")
+        return 1
+    print("  OK: Check 35a passed (offline cash capture adapted to net retained settled amount, tender 60/total 50/change 10 -> receipt 50, audit preserved separately)")
     passed_checks += 1
 
+    # Deterministic test resolver mapping company-scoped wire Crockford ULID to internal positive integer
+    known_accounts = {
+        ("01JCV8X9M2NQW3TYZ4R5S6789A", "01JCV8X9MAJ3K4M5N6P7Q8R9S0"): 101,
+        ("01JCV8X9M2NQW3TYZ4R5S6789A", "01JCV8X9MAJ3K4M5N6P7Q8R9S2"): 102,
+    }
+    def deterministic_cash_account_resolver(company_id: str, cash_account_ulid: str) -> int:
+        pair = (company_id, cash_account_ulid)
+        if pair not in known_accounts:
+            raise ValueError(f"Unknown or foreign company cash account: {cash_account_ulid}")
+        return known_accounts[pair]
+
     # 35b: Unpaid wire profile adaptation: maps EXACTLY to {"mode": "unpaid"}, strips wire fields without altering profile/digest or applying general null filter
-    choice_unpaid = adapt_online_payment_to_canonical_choice(profile_unpaid_null, "50.000000")
+    # Unpaid requires NO cash_account_resolver or reviewed_payment_date (unpaidnoresolverneeded)
+    choice_unpaid = adapt_online_payment_to_canonical_choice(profile_unpaid_null, "50.000000", currency_minor_units=2)
     if choice_unpaid != {"mode": "unpaid"}:
         print(f"  FAIL Check 35b: Unpaid choice did not map exactly to {{'mode': 'unpaid'}}: {choice_unpaid!r}")
         return 1
@@ -2353,27 +2681,44 @@ def run_suite() -> int:
     if "tax_rate_id" not in sample_no_tax_line or sample_no_tax_line["tax_rate_id"] is not None:
         print("  FAIL Check 35b: Line tax_rate_id: null was stripped or corrupted!")
         return 1
-    print("  OK: Check 35b passed (unpaid wire profile maps exactly to {'mode': 'unpaid'}, wire profile/digest unaltered, line tax_rate_id: null preserved)")
+    print("  OK: Check 35b passed (unpaid wire profile maps exactly to {'mode': 'unpaid'} without resolver/date, wire profile/digest unaltered, line tax_rate_id: null preserved)")
     passed_checks += 1
 
     # 35c: Partial base currency cash adaptation: wire amount maps to received_amount AND invoice_amount allocation
-    choice_partial = adapt_online_payment_to_canonical_choice(profile_partial, "50.000000", reviewed_payment_date="2026-11-11")
-    if (choice_partial["amount"] != "20.000000" or
+    # money_account_id is resolved internal int 101, NOT wire ULID string
+    choice_partial = adapt_online_payment_to_canonical_choice(
+        profile_partial,
+        "50.000000",
+        currency_minor_units=2,
+        reviewed_payment_date="2026-11-11",
+        cash_account_resolver=deterministic_cash_account_resolver,
+    )
+    if (
+        choice_partial["amount"] != "20.000000" or
         choice_partial["invoice_amount"] != "20.000000" or
         choice_partial["payment_currency_amount"] != "20.000000" or
         choice_partial["exchange_rate"] != "1.0000000000" or
         choice_partial["mode"] != "partial" or
-        choice_partial["money_account_id"] != "01JCV8X9MAJ3K4M5N6P7Q8R9S0"):
+        choice_partial["payment_date"] != "2026-11-11" or
+        choice_partial["money_account_id"] != 101 or
+        not isinstance(choice_partial["money_account_id"], int)
+    ):
         print(f"  FAIL Check 35c: Partial choice mapping failed: {choice_partial!r}")
         return 1
-    print("  OK: Check 35c passed (partial base currency cash maps wire amount to received_amount and invoice_amount allocation, FX 1, reviewed date)")
+    print("  OK: Check 35c passed (partial base currency cash maps wire amount to received_amount and invoice_amount allocation, FX 1, resolved internal int account, reviewed date)")
     passed_checks += 1
 
     # 35d: Online full policy exact match rejection: overpayment (60 > 50) and underpayment (40 < 50) rejected
     bad_full_over = json.loads(json.dumps(profile_full_exact))
     bad_full_over["payment"]["amount"] = "60.000000"
     try:
-        adapt_online_payment_to_canonical_choice(bad_full_over, "50.000000")
+        adapt_online_payment_to_canonical_choice(
+            bad_full_over,
+            "50.000000",
+            currency_minor_units=2,
+            reviewed_payment_date="2026-11-11",
+            cash_account_resolver=deterministic_cash_account_resolver,
+        )
         print("  FAIL Check 35d: Full mode overpayment was accepted by adapter!")
         return 1
     except ValueError:
@@ -2381,16 +2726,84 @@ def run_suite() -> int:
     bad_full_under = json.loads(json.dumps(profile_full_exact))
     bad_full_under["payment"]["amount"] = "40.000000"
     try:
-        adapt_online_payment_to_canonical_choice(bad_full_under, "50.000000")
+        adapt_online_payment_to_canonical_choice(
+            bad_full_under,
+            "50.000000",
+            currency_minor_units=2,
+            reviewed_payment_date="2026-11-11",
+            cash_account_resolver=deterministic_cash_account_resolver,
+        )
         print("  FAIL Check 35d: Full mode underpayment was accepted by adapter!")
         return 1
     except ValueError:
         pass
-    choice_full = adapt_online_payment_to_canonical_choice(profile_full_exact, "50.000000")
-    if choice_full["amount"] != "50.000000" or choice_full["invoice_amount"] != "50.000000":
+    choice_full = adapt_online_payment_to_canonical_choice(
+        profile_full_exact,
+        "50.000000",
+        currency_minor_units=2,
+        reviewed_payment_date="2026-11-11",
+        cash_account_resolver=deterministic_cash_account_resolver,
+    )
+    if (
+        choice_full["amount"] != "50.000000" or
+        choice_full["invoice_amount"] != "50.000000" or
+        choice_full["money_account_id"] != 101 or
+        not isinstance(choice_full["money_account_id"], int)
+    ):
         print(f"  FAIL Check 35d: Full exact choice mapping failed: {choice_full!r}")
         return 1
-    print("  OK: Check 35d passed (online full first-release policy enforces exact total, over/under payment strictly rejected by adapter)")
+    print("  OK: Check 35d passed (online full first-release policy enforces exact total, resolved internal int account, over/under payment strictly rejected)")
+    passed_checks += 1
+
+    # 35e: Missing resolver or payment date fail closed with no invented defaults
+    try:
+        adapt_online_payment_to_canonical_choice(profile_full_exact, "50.000000", currency_minor_units=2, reviewed_payment_date=None, cash_account_resolver=deterministic_cash_account_resolver)
+        print("  FAIL Check 35e: Missing payment_date was accepted with invented default!")
+        return 1
+    except ValueError:
+        pass
+    try:
+        adapt_online_payment_to_canonical_choice(profile_full_exact, "50.000000", currency_minor_units=2, reviewed_payment_date="2026-11-11", cash_account_resolver=None)
+        print("  FAIL Check 35e: Missing cash_account_resolver was accepted!")
+        return 1
+    except ValueError:
+        pass
+    try:
+        adapt_online_payment_to_canonical_choice(profile_partial, "50.000000", currency_minor_units=2, reviewed_payment_date=None, cash_account_resolver=deterministic_cash_account_resolver)
+        print("  FAIL Check 35e: Partial mode missing payment_date was accepted!")
+        return 1
+    except ValueError:
+        pass
+    try:
+        adapt_online_payment_to_canonical_choice(profile_partial, "50.000000", currency_minor_units=2, reviewed_payment_date="2026-11-11", cash_account_resolver=None)
+        print("  FAIL Check 35e: Partial mode missing cash_account_resolver was accepted!")
+        return 1
+    except ValueError:
+        pass
+    print("  OK: Check 35e passed (missing cash account resolver or payment date strictly fails closed with no invented defaults)")
+    passed_checks += 1
+
+    # 35f: Foreign / unknown cash account resolver failure without secrets leak
+    bad_foreign_profile = json.loads(json.dumps(profile_full_exact))
+    bad_foreign_profile["payment"]["cash_account_id"] = "01JCV8X9MAJ3K4M5N6P7Q8R9S9"  # Foreign/unknown ULID
+    try:
+        adapt_online_payment_to_canonical_choice(
+            bad_foreign_profile,
+            "50.000000",
+            currency_minor_units=2,
+            reviewed_payment_date="2026-11-11",
+            cash_account_resolver=deterministic_cash_account_resolver,
+        )
+        print("  FAIL Check 35f: Foreign/unknown company cash account was accepted!")
+        return 1
+    except ValueError as e:
+        # Verify no credentials, tokens, or connection strings in error message
+        err_msg = str(e)
+        for secret_token in ("password", "secret", "token", "Bearer", "PRIVATE KEY"):
+            if secret_token in err_msg:
+                print(f"  FAIL Check 35f: Secret leaked in error message: {err_msg}")
+                return 1
+    print("  OK: Check 35f passed (foreign company cash account resolver fails closed without secrets leak)")
     passed_checks += 1
 
     # Revision 2 positive/negative read/auth fixtures
