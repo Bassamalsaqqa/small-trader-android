@@ -157,7 +157,7 @@ class OnlineSaleIntentProfileMutationTest {
     @Test
     fun testCheck26jPaymentTamperingDetected() {
         val tamperedPayment = goldenProfile.payment.copy(
-            amount = MoneyAmount.fromPositiveString("50.000001")
+            amount = MoneyAmount.fromPositiveString("50.010000")
         )
         val tampered = goldenProfile.copy(payment = tamperedPayment)
         assertNotEquals(goldenDigest, tampered.computePayloadDigest())

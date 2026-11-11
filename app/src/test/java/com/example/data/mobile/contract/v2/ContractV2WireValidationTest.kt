@@ -172,4 +172,33 @@ class ContractV2WireValidationTest {
         }
         assertTrue(ex.message!!.contains("Invalid actor_id ULID"))
     }
+
+    @Test
+    fun testLineLimitEnforcedOnWireAndCopy() {
+        val context = OnlineSaleContext.fromStrictJson(goldenContext)
+        val profile = OnlineSaleIntentProfile.fromContextAndRequest(context, goldenRequest)
+        assertThrows(IntentProfileValidationError::class.java) {
+            profile.copy(lines = List(101) { profile.lines.first() })
+        }
+        val request = goldenRequest.properties.toMutableMap()
+        request["lines"] = com.example.data.mobile.contract.StrictJsonArray(
+            List(101) { goldenRequest.require("lines").asArray()[0] }
+        )
+        assertThrows(IntentProfileValidationError::class.java) {
+            OnlineSaleIntentProfile.fromContextAndRequest(context, StrictJsonObject(request))
+        }
+    }
+
+    @Test
+    fun testPaymentPrecisionEnforcedDuringProfileConstruction() {
+        val context = OnlineSaleContext.fromStrictJson(goldenContext)
+        val request = goldenRequest.properties.toMutableMap()
+        val payment = goldenRequest.require("payment").asObject().properties.toMutableMap()
+        payment["amount"] = StrictJsonString("0.000001")
+        payment["settlement_mode"] = StrictJsonString("partial")
+        request["payment"] = StrictJsonObject(payment)
+        assertThrows(IntentProfileValidationError::class.java) {
+            OnlineSaleIntentProfile.fromContextAndRequest(context, StrictJsonObject(request))
+        }
+    }
 }

@@ -207,6 +207,12 @@ class OnlineSaleIntentProfile(
         if (this.lines.isEmpty()) {
             throw IntentProfileValidationError("Online intent profile requires at least one line item")
         }
+        if (this.lines.size > ContractConstants.MAX_LINE_ITEMS) {
+            throw IntentProfileValidationError("Online intent profile exceeds line limit")
+        }
+        if (PaymentDecimalConsistency.parseAndValidateMonetaryAmount(payment.amount.toPlainString(), currencyMinorUnits) == null) {
+            throw IntentProfileValidationError("Payment amount exceeds currency precision")
+        }
     }
 
     fun copy(
