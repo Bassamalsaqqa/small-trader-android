@@ -9,6 +9,7 @@ import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.contract.v2.OfflineSaleEventV2
 import com.example.data.mobile.contract.v2.OfflineSaleIntakeRequestV2
 import com.example.data.mobile.contract.v2.PaymentDecimalConsistency
+import com.example.data.mobile.contract.ContractConstants
 import java.math.BigDecimal
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
@@ -57,8 +58,12 @@ interface OutboxRepository {
      *   - Sum of line totals must exactly equal amountSettled.
      *   - Each lineTotal and taxAmount must conform to currencyMinorUnits scale.
      *   - Quantity, unitPrice, and taxRate preserve up to 6 decimal scale according to candidate specification without silent rounding.
-     * - Defensive copies of byte payloads to eliminate mutable source aliasing.
-     * - Stored payload_bytes is the exact canonical UTF-8 JSON bytes of the event, with stable eventVersion = 2.
+     * - Defensive copies of byte payloads to eliminate mutable source aliasing (TOCTOU protection).
+     * - Stored payload_bytes is the exact canonical UTF-8 JSON bytes of the bare event, with stable eventVersion = 2.
+     * - rawCanonicalEventUtf8 represents CANONICAL BARE EVENT UTF-8 ONLY. Intake envelopes, fixture wrappers,
+     *   arbitrary JSON roots, noncanonical whitespace/key-ordering/decimal lexemes are strictly rejected before write.
+     *   Zero silent re-encoding or fallback serialization.
+     * - Input bounded to 1 MiB (ContractConstants.MAX_PAYLOAD_BYTES) before decode allocation.
      * - Same company, event unique identity spans v1/v2:
      *   - Same identity + matching payload digest: idempotent duplicate replay (existing record unmodified).
      *   - Same identity + altered digest: scope-owned conflict, marking CONFLICT without replacing original event bytes.
@@ -78,7 +83,7 @@ interface OutboxRepository {
         deviceId: ClientUuid,
         currencyMinorUnits: Int,
         intakeRequest: OfflineSaleIntakeRequestV2,
-        rawUtf8Json: ByteArray? = null
+        rawCanonicalEventUtf8: ByteArray? = null
     ): CaptureResult
 
     fun captureSaleV2(
@@ -87,7 +92,7 @@ interface OutboxRepository {
         deviceId: ClientUuid,
         currencyMinorUnits: Int,
         event: OfflineSaleEventV2,
-        rawUtf8Json: ByteArray? = null
+        rawCanonicalEventUtf8: ByteArray? = null
     ): CaptureResult
 
     fun captureSaleV2(
@@ -95,7 +100,7 @@ interface OutboxRepository {
         actorId: ServerUlid,
         deviceId: ClientUuid,
         currencyMinorUnits: Int,
-        rawUtf8Json: ByteArray
+        rawCanonicalEventUtf8: ByteArray
     ): CaptureResult
 
     /**
@@ -234,13 +239,23 @@ class OutboxRepositoryImpl(
         event: OfflineSaleEvent,
         rawUtf8Json: ByteArray?
     ): CaptureResult {
+        // Defensive copy at entry BEFORE validation (TOCTOU defensive copy)
+        val clonedRaw = rawUtf8Json?.clone()
+
+        if (clonedRaw != null) {
+            // Bound input 1 MiB BEFORE decode allocation
+            require(clonedRaw.size <= ContractConstants.MAX_PAYLOAD_BYTES) {
+                "rawUtf8Json payload size ${clonedRaw.size} exceeds maximum allowed ${ContractConstants.MAX_PAYLOAD_BYTES} bytes"
+            }
+        }
+
         // 1. Strict UTF-8 decoding & validation
-        val canonicalBytes = if (rawUtf8Json != null) {
+        val canonicalBytes = if (clonedRaw != null) {
             val decoder = StandardCharsets.UTF_8.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT)
             val jsonString = try {
-                decoder.decode(ByteBuffer.wrap(rawUtf8Json)).toString()
+                decoder.decode(ByteBuffer.wrap(clonedRaw)).toString()
             } catch (e: CharacterCodingException) {
                 throw IllegalArgumentException("Malformed UTF-8 byte sequence in rawUtf8Json for event ${event.clientEventId}", e)
             }
@@ -249,9 +264,13 @@ class OutboxRepositoryImpl(
             require(parsedEvent == event) {
                 "Provided rawUtf8Json does not match OfflineSaleEvent (client_event_id: ${event.clientEventId})"
             }
-            rawUtf8Json.clone()
+            val canonicalSerializerBytes = CanonicalJsonSerializer.serialize(event).toByteArray(StandardCharsets.UTF_8)
+            require(clonedRaw.contentEquals(canonicalSerializerBytes)) {
+                "Provided rawUtf8Json is not canonical (byte exact parity required) for event ${event.clientEventId}"
+            }
+            clonedRaw
         } else {
-            CanonicalJsonSerializer.serialize(event).toByteArray(Charsets.UTF_8)
+            CanonicalJsonSerializer.serialize(event).toByteArray(StandardCharsets.UTF_8)
         }
 
         val computedDigest = event.computePayloadDigest()
@@ -278,47 +297,39 @@ class OutboxRepositoryImpl(
         actorId: ServerUlid,
         deviceId: ClientUuid,
         currencyMinorUnits: Int,
-        rawUtf8Json: ByteArray
+        rawCanonicalEventUtf8: ByteArray
     ): CaptureResult {
-        // 1. Strict UTF-8 decoding
+        // 1. Defensive copy at entry BEFORE validation (TOCTOU defensive copy)
+        val clonedRaw = rawCanonicalEventUtf8.clone()
+
+        // 2. Bound input 1 MiB BEFORE decode allocation
+        require(clonedRaw.size <= ContractConstants.MAX_PAYLOAD_BYTES) {
+            "rawCanonicalEventUtf8 size ${clonedRaw.size} exceeds maximum allowed 1 MiB (${ContractConstants.MAX_PAYLOAD_BYTES} bytes)"
+        }
+
+        // 3. Strict UTF-8 decoding with REPORT (no silent replacement)
         val decoder = StandardCharsets.UTF_8.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT)
         val jsonString = try {
-            decoder.decode(ByteBuffer.wrap(rawUtf8Json)).toString()
+            decoder.decode(ByteBuffer.wrap(clonedRaw)).toString()
         } catch (e: CharacterCodingException) {
-            throw IllegalArgumentException("Malformed UTF-8 byte sequence in rawUtf8Json", e)
+            throw IllegalArgumentException("Malformed UTF-8 byte sequence in rawCanonicalEventUtf8", e)
         }
 
-        // 2. Strict JSON parsing
+        // 4. Strict parse direct root OfflineSaleEventV2:
+        // Strictly rejects intake envelope (e.g. "event", "payload_digest"), fixture wrapper (e.g. "request"),
+        // arbitrary root (e.g. {}), or unknown keys.
         val parsedJson = StrictJsonParser.parse(jsonString).asObject()
-
-        // 3. Resolve intake request
-        val intakeReq = if ("event" in parsedJson.properties) {
-            OfflineSaleIntakeRequestV2.fromStrictJson(parsedJson)
-        } else if ("request" in parsedJson.properties && "event" !in parsedJson.properties) {
-            val reqObj = parsedJson.require("request").asObject()
-            OfflineSaleIntakeRequestV2.fromStrictJson(reqObj)
-        } else if ("lines" in parsedJson.properties && "payment" in parsedJson.properties) {
-            val event = OfflineSaleEventV2.fromStrictJson(parsedJson)
-            OfflineSaleIntakeRequestV2(
-                clientEventId = event.clientEventId,
-                deviceId = event.deviceId,
-                capturedAt = event.capturedAt,
-                payloadDigest = event.computePayloadDigest(),
-                event = event
-            )
-        } else {
-            throw IllegalArgumentException("Unrecognized JSON object structure for v2 offline sale intake")
-        }
+        val event = OfflineSaleEventV2.fromStrictJson(parsedJson)
 
         return captureSaleV2(
             companyId = companyId,
             actorId = actorId,
             deviceId = deviceId,
             currencyMinorUnits = currencyMinorUnits,
-            intakeRequest = intakeReq,
-            rawUtf8Json = rawUtf8Json
+            event = event,
+            rawCanonicalEventUtf8 = clonedRaw
         )
     }
 
@@ -328,7 +339,7 @@ class OutboxRepositoryImpl(
         deviceId: ClientUuid,
         currencyMinorUnits: Int,
         event: OfflineSaleEventV2,
-        rawUtf8Json: ByteArray?
+        rawCanonicalEventUtf8: ByteArray?
     ): CaptureResult {
         val intakeReq = OfflineSaleIntakeRequestV2(
             clientEventId = event.clientEventId,
@@ -343,7 +354,7 @@ class OutboxRepositoryImpl(
             deviceId = deviceId,
             currencyMinorUnits = currencyMinorUnits,
             intakeRequest = intakeReq,
-            rawUtf8Json = rawUtf8Json
+            rawCanonicalEventUtf8 = rawCanonicalEventUtf8
         )
     }
 
@@ -353,8 +364,18 @@ class OutboxRepositoryImpl(
         deviceId: ClientUuid,
         currencyMinorUnits: Int,
         intakeRequest: OfflineSaleIntakeRequestV2,
-        rawUtf8Json: ByteArray?
+        rawCanonicalEventUtf8: ByteArray?
     ): CaptureResult {
+        // Defensive copy at entry BEFORE validation (TOCTOU defensive copy)
+        val clonedRaw = rawCanonicalEventUtf8?.clone()
+
+        if (clonedRaw != null) {
+            // Bound input 1 MiB BEFORE decode allocation
+            require(clonedRaw.size <= ContractConstants.MAX_PAYLOAD_BYTES) {
+                "rawCanonicalEventUtf8 size ${clonedRaw.size} exceeds maximum allowed 1 MiB (${ContractConstants.MAX_PAYLOAD_BYTES} bytes)"
+            }
+        }
+
         val event = intakeRequest.event
 
         // Guard 1: Scope parameters MUST match captured identity BEFORE disclosing existing row
@@ -366,6 +387,18 @@ class OutboxRepositoryImpl(
         }
         require(deviceId == event.deviceId && deviceId == intakeRequest.deviceId) {
             "Explicit deviceId ($deviceId) does not match captured event deviceId (${event.deviceId})"
+        }
+
+        // Intake request envelope field bindings match event
+        require(intakeRequest.clientEventId == event.clientEventId) {
+            "Intake envelope clientEventId (${intakeRequest.clientEventId}) does not match event clientEventId (${event.clientEventId})"
+        }
+        require(intakeRequest.capturedAt == event.capturedAt) {
+            "Intake envelope capturedAt (${intakeRequest.capturedAt}) does not match event capturedAt (${event.capturedAt})"
+        }
+        val computedDigest = event.computePayloadDigest()
+        require(intakeRequest.payloadDigest == computedDigest) {
+            "Intake envelope payloadDigest (${intakeRequest.payloadDigest}) does not match event canonical digest ($computedDigest)"
         }
 
         // Guard 2: Mandatory qualified currencyMinorUnits in 0..6 (no fallback / guessing)
@@ -413,54 +446,48 @@ class OutboxRepositoryImpl(
         }
 
         // Guard 4: Canonical UTF-8 bytes and digest verification
-        val canonicalBytes = if (rawUtf8Json != null) {
+        val canonicalBytes = if (clonedRaw != null) {
             val decoder = StandardCharsets.UTF_8.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT)
             val jsonString = try {
-                decoder.decode(ByteBuffer.wrap(rawUtf8Json)).toString()
+                decoder.decode(ByteBuffer.wrap(clonedRaw)).toString()
             } catch (e: CharacterCodingException) {
-                throw IllegalArgumentException("Malformed UTF-8 byte sequence in rawUtf8Json for event ${event.clientEventId}", e)
+                throw IllegalArgumentException("Malformed UTF-8 byte sequence in rawCanonicalEventUtf8 for event ${event.clientEventId}", e)
             }
             val parsedJson = StrictJsonParser.parse(jsonString).asObject()
-            val rawDigest = PayloadDigest.fromBytes(rawUtf8Json)
-
-            if ("event" in parsedJson.properties) {
-                val parsedReq = OfflineSaleIntakeRequestV2.fromStrictJson(parsedJson)
-                require(parsedReq == intakeRequest) {
-                    "Provided rawUtf8Json envelope does not match OfflineSaleIntakeRequestV2 (client_event_id: ${event.clientEventId})"
-                }
-                CanonicalJsonSerializer.serialize(event).toByteArray(Charsets.UTF_8)
-            } else if ("lines" in parsedJson.properties) {
-                val parsedEvent = OfflineSaleEventV2.fromStrictJson(parsedJson)
-                require(parsedEvent == event) {
-                    "Provided rawUtf8Json does not match OfflineSaleEventV2 (client_event_id: ${event.clientEventId})"
-                }
-                if (rawDigest == event.computePayloadDigest()) {
-                    rawUtf8Json.clone()
-                } else {
-                    CanonicalJsonSerializer.serialize(event).toByteArray(Charsets.UTF_8)
-                }
-            } else if ("request" in parsedJson.properties) {
-                val parsedReq = OfflineSaleIntakeRequestV2.fromStrictJson(parsedJson.require("request").asObject())
-                require(parsedReq == intakeRequest) {
-                    "Provided rawUtf8Json does not match OfflineSaleIntakeRequestV2 (client_event_id: ${event.clientEventId})"
-                }
-                CanonicalJsonSerializer.serialize(event).toByteArray(Charsets.UTF_8)
-            } else {
-                CanonicalJsonSerializer.serialize(event).toByteArray(Charsets.UTF_8)
+            val parsedEvent = OfflineSaleEventV2.fromStrictJson(parsedJson)
+            require(parsedEvent == event) {
+                "Provided rawCanonicalEventUtf8 does not match OfflineSaleEventV2 (client_event_id: ${event.clientEventId})"
             }
-        } else {
-            CanonicalJsonSerializer.serialize(event).toByteArray(Charsets.UTF_8)
-        }
 
-        val computedDigest = event.computePayloadDigest()
-        val byteDigest = PayloadDigest.fromBytes(canonicalBytes)
-        require(computedDigest == byteDigest) {
-            "Canonical bytes digest ($byteDigest) does not match event digest ($computedDigest) for event ${event.clientEventId}"
-        }
-        require(computedDigest == intakeRequest.payloadDigest) {
-            "Event digest ($computedDigest) does not match intake request payload digest (${intakeRequest.payloadDigest})"
+            // Require byte-exact parity with canonical serializer bytes:
+            // Fails closed on formatted whitespace, key ordering differences, or decimal lexeme alterations.
+            val canonicalSerializerBytes = CanonicalJsonSerializer.serialize(event).toByteArray(StandardCharsets.UTF_8)
+            require(clonedRaw.contentEquals(canonicalSerializerBytes)) {
+                "Provided rawCanonicalEventUtf8 is not canonical (byte exact parity required; formatted whitespace, key order differences, or decimal lexeme alterations are rejected) for event ${event.clientEventId}"
+            }
+
+            val rawDigest = PayloadDigest.fromBytes(clonedRaw)
+            require(rawDigest == computedDigest) {
+                "Canonical bytes digest ($rawDigest) does not match event digest ($computedDigest) for event ${event.clientEventId}"
+            }
+            require(rawDigest == intakeRequest.payloadDigest) {
+                "Canonical bytes digest ($rawDigest) does not match intake request payload digest (${intakeRequest.payloadDigest})"
+            }
+
+            clonedRaw
+        } else {
+            // Typed model without supplied raw: serialize once for initial capture (expressly new capture, not normalizing existing bytes)
+            val serialized = CanonicalJsonSerializer.serialize(event).toByteArray(StandardCharsets.UTF_8)
+            val byteDigest = PayloadDigest.fromBytes(serialized)
+            require(computedDigest == byteDigest) {
+                "Canonical bytes digest ($byteDigest) does not match event digest ($computedDigest) for event ${event.clientEventId}"
+            }
+            require(computedDigest == intakeRequest.payloadDigest) {
+                "Event digest ($computedDigest) does not match intake request payload digest (${intakeRequest.payloadDigest})"
+            }
+            serialized
         }
 
         // Guard 5: Execute atomic capture transaction sharing verified machinery

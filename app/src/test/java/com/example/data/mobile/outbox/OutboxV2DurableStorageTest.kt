@@ -12,7 +12,9 @@ import com.example.data.mobile.contract.TaxPercentage
 import com.example.data.mobile.contract.v2.OfflineSaleEventV2
 import com.example.data.mobile.contract.v2.OfflineSaleIntakeRequestV2
 import com.example.data.mobile.contract.v2.OfflineSaleLineV2
+import com.example.data.mobile.contract.ContractConstants
 import com.example.data.mobile.contract.v2.OfflineSalePaymentV2
+import java.nio.charset.StandardCharsets
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -674,7 +676,7 @@ class OutboxV2DurableStorageTest {
                 actorId = event.actorId,
                 deviceId = event.deviceId,
                 currencyMinorUnits = 2,
-                rawUtf8Json = invalidUtf8
+                rawCanonicalEventUtf8 = invalidUtf8
             )
         }
         assertTrue("Exception must report malformed UTF-8", ex.message!!.contains("Malformed UTF-8"))
@@ -748,5 +750,413 @@ class OutboxV2DurableStorageTest {
         assertArrayEquals("Payload bytes must not be altered after reconciliation", initialBytes, confirmedRecord.payloadBytes)
         assertEquals(invoiceUlid.value, confirmedRecord.deliveryState.invoiceUlid)
         assertEquals(paymentUlid.value, confirmedRecord.deliveryState.paymentUlid)
+    }
+
+    // =========================================================================
+    // 11. Typed Valid Model + Raw {} Arbitrary Root Rejected Before Write
+    // =========================================================================
+
+    @Test
+    fun testTypedValidModelWithRawEmptyObjectRejectedBeforeWrite() {
+        val event = OutboxTestFixtures.createSampleEventV2()
+        val intakeReq = OutboxTestFixtures.createSampleIntakeRequestV2(event)
+        val rawEmptyObj = "{}".toByteArray(StandardCharsets.UTF_8)
+
+        assertThrows(Exception::class.java) {
+            repository.captureSaleV2(
+                companyId = event.companyId,
+                actorId = event.actorId,
+                deviceId = event.deviceId,
+                currencyMinorUnits = 2,
+                intakeRequest = intakeReq,
+                rawCanonicalEventUtf8 = rawEmptyObj
+            )
+        }
+
+        // DB state check: zero records, zero delivery states, zero scope locks
+        assertNull(repository.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId))
+        assertEquals(0, repository.getRecordsByScope(event.companyId, event.actorId, event.deviceId).size)
+        assertFalse(repository.isQueueLocked(event.companyId, event.actorId, event.deviceId))
+    }
+
+    // =========================================================================
+    // 12. Raw Envelope & Extra Wrapper Keys Rejected Before Write
+    // =========================================================================
+
+    @Test
+    fun testRawEnvelopeAndExtraWrapperKeysRejectedBeforeWrite() {
+        val event = OutboxTestFixtures.createSampleEventV2()
+        val intakeReq = OutboxTestFixtures.createSampleIntakeRequestV2(event)
+
+        // a) Intake envelope passed to raw-only captureSaleV2
+        val rawEnvelope = CanonicalJsonSerializer.serialize(intakeReq).toByteArray(StandardCharsets.UTF_8)
+        assertThrows(Exception::class.java) {
+            repository.captureSaleV2(
+                companyId = event.companyId,
+                actorId = event.actorId,
+                deviceId = event.deviceId,
+                currencyMinorUnits = 2,
+                rawCanonicalEventUtf8 = rawEnvelope
+            )
+        }
+        assertNull(repository.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId))
+
+        // b) Fixture wrapper {"request": ...} passed to raw-only captureSaleV2
+        val goldenFile = File(OutboxTestFixtures.locateFixturesDir(), "golden-offline-sale-intake-v2.json")
+        val rawFixtureWrapper = goldenFile.readBytes()
+        assertThrows(Exception::class.java) {
+            repository.captureSaleV2(
+                companyId = event.companyId,
+                actorId = event.actorId,
+                deviceId = event.deviceId,
+                currencyMinorUnits = 2,
+                rawCanonicalEventUtf8 = rawFixtureWrapper
+            )
+        }
+        assertNull(repository.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId))
+
+        // c) Raw bare event with unexpected wrapper/unknown key passed to raw-only captureSaleV2
+        val bareJson = CanonicalJsonSerializer.serialize(event)
+        val jsonWithUnknownKey = bareJson.replaceFirst("}", ",\"unexpected_wrapper_key\":\"invalid\"}")
+            .toByteArray(StandardCharsets.UTF_8)
+        assertThrows(Exception::class.java) {
+            repository.captureSaleV2(
+                companyId = event.companyId,
+                actorId = event.actorId,
+                deviceId = event.deviceId,
+                currencyMinorUnits = 2,
+                rawCanonicalEventUtf8 = jsonWithUnknownKey
+            )
+        }
+        assertNull(repository.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId))
+
+        // d) Typed intake overload with raw intake envelope rejected
+        assertThrows(Exception::class.java) {
+            repository.captureSaleV2(
+                companyId = event.companyId,
+                actorId = event.actorId,
+                deviceId = event.deviceId,
+                currencyMinorUnits = 2,
+                intakeRequest = intakeReq,
+                rawCanonicalEventUtf8 = rawEnvelope
+            )
+        }
+        assertNull(repository.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId))
+        assertEquals(0, repository.getRecordsByScope(event.companyId, event.actorId, event.deviceId).size)
+    }
+
+    // =========================================================================
+    // 13. Noncanonical Whitespace & Raw Key Order Rejected Without Rewrite
+    // =========================================================================
+
+    @Test
+    fun testNoncanonicalWhitespaceAndKeyOrderRejectedNoRewrite() {
+        val event = OutboxTestFixtures.createSampleEventV2()
+        val intakeReq = OutboxTestFixtures.createSampleIntakeRequestV2(event)
+        val canonicalBareJson = CanonicalJsonSerializer.serialize(event)
+
+        // Noncanonical formatted whitespace (trailing newline or spaces)
+        val whitespaceRaw = (canonicalBareJson + "\n ").toByteArray(StandardCharsets.UTF_8)
+        val exWhitespace = assertThrows(IllegalArgumentException::class.java) {
+            repository.captureSaleV2(
+                companyId = event.companyId,
+                actorId = event.actorId,
+                deviceId = event.deviceId,
+                currencyMinorUnits = 2,
+                intakeRequest = intakeReq,
+                rawCanonicalEventUtf8 = whitespaceRaw
+            )
+        }
+        assertTrue("Exception must cite non-canonical bytes", exWhitespace.message!!.contains("not canonical"))
+        assertNull("DB must be clean: no record written", repository.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId))
+
+        // Noncanonical internal key ordering (valid JSON for same model, but non-canonical key order)
+        val actorPattern = "\"actor_id\":\"${event.actorId.value}\","
+        val companyPattern = "\"company_id\":\"${event.companyId.value}\","
+        val reorderedStr = canonicalBareJson.replaceFirst(actorPattern, "").replaceFirst(companyPattern, "$companyPattern$actorPattern")
+
+        val parsedReordered = com.example.data.mobile.contract.StrictJsonParser.parse(reorderedStr).asObject()
+        val parsedEventReordered = OfflineSaleEventV2.fromStrictJson(parsedReordered)
+        assertEquals("Must parse to same model", event, parsedEventReordered)
+
+        val reorderedRaw = reorderedStr.toByteArray(StandardCharsets.UTF_8)
+        val exReordered = assertThrows(IllegalArgumentException::class.java) {
+            repository.captureSaleV2(
+                companyId = event.companyId,
+                actorId = event.actorId,
+                deviceId = event.deviceId,
+                currencyMinorUnits = 2,
+                intakeRequest = intakeReq,
+                rawCanonicalEventUtf8 = reorderedRaw
+            )
+        }
+        assertTrue("Exception must cite non-canonical bytes", exReordered.message!!.contains("not canonical"))
+        assertNull("DB must be clean: no rewrite or fallback serialization allowed", repository.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId))
+        assertEquals(0, repository.getRecordsByScope(event.companyId, event.actorId, event.deviceId).size)
+    }
+
+    // =========================================================================
+    // 14. Typed Model + Raw Different Lexeme or Event Rejected
+    // =========================================================================
+
+    @Test
+    fun testTypedModelAndRawDifferentLexemeOrEventRejectedWithoutAffectingExisting() {
+        val existingEvent = OutboxTestFixtures.createSampleEventV2()
+        val existingIntake = OutboxTestFixtures.createSampleIntakeRequestV2(existingEvent)
+
+        // Seed an existing valid record into DB
+        val seedResult = repository.captureSaleV2(
+            companyId = existingEvent.companyId,
+            actorId = existingEvent.actorId,
+            deviceId = existingEvent.deviceId,
+            currencyMinorUnits = 2,
+            intakeRequest = existingIntake
+        )
+        assertTrue(seedResult is CaptureResult.Created)
+        val originalRecord = repository.getRecord(existingEvent.companyId, existingEvent.actorId, existingEvent.deviceId, existingEvent.clientEventId)!!
+
+        // Attempt capture with typed model but raw for a DIFFERENT event
+        val otherEvent = OutboxTestFixtures.createSampleEventV2(localReceiptNumber = "REC-OTHER-0099")
+        val otherRawCanonical = CanonicalJsonSerializer.serialize(otherEvent).toByteArray(StandardCharsets.UTF_8)
+
+        val newEvent = OutboxTestFixtures.createSampleEventV2()
+        val newIntake = OutboxTestFixtures.createSampleIntakeRequestV2(newEvent)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            repository.captureSaleV2(
+                companyId = newEvent.companyId,
+                actorId = newEvent.actorId,
+                deviceId = newEvent.deviceId,
+                currencyMinorUnits = 2,
+                intakeRequest = newIntake,
+                rawCanonicalEventUtf8 = otherRawCanonical
+            )
+        }
+
+        // Verify new event was NOT written
+        assertNull(repository.getRecord(newEvent.companyId, newEvent.actorId, newEvent.deviceId, newEvent.clientEventId))
+
+        // Verify existing record is 100% untouched
+        val afterRecord = repository.getRecord(existingEvent.companyId, existingEvent.actorId, existingEvent.deviceId, existingEvent.clientEventId)!!
+        assertEquals(originalRecord.payloadDigest, afterRecord.payloadDigest)
+        assertArrayEquals(originalRecord.payloadBytes, afterRecord.payloadBytes)
+        assertEquals(originalRecord.status, afterRecord.status)
+        assertEquals(1, repository.getRecordsByScope(existingEvent.companyId, existingEvent.actorId, existingEvent.deviceId).size)
+    }
+
+    // =========================================================================
+    // 15. Canonical Bare Event Bytes Capture + Disk Reopen Exact
+    // =========================================================================
+
+    @Test
+    fun testCanonicalBareEventBytesCaptureAndDiskReopenExact() {
+        val db1 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val repo1 = OutboxRepositoryImpl(db1)
+
+        val event = OutboxTestFixtures.createSampleEventV2()
+        val rawCanonicalBareBytes = CanonicalJsonSerializer.serialize(event).toByteArray(StandardCharsets.UTF_8)
+
+        val res = repo1.captureSaleV2(
+            companyId = event.companyId,
+            actorId = event.actorId,
+            deviceId = event.deviceId,
+            currencyMinorUnits = 2,
+            rawCanonicalEventUtf8 = rawCanonicalBareBytes
+        )
+        assertTrue(res is CaptureResult.Created)
+        val created = (res as CaptureResult.Created).record
+        assertArrayEquals(rawCanonicalBareBytes, created.payloadBytes)
+        assertEquals(event.computePayloadDigest().value, created.payloadDigest)
+
+        db1.close()
+
+        val db2 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val repo2 = OutboxRepositoryImpl(db2)
+
+        val reopened = repo2.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId)
+        assertNotNull(reopened)
+        assertEquals(2, reopened!!.eventVersion)
+        assertEquals(event.computePayloadDigest().value, reopened.payloadDigest)
+        assertArrayEquals(rawCanonicalBareBytes, reopened.payloadBytes)
+        assertEquals(OutboxStatus.PENDING, reopened.status)
+
+        db2.close()
+    }
+
+    // =========================================================================
+    // 16. Raw-Only Canonical Event Accepted
+    // =========================================================================
+
+    @Test
+    fun testRawOnlyCanonicalBareEventAccepted() {
+        val event = OutboxTestFixtures.createSampleEventV2()
+        val rawCanonicalBytes = CanonicalJsonSerializer.serialize(event).toByteArray(StandardCharsets.UTF_8)
+
+        val res = repository.captureSaleV2(
+            companyId = event.companyId,
+            actorId = event.actorId,
+            deviceId = event.deviceId,
+            currencyMinorUnits = 2,
+            rawCanonicalEventUtf8 = rawCanonicalBytes
+        )
+
+        assertTrue(res is CaptureResult.Created)
+        val record = (res as CaptureResult.Created).record
+        assertEquals(event.clientEventId.value, record.clientEventId)
+        assertEquals(2, record.eventVersion)
+        assertEquals(event.computePayloadDigest().value, record.payloadDigest)
+        assertArrayEquals(rawCanonicalBytes, record.payloadBytes)
+        assertEquals(OutboxStatus.PENDING, record.status)
+    }
+
+    // =========================================================================
+    // 17. Intake Without Raw Serializes Initial Canonical Event Byte Parity
+    // =========================================================================
+
+    @Test
+    fun testIntakeWithoutRawSerializesInitialCanonicalEventByteParity() {
+        val event = OutboxTestFixtures.createSampleEventV2()
+        val intakeReq = OutboxTestFixtures.createSampleIntakeRequestV2(event)
+        val expectedCanonicalBytes = CanonicalJsonSerializer.serialize(event).toByteArray(StandardCharsets.UTF_8)
+
+        // Capture with null rawCanonicalEventUtf8
+        val res = repository.captureSaleV2(
+            companyId = event.companyId,
+            actorId = event.actorId,
+            deviceId = event.deviceId,
+            currencyMinorUnits = 2,
+            intakeRequest = intakeReq,
+            rawCanonicalEventUtf8 = null
+        )
+
+        assertTrue(res is CaptureResult.Created)
+        val record = (res as CaptureResult.Created).record
+        assertArrayEquals("Stored bytes must match canonical serializer bytes", expectedCanonicalBytes, record.payloadBytes)
+        assertEquals(event.computePayloadDigest().value, record.payloadDigest)
+
+        // Idempotent duplicate replay without raw
+        val dupRes = repository.captureSaleV2(
+            companyId = event.companyId,
+            actorId = event.actorId,
+            deviceId = event.deviceId,
+            currencyMinorUnits = 2,
+            intakeRequest = intakeReq,
+            rawCanonicalEventUtf8 = null
+        )
+        assertTrue(dupRes is CaptureResult.Duplicate)
+        val dupRecord = (dupRes as CaptureResult.Duplicate).record
+        assertArrayEquals(expectedCanonicalBytes, dupRecord.payloadBytes)
+        assertEquals(event.computePayloadDigest().value, dupRecord.payloadDigest)
+    }
+
+    // =========================================================================
+    // 18. Oversize Payload (> 1 MiB) Rejected Before Decode & Write
+    // =========================================================================
+
+    @Test
+    fun testOversizePayloadRejectedBeforeDecodeAndWrite() {
+        val event = OutboxTestFixtures.createSampleEventV2()
+        val oversizeBytes = ByteArray(ContractConstants.MAX_PAYLOAD_BYTES + 1) { 'a'.code.toByte() }
+
+        val ex = assertThrows(IllegalArgumentException::class.java) {
+            repository.captureSaleV2(
+                companyId = event.companyId,
+                actorId = event.actorId,
+                deviceId = event.deviceId,
+                currencyMinorUnits = 2,
+                rawCanonicalEventUtf8 = oversizeBytes
+            )
+        }
+        assertTrue("Exception must report oversize payload", ex.message!!.contains("exceeds maximum allowed 1 MiB"))
+        assertNull(repository.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId))
+        assertEquals(0, repository.getRecordsByScope(event.companyId, event.actorId, event.deviceId).size)
+    }
+
+    // =========================================================================
+    // 19. Input & Output Alias Defense
+    // =========================================================================
+
+    @Test
+    fun testInputAndOutputAliasDefenseV2() {
+        val event = OutboxTestFixtures.createSampleEventV2()
+        val mutableRaw = CanonicalJsonSerializer.serialize(event).toByteArray(StandardCharsets.UTF_8)
+        val originalFirstByte = mutableRaw[0]
+
+        val res = repository.captureSaleV2(
+            companyId = event.companyId,
+            actorId = event.actorId,
+            deviceId = event.deviceId,
+            currencyMinorUnits = 2,
+            rawCanonicalEventUtf8 = mutableRaw
+        )
+        assertTrue(res is CaptureResult.Created)
+
+        // 1. Mutate incoming array post-capture (input alias attempt)
+        mutableRaw[0] = 0x7F.toByte()
+
+        val record1 = repository.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId)!!
+        assertEquals("Stored byte must remain uncorrupted by caller mutation", originalFirstByte, record1.payloadBytes[0])
+
+        // 2. Mutate returned byte array (output alias attempt)
+        record1.payloadBytes[0] = 0x7F.toByte()
+        record1.event.payloadBytes.fill(0)
+
+        val record2 = repository.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId)!!
+        assertEquals("Subsequent read must remain uncorrupted by output mutation", originalFirstByte, record2.payloadBytes[0])
+        assertEquals(event.computePayloadDigest().value, PayloadDigest.fromBytes(record2.payloadBytes).value)
+    }
+
+    // =========================================================================
+    // 20. Cross Version Lost ACK Raw Identity Preserved
+    // =========================================================================
+
+    @Test
+    fun testCrossVersionLostAckRawIdentityPreserved() {
+        val v1Event = OutboxTestFixtures.createSampleEvent(clientEventId = ClientUuid.random())
+        val v2Event = OutboxTestFixtures.createSampleEventV2(
+            clientEventId = ClientUuid.random(),
+            companyId = v1Event.companyId,
+            actorId = v1Event.actorId,
+            deviceId = v1Event.deviceId
+        )
+
+        val v1Raw = CanonicalJsonSerializer.serialize(v1Event).toByteArray(StandardCharsets.UTF_8)
+        val v2Raw = CanonicalJsonSerializer.serialize(v2Event).toByteArray(StandardCharsets.UTF_8)
+
+        val v1Res = repository.captureSale(v1Event, v1Raw)
+        val v2Res = repository.captureSaleV2(v2Event.companyId, v2Event.actorId, v2Event.deviceId, 2, v2Raw)
+        assertTrue(v1Res is CaptureResult.Created)
+        assertTrue(v2Res is CaptureResult.Created)
+
+        // Worker claims both in batch
+        val batch = repository.claimNextBatch(v1Event.companyId, v1Event.actorId, v1Event.deviceId, batchSize = 10)
+        assertEquals(2, batch.records.size)
+
+        // Lost ACK: worker times out on both -> UNKNOWN_ACK
+        assertTrue(repository.recordTimeout(v1Event.companyId, v1Event.actorId, v1Event.deviceId, v1Event.clientEventId, batch.claimToken, "504 Timeout"))
+        assertTrue(repository.recordTimeout(v2Event.companyId, v2Event.actorId, v2Event.deviceId, v2Event.clientEventId, batch.claimToken, "504 Timeout"))
+
+        // Reconcile confirmations via status poll (without worker claim token)
+        val v1Inv = ServerUlid.parse("01J9Z5K3MN0000000000000071")
+        val v1Pay = ServerUlid.parse("01J9Z5K3MN0000000000000072")
+        val v2Inv = ServerUlid.parse("01J9Z5K3MN0000000000000073")
+        val v2Pay = ServerUlid.parse("01J9Z5K3MN0000000000000074")
+
+        assertTrue(repository.reconcileDeliveryConfirmation(v1Event.companyId, v1Event.actorId, v1Event.deviceId, v1Event.clientEventId, v1Event.computePayloadDigest(), v1Inv, v1Pay, "2026-11-11T15:00:00Z"))
+        assertTrue(repository.reconcileDeliveryConfirmation(v2Event.companyId, v2Event.actorId, v2Event.deviceId, v2Event.clientEventId, v2Event.computePayloadDigest(), v2Inv, v2Pay, "2026-11-11T15:00:00Z"))
+
+        // Verify status is CONFIRMED and byte identity is preserved for both versions
+        val confirmedV1 = repository.getRecord(v1Event.companyId, v1Event.actorId, v1Event.deviceId, v1Event.clientEventId)!!
+        val confirmedV2 = repository.getRecord(v2Event.companyId, v2Event.actorId, v2Event.deviceId, v2Event.clientEventId)!!
+
+        assertEquals(OutboxStatus.CONFIRMED, confirmedV1.status)
+        assertEquals(1, confirmedV1.eventVersion)
+        assertEquals(v1Event.computePayloadDigest().value, confirmedV1.payloadDigest)
+        assertArrayEquals(v1Raw, confirmedV1.payloadBytes)
+
+        assertEquals(OutboxStatus.CONFIRMED, confirmedV2.status)
+        assertEquals(2, confirmedV2.eventVersion)
+        assertEquals(v2Event.computePayloadDigest().value, confirmedV2.payloadDigest)
+        assertArrayEquals(v2Raw, confirmedV2.payloadBytes)
     }
 }
