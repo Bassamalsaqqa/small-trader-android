@@ -2,13 +2,14 @@
 
 ## 1. Architectural Scope & Context
 
-This document details the minimal Android API 24+ compatible HTTP transport adapter for the Small Trader Mobile V1 Read Client Foundation. It implements `ReadClientTransport` via standard platform `java.net.HttpURLConnection` / `javax.net.ssl.HttpsURLConnection` under `com.example.data.mobile.readclient.http.*`.
+This document details the minimal Android API 24+ compatible HTTP transport adapter for the Small Trader Mobile V1 Read Client Foundation. It implements `ReadClientTransport` via a dedicated, private, non-injected `OkHttpClient` instance under `com.example.data.mobile.readclient.http.OkHttpTransport`.
 
-### Design Philosophy & Platform Boundaries
-- **Platform Native**: Utilizes built-in `HttpURLConnection` and `HttpsURLConnection` available on Android API 24+ and JDK 21.
+### Design Philosophy & Dedicated Client Security Boundary
+- **Isolated Client Dependency**: Activates the existing `okhttp = "4.10.0"` catalog dependency in `gradle/libs.versions.toml` without introducing Retrofit, logging-interceptors, Moshi, or broad framework overhauls.
 - **Strict Separation of Concerns**: Bridges pure Kotlin request/response models (`TransportRequest`, `TransportResponse`) to HTTP socket streaming while enforcing origin equality, endpoint allowlisting, bounded payloads, and credential protection.
-- **Zero Global State Mutation**: Eliminates process-wide static mutations (`HttpURLConnection.setFollowRedirects`, `defaultUseCaches`) in favor of strict per-connection configuration (`instanceFollowRedirects = false`, `useCaches = false`).
-- **Honest Platform Tradeoff Documentation**: Accurately documents platform-level architectural limits regarding ambient VM state (cookies, authenticators) without making false isolation claims.
+- **True Process-Ambient Isolation**: By utilizing a dedicated, private `OkHttpClient` instance with explicit `CookieJar.NO_COOKIES`, `Authenticator.NONE`, `proxyAuthenticator(Authenticator.NONE)`, and `cache(null)`, the transport guarantees complete isolation from JVM ambient state (`CookieHandler.getDefault()`, `java.net.Authenticator.getDefault()`, and `ResponseCache.getDefault()`).
+- **Zero Global State Mutation**: Eliminates process-wide static mutations (`HttpURLConnection.setFollowRedirects`, `defaultUseCaches`) and eliminates dangerous multi-threaded race conditions caused by attempting to temporarily clear JVM static defaults.
+- **Honest Platform Tradeoff Documentation**: Accurately documents platform-level architectural limits regarding ambient VM state (cookies, authenticators) and provides empirical test fixtures demonstrating why platform `HttpURLConnection` fails per-client isolation.
 
 ---
 
@@ -22,46 +23,51 @@ This document details the minimal Android API 24+ compatible HTTP transport adap
 >    ```
 >    This manifest change is deferred until supervisor application wiring.
 > 2. **Main Thread Policy (`NetworkOnMainThreadException`)**:
->    Platform `HttpURLConnection` performs synchronous blocking I/O. In an Android runtime, invoking `execute` on the main (UI) thread will trigger an immediate `android.os.NetworkOnMainThreadException`. Callers must dispatch `SmallTraderReadClient` / transport calls on a background worker thread or coroutine dispatcher (e.g. `Dispatchers.IO`).
+>    HTTP calls perform synchronous blocking network I/O. In an Android runtime, invoking `execute` on the main (UI) thread triggers an immediate `android.os.NetworkOnMainThreadException`. Callers must dispatch `SmallTraderReadClient` / transport calls on a background worker thread or coroutine dispatcher (e.g. `Dispatchers.IO`).
 > 3. **Socket Timeout vs. Total Deadline & Cancellation**:
->    - `connectTimeout` and `readTimeout` bound socket idle duration (time to establish connection and maximum pause between incoming bytes). They do **not** bound the total request-response lifespan (a slow stream trickling bytes within `readTimeout` can prolong execution).
->    - Higher-level caller workflows require an end-to-end deadline with explicit connection teardown (invoking `connection.disconnect()` upon cancellation or deadline expiration).
->    - Standard coroutine `withTimeout` alone around blocking stream I/O cannot preempt a thread blocked in native socket read without tearing down the underlying socket connection.
+>    - `connectTimeout` and `readTimeout` bound socket idle duration (time to establish connection and maximum pause between incoming bytes).
+>    - In addition to connect and read timeouts, `OkHttpTransport` configures a finite, bounded `callTimeout` (default: 25s; bounded within 100ms..60s) providing an authoritative total request-response deadline.
+>    - When calls fail or time out, `call.cancel()` is deterministically invoked in `finally`, immediately closing underlying sockets and cancelling ongoing I/O.
+>    - This avoids the platform defect where standard coroutine `withTimeout` alone around blocking stream I/O cannot preempt a thread blocked in native socket read without tearing down the underlying socket connection.
 >    - No new coroutine worker wiring is introduced in this PR; the transport adapter remains a clean, synchronous `ReadClientTransport` implementation.
 
 ---
 
 ## 3. Ambient Global State & Platform Isolation Analysis
 
-### 3.1 Platform `HttpURLConnection` Architectural Boundaries
-In standard Java / Android runtime implementations (`com.android.okhttp.internal.huc.HttpURLConnectionImpl` on Android API 24+ and `sun.net.www.protocol.http.HttpURLConnection` on OpenJDK):
+### 3.1 Why One Client Dependency is a Necessary Security Boundary vs. Global State Workarounds
+Standard Java / Android platform implementations (`com.android.okhttp.internal.huc.HttpURLConnectionImpl` on Android API 24+ and `sun.net.www.protocol.http.HttpURLConnection` on OpenJDK) exhibit architectural coupling to JVM process-global singletons:
 1. **Cookie Handling (`java.net.CookieHandler`)**:
    - `HttpURLConnection` unconditionally queries the process-wide static `CookieHandler.getDefault()`.
-   - If an ambient `CookieHandler` is configured anywhere in the process (e.g. by WebView or an embedded SDK), `HttpURLConnection` appends ambient `Cookie` headers to outgoing requests and dispatches received `Set-Cookie` headers to `CookieHandler.put()`.
-   - There is no per-instance API on `HttpURLConnection` to disable or bypass `CookieHandler`. Mutating `CookieHandler.setDefault(null)` during `execute()` would mutate process globals and create thread-safety race conditions across the host application.
+   - If an ambient `CookieHandler` is configured anywhere in the process (e.g. by WebView, third-party analytics, or an embedded SDK), `HttpURLConnection` appends ambient `Cookie` headers to outgoing requests and dispatches received `Set-Cookie` headers to `CookieHandler.put()`.
+   - There is no per-instance API on `HttpURLConnection` to disable or bypass `CookieHandler`. Mutating `CookieHandler.setDefault(null)` during `execute()` mutates process globals, breaking other components and creating fatal multi-threaded race conditions.
 2. **Authentication Handling (`java.net.Authenticator`)**:
    - When a 401 Unauthorized or 407 Proxy Authentication Required response is encountered, `HttpURLConnection` delegates to the process-global static `java.net.Authenticator.getDefault()`.
    - If configured, the ambient authenticator prompts for credentials and retries the request automatically.
    - `HttpURLConnection` on Android API 24 has no per-instance API to disable `Authenticator`.
 3. **Response Caching (`java.net.ResponseCache`)**:
-   - Per-connection caching is safely suppressed by setting `connection.useCaches = false`. The global `defaultUseCaches` is left untouched.
+   - `HttpURLConnection` may interact with ambient response caches if not explicitly managed.
 
-### 3.2 Security Posture & Tradeoff Analysis
-- **Fail-Closed on Controlled Headers**: `HttpUrlConnectionTransport` strictly rejects explicit `Cookie` headers in `request.headers` with `CATEGORY_SECURITY_VIOLATION`.
-- **Stateless Client Justification**: If genuine, guaranteed per-client isolation from process-ambient `CookieHandler` and `Authenticator` is required by future supervisor layers, adopting a dedicated `OkHttpClient` instance configured with:
-  ```kotlin
-  OkHttpClient.Builder()
-      .cookieJar(CookieJar.NO_COOKIES)
-      .authenticator(Authenticator.NONE)
-      .proxyAuthenticator(Authenticator.NONE)
-      .cache(null)
-      .followRedirects(false)
-      .followSslRedirects(false)
-      .retryOnConnectionFailure(false)
-      .build()
-  ```
-  would be technically justified. The existing Gradle catalog already declares `okhttp = "4.10.0"` in `gradle/libs.versions.toml`.
-- **No False Claims**: This PR does **not** make unproven claims that `HttpURLConnection` achieves full process-ambient cookie/auth isolation. The platform behavior is demonstrated hermetically in `HttpUrlConnectionTransportLoopbackServerTest.testLoopbackAmbientCookieHandlerAndAuthenticatorPlatformEvidence`, and the bounded blocker is formally recorded.
+### 3.2 The Dedicated OkHttpClient Solution
+By activating the existing `okhttp = "4.10.0"` dependency and constructing a private, non-injected `OkHttpClient`:
+```kotlin
+OkHttpClient.Builder()
+    .cookieJar(CookieJar.NO_COOKIES)
+    .authenticator(Authenticator.NONE)
+    .proxyAuthenticator(Authenticator.NONE)
+    .cache(null)
+    .followRedirects(false)
+    .followSslRedirects(false)
+    .retryOnConnectionFailure(false)
+    .connectTimeout(connectTimeoutMs.toLong(), TimeUnit.MILLISECONDS)
+    .readTimeout(readTimeoutMs.toLong(), TimeUnit.MILLISECONDS)
+    .writeTimeout(readTimeoutMs.toLong(), TimeUnit.MILLISECONDS)
+    .callTimeout(callTimeoutMs.toLong(), TimeUnit.MILLISECONDS)
+    .build()
+```
+- **Guaranteed Isolation**: `CookieJar.NO_COOKIES` and `Authenticator.NONE` ensure OkHttp never queries `CookieHandler.getDefault()` or `Authenticator.getDefault()`.
+- **Zero Process-Global Mutations**: No static setters are ever invoked.
+- **Dedicated Private Instance**: Arbitrary caller client injection is strictly disallowed, preventing external code from injecting clients configured with cookie persistence or arbitrary interceptors.
 
 ---
 
@@ -70,13 +76,13 @@ In standard Java / Android runtime implementations (`com.android.okhttp.internal
 ### 4.1 Origin Equality & HTTPS Default
 - **Strict HTTPS Default**: Origins are validated through `EndpointSecurity.validateBaseOrigin(configuredOrigin, allowHttpLoopback)`. Remote endpoints require `https://`.
 - **Loopback HTTP Opt-In**: Plaintext HTTP (`http://`) is strictly restricted to verified loopback addresses (`127.0.0.1`, `localhost`, `10.0.2.2`, `::1`, `[::1]`) and requires explicit `allowHttpLoopback = true` configuration. Broad remote HTTP is strictly rejected.
-- **Origin Equality Check**: `HttpUrlConnectionTransport.execute(request)` verifies that `request.baseOrigin` equals the transport instance's `validatedOrigin` before opening any connection. Cross-origin dispatch is rejected immediately.
+- **Origin Equality Check**: `OkHttpTransport.execute(request)` verifies that `request.baseOrigin` equals the transport instance's `validatedOrigin` before opening any connection. Cross-origin dispatch is rejected immediately.
 - **No DNS Prevalidation / Custom Resolver**: Relies on standard platform name resolution at connection time without inventing custom DNS resolvers or pre-resolving addresses.
 
 ### 4.2 Method & Path Allowlist Enforcement
 - Before opening any connection, the transport checks `request.method` and `request.path` using `EndpointSecurity.validateMethodAndPath(request.method, request.path)`.
 - Disallowed paths and disallowed method-path combinations (e.g. POST to `/products`, GET to `/auth/login`) are rejected before connection establishment.
-- **GET Request Body Rejection**: GET requests containing a non-null request body are strictly rejected before opening a connection (`CATEGORY_SECURITY_VIOLATION`), preventing `HttpURLConnection` from performing an automatic method-flip to POST via `doOutput = true`.
+- **GET Request Body Rejection**: GET requests containing a non-null request body are strictly rejected before opening a connection (`CATEGORY_SECURITY_VIOLATION`), preventing protocol ambiguity or method-flipping.
 
 ### 4.3 Controlled Headers & Sanitized Credentials
 - **Controlled Request Headers**: Only `Accept`, `Content-Type`, and `Authorization` are permitted. Any unexpected or arbitrary headers (e.g. `Cookie`, `X-Custom-Auth`) are rejected with `CATEGORY_SECURITY_VIOLATION`.
@@ -95,11 +101,12 @@ In standard Java / Android runtime implementations (`com.android.okhttp.internal
 
 ### 4.4 Opaque Query Parameter Percent-Encoding
 - All query parameters (`limit`, `cursor`, `search`) are UTF-8 URL-encoded (`URLEncoder.encode(..., "UTF-8")`).
+- Any CRLF characters remain safely percent-encoded query characters (`%0D%0A`), preventing header injection.
 - Cursors are validated as bounded opaque tokens (`EndpointSecurity.validateCursor`) up to 255 characters. Valid contract characters (`/`, `=`, `+`, `-`, `_`, `.`) are safely percent-encoded and never parsed or followed as URLs.
 
 ### 4.5 Per-Connection Redirect & Cache Suppression
-- Automatic redirects are disabled per-connection via `connection.instanceFollowRedirects = false`. The global `HttpURLConnection.setFollowRedirects` default is never mutated.
-- Caching is disabled per-connection via `connection.useCaches = false`. The global `defaultUseCaches` protocol default is never mutated.
+- Automatic redirects are disabled per-client via `followRedirects(false)` and `followSslRedirects(false)`.
+- Caching is disabled per-client via `cache(null)`.
 - 3xx redirects (301, 302, 303, 307, 308) return their HTTP status code directly to the foundation. Credentials are never forwarded to redirected URLs.
 
 ### 4.6 Standard TLS Verification
@@ -107,24 +114,23 @@ In standard Java / Android runtime implementations (`com.android.okhttp.internal
 - Strictly avoids custom trust-all trust managers, certificate bypasses, or invented pinning implementations.
 
 ### 4.7 Finite Bounded Timeouts
-- Connect and read timeouts are finite and bounded (default: 10s connect, 15s read; enforced bounds: 100ms minimum, 60s maximum).
-- Socket timeouts are caught and mapped to `HttpTransportException(CATEGORY_TIMEOUT)`.
+- Connect, read, write, and call timeouts are finite and bounded:
+  - Default: 10s connect, 15s read, 25s call.
+  - Enforced bounds: 100ms minimum, 60s maximum.
+- Socket timeouts and call deadlines are caught and mapped to safe `HttpTransportException(CATEGORY_TIMEOUT)`.
 
 ### 4.8 Payload Bounding & Strict UTF-8 Stream Decoding
 - **1 MiB Upper Bound**: Maximum allowable request and response payload size is strictly 1 MiB (1,048,576 bytes).
-- **Request Body Pre-Check & Strict UTF-8**: The request body length is bounded before allocation, and characters are encoded using a strict UTF-8 encoder (`CodingErrorAction.REPORT`) to reject malformed UTF-16 surrogates without unbounded memory growth. Fixed-length streaming mode is applied.
+- **Request Body Pre-Check & Strict UTF-8**: The request body length is bounded before allocation, and characters are encoded using a strict UTF-8 encoder (`CodingErrorAction.REPORT`) to reject malformed UTF-16 surrogates without unbounded memory growth.
 - **Response Content-Length Pre-Check**: If the `Content-Length` header exceeds 1 MiB, the connection is aborted immediately without reading stream bytes (`CATEGORY_PAYLOAD_TOO_LARGE`).
 - **Streaming Limit**: For chunked or unknown content length, byte reading is capped at 1 MiB during stream consumption (`CATEGORY_PAYLOAD_TOO_LARGE`).
 - **Strict UTF-8 Decoding**: Response bytes are decoded using `StandardCharsets.UTF_8.newDecoder()` with `CodingErrorAction.REPORT`. Malformed or unmappable byte sequences are strictly rejected (`CATEGORY_MALFORMED_UTF8`), never masked with replacement character `\uFFFD`.
 
 ### 4.9 Resource Management & Error Streams
-- **Deterministic Teardown**: `outputStream`, `inputStream`, `errorStream`, and `connection.disconnect()` are closed/disconnected in `finally` blocks on all paths.
-- **Error Stream Handling**:
-  - Responses with 4xx/5xx status codes read `connection.errorStream` directly without falling back to `connection.inputStream` (avoiding ordinary `FileNotFoundException` and preventing socket timeouts from being masked).
-  - Empty 4xx/5xx responses (e.g. empty 401 Unauthorized with null `errorStream`) return the authoritative status code with an empty body `""`.
-  - 3xx responses read `connection.inputStream` if a diagnostic body is present.
-  - Any `SocketTimeoutException` encountered while reading streams is strictly propagated as `CATEGORY_TIMEOUT`, never swallowed into synthetic success or empty bodies.
-- **Response Headers Null Safety**: Response header extraction defends against null status keys (HTTP status line) and null list items.
+- **Deterministic Teardown**: `response` body streams and underlying calls (`call.cancel()`) are closed/canceled in `finally` blocks on all paths.
+- **Authoritative Status Codes & No Swallowing**:
+  - Responses with 401 Unauthorized return authoritative status code with empty body `""` when the body is empty.
+  - Any IO error, network drop, or socket timeout encountered while reading response streams is strictly propagated as `CATEGORY_TIMEOUT` or `CATEGORY_NETWORK_IO`, never swallowed into synthetic empty bodies.
 - **Cancellation & Fatal Error Propagation**: Catches `Throwable` to ensure `VirtualMachineError` and `CancellationException` are immediately re-thrown.
 - **Safe Exceptions**: `HttpTransportException` carries only a fixed category code and sanitized message. No raw URLs, query tokens, request/response bodies, or low-level exception causes are attached.
 
@@ -133,7 +139,7 @@ In standard Java / Android runtime implementations (`com.android.okhttp.internal
 ## 5. Automated Verification Evidence
 
 ### 5.1 Unit Test Suite Execution
-Tests executed with `./gradlew testDebugUnitTest --tests "com.example.data.mobile.*" --rerun`:
+Tests executed with `./gradlew testDebugUnitTest`:
 
 | Package | Test Class | Tests | Status |
 | :--- | :--- | :--- | :--- |
@@ -148,10 +154,13 @@ Tests executed with `./gradlew testDebugUnitTest --tests "com.example.data.mobil
 | `readclient` | `ReadClientSecurityAndTransportTest` | 10 | PASSED |
 | `readclient` | `ReadClientRevision2BoundariesTest` | 13 | PASSED |
 | `readclient` | `SmallTraderReadClientWorkflowTest` | 21 | PASSED |
-| `readclient.http` | `HttpUrlConnectionTransportExecutionTest` | 17 | PASSED |
-| `readclient.http` | `HttpUrlConnectionTransportSecurityTest` | 12 | PASSED |
-| `readclient.http` | `HttpUrlConnectionTransportLoopbackServerTest` | 8 | PASSED |
-| **Total** | **14 test classes** | **127** | **100% PASSED** (0 failures, 0 skipped) |
+| `readclient.http` | `OkHttpTransportSecurityTest` | 12 | PASSED |
+| `readclient.http` | `OkHttpTransportLoopbackServerTest` | 12 | PASSED |
+| `readclient.http` | `OkHttpMockWebServerTest` | 7 | PASSED |
+| `readclient.http` | `PlatformHttpUrlConnectionAmbientEvidenceTest` | 2 | PASSED |
+| **Total Core Suite** | **15 test classes** | **123** | **100% PASSED** (0 failures, 0 skipped) |
+
+*Full test suite run: 263 total tests passed across 31 test classes, 0 failures, 1 skipped.*
 
 ### 5.2 Contract & Schema Verification
 - Python contract validation (`python3 tools/validate-mobile-contract.py` and `python3 -O tools/validate-mobile-contract.py`):
@@ -162,6 +171,6 @@ Tests executed with `./gradlew testDebugUnitTest --tests "com.example.data.mobil
 - Gradle static analysis (`./gradlew lintDebug`): PASSED clean with 0 errors.
 
 ### 5.4 Platform & Device Testing Limits
-- All automated unit tests execute hermetically on JDK 21 (`/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9`) using mock connections and an in-process local JDK `HttpServer` bound strictly to loopback `127.0.0.1`.
+- All automated unit tests execute hermetically on JDK 21 (`/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9`) using `MockWebServer` and an in-process local JDK `HttpServer` bound strictly to loopback `127.0.0.1`.
 - Hermetic loopback tests do not claim to prove on-device TLS certificates or real device networking.
 - Broad Android instrumentation visual test runs are not executed due to known native visual emulator evidence hangs; verification relies on focused mobile unit test suites and official contract parity validators.

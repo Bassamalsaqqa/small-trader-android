@@ -6,11 +6,18 @@ import com.example.data.mobile.readclient.ReadClientTransport
 import com.example.data.mobile.readclient.TransportRequest
 import com.example.data.mobile.readclient.TransportResponse
 import com.example.data.mobile.readclient.ValidationUtils
+import okhttp3.Authenticator
+import okhttp3.Call
+import okhttp3.CookieJar
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
-import java.io.OutputStream
-import java.net.HttpURLConnection
+import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
 import java.net.URL
 import java.net.URLEncoder
@@ -22,58 +29,67 @@ import java.nio.charset.StandardCharsets
 import java.util.Collections
 import java.util.Locale
 import java.util.concurrent.CancellationException
+import java.util.concurrent.TimeUnit
 
 /**
- * Minimal Android API 24+ compatible HTTP transport adapter for Small Trader Read Client.
+ * Minimal, hardened, Android API 24+ compatible HTTP transport adapter for Small Trader Read Client.
  *
- * Implements [ReadClientTransport] using standard platform [HttpURLConnection] / [javax.net.ssl.HttpsURLConnection]
- * with strict security boundaries, hermetic testability, and zero third-party dependencies.
+ * Implements [ReadClientTransport] using a dedicated, private, non-injected [OkHttpClient] instance.
+ * Replaces the unsafe platform HttpURLConnection adapter to guarantee strict process-ambient isolation:
+ * - Completely immune to ambient [java.net.CookieHandler.getDefault] leakage.
+ * - Completely immune to ambient [java.net.Authenticator.getDefault] challenge-retry loops on 401/407.
+ * - Completely immune to ambient [java.net.ResponseCache.getDefault] cache pollution.
+ * - Zero mutation of JVM process-global state.
  *
  * Security & Reliability Invariants:
- * 1. Origin Equality & HTTPS Default:
+ * 1. Dedicated Private Client (No Caller Injection):
+ *    - Uses a private, sealed [OkHttpClient] configured with [CookieJar.NO_COOKIES],
+ *      [Authenticator.NONE], cache(null), followRedirects(false), followSslRedirects(false),
+ *      and retryOnConnectionFailure(false).
+ *    - Arbitrary caller client injection is disallowed to prevent enabling cookies, caching, or arbitrary interceptors.
+ * 2. Origin Equality & HTTPS Default:
  *    - Base origin validated via [EndpointSecurity.validateBaseOrigin] (HTTPS default; HTTP loopback only with explicit opt-in).
  *    - Dispatched requests must strictly match this transport's configured origin. Mismatches are rejected before opening a connection.
- * 2. Method and Path Allowlisting:
+ * 3. Method and Path Allowlisting:
  *    - All requests verified against [EndpointSecurity.validateMethodAndPath] before opening a connection.
- *    - GET requests with a request body are strictly rejected before connection establishment to prevent method-flip or protocol desync.
- * 3. Controlled Headers:
+ *    - GET requests with a request body are strictly rejected before connection establishment.
+ * 4. Controlled Headers:
  *    - Only 'Accept', 'Content-Type', and validated 'Authorization' (Bearer token) are permitted. Arbitrary headers are rejected.
  *    - Exact allowed MIME types enforced (no 'contains' matching).
  *    - Case-insensitive duplicate headers are strictly rejected.
  *    - Authorization exact raw value validated without trim and dispatched same bytes (rejecting leading/trailing whitespace and CRLF).
  *    - Safe constant error messages with zero leakage of raw header names, paths, or custom tokens.
- * 4. UTF-8 Query Parameter Percent-Encoding:
- *    - Every query parameter key and value is UTF-8 URL-encoded.
+ * 5. UTF-8 Query Parameter Percent-Encoding:
+ *    - Every query parameter key and value is UTF-8 URL-encoded. CRLF characters remain safely percent-encoded query characters.
  *    - Cursors are treated strictly as opaque query data and bounded via [EndpointSecurity.validateCursor], never followed as URLs.
- * 5. Per-Connection Redirect & Cache Suppression:
- *    - Automatic redirects disabled per-connection (instanceFollowRedirects = false). Global redirect state is never mutated.
- *    - Caching disabled per-connection (useCaches = false). Global defaultUseCaches is never mutated.
  * 6. Standard TLS Verification:
  *    - Uses standard platform TLS chain and host verification. No custom trust managers, cert bypass, or invented pinning.
  * 7. Finite Bounded Timeouts:
- *    - Connect and read timeouts are finite and bounded (default 10s connect, 15s read; bounded between 100ms and 60s).
+ *    - Connect, read, write, and call total deadlines are finite and bounded (default 10s connect, 15s read, 25s call; bounded between 100ms and 60s).
  * 8. Strict Bounded Payload & UTF-8 Stream Decoding:
  *    - Maximum request and response size is strictly 1 MiB (1,048,576 bytes).
  *    - Request body UTF-8 surrogate check protects against malformed sequences without unbounded memory allocation.
  *    - Content-Length pre-check rejects responses exceeding 1 MiB immediately.
  *    - Stream limit reading enforces 1 MiB bound even for chunked or unknown content length.
  *    - Strict UTF-8 decoder rejects malformed or unmappable byte sequences without replacement characters.
- * 9. Resource Management & Error Streams:
- *    - Input, error, output streams and connections are deterministically closed/disconnected on all execution paths.
- *    - 4xx/5xx responses use errorStream directly without falling back to inputStream, preserving timeouts and authoritative status codes.
+ * 9. Resource Management & Error Handling:
+ *    - Response body streams and underlying calls are deterministically closed/canceled on all failure paths.
+ *    - 401 responses with empty bodies return authoritative status code without swallowing stream errors.
  * 10. Cancellation & Safe Exceptions:
  *    - [CancellationException] and [VirtualMachineError] are never swallowed.
  *    - Exceptions are mapped to safe [HttpTransportException] with fixed typed categories and zero credential/token leakage.
  */
-class HttpUrlConnectionTransport(
+class OkHttpTransport(
     configuredOrigin: String,
     val allowHttpLoopback: Boolean = false,
     val connectTimeoutMs: Int = DEFAULT_CONNECT_TIMEOUT_MS,
     val readTimeoutMs: Int = DEFAULT_READ_TIMEOUT_MS,
-    private val connectionFactory: HttpUrlConnectionFactory = DefaultHttpUrlConnectionFactory
+    val callTimeoutMs: Int = DEFAULT_CALL_TIMEOUT_MS
 ) : ReadClientTransport {
 
     val validatedOrigin: String = EndpointSecurity.validateBaseOrigin(configuredOrigin, allowHttpLoopback)
+
+    private val okHttpClient: OkHttpClient
 
     init {
         require(connectTimeoutMs in MIN_TIMEOUT_MS..MAX_TIMEOUT_MS) {
@@ -82,6 +98,24 @@ class HttpUrlConnectionTransport(
         require(readTimeoutMs in MIN_TIMEOUT_MS..MAX_TIMEOUT_MS) {
             "readTimeoutMs must be between $MIN_TIMEOUT_MS and $MAX_TIMEOUT_MS ms, got $readTimeoutMs"
         }
+        require(callTimeoutMs in MIN_TIMEOUT_MS..MAX_TIMEOUT_MS) {
+            "callTimeoutMs must be between $MIN_TIMEOUT_MS and $MAX_TIMEOUT_MS ms, got $callTimeoutMs"
+        }
+
+        // Dedicated private client enforcing isolation from ambient JVM handlers
+        this.okHttpClient = OkHttpClient.Builder()
+            .cookieJar(CookieJar.NO_COOKIES)
+            .authenticator(Authenticator.NONE)
+            .proxyAuthenticator(Authenticator.NONE)
+            .cache(null)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .retryOnConnectionFailure(false)
+            .connectTimeout(connectTimeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .readTimeout(readTimeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .writeTimeout(readTimeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .callTimeout(callTimeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .build()
     }
 
     override fun execute(request: TransportRequest): TransportResponse {
@@ -236,70 +270,54 @@ class HttpUrlConnectionTransport(
 
         val targetUrl = buildTargetUrl(this.validatedOrigin, request.path, request.queryParams)
 
-        // 6. Connect and Execute HTTP Request
-        var connection: HttpURLConnection? = null
-        var outputStream: OutputStream? = null
-        var inputStream: InputStream? = null
-        var errorStream: InputStream? = null
+        // 6. Build OkHttp Request
+        val requestBuilder = Request.Builder()
+            .url(targetUrl)
+
+        requestBuilder.header("Accept", "application/json")
+        if (preparedRequestBodyBytes != null || request.method == HttpMethod.POST) {
+            requestBuilder.header("Content-Type", "application/json; charset=utf-8")
+        }
+        if (validatedAuthHeader != null) {
+            requestBuilder.header("Authorization", validatedAuthHeader)
+        }
+
+        val requestBody = when (request.method) {
+            HttpMethod.GET -> null
+            HttpMethod.POST -> {
+                val mediaType = "application/json; charset=utf-8".toMediaType()
+                val bytes = preparedRequestBodyBytes ?: ByteArray(0)
+                bytes.toRequestBody(mediaType)
+            }
+        }
+
+        requestBuilder.method(request.method.name, requestBody)
+        val okHttpRequest = requestBuilder.build()
+
+        // 7. Execute Call with deterministic resource lifecycle
+        var call: Call? = null
+        var response: Response? = null
+        var isSuccess = false
 
         try {
-            connection = connectionFactory.openConnection(targetUrl)
+            call = okHttpClient.newCall(okHttpRequest)
+            response = call.execute()
 
-            // Disable per-connection redirects strictly without mutating process-global defaults
-            connection.instanceFollowRedirects = false
-
-            // Disable per-connection caching strictly without mutating process-global defaultUseCaches
-            connection.useCaches = false
-
-            // Set finite bounded timeouts
-            connection.connectTimeout = connectTimeoutMs
-            connection.readTimeout = readTimeoutMs
-
-            // Configure HTTP Method
-            connection.requestMethod = request.method.name
-
-            // Set Controlled Request Headers
-            connection.setRequestProperty("Accept", "application/json")
-            if (preparedRequestBodyBytes != null || request.method == HttpMethod.POST) {
-                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            }
-            if (validatedAuthHeader != null) {
-                connection.setRequestProperty("Authorization", validatedAuthHeader)
-            }
-
-            connection.doInput = true
-
-            // Transmit Request Body if present
-            if (preparedRequestBodyBytes != null) {
-                connection.doOutput = true
-                connection.setFixedLengthStreamingMode(preparedRequestBodyBytes.size)
-                outputStream = connection.outputStream
-                outputStream.write(preparedRequestBodyBytes)
-                outputStream.flush()
-                outputStream.close()
-                outputStream = null
-            }
-
-            // Retrieve Response Status Code
-            val statusCode = connection.responseCode
+            val statusCode = response.code
 
             // Extract Response Headers (case-preserving, defensive copy, null-safe)
             val responseHeaders = mutableMapOf<String, String>()
-            val rawFields = connection.headerFields
-            if (rawFields != null) {
-                for ((key, values) in rawFields) {
-                    if (key != null && values != null) {
-                        val nonNullValues = values.filterNotNull()
-                        if (nonNullValues.isNotEmpty()) {
-                            responseHeaders[key] = nonNullValues.joinToString(", ")
-                        }
-                    }
+            val rawHeaders = response.headers
+            for (name in rawHeaders.names()) {
+                val values = rawHeaders.values(name)
+                if (values.isNotEmpty()) {
+                    responseHeaders[name] = values.joinToString(", ")
                 }
             }
 
             // Pre-check Content-Length header against 1 MiB bound
-            val contentLengthHeader = connection.getHeaderField("Content-Length")
-            val reportedContentLength = contentLengthHeader?.toLongOrNull() ?: connection.contentLength.toLong()
+            val contentLengthHeader = response.header("Content-Length")
+            val reportedContentLength = contentLengthHeader?.toLongOrNull() ?: response.body?.contentLength() ?: -1L
             if (reportedContentLength > MAX_PAYLOAD_BYTES) {
                 throw HttpTransportException(
                     HttpTransportException.CATEGORY_PAYLOAD_TOO_LARGE,
@@ -307,43 +325,15 @@ class HttpUrlConnectionTransport(
                 )
             }
 
-            // Determine input stream based on status code
-            val streamToRead = when {
-                statusCode in 200..299 -> {
-                    inputStream = connection.inputStream
-                    inputStream
-                }
-                statusCode in 300..399 -> {
-                    // 3xx redirects (not followed) may carry a diagnostic body on inputStream
-                    try {
-                        inputStream = connection.inputStream
-                        inputStream
-                    } catch (e: Exception) {
-                        if (e is SocketTimeoutException) throw e
-                        if (e is CancellationException) throw e
-                        null
-                    }
-                }
-                statusCode in 400..599 -> {
-                    // 4xx/5xx errors: read errorStream directly without falling back to inputStream
-                    val err = connection.errorStream
-                    if (err != null) {
-                        errorStream = err
-                        err
-                    } else {
-                        null
-                    }
-                }
-                else -> null
-            }
-
             // Read Bounded UTF-8 Response Body
-            val responseBody = if (streamToRead != null) {
-                readBoundedUtf8Stream(streamToRead)
+            val responseBodyStream = response.body?.byteStream()
+            val responseBody = if (responseBodyStream != null) {
+                readBoundedUtf8Stream(responseBodyStream)
             } else {
                 ""
             }
 
+            isSuccess = true
             return TransportResponse(
                 statusCode = statusCode,
                 headers = Collections.unmodifiableMap(LinkedHashMap(responseHeaders)),
@@ -355,6 +345,13 @@ class HttpUrlConnectionTransport(
                 is CancellationException -> throw t
                 is HttpTransportException -> throw t
                 is SocketTimeoutException -> {
+                    throw HttpTransportException(
+                        HttpTransportException.CATEGORY_TIMEOUT,
+                        "Network socket timeout occurred"
+                    )
+                }
+                is InterruptedIOException -> {
+                    // OkHttp callTimeout fires as InterruptedIOException with timeout detail
                     throw HttpTransportException(
                         HttpTransportException.CATEGORY_TIMEOUT,
                         "Network socket timeout occurred"
@@ -374,10 +371,10 @@ class HttpUrlConnectionTransport(
                 }
             }
         } finally {
-            try { outputStream?.close() } catch (_: Throwable) {}
-            try { inputStream?.close() } catch (_: Throwable) {}
-            try { errorStream?.close() } catch (_: Throwable) {}
-            try { connection?.disconnect() } catch (_: Throwable) {}
+            try { response?.close() } catch (_: Throwable) {}
+            if (!isSuccess) {
+                try { call?.cancel() } catch (_: Throwable) {}
+            }
         }
     }
 
@@ -454,11 +451,12 @@ class HttpUrlConnectionTransport(
     }
 
     override fun toString(): String =
-        "HttpUrlConnectionTransport(configuredOrigin='$validatedOrigin', allowHttpLoopback=$allowHttpLoopback)"
+        "OkHttpTransport(configuredOrigin='$validatedOrigin', allowHttpLoopback=$allowHttpLoopback)"
 
     companion object {
         const val DEFAULT_CONNECT_TIMEOUT_MS = 10_000 // 10 seconds
         const val DEFAULT_READ_TIMEOUT_MS = 15_000 // 15 seconds
+        const val DEFAULT_CALL_TIMEOUT_MS = 25_000 // 25 seconds
         const val MIN_TIMEOUT_MS = 100 // 100 ms
         const val MAX_TIMEOUT_MS = 60_000 // 60 seconds
         const val MAX_PAYLOAD_BYTES = 1024 * 1024 // 1 MiB = 1,048,576 bytes
@@ -474,3 +472,12 @@ class HttpUrlConnectionTransport(
         private const val STREAM_BUFFER_SIZE = 8192
     }
 }
+
+/**
+ * Migration compatibility alias for callers migrating from the previous platform transport name.
+ */
+@Deprecated(
+    message = "Replaced by OkHttpTransport for dedicated client isolation and safety against ambient state",
+    replaceWith = ReplaceWith("OkHttpTransport")
+)
+typealias HttpUrlConnectionTransport = OkHttpTransport

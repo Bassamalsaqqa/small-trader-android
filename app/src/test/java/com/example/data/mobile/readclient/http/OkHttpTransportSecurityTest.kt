@@ -8,9 +8,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.net.URL
 
-class HttpUrlConnectionTransportSecurityTest {
+class OkHttpTransportSecurityTest {
 
     private val configuredOrigin = "https://api.smalltrader.example"
     private val validBootstrapPath = "/api/mobile/v1/companies/01ARZ3NDEKTSV4RRFFQ69G5FAV/bootstrap"
@@ -19,24 +18,9 @@ class HttpUrlConnectionTransportSecurityTest {
     private val validLoginPath = "/api/mobile/v1/auth/login"
     private val validToken = "1|sanctum_valid_token_test_1234567890_abcdef"
 
-    private class TrackingFactory : HttpUrlConnectionFactory {
-        var callCount = 0
-        var lastUrl: URL? = null
-
-        override fun openConnection(url: URL): MockHttpURLConnection {
-            callCount++
-            lastUrl = url
-            return MockHttpURLConnection(url)
-        }
-    }
-
     @Test
-    fun testWrongOriginRejectedBeforeFactoryInvoked() {
-        val factory = TrackingFactory()
-        val transport = HttpUrlConnectionTransport(
-            configuredOrigin = configuredOrigin,
-            connectionFactory = factory
-        )
+    fun testWrongOriginRejectedBeforeNetwork() {
+        val transport = OkHttpTransport(configuredOrigin = configuredOrigin)
 
         val mismatchedRequest = TransportRequest(
             method = HttpMethod.GET,
@@ -54,17 +38,11 @@ class HttpUrlConnectionTransportSecurityTest {
 
         assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex.category)
         assertTrue(ex.message!!.contains("Request baseOrigin does not match configured transport origin"))
-        assertEquals(0, factory.callCount)
-        assertNull(factory.lastUrl)
     }
 
     @Test
-    fun testDisallowedPathRejectedBeforeFactoryInvoked() {
-        val factory = TrackingFactory()
-        val transport = HttpUrlConnectionTransport(
-            configuredOrigin = configuredOrigin,
-            connectionFactory = factory
-        )
+    fun testDisallowedPathRejectedBeforeNetwork() {
+        val transport = OkHttpTransport(configuredOrigin = configuredOrigin)
 
         val unallowlistedPaths = listOf(
             "/api/v1/sales",
@@ -87,17 +65,11 @@ class HttpUrlConnectionTransportSecurityTest {
             assertEquals("Disallowed HTTP method or endpoint path", ex.message)
             assertFalse("Error message must not leak requested path", ex.message!!.contains(path))
         }
-
-        assertEquals(0, factory.callCount)
     }
 
     @Test
-    fun testDisallowedMethodAndPathCombinationsRejectedBeforeFactory() {
-        val factory = TrackingFactory()
-        val transport = HttpUrlConnectionTransport(
-            configuredOrigin = configuredOrigin,
-            connectionFactory = factory
-        )
+    fun testDisallowedMethodAndPathCombinationsRejectedBeforeNetwork() {
+        val transport = OkHttpTransport(configuredOrigin = configuredOrigin)
 
         // POST to products (only GET allowed)
         val postProducts = TransportRequest(
@@ -126,17 +98,11 @@ class HttpUrlConnectionTransportSecurityTest {
             transport.execute(getLogin)
         }
         assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex2.category)
-
-        assertEquals(0, factory.callCount)
     }
 
     @Test
-    fun testGetWithBodyRejectedBeforeFactory() {
-        val factory = TrackingFactory()
-        val transport = HttpUrlConnectionTransport(
-            configuredOrigin = configuredOrigin,
-            connectionFactory = factory
-        )
+    fun testGetWithBodyRejectedBeforeNetwork() {
+        val transport = OkHttpTransport(configuredOrigin = configuredOrigin)
 
         val getWithBody = TransportRequest(
             method = HttpMethod.GET,
@@ -152,16 +118,11 @@ class HttpUrlConnectionTransportSecurityTest {
 
         assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex.category)
         assertEquals("GET requests must not contain a request body", ex.message)
-        assertEquals(0, factory.callCount)
     }
 
     @Test
-    fun testDisallowedHeadersRejectedBeforeFactory() {
-        val factory = TrackingFactory()
-        val transport = HttpUrlConnectionTransport(
-            configuredOrigin = configuredOrigin,
-            connectionFactory = factory
-        )
+    fun testDisallowedHeadersRejectedBeforeNetwork() {
+        val transport = OkHttpTransport(configuredOrigin = configuredOrigin)
 
         val requestWithCookie = TransportRequest(
             method = HttpMethod.GET,
@@ -194,17 +155,11 @@ class HttpUrlConnectionTransportSecurityTest {
         assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex2.category)
         assertEquals("Disallowed request header", ex2.message)
         assertFalse("Error message must not leak header name", ex2.message!!.contains("X-Custom-Auth"))
-
-        assertEquals(0, factory.callCount)
     }
 
     @Test
     fun testControlledHeadersValidation() {
-        val factory = TrackingFactory()
-        val transport = HttpUrlConnectionTransport(
-            configuredOrigin = configuredOrigin,
-            connectionFactory = factory
-        )
+        val transport = OkHttpTransport(configuredOrigin = configuredOrigin)
 
         val badAccepts = listOf(
             "text/html",
@@ -283,17 +238,11 @@ class HttpUrlConnectionTransportSecurityTest {
         }
         assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, dupContentTypeEx.category)
         assertEquals("Duplicate Content-Type header", dupContentTypeEx.message)
-
-        assertEquals(0, factory.callCount)
     }
 
     @Test
     fun testAuthorizationTokenValidation() {
-        val factory = TrackingFactory()
-        val transport = HttpUrlConnectionTransport(
-            configuredOrigin = configuredOrigin,
-            connectionFactory = factory
-        )
+        val transport = OkHttpTransport(configuredOrigin = configuredOrigin)
 
         // Missing "Bearer " prefix
         val noBearer = TransportRequest(
@@ -433,19 +382,13 @@ class HttpUrlConnectionTransportSecurityTest {
         }
         assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, exDup.category)
         assertEquals("Duplicate Authorization header", exDup.message)
-
-        assertEquals(0, factory.callCount)
     }
 
     @Test
     fun testRequestBodyBoundingAndSurrogateProtection() {
-        val factory = TrackingFactory()
-        val transport = HttpUrlConnectionTransport(
-            configuredOrigin = configuredOrigin,
-            connectionFactory = factory
-        )
+        val transport = OkHttpTransport(configuredOrigin = configuredOrigin)
 
-        // Body exceeding 1 MiB rejected before factory
+        // Body exceeding 1 MiB rejected before network
         val oversizeBody = "a".repeat(1024 * 1024 + 1)
         val oversizeReq = TransportRequest(
             method = HttpMethod.POST,
@@ -479,17 +422,11 @@ class HttpUrlConnectionTransportSecurityTest {
         }
         assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex2.category)
         assertTrue(ex2.message!!.contains("malformed or unmappable UTF-8"))
-
-        assertEquals(0, factory.callCount)
     }
 
     @Test
     fun testPaginationCursorValidation() {
-        val factory = TrackingFactory()
-        val transport = HttpUrlConnectionTransport(
-            configuredOrigin = configuredOrigin,
-            connectionFactory = factory
-        )
+        val transport = OkHttpTransport(configuredOrigin = configuredOrigin)
 
         // Cursor exceeding 255 chars
         val longCursor = "a".repeat(256)
@@ -504,50 +441,60 @@ class HttpUrlConnectionTransportSecurityTest {
             transport.execute(req)
         }
         assertEquals(HttpTransportException.CATEGORY_SECURITY_VIOLATION, ex.category)
-        assertEquals(0, factory.callCount)
     }
 
     @Test
     fun testOriginConfigurationInvariants() {
         // HTTPS is required by default
         assertThrows(IllegalArgumentException::class.java) {
-            HttpUrlConnectionTransport("http://api.smalltrader.example")
+            OkHttpTransport("http://api.smalltrader.example")
         }
 
         // Loopback HTTP without explicit flag is rejected
         assertThrows(IllegalArgumentException::class.java) {
-            HttpUrlConnectionTransport("http://127.0.0.1:8000")
+            OkHttpTransport("http://127.0.0.1:8000")
         }
 
         // Broad remote HTTP is ALWAYS rejected even with allowHttpLoopback
         assertThrows(IllegalArgumentException::class.java) {
-            HttpUrlConnectionTransport("http://api.smalltrader.example", allowHttpLoopback = true)
+            OkHttpTransport("http://api.smalltrader.example", allowHttpLoopback = true)
         }
 
         // Valid loopback hosts with explicit opt-in
-        val loopback1 = HttpUrlConnectionTransport("http://127.0.0.1:8000", allowHttpLoopback = true)
+        val loopback1 = OkHttpTransport("http://127.0.0.1:8000", allowHttpLoopback = true)
         assertEquals("http://127.0.0.1:8000", loopback1.validatedOrigin)
 
-        val loopback2 = HttpUrlConnectionTransport("http://localhost:8080", allowHttpLoopback = true)
+        val loopback2 = OkHttpTransport("http://localhost:8080", allowHttpLoopback = true)
         assertEquals("http://localhost:8080", loopback2.validatedOrigin)
 
-        val loopback3 = HttpUrlConnectionTransport("http://10.0.2.2:8000", allowHttpLoopback = true)
+        val loopback3 = OkHttpTransport("http://10.0.2.2:8000", allowHttpLoopback = true)
         assertEquals("http://10.0.2.2:8000", loopback3.validatedOrigin)
     }
 
     @Test
     fun testTimeoutBoundsEnforcedInConstructor() {
+        // Connect timeout bounds
         assertThrows(IllegalArgumentException::class.java) {
-            HttpUrlConnectionTransport(configuredOrigin, connectTimeoutMs = 50) // below 100ms
+            OkHttpTransport(configuredOrigin, connectTimeoutMs = 50) // below 100ms
         }
         assertThrows(IllegalArgumentException::class.java) {
-            HttpUrlConnectionTransport(configuredOrigin, connectTimeoutMs = 70_000) // above 60s
+            OkHttpTransport(configuredOrigin, connectTimeoutMs = 70_000) // above 60s
+        }
+
+        // Read timeout bounds
+        assertThrows(IllegalArgumentException::class.java) {
+            OkHttpTransport(configuredOrigin, readTimeoutMs = 10) // below 100ms
         }
         assertThrows(IllegalArgumentException::class.java) {
-            HttpUrlConnectionTransport(configuredOrigin, readTimeoutMs = 10) // below 100ms
+            OkHttpTransport(configuredOrigin, readTimeoutMs = 90_000) // above 60s
+        }
+
+        // Call timeout bounds
+        assertThrows(IllegalArgumentException::class.java) {
+            OkHttpTransport(configuredOrigin, callTimeoutMs = 50) // below 100ms
         }
         assertThrows(IllegalArgumentException::class.java) {
-            HttpUrlConnectionTransport(configuredOrigin, readTimeoutMs = 90_000) // above 60s
+            OkHttpTransport(configuredOrigin, callTimeoutMs = 70_000) // above 60s
         }
     }
 
@@ -563,9 +510,9 @@ class HttpUrlConnectionTransportSecurityTest {
         assertFalse(str.contains("token"))
         assertNull(ex.cause)
 
-        val transport = HttpUrlConnectionTransport(configuredOrigin)
+        val transport = OkHttpTransport(configuredOrigin)
         val transportStr = transport.toString()
-        assertEquals("HttpUrlConnectionTransport(configuredOrigin='https://api.smalltrader.example', allowHttpLoopback=false)", transportStr)
+        assertEquals("OkHttpTransport(configuredOrigin='https://api.smalltrader.example', allowHttpLoopback=false)", transportStr)
         assertFalse(transportStr.contains("password"))
         assertFalse(transportStr.contains("secret"))
     }

@@ -11,22 +11,28 @@ import com.sun.net.httpserver.HttpHandler
 import com.sun.net.httpserver.HttpServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.net.CacheRequest
+import java.net.CacheResponse
 import java.net.CookieHandler
 import java.net.InetSocketAddress
 import java.net.PasswordAuthentication
+import java.net.ResponseCache
 import java.net.URI
+import java.net.URLConnection
 import java.nio.charset.StandardCharsets
 
 /**
  * Hermetic integration tests using a local in-process JDK HttpServer on 127.0.0.1.
- * Tests real socket connections, real network streams, and real platform HttpURLConnection behavior
+ * Tests real socket connections, real network streams, and real OkHttp transport behavior
  * without any external internet traffic or live backend dependencies.
  */
-class HttpUrlConnectionTransportLoopbackServerTest {
+class OkHttpTransportLoopbackServerTest {
 
     private var server: HttpServer? = null
     private var baseOrigin: String = ""
@@ -66,7 +72,7 @@ class HttpUrlConnectionTransportLoopbackServerTest {
             exchange.close()
         })
 
-        val transport = HttpUrlConnectionTransport(baseOrigin, allowHttpLoopback = true)
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
         val req = TransportRequest(
             method = HttpMethod.GET,
             path = "/api/mobile/v1/companies/${validCompanyUlid.value}/products",
@@ -104,7 +110,7 @@ class HttpUrlConnectionTransportLoopbackServerTest {
             exchange.close()
         })
 
-        val transport = HttpUrlConnectionTransport(baseOrigin, allowHttpLoopback = true)
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
         val req = TransportRequest(
             method = HttpMethod.POST,
             path = "/api/mobile/v1/auth/challenge",
@@ -123,7 +129,9 @@ class HttpUrlConnectionTransportLoopbackServerTest {
 
     @Test
     fun testRealLoopbackRedirectNotFollowed() {
+        var serverRequestCount = 0
         server!!.createContext("/api/mobile/v1/companies/${validCompanyUlid.value}/bootstrap", HttpHandler { exchange ->
+            serverRequestCount++
             exchange.responseHeaders.set("Location", "http://127.0.0.1:9999/leaked")
             exchange.responseHeaders.set("Content-Type", "application/json")
             val bytes = "{\"redirect\":\"true\"}".toByteArray(StandardCharsets.UTF_8)
@@ -132,7 +140,7 @@ class HttpUrlConnectionTransportLoopbackServerTest {
             exchange.close()
         })
 
-        val transport = HttpUrlConnectionTransport(baseOrigin, allowHttpLoopback = true)
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
         val req = TransportRequest(
             method = HttpMethod.GET,
             path = "/api/mobile/v1/companies/${validCompanyUlid.value}/bootstrap",
@@ -148,6 +156,38 @@ class HttpUrlConnectionTransportLoopbackServerTest {
         assertEquals(302, response.statusCode)
         assertEquals("http://127.0.0.1:9999/leaked", response.headers["Location"])
         assertEquals("{\"redirect\":\"true\"}", response.body)
+        assertEquals(1, serverRequestCount)
+    }
+
+    @Test
+    fun testRealLoopback401ChallengeNoAutomaticAuthRetry() {
+        var serverRequestCount = 0
+        server!!.createContext("/api/mobile/v1/companies/${validCompanyUlid.value}/bootstrap", HttpHandler { exchange ->
+            serverRequestCount++
+            exchange.responseHeaders.set("WWW-Authenticate", "Basic realm=\"SmallTrader\"")
+            exchange.responseHeaders.set("Content-Type", "application/json")
+            val bytes = "{\"error\":{\"code\":\"UNAUTHORIZED\"}}".toByteArray(StandardCharsets.UTF_8)
+            exchange.sendResponseHeaders(401, bytes.size.toLong())
+            exchange.responseBody.write(bytes)
+            exchange.close()
+        })
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val req = TransportRequest(
+            method = HttpMethod.GET,
+            path = "/api/mobile/v1/companies/${validCompanyUlid.value}/bootstrap",
+            baseOrigin = baseOrigin,
+            headers = mapOf(
+                "Accept" to "application/json",
+                "Authorization" to "Bearer $validToken"
+            )
+        )
+
+        val response = transport.execute(req)
+        assertEquals(401, response.statusCode)
+        assertEquals("{\"error\":{\"code\":\"UNAUTHORIZED\"}}", response.body)
+        // Strictly only 1 request must be received by the server - zero automatic auth retries
+        assertEquals(1, serverRequestCount)
     }
 
     @Test
@@ -168,7 +208,7 @@ class HttpUrlConnectionTransportLoopbackServerTest {
             exchange.close()
         })
 
-        val transport = HttpUrlConnectionTransport(baseOrigin, allowHttpLoopback = true)
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
         val req = TransportRequest(
             method = HttpMethod.GET,
             path = "/api/mobile/v1/companies/${validCompanyUlid.value}/bootstrap",
@@ -183,6 +223,54 @@ class HttpUrlConnectionTransportLoopbackServerTest {
     }
 
     @Test
+    fun testRealLoopbackContentLengthOversizeRejected() {
+        server!!.createContext("/api/mobile/v1/companies/${validCompanyUlid.value}/bootstrap", HttpHandler { exchange ->
+            exchange.responseHeaders.set("Content-Length", (1024 * 1024 + 100).toString())
+            exchange.responseHeaders.set("Content-Type", "application/json")
+            exchange.sendResponseHeaders(200, 1024 * 1024 + 100)
+            exchange.close()
+        })
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val req = TransportRequest(
+            method = HttpMethod.GET,
+            path = "/api/mobile/v1/companies/${validCompanyUlid.value}/bootstrap",
+            baseOrigin = baseOrigin,
+            headers = mapOf("Accept" to "application/json")
+        )
+
+        val ex = assertThrows(HttpTransportException::class.java) {
+            transport.execute(req)
+        }
+        assertEquals(HttpTransportException.CATEGORY_PAYLOAD_TOO_LARGE, ex.category)
+    }
+
+    @Test
+    fun testRealLoopbackMalformedUtf8Rejected() {
+        server!!.createContext("/api/mobile/v1/companies/${validCompanyUlid.value}/bootstrap", HttpHandler { exchange ->
+            // Malformed UTF-8 sequence: 0xC0 0xAF (overlong ASCII slash)
+            val badBytes = byteArrayOf(0xC0.toByte(), 0xAF.toByte())
+            exchange.responseHeaders.set("Content-Type", "application/json")
+            exchange.sendResponseHeaders(200, badBytes.size.toLong())
+            exchange.responseBody.write(badBytes)
+            exchange.close()
+        })
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val req = TransportRequest(
+            method = HttpMethod.GET,
+            path = "/api/mobile/v1/companies/${validCompanyUlid.value}/bootstrap",
+            baseOrigin = baseOrigin,
+            headers = mapOf("Accept" to "application/json")
+        )
+
+        val ex = assertThrows(HttpTransportException::class.java) {
+            transport.execute(req)
+        }
+        assertEquals(HttpTransportException.CATEGORY_MALFORMED_UTF8, ex.category)
+    }
+
+    @Test
     fun testRealLoopbackErrorBodyRead() {
         val errorJson = "{\"error\":{\"code\":\"UNAUTHORIZED\",\"message\":\"Bearer token invalid\"}}"
         server!!.createContext("/api/mobile/v1/companies/${validCompanyUlid.value}/bootstrap", HttpHandler { exchange ->
@@ -193,7 +281,7 @@ class HttpUrlConnectionTransportLoopbackServerTest {
             exchange.close()
         })
 
-        val transport = HttpUrlConnectionTransport(baseOrigin, allowHttpLoopback = true)
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
         val req = TransportRequest(
             method = HttpMethod.GET,
             path = "/api/mobile/v1/companies/${validCompanyUlid.value}/bootstrap",
@@ -212,11 +300,11 @@ class HttpUrlConnectionTransportLoopbackServerTest {
     @Test
     fun testRealLoopbackEmpty401ResponseReturnsAuthoritativeStatusCode() {
         server!!.createContext("/api/mobile/v1/companies/${validCompanyUlid.value}/bootstrap", HttpHandler { exchange ->
-            exchange.sendResponseHeaders(401, -1) // No response body (content-length = -1 in HttpServer)
+            exchange.sendResponseHeaders(401, -1) // No response body
             exchange.close()
         })
 
-        val transport = HttpUrlConnectionTransport(baseOrigin, allowHttpLoopback = true)
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
         val req = TransportRequest(
             method = HttpMethod.GET,
             path = "/api/mobile/v1/companies/${validCompanyUlid.value}/bootstrap",
@@ -233,10 +321,9 @@ class HttpUrlConnectionTransportLoopbackServerTest {
     }
 
     @Test
-    fun testLoopbackAmbientCookieHandlerAndAuthenticatorPlatformEvidence() {
-        // Hermetic evidence demonstrating platform HttpURLConnection behavior when ambient handlers exist.
-        // Restores only test-owned state in finally.
+    fun testLoopbackAmbientCookieHandlerAuthenticatorAndResponseCacheIsolation() {
         val previousCookieHandler = CookieHandler.getDefault()
+        val previousResponseCache = ResponseCache.getDefault()
 
         var serverReceivedCookie: String? = null
         var serverReceivedAuth: String? = null
@@ -251,15 +338,43 @@ class HttpUrlConnectionTransportLoopbackServerTest {
             exchange.close()
         })
 
-        try {
-            CookieHandler.setDefault(object : CookieHandler() {
-                override fun get(uri: URI?, requestHeaders: Map<String, List<String>>?): Map<String, List<String>> {
-                    return mapOf("Cookie" to listOf("ambient_session=leak_test"))
-                }
-                override fun put(uri: URI?, responseHeaders: Map<String, List<String>>?) {}
-            })
+        val hostileCookieHandler = object : CookieHandler() {
+            var invoked = false
+            override fun get(uri: URI?, requestHeaders: Map<String, List<String>>?): Map<String, List<String>> {
+                invoked = true
+                return mapOf("Cookie" to listOf("ambient_session=hostile_leak_test"))
+            }
+            override fun put(uri: URI?, responseHeaders: Map<String, List<String>>?) {
+                invoked = true
+            }
+        }
 
-            val transport = HttpUrlConnectionTransport(baseOrigin, allowHttpLoopback = true)
+        val hostileAuthenticator = object : java.net.Authenticator() {
+            var invoked = false
+            override fun getPasswordAuthentication(): PasswordAuthentication {
+                invoked = true
+                return PasswordAuthentication("hostile_user", "hostile_pass".toCharArray())
+            }
+        }
+
+        val hostileResponseCache = object : ResponseCache() {
+            var invoked = false
+            override fun get(uri: URI?, rqstMethod: String?, rqstHeaders: Map<String, List<String>>?): CacheResponse? {
+                invoked = true
+                return null
+            }
+            override fun put(uri: URI?, conn: URLConnection?): CacheRequest? {
+                invoked = true
+                return null
+            }
+        }
+
+        try {
+            CookieHandler.setDefault(hostileCookieHandler)
+            java.net.Authenticator.setDefault(hostileAuthenticator)
+            ResponseCache.setDefault(hostileResponseCache)
+
+            val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
             val req = TransportRequest(
                 method = HttpMethod.GET,
                 path = "/api/mobile/v1/companies/${validCompanyUlid.value}/products",
@@ -272,16 +387,52 @@ class HttpUrlConnectionTransportLoopbackServerTest {
 
             val response = transport.execute(req)
             assertEquals(200, response.statusCode)
+            assertEquals("{\"data\":\"ok\"}", response.body)
 
-            // Evidence: HttpURLConnection platform implementation consults CookieHandler.getDefault()
-            // and appends ambient cookies over the wire. This proves that platform HttpURLConnection
-            // cannot provide per-instance cookie isolation without dedicated client (e.g. OkHttp)
-            // or without mutating process globals.
+            // Evidence of strict isolation:
+            // OkHttp's dedicated client uses CookieJar.NO_COOKIES, Authenticator.NONE, cache(null)
+            // and completely avoids consulting ambient JVM handlers.
+            assertFalse("Hostile CookieHandler must NEVER be invoked", hostileCookieHandler.invoked)
+            assertFalse("Hostile Authenticator must NEVER be invoked", hostileAuthenticator.invoked)
+            assertFalse("Hostile ResponseCache must NEVER be invoked", hostileResponseCache.invoked)
+            assertNull("Server must NOT receive any ambient Cookie header", serverReceivedCookie)
             assertEquals("Bearer $validToken", serverReceivedAuth)
-            assertEquals("ambient_session=leak_test", serverReceivedCookie)
         } finally {
             CookieHandler.setDefault(previousCookieHandler)
+            java.net.Authenticator.setDefault(null)
+            ResponseCache.setDefault(previousResponseCache)
         }
+    }
+
+    @Test
+    fun testCacheMissAcrossScopedRequests() {
+        var hits = 0
+        server!!.createContext("/api/mobile/v1/companies/${validCompanyUlid.value}/products", HttpHandler { exchange ->
+            hits++
+            val bytes = "{\"hit\":$hits}".toByteArray(StandardCharsets.UTF_8)
+            exchange.responseHeaders.set("Content-Type", "application/json")
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.write(bytes)
+            exchange.close()
+        })
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val req = TransportRequest(
+            method = HttpMethod.GET,
+            path = "/api/mobile/v1/companies/${validCompanyUlid.value}/products",
+            baseOrigin = baseOrigin,
+            headers = mapOf(
+                "Accept" to "application/json",
+                "Authorization" to "Bearer $validToken"
+            )
+        )
+
+        val res1 = transport.execute(req)
+        val res2 = transport.execute(req)
+
+        assertEquals("{\"hit\":1}", res1.body)
+        assertEquals("{\"hit\":2}", res2.body)
+        assertEquals(2, hits)
     }
 
     @Test
@@ -295,7 +446,7 @@ class HttpUrlConnectionTransportLoopbackServerTest {
             exchange.close()
         })
 
-        val transport = HttpUrlConnectionTransport(baseOrigin, allowHttpLoopback = true)
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
         val client = SmallTraderReadClient(transport, baseOrigin, allowHttpLoopback = true)
 
         val challengeResult = client.authChallenge(
