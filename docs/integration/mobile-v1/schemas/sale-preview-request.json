@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://contracts.smalltrader.app/mobile/v1/sale-preview-request.json",
   "title": "SalePreviewRequest",
+  "description": "Sale preview request schema for contract revision 3 with explicit line tax identity, mode, and packaging conversion snapshot.",
   "type": "object",
   "required": [
     "client_event_id",
@@ -42,9 +43,12 @@
         "required": [
           "product_id",
           "product_unit_id",
+          "conversion_to_base",
           "quantity",
           "unit_price",
-          "tax_rate"
+          "tax_rate_id",
+          "tax_rate",
+          "tax_inclusive"
         ],
         "properties": {
           "product_id": {
@@ -55,6 +59,10 @@
             "type": "string",
             "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
           },
+          "conversion_to_base": {
+            "type": "string",
+            "pattern": "^(?:0\\.(?=[0-9]{1,6}$)[0-9]*[1-9][0-9]*|[1-9][0-9]{0,13}(?:\\.[0-9]{1,6})?)$"
+          },
           "quantity": {
             "type": "string",
             "pattern": "^(?:0\\.(?=[0-9]{1,6}$)[0-9]*[1-9][0-9]*|[1-9][0-9]{0,13}(?:\\.[0-9]{1,6})?)$"
@@ -63,11 +71,39 @@
             "type": "string",
             "pattern": "^(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{1,6})?$"
           },
+          "tax_rate_id": {
+            "type": ["string", "null"],
+            "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+          },
           "tax_rate": {
             "type": "string",
             "pattern": "^(?:100(?:\\.0{1,6})?|(?:0|[1-9][0-9]?)(?:\\.[0-9]{1,6})?)$"
+          },
+          "tax_inclusive": {
+            "type": "boolean"
           }
         },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "tax_rate_id": {
+                  "type": "null"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "tax_rate": {
+                  "const": "0.000000"
+                },
+                "tax_inclusive": {
+                  "const": false
+                }
+              }
+            }
+          }
+        ],
         "additionalProperties": false
       }
     },
@@ -92,6 +128,47 @@
           "pattern": "^(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{1,6})?$"
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "settlement_mode": {
+                "const": "unpaid"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payment_method": {
+                "type": "null"
+              },
+              "cash_account_id": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "settlement_mode": {
+                "enum": ["full", "partial"]
+              }
+            }
+          },
+          "then": {
+            "required": ["payment_method", "cash_account_id"],
+            "properties": {
+              "payment_method": {
+                "const": "cash"
+              },
+              "cash_account_id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ],
       "additionalProperties": false
     }
   },
