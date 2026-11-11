@@ -211,4 +211,5 @@ data class OutboxRecord(
     val status: OutboxStatus get() = OutboxStatus.fromWireValue(deliveryState.status)
     val payloadDigest: String get() = event.payloadDigest
     val payloadBytes: ByteArray get() = event.payloadBytes.clone()
+    val eventVersion: Int get() = event.eventVersion
 }
