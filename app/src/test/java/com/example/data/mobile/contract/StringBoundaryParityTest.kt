@@ -39,4 +39,12 @@ class StringBoundaryParityTest {
         assertThrows(IllegalArgumentException::class.java) { MoneyAmount("1.00\n") }
         assertThrows(IllegalArgumentException::class.java) { PositiveDecimalQuantity("1\n") }
     }
+    @Test fun unicodeEscapesRequireFourUnsignedAsciiHexDigits() {
+        for (encoded in listOf("\\u+041", "\\u-041", "\\u00g1", "\\uD83D\\u+041")) {
+            assertThrows(CanonicalSerializationException::class.java) {
+                StrictJsonParser.parse("\"" + encoded + "\"")
+            }
+        }
+        assertEquals("A", StrictJsonParser.parse("\"\\u0041\"").asString())
+    }
 }
