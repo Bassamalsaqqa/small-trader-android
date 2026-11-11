@@ -22,7 +22,7 @@ Both online sale preview (`POST /sales/preview`) and offline intake (`POST /offl
 
 ### Explicit No-Tax vs. Catalog Null Tax Pair
 - Catalog `GET /products` returns `tax_rate: null, tax_rate_id: null` to signify *absence of a product default tax association*, NEVER zero tax or tax exemption. Mature products have no tax columns.
-- Explicit No-Tax selection in client UI transmits strictly: `tax_rate_id: null`, `tax_rate: "0.000000"`, `tax_inclusive: false`. Any other combination with `tax_rate_id: null` is rejected by schema and server validators.
+- Explicit No-Tax selection in client UI transmits strictly: `tax_rate_id: null`, `tax_rate: "0.000000"`, `tax_inclusive: false`. Any other combination with `tax_rate_id: null` is rejected by the proposed schema; corresponding server validation remains to be implemented.
 - Master Resolution: Non-null `tax_rate_id` resolves to an active tax rate master belonging to the authenticated company, comparing exact rate percentage and inclusive mode inside the posting transaction. Fails closed on mismatch; never guesses a tax master from a percentage alone.
 
 ### Currency Minor Units in Bootstrap
@@ -38,7 +38,7 @@ Calculations match `SalesLineCalculator.php` (ROUND_HALF_UP at minor units):
   - `line_total = 43.10 + 6.90 = 50.000000`
 
 ### Canonical Stale-Preview Behavior
-`SalesInvoiceCommands::computeDraftRevision` fingerprints default product and unit prices. Price modifications invalidate the preview token even for users holding `sales.invoice.change_price`. Stale preview returns `stale_preview` / `tax_snapshot_changed`; the client must request a fresh preview. No relaxed stale token rules, no silent refresh.
+`SalesInvoiceCommands::computePreviewRevision` fingerprints current product and unit default prices. Price modifications invalidate the preview token even for users holding `sales.invoice.change_price`. The proposed mobile adapter must expose stale-preview conflicts without treating existing internal blocker names as established HTTP guarantees; the client must request a fresh preview. No relaxed stale token rules, no silent refresh.
 
 ### Proposed Mobile Authority Boundary
 The write transaction revalidates the bearer token, device installation UUID binding, tenant company membership, password epoch, and required permissions. No fabricated browser session proofs.

@@ -172,7 +172,7 @@ Both online sale preview (`POST /sales/preview`) and offline event intake (`POST
 
 ### Explicit No-Tax vs. Catalog Null Tax Pair
 - **Catalog Null Pair**: In `GET /products`, `tax_rate: null, tax_rate_id: null` denotes the *absence of a product default tax association*, NEVER zero tax or tax exemption. Mature products have no tax foreign keys.
-- **Explicit No-Tax Selection**: When an operator explicitly selects "No Tax" in the client UI, the line transmits `tax_rate_id: null`, `tax_rate: "0.000000"`, `tax_inclusive: false`. Any combination of `tax_rate_id: null` with non-zero rate or inclusive mode is strictly rejected by schema and server validators.
+- **Explicit No-Tax Selection**: When an operator explicitly selects "No Tax" in the client UI, the line transmits `tax_rate_id: null`, `tax_rate: "0.000000"`, `tax_inclusive: false`. Any combination of `tax_rate_id: null` with non-zero rate or inclusive mode is strictly rejected by the proposed schema; corresponding server validation remains to be implemented.
 - **Server Master Resolution**: When `tax_rate_id` is non-null, the server resolves the public ULID to an active tax rate master within the authenticated company, revalidating exact percentage and tax mode under the database transaction. Fails closed on mismatch without repricing; never infers or guesses a master record by percentage alone.
 
 ### Currency Minor Units in Bootstrap
@@ -188,7 +188,7 @@ Calculations follow `SalesLineCalculator.php` (ROUND_HALF_UP at minor units):
   - `line_total = 43.10 + 6.90 = 50.000000`
 
 ### Canonical Stale-Preview Behavior
-`computeDraftRevision` in `SalesInvoiceCommands.php` fingerprints current product and unit default prices. Any subsequent price edit invalidates the preview token, even if the acting user holds the `sales.invoice.change_price` override permission. The mobile client must preserve this canonical behavior: stale previews fail closed (`stale_preview` / `tax_snapshot_changed`), requiring a fresh preview. No relaxed stale token rules, no silent refresh.
+`computePreviewRevision` in `SalesInvoiceCommands.php` fingerprints current product and unit default prices. Any subsequent price edit invalidates the preview token, even if the acting user holds the `sales.invoice.change_price` override permission. The mobile client must preserve this canonical behavior: stale previews fail closed, requiring a fresh preview. Existing internal blocker names are not established mobile HTTP guarantees. No relaxed stale token rules, no silent refresh.
 
 ### Proposed Mobile Authority Boundary
 The mobile write transaction must re-verify the active bearer token, device installation UUID binding, tenant company membership, password epoch, and required granular permissions (`sales.create`) within the transaction. Browser `CommandSessionGuard` requires browser database session proof; the mobile client must NOT fabricate browser session records.
