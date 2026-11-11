@@ -155,3 +155,52 @@ Product tax_rate and tax_rate_id form a nullable pair. Null means NO PRODUCT DEF
 ### Restricted parser boundary clarification
 
 Raw JSON payload limit is 1 MiB of UTF-8 bytes. Each decoded JSON string is bounded at 65536 UTF-16 code units, checked after appending a full escaped surrogate pair. Unicode hex escapes accept unsigned ASCII hex digits only; unescaped controls are rejected. Integers must be within the exact safe integer domain [-9007199254740991,9007199254740991], consistently for parsed and raw values. Economic decimal input lexemes are preserved without trimming or rounding; floats are forbidden. Economic bounded-string validation must require a full match (a trailing newline must not pass a dollar-anchor check). These clarify parser requirements, not a change to immutable financial fields or digest vectors.
+
+## Coordinated DRAFT revision 3 (financial contract, line tax amendment, event v2, currency minor units)
+
+This explicit revision introduces proposed contract revision 3 for financial line tax identity, mode, and conversion snapshots, offline event version 2, and currency minor units metadata. Historical baseline is Git `ec8220934839ade0c4fe5408398ab1a313feb09c`, revision 2 manifest SHA-256 `ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659` (preserved unchanged as parent reference). Status: **PROPOSED NOT LIVE**. API prefix remains frozen at `/api/mobile/v1`.
+
+### Distinction Between Contract Revision and Event Version
+Contract revision (Revision 3) and offline event version (`event_version: 2`) are strictly distinct concepts. Contract revision tracks the evolution of the overall mobile API specification and schemas (ADR-0001, OpenAPI 3.1, JSON schemas). Event version tracks the wire representation of the offline event payload. Offline event version 1 is archived; new capture requires event version 2.
+
+### Financial Line Schema Amendment
+Both online sale preview (`POST /sales/preview`) and offline event intake (`POST /offline-events`) lines are amended with explicit economic fields:
+1. `tax_rate_id`: Public nullable 26-character Crockford ULID (`^[0-7][0-9A-HJKMNP-TV-Z]{25}$`).
+2. `tax_rate`: Exact percentage snapshot string (`0..100`, up to 6 decimal places: `^(?:100(?:\.0{1,6})?|(?:0|[1-9][0-9]?)(?:\.[0-9]{1,6})?)$`).
+3. `tax_inclusive`: Boolean flag (`true` for gross inclusive tax calculation, `false` for net exclusive tax calculation).
+4. `conversion_to_base`: Positive exact decimal string (`^(?:0\.(?=[0-9]{1,6}$)[0-9]*[1-9][0-9]*|[1-9][0-9]{0,13}(?:\.[0-9]{1,6})?)$`) matching the catalog packaging unit conversion multiplier.
+
+### Explicit No-Tax vs. Catalog Null Tax Pair
+- **Catalog Null Pair**: In `GET /products`, `tax_rate: null, tax_rate_id: null` denotes the *absence of a product default tax association*, NEVER zero tax or tax exemption. Mature products have no tax foreign keys.
+- **Explicit No-Tax Selection**: When an operator explicitly selects "No Tax" in the client UI, the line transmits `tax_rate_id: null`, `tax_rate: "0.000000"`, `tax_inclusive: false`. Any combination of `tax_rate_id: null` with non-zero rate or inclusive mode is strictly rejected by schema and server validators.
+- **Server Master Resolution**: When `tax_rate_id` is non-null, the server resolves the public ULID to an active tax rate master within the authenticated company, revalidating exact percentage and tax mode under the database transaction. Fails closed on mismatch without repricing; never infers or guesses a master record by percentage alone.
+
+### Currency Minor Units in Bootstrap
+The bootstrap response (`GET /bootstrap`) includes `base_currency_minor_units` (integer `0..6`).
+- **Source Anchor & Qualification Requirement**: Backend `SalesDocumentRules::price` (`app/Services/Sales/SalesDocumentRules.php`) currently hardcodes `$currency === 'JOD' ? 3 : 2`. Client metadata parity requires qualifying all server financial writers to read `currencies.minor_units` before relying on dynamic currency decimals. No guessing currency metadata.
+
+### Canonical Tax Calculation Parity
+Calculations follow `SalesLineCalculator.php` (ROUND_HALF_UP at minor units):
+- ILS gross 50.000000, 16% inclusive, 2 minor units:
+  - `subtotal = 50.000000`
+  - `net_before_tax = round(50.00 / 1.16, 2) = 43.100000`
+  - `tax_amount = 50.00 - 43.10 = 6.900000` (NOT unrounded floating `6.896552`)
+  - `line_total = 43.10 + 6.90 = 50.000000`
+
+### Canonical Stale-Preview Behavior
+`computeDraftRevision` in `SalesInvoiceCommands.php` fingerprints current product and unit default prices. Any subsequent price edit invalidates the preview token, even if the acting user holds the `sales.invoice.change_price` override permission. The mobile client must preserve this canonical behavior: stale previews fail closed (`stale_preview` / `tax_snapshot_changed`), requiring a fresh preview. No relaxed stale token rules, no silent refresh.
+
+### Proposed Mobile Authority Boundary
+The mobile write transaction must re-verify the active bearer token, device installation UUID binding, tenant company membership, password epoch, and required granular permissions (`sales.create`) within the transaction. Browser `CommandSessionGuard` requires browser database session proof; the mobile client must NOT fabricate browser session records.
+
+### Immutable Durable Receipt & Idempotent Replay
+- Dedicated receipt table scoped with `UNIQUE(company_id, client_event_id)` bound to original `(actor_id, device_id)`.
+- Replay with identical payload bytes and digest returns the original durable outcome (`invoice_id`, `payment_id`, `invoice_number`, `grand_total`).
+- Altered payload bytes or digest under an existing `client_event_id` returns HTTP 409 Conflict.
+- High-concurrency unique insert and row-locking behavior requires qualification against real MariaDB test suites; schema fixtures assert contract consistency only.
+
+### Legacy v1 Unsupported Intake Mapping
+The v2 intake endpoint accepts only `event_version: 2`. Pre-existing offline events with `event_version: 1` encountering the endpoint receive HTTP 409 Conflict with detail `unsupported_event_version_1`. The client Room outbox transitions to `CONFLICT` state while preserving the original `payload_bytes`, `client_event_id`, and `payload_digest` without mutation.
+
+### Offline Policy Default
+Default offline policy remains strictly disabled (`enabled: false, availability: "unavailable"`) with null `device_lease`. No operational caps or numeric lease limits are authorized without explicit business approval.

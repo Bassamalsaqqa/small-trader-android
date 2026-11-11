@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Small Trader Mobile API v1",
-    "version": "1.0.0-draft.2",
-    "description": "PROPOSED NOT LIVE: Native REST API specification for Small Trader Android client integration with Laravel backend (account baseline f8a0cf7012c4875bec7320d42e0f8dde58593b52, Android baseline 79c9bb348f7ad4840842aa077f1820f75745d2a0). Coordinated DRAFT contract revision 2; read/MFA/bootstrap amendments only. Financial protocol remains incomplete and not release-ready."
+    "version": "1.0.0-draft.3",
+    "description": "PROPOSED NOT LIVE: Native REST API specification for Small Trader Android client integration with Laravel backend (account baseline f8a0cf7012c4875bec7320d42e0f8dde58593b52, Android baseline 79c9bb348f7ad4840842aa077f1820f75745d2a0). Coordinated DRAFT contract revision 3; financial line schema amendment (public nullable tax_rate_id ULID, exact tax_rate snapshot, tax_inclusive bool, conversion_to_base snapshot), offline event_version 2 intake, and base_currency_minor_units in bootstrap. PROPOSED NOT LIVE."
   },
   "servers": [
     {
