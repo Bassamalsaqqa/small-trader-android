@@ -242,4 +242,162 @@ class ReadClientRevision2BoundariesTest {
         // ULID rejected as ClientUuid
         assertFalse(ClientUuid.isValid("01JCV8X9M8T1V2W3X4Y5Z67890"))
     }
+
+    @Test
+    fun testMissingRequiredNullablePropertiesRejected() {
+        // 1. Missing next_cursor in CustomerDirectoryResponse (missing != null)
+        val missingCursorCustomerJson = """
+            {
+              "company_id": "01JCV8X9M2NQW3TYZ4R5S6789A",
+              "generated_at": "2026-11-10T12:00:00Z",
+              "has_more": false,
+              "customers": []
+            }
+        """.trimIndent()
+        assertThrows(CanonicalSerializationException::class.java) {
+            CustomerDirectoryResponse.fromStrictJson(StrictJsonParser.parse(missingCursorCustomerJson).asObject())
+        }
+
+        // 2. Missing next_cursor in ProductCatalogResponse
+        val missingCursorProductJson = """
+            {
+              "company_id": "01JCV8X9M2NQW3TYZ4R5S6789A",
+              "catalog_snapshot_version": "snap-1",
+              "generated_at": "2026-11-10T12:00:00Z",
+              "has_more": false,
+              "products": []
+            }
+        """.trimIndent()
+        assertThrows(CanonicalSerializationException::class.java) {
+            ProductCatalogResponse.fromStrictJson(StrictJsonParser.parse(missingCursorProductJson).asObject())
+        }
+
+        // 3. Missing tax_rate or tax_rate_id in ProductCatalogItem (missing != null)
+        val missingTaxRateJson = """
+            {
+              "id": "01JCV8X9M6A1B2C3D4E5F6G7H8",
+              "sku": "SKU-TEST",
+              "name": "Test Item",
+              "unit_price": "25.000000",
+              "tax_rate_id": null,
+              "is_tracked": true,
+              "available_quantity": "10.000000",
+              "base_unit": { "id": "01JCV8X9MBV4W5X6Y7Z8012345", "code": "PCS", "name": "Piece" },
+              "default_unit": { "unit_id": "01JCV8X9MBV4W5X6Y7Z8012345", "product_unit_id": "01JCV8X9MBV4W5X6Y7Z8012345", "conversion_to_base": "1.000000", "sale_price": "25.000000" },
+              "units": []
+            }
+        """.trimIndent()
+        assertThrows(CanonicalSerializationException::class.java) {
+            ProductCatalogItem.fromStrictJson(StrictJsonParser.parse(missingTaxRateJson).asObject())
+        }
+
+        // 4. Missing sale_price in ProductDefaultUnit
+        val missingSalePriceUnitJson = """
+            {
+              "unit_id": "01JCV8X9MBV4W5X6Y7Z8012345",
+              "product_unit_id": "01JCV8X9MBV4W5X6Y7Z8012345",
+              "conversion_to_base": "1.000000"
+            }
+        """.trimIndent()
+        assertThrows(CanonicalSerializationException::class.java) {
+            ProductDefaultUnit.fromStrictJson(StrictJsonParser.parse(missingSalePriceUnitJson).asObject())
+        }
+
+        // 5. Missing device_lease in BootstrapResponse
+        val fixturesDir = locateFixturesDir()
+        val goldenBootstrap = File(fixturesDir, "golden-bootstrap.json")
+        val bootObj = StrictJsonParser.parse(goldenBootstrap.readText(Charsets.UTF_8)).asObject()
+        val missingLeaseProps = LinkedHashMap(bootObj.properties)
+        missingLeaseProps.remove("device_lease")
+        assertThrows(CanonicalSerializationException::class.java) {
+            BootstrapResponse.fromStrictJson(com.example.data.mobile.contract.StrictJsonObject(missingLeaseProps))
+        }
+    }
+
+    @Test
+    fun testErrorResponseDetailsTypeConstraints() {
+        // Invalid: number in details
+        val numberDetailsJson = """
+            {
+              "error": {
+                "code": "INVALID_STATE",
+                "message": "Error occurred",
+                "details": 42
+              }
+            }
+        """.trimIndent()
+        assertThrows(CanonicalSerializationException::class.java) {
+            ReadClientErrorResponse.fromStrictJson(StrictJsonParser.parse(numberDetailsJson).asObject())
+        }
+
+        // Invalid: boolean in details
+        val booleanDetailsJson = """
+            {
+              "error": {
+                "code": "INVALID_STATE",
+                "message": "Error occurred",
+                "details": true
+              }
+            }
+        """.trimIndent()
+        assertThrows(CanonicalSerializationException::class.java) {
+            ReadClientErrorResponse.fromStrictJson(StrictJsonParser.parse(booleanDetailsJson).asObject())
+        }
+
+        // Valid: string in details
+        val stringDetailsJson = """
+            {
+              "error": {
+                "code": "INVALID_STATE",
+                "message": "Error occurred",
+                "details": "Additional explanation"
+              }
+            }
+        """.trimIndent()
+        val err = ReadClientErrorResponse.fromStrictJson(StrictJsonParser.parse(stringDetailsJson).asObject())
+        assertEquals("INVALID_STATE", err.code)
+    }
+
+    @Test
+    fun testDirectConstructorAndCopyInvariants() {
+        // ProductDefaultUnit invariants
+        assertThrows(IllegalArgumentException::class.java) {
+            ProductDefaultUnit(
+                unitId = ServerUlid.parse("01JCV8X9MBV4W5X6Y7Z8012345"),
+                productUnitId = ServerUlid.parse("01JCV8X9MBV4W5X6Y7Z8012345"),
+                conversionToBase = com.example.data.mobile.contract.PositiveDecimalQuantity("1.000000"),
+                salePrice = com.example.data.mobile.contract.MoneyAmount(java.math.BigDecimal("-1.00"))
+            )
+        }
+
+        // ReadClientErrorResponse invariants
+        assertThrows(IllegalArgumentException::class.java) {
+            ReadClientErrorResponse(code = "", message = "Something happened")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ReadClientErrorResponse(code = "CODE", message = "")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ReadClientErrorResponse(
+                code = "CODE",
+                message = "Message",
+                details = com.example.data.mobile.contract.StrictJsonNumber("123", true)
+            )
+        }
+    }
+
+    @Test
+    fun testAuthLoginMfaOneOfMixedBranchesRejected() {
+        // Mixed branches: status/retry mixed with token
+        val mixedJson = """
+            {
+              "status": "MFA_REQUIRED",
+              "retry": "fresh_challenge",
+              "token": "sanctum_1092837465_mobile_token_982347109238471092384710"
+            }
+        """.trimIndent()
+        assertThrows(CanonicalSerializationException::class.java) {
+            AuthLoginResult.fromStrictJson(StrictJsonParser.parse(mixedJson).asObject())
+        }
+    }
 }

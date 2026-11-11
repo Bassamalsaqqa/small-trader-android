@@ -312,7 +312,8 @@ class SmallTraderReadClientWorkflowTest {
 
         assertTrue("Expected ParseFailure, got $result", result is ReadClientResult.ParseFailure)
         val pf = result as ReadClientResult.ParseFailure
-        assertTrue(pf.message.contains("Unexpected fields"))
+        assertEquals("PARSE_ERROR", pf.category)
+        assertFalse("Raw exception message must not leak in toString()", pf.toString().contains("unexpected_injected_field"))
     }
 
     @Test
@@ -325,6 +326,170 @@ class SmallTraderReadClientWorkflowTest {
 
         assertTrue("Expected NetworkUnknown, got $result", result is ReadClientResult.NetworkUnknown)
         val nu = result as ReadClientResult.NetworkUnknown
-        assertTrue(nu.message.contains("Connection refused by peer"))
+        assertEquals("NETWORK_ERROR", nu.category)
+        assertFalse("Raw exception message must not leak in toString()", nu.toString().contains("Connection refused by peer"))
+    }
+
+    @Test
+    fun testCompanyIdMismatchRejectedOnBootstrap() {
+        val foreignCompanyId = ServerUlid.parse("01JCV8X9M8T1V2W3X4Y5Z67890")
+        val golden = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val transport = MockTransport()
+        transport.responseToReturn = TransportResponse(statusCode = 200, body = golden)
+
+        val client = SmallTraderReadClient(transport, baseOrigin)
+        // Request for foreignCompanyId but response contains dummyCompanyId (Al-Amal)
+        val result = client.getBootstrap(dummyToken, foreignCompanyId)
+
+        assertTrue("Expected ParseFailure on company_id mismatch, got $result", result is ReadClientResult.ParseFailure)
+        val pf = result as ReadClientResult.ParseFailure
+        assertEquals("PARSE_ERROR", pf.category)
+    }
+
+    @Test
+    fun testCompanyIdMismatchRejectedOnProducts() {
+        val foreignCompanyId = ServerUlid.parse("01JCV8X9M8T1V2W3X4Y5Z67890")
+        val golden = File(fixturesDir, "golden-product-catalog.json").readText(Charsets.UTF_8)
+        val transport = MockTransport()
+        transport.responseToReturn = TransportResponse(statusCode = 200, body = golden)
+
+        val client = SmallTraderReadClient(transport, baseOrigin)
+        val result = client.getProducts(dummyToken, foreignCompanyId)
+
+        assertTrue("Expected ParseFailure on products company_id mismatch, got $result", result is ReadClientResult.ParseFailure)
+    }
+
+    @Test
+    fun testCompanyIdMismatchRejectedOnCustomers() {
+        val foreignCompanyId = ServerUlid.parse("01JCV8X9M8T1V2W3X4Y5Z67890")
+        val golden = File(fixturesDir, "golden-customer-directory.json").readText(Charsets.UTF_8)
+        val transport = MockTransport()
+        transport.responseToReturn = TransportResponse(statusCode = 200, body = golden)
+
+        val client = SmallTraderReadClient(transport, baseOrigin)
+        val result = client.getCustomers(dummyToken, foreignCompanyId)
+
+        assertTrue("Expected ParseFailure on customers company_id mismatch, got $result", result is ReadClientResult.ParseFailure)
+    }
+
+    @Test
+    fun testLoginActorEmailMismatchRejected() {
+        val golden = File(fixturesDir, "golden-auth-login.json").readText(Charsets.UTF_8)
+        val goldenRes = StrictJsonParser.parse(golden).asObject().require("response")
+        val transport = MockTransport()
+        transport.responseToReturn = TransportResponse(
+            statusCode = 200,
+            body = com.example.data.mobile.contract.CanonicalJsonSerializer.serialize(goldenRes)
+        )
+
+        val client = SmallTraderReadClient(transport, baseOrigin)
+        val request = AuthLoginRequest(
+            challengeId = ClientUuid.parse("a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"),
+            nonce = "9f834928abceef761234509876abcdef1234567890abcdef1234567890abcdef",
+            deviceId = ClientUuid.parse("8e2b8bc6-f80c-4034-8c88-59368d1f2e10"),
+            deviceName = "Tablet A",
+            email = "different.user@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!"
+        )
+        val result = client.authLogin(request)
+
+        assertTrue("Actor email mismatch must yield ParseFailure", result is ReadClientResult.ParseFailure)
+    }
+
+    @Test
+    fun testLoginActorEmailCaseInsensitiveMatchAccepted() {
+        val golden = File(fixturesDir, "golden-auth-login.json").readText(Charsets.UTF_8)
+        val goldenRes = StrictJsonParser.parse(golden).asObject().require("response")
+        val transport = MockTransport()
+        transport.responseToReturn = TransportResponse(
+            statusCode = 200,
+            body = com.example.data.mobile.contract.CanonicalJsonSerializer.serialize(goldenRes)
+        )
+
+        val client = SmallTraderReadClient(transport, baseOrigin)
+        val request = AuthLoginRequest(
+            challengeId = ClientUuid.parse("a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"),
+            nonce = "9f834928abceef761234509876abcdef1234567890abcdef1234567890abcdef",
+            deviceId = ClientUuid.parse("8e2b8bc6-f80c-4034-8c88-59368d1f2e10"),
+            deviceName = "Tablet A",
+            email = "CASHIER@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!"
+        )
+        val result = client.authLogin(request)
+
+        assertTrue("Case-insensitive email match must succeed", result is ReadClientResult.Success)
+    }
+
+    @Test
+    fun testHostileTransportExceptionNoSecretLeak() {
+        val transport = MockTransport()
+        transport.exceptionToThrow = IOException("Hostile leak: password=SuperSecretSecret123! token=sanctum_secret_token_abc")
+
+        val client = SmallTraderReadClient(transport, baseOrigin)
+        val result = client.getBootstrap(dummyToken, dummyCompanyId)
+
+        assertTrue(result is ReadClientResult.NetworkUnknown)
+        val nu = result as ReadClientResult.NetworkUnknown
+        assertEquals("NETWORK_ERROR", nu.category)
+        assertFalse("Must not leak password", nu.toString().contains("SuperSecretSecret123!"))
+        assertFalse("Must not leak token", nu.toString().contains("sanctum_secret_token_abc"))
+        assertFalse("Must not expose raw exception message", nu.toString().contains("Hostile leak"))
+    }
+
+    @Test
+    fun testMalformedLoginSecretBodyNoSecretLeak() {
+        val transport = MockTransport()
+        transport.responseToReturn = TransportResponse(
+            statusCode = 200,
+            body = "{\"status\": 42, \"password\": \"SuperSecretSecret123!\""
+        )
+
+        val client = SmallTraderReadClient(transport, baseOrigin)
+        val request = AuthLoginRequest(
+            challengeId = ClientUuid.parse("a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"),
+            nonce = "9f834928abceef761234509876abcdef1234567890abcdef1234567890abcdef",
+            deviceId = ClientUuid.parse("8e2b8bc6-f80c-4034-8c88-59368d1f2e10"),
+            deviceName = "Tablet A",
+            email = "cashier@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!"
+        )
+        val result = client.authLogin(request)
+
+        assertTrue(result is ReadClientResult.ParseFailure)
+        val pf = result as ReadClientResult.ParseFailure
+        assertEquals("PARSE_ERROR", pf.category)
+        assertFalse("Must not leak secret in toString", pf.toString().contains("SuperSecretSecret123!"))
+    }
+
+    @Test
+    fun testUnexpected201And204NotParsedAsSuccess() {
+        val transport = MockTransport()
+        transport.responseToReturn = TransportResponse(statusCode = 201, body = "{}")
+
+        val client = SmallTraderReadClient(transport, baseOrigin)
+        val res201 = client.getBootstrap(dummyToken, dummyCompanyId)
+        assertTrue("Unexpected 201 must yield HttpError, got $res201", res201 is ReadClientResult.HttpError)
+        assertEquals(201, (res201 as ReadClientResult.HttpError).statusCode)
+
+        transport.responseToReturn = TransportResponse(statusCode = 204, body = "")
+        val res204 = client.getBootstrap(dummyToken, dummyCompanyId)
+        assertTrue("Unexpected 204 must yield HttpError, got $res204", res204 is ReadClientResult.HttpError)
+        assertEquals(204, (res204 as ReadClientResult.HttpError).statusCode)
+    }
+
+    @Test
+    fun testDispatchedRequestCarriesOriginAndValidatesMethodPath() {
+        val transport = MockTransport()
+        val golden = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        transport.responseToReturn = TransportResponse(statusCode = 200, body = golden)
+
+        val client = SmallTraderReadClient(transport, baseOrigin)
+        client.getBootstrap(dummyToken, dummyCompanyId)
+
+        val req = transport.lastRequest
+        assertNotNull(req)
+        assertEquals("https://api.smalltrader.example", req?.baseOrigin)
+        assertEquals(HttpMethod.GET, req?.method)
+        assertEquals("/api/mobile/v1/companies/${dummyCompanyId.value}/bootstrap", req?.path)
     }
 }

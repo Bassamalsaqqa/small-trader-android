@@ -71,6 +71,27 @@ internal object ValidationUtils {
         }
     }
 
+    fun validateToken(token: String, fieldName: String = "token") {
+        if (token.length < 20) {
+            throw CanonicalSerializationException(
+                "$fieldName length must be at least 20 characters, got ${token.length}"
+            )
+        }
+        if (token.length > 2048) {
+            throw CanonicalSerializationException(
+                "$fieldName length exceeds maximum allowed 2048 characters, got ${token.length}"
+            )
+        }
+        for (i in token.indices) {
+            val c = token[i]
+            if (c <= ' ' || c > '~') {
+                throw CanonicalSerializationException(
+                    "Invalid $fieldName: token must not contain whitespace, CRLF, or control characters"
+                )
+            }
+        }
+    }
+
     fun validateStringBounds(value: String, fieldName: String, minLength: Int = 1, maxLength: Int) {
         if (value.length < minLength) {
             throw CanonicalSerializationException(
@@ -101,6 +122,18 @@ internal object ValidationUtils {
 
     fun optionalString(obj: StrictJsonObject, key: String, minLength: Int = 1, maxLength: Int = 255): String? {
         val element = obj.properties[key] ?: return null
+        if (element is StrictJsonNull) return null
+        val s = (element as? StrictJsonString)?.value
+            ?: throw CanonicalSerializationException("Property '$key' must be a JSON string or null, got ${element::class.simpleName}")
+        validateStringBounds(s, key, minLength, maxLength)
+        return s
+    }
+
+    fun requireNullableString(obj: StrictJsonObject, key: String, minLength: Int = 1, maxLength: Int = 255): String? {
+        if (!obj.properties.containsKey(key)) {
+            throw CanonicalSerializationException("Missing required property '$key'")
+        }
+        val element = obj.properties[key]!!
         if (element is StrictJsonNull) return null
         val s = (element as? StrictJsonString)?.value
             ?: throw CanonicalSerializationException("Property '$key' must be a JSON string or null, got ${element::class.simpleName}")
@@ -172,6 +205,20 @@ internal object ValidationUtils {
         return ServerUlid.parse(s)
     }
 
+    fun requireNullableUlid(obj: StrictJsonObject, key: String): ServerUlid? {
+        if (!obj.properties.containsKey(key)) {
+            throw CanonicalSerializationException("Missing required property '$key'")
+        }
+        val element = obj.properties[key]!!
+        if (element is StrictJsonNull) return null
+        val s = (element as? StrictJsonString)?.value
+            ?: throw CanonicalSerializationException("Property '$key' must be a ULID string or null, got ${element::class.simpleName}")
+        if (!ServerUlid.isValid(s)) {
+            throw CanonicalSerializationException("Property '$key' must be a valid 26-char Crockford ULID or null, got '$s'")
+        }
+        return ServerUlid.parse(s)
+    }
+
     fun requireUuid(obj: StrictJsonObject, key: String): ClientUuid {
         val s = requireString(obj, key, minLength = 36, maxLength = 36)
         if (!ClientUuid.isValid(s)) {
@@ -231,6 +278,20 @@ internal object ValidationUtils {
         return MoneyAmount.fromNonnegativeString(s)
     }
 
+    fun requireNullableMoney(obj: StrictJsonObject, key: String): MoneyAmount? {
+        if (!obj.properties.containsKey(key)) {
+            throw CanonicalSerializationException("Missing required property '$key'")
+        }
+        val element = obj.properties[key]!!
+        if (element is StrictJsonNull) return null
+        val s = (element as? StrictJsonString)?.value
+            ?: throw CanonicalSerializationException("Money property '$key' must be a string decimal or null, got ${element::class.simpleName}")
+        if (!ContractConstants.NONNEGATIVE_DECIMAL_REGEX.matches(s)) {
+            throw CanonicalSerializationException("Money property '$key' has invalid decimal lexeme: '$s'")
+        }
+        return MoneyAmount.fromNonnegativeString(s)
+    }
+
     fun requireTaxPercentage(obj: StrictJsonObject, key: String): TaxPercentage {
         val element = obj.require(key)
         val s = (element as? StrictJsonString)?.value
@@ -243,6 +304,20 @@ internal object ValidationUtils {
 
     fun optionalTaxPercentage(obj: StrictJsonObject, key: String): TaxPercentage? {
         val element = obj.properties[key] ?: return null
+        if (element is StrictJsonNull) return null
+        val s = (element as? StrictJsonString)?.value
+            ?: throw CanonicalSerializationException("Tax rate property '$key' must be a string decimal or null, got ${element::class.simpleName}")
+        if (!ContractConstants.TAX_PERCENTAGE_REGEX.matches(s)) {
+            throw CanonicalSerializationException("Tax rate property '$key' has invalid tax percentage format: '$s'")
+        }
+        return TaxPercentage.fromString(s)
+    }
+
+    fun requireNullableTaxPercentage(obj: StrictJsonObject, key: String): TaxPercentage? {
+        if (!obj.properties.containsKey(key)) {
+            throw CanonicalSerializationException("Missing required property '$key'")
+        }
+        val element = obj.properties[key]!!
         if (element is StrictJsonNull) return null
         val s = (element as? StrictJsonString)?.value
             ?: throw CanonicalSerializationException("Tax rate property '$key' must be a string decimal or null, got ${element::class.simpleName}")

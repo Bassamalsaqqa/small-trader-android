@@ -3,12 +3,13 @@ package com.example.data.mobile.readclient
 import com.example.data.mobile.contract.CanonicalSerializationException
 import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.PayloadDigest
+import com.example.data.mobile.contract.StrictJsonArray
 import com.example.data.mobile.contract.StrictJsonElement
 import com.example.data.mobile.contract.StrictJsonNull
 import com.example.data.mobile.contract.StrictJsonObject
+import com.example.data.mobile.contract.StrictJsonString
 import com.example.data.mobile.readclient.ValidationUtils.checkAllowedKeys
 import com.example.data.mobile.readclient.ValidationUtils.optionalString
-import com.example.data.mobile.readclient.ValidationUtils.optionalUlid
 import com.example.data.mobile.readclient.ValidationUtils.optionalUuid
 import com.example.data.mobile.readclient.ValidationUtils.requireObject
 import com.example.data.mobile.readclient.ValidationUtils.requireString
@@ -25,6 +26,9 @@ data class ConflictEvidence(
             validateDateTime(conflictDetectedAt, "conflict_detected_at")
         }
     }
+
+    override fun toString(): String =
+        "ConflictEvidence(clientEventId=$clientEventId, storedPayloadDigest=$storedPayloadDigest, incomingPayloadDigest=$incomingPayloadDigest, conflictDetectedAt='$conflictDetectedAt')"
 
     companion object {
         private val ALLOWED_KEYS = setOf(
@@ -51,6 +55,7 @@ data class ConflictEvidence(
 /**
  * RFC 7807/9457 Problem Details conforming error response from the Mobile V1 API.
  * Never stores or serializes sensitive credentials or tokens.
+ * Enforces bounded shape and redacts raw server message and details in toString().
  */
 data class ReadClientErrorResponse(
     val code: String,
@@ -58,9 +63,27 @@ data class ReadClientErrorResponse(
     val details: StrictJsonElement? = null,
     val conflictEvidence: ConflictEvidence? = null
 ) {
+    init {
+        require(code.isNotEmpty()) { "error.code must not be empty" }
+        require(message.isNotEmpty()) { "error.message must not be empty" }
+        if (details != null) {
+            require(details is StrictJsonObject || details is StrictJsonArray || details is StrictJsonString || details is StrictJsonNull) {
+                "details must be object, array, string, or null, got ${details::class.simpleName}"
+            }
+        }
+    }
+
+    override fun toString(): String {
+        val safeCode = if (SAFE_CODE_REGEX.matches(code)) code else "[UNTRUSTED_CODE]"
+        val hasDetails = details != null && details !is StrictJsonNull
+        val hasEvidence = conflictEvidence != null
+        return "ReadClientErrorResponse(code='$safeCode', message='[REDACTED]', details=${if (hasDetails) "[REDACTED]" else "null"}, conflictEvidence=${if (hasEvidence) "[REDACTED]" else "null"})"
+    }
+
     companion object {
         private val ROOT_ALLOWED_KEYS = setOf("error")
         private val ERROR_ALLOWED_KEYS = setOf("code", "message", "details", "conflict_evidence")
+        private val SAFE_CODE_REGEX = Regex("^[A-Z0-9_]{1,64}$")
 
         fun fromStrictJson(rootObj: StrictJsonObject): ReadClientErrorResponse {
             checkAllowedKeys(rootObj, ROOT_ALLOWED_KEYS, "ErrorResponse")
@@ -69,7 +92,17 @@ data class ReadClientErrorResponse(
 
             val code = requireString(errObj, "code", minLength = 1, maxLength = 255)
             val message = requireString(errObj, "message", minLength = 1, maxLength = 2048)
-            val detailsElement = errObj.properties["details"]?.takeIf { it !is StrictJsonNull }
+
+            val detailsElement = if (errObj.properties.containsKey("details")) {
+                val elem = errObj.properties["details"]!!
+                when (elem) {
+                    is StrictJsonNull -> null
+                    is StrictJsonObject, is StrictJsonArray, is StrictJsonString -> elem
+                    else -> throw CanonicalSerializationException("details must be an object, array, string, or null, got ${elem::class.simpleName}")
+                }
+            } else {
+                null
+            }
 
             val conflictEvidence = errObj.properties["conflict_evidence"]?.let { element ->
                 if (element is StrictJsonNull) null
@@ -90,13 +123,40 @@ data class ReadClientErrorResponse(
 /**
  * Exhaustive typed outcomes for Mobile V1 read client calls.
  * Callers use Auth401 specifically for queue lock handling (QUEUE_LOCKED_AUTH_DENIED).
+ * ParseFailure and NetworkUnknown retain only safe fixed failure categories with NO accessible unsanitized causes.
  */
 sealed class ReadClientResult<out T> {
-    data class Success<out T>(val value: T) : ReadClientResult<T>()
-    data class Auth401(val error: ReadClientErrorResponse) : ReadClientResult<Nothing>()
-    data class Forbidden403(val error: ReadClientErrorResponse) : ReadClientResult<Nothing>()
-    data class Conflict409(val error: ReadClientErrorResponse) : ReadClientResult<Nothing>()
-    data class HttpError(val statusCode: Int, val error: ReadClientErrorResponse?) : ReadClientResult<Nothing>()
-    data class ParseFailure(val message: String, val cause: Throwable? = null) : ReadClientResult<Nothing>()
-    data class NetworkUnknown(val message: String, val cause: Throwable? = null) : ReadClientResult<Nothing>()
+    data class Success<out T>(val value: T) : ReadClientResult<T>() {
+        override fun toString(): String = "ReadClientResult.Success(value=$value)"
+    }
+
+    data class Auth401(val error: ReadClientErrorResponse) : ReadClientResult<Nothing>() {
+        override fun toString(): String = "ReadClientResult.Auth401(error=$error)"
+    }
+
+    data class Forbidden403(val error: ReadClientErrorResponse) : ReadClientResult<Nothing>() {
+        override fun toString(): String = "ReadClientResult.Forbidden403(error=$error)"
+    }
+
+    data class Conflict409(val error: ReadClientErrorResponse) : ReadClientResult<Nothing>() {
+        override fun toString(): String = "ReadClientResult.Conflict409(error=$error)"
+    }
+
+    data class HttpError(val statusCode: Int, val error: ReadClientErrorResponse?) : ReadClientResult<Nothing>() {
+        override fun toString(): String = "ReadClientResult.HttpError(statusCode=$statusCode, error=$error)"
+    }
+
+    data class ParseFailure(
+        val category: String = "PARSE_ERROR"
+    ) : ReadClientResult<Nothing>() {
+        val message: String get() = category
+        override fun toString(): String = "ReadClientResult.ParseFailure(category='$category')"
+    }
+
+    data class NetworkUnknown(
+        val category: String = "NETWORK_ERROR"
+    ) : ReadClientResult<Nothing>() {
+        val message: String get() = category
+        override fun toString(): String = "ReadClientResult.NetworkUnknown(category='$category')"
+    }
 }

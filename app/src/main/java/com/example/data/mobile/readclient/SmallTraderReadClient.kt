@@ -1,5 +1,6 @@
 package com.example.data.mobile.readclient
 
+import com.example.data.mobile.contract.CanonicalSerializationException
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.StrictJsonObject
 import com.example.data.mobile.contract.StrictJsonParser
@@ -53,20 +54,25 @@ data class PaginationQuery(
  * 6. GET  /api/mobile/v1/companies/{companyId}/customers
  *
  * Security & Boundary Invariants:
- * - Injected transport with explicit endpoint allowlisting and base-origin validation.
+ * - Injected transport with explicit endpoint allowlisting, method+path validation, and robust URI origin validation.
+ * - Dispatched transport requests carry the validated origin; query parameters and headers are protected against alias modification.
  * - Bearer tokens passed ONLY in Authorization header; login credentials ONLY in request body.
- * - No secrets or credentials in logs, exceptions, or error serialization.
- * - Cursors are opaque tokens; arbitrary URL following is strictly rejected.
- * - Exact revision 2 wire shape parsing with extra/missing property checks, exact decimal preservation.
+ * - All toString/debug representations strictly redact raw bodies, headers, query params, credentials, and customer data.
+ * - ParseFailure and NetworkUnknown retain only safe fixed failure categories with no accessible unsanitized causes.
+ * - Only exact 200 OK status codes are parsed as Success; unexpected 201/202/204 yield HttpError.
+ * - Tenant isolation enforced: response company_id must match requested companyId.
+ * - Login identity verified: response actor.email must match submitted email.
+ * - Cursors are opaque tokens; arbitrary URL schemes and protocol-relative URLs are strictly rejected.
  * - Server 401 returns explicit Auth401 outcome for caller lock handling.
- * - MFA_REQUIRED returns explicit fresh_challenge retry indicator.
+ * - MFA_REQUIRED returns explicit fresh_challenge retry indicator without fake client state proofs.
  * - Does not wire network engine, UI, ViewModel, Keystore, Room, or sales endpoints.
  */
 class SmallTraderReadClient(
     private val transport: ReadClientTransport,
-    baseOrigin: String
+    baseOrigin: String,
+    allowHttpLoopback: Boolean = false
 ) {
-    val validatedBaseOrigin: String = EndpointSecurity.validateBaseOrigin(baseOrigin)
+    val validatedBaseOrigin: String = EndpointSecurity.validateBaseOrigin(baseOrigin, allowHttpLoopback)
 
     /**
      * Request an authentication challenge nonce and TTL for login.
@@ -77,6 +83,7 @@ class SmallTraderReadClient(
         val transportRequest = TransportRequest(
             method = HttpMethod.POST,
             path = path,
+            baseOrigin = validatedBaseOrigin,
             headers = mapOf(
                 "Content-Type" to "application/json",
                 "Accept" to "application/json"
@@ -93,6 +100,7 @@ class SmallTraderReadClient(
      * POST /api/mobile/v1/auth/login
      *
      * Credentials are placed strictly in the JSON body.
+     * Validates that returned actor.email matches the submitted identity.
      * Returns either Success (with immutable actor and companies) or MfaRequired (with fresh_challenge retry).
      */
     fun authLogin(request: AuthLoginRequest): ReadClientResult<AuthLoginResult> {
@@ -100,6 +108,7 @@ class SmallTraderReadClient(
         val transportRequest = TransportRequest(
             method = HttpMethod.POST,
             path = path,
+            baseOrigin = validatedBaseOrigin,
             headers = mapOf(
                 "Content-Type" to "application/json",
                 "Accept" to "application/json"
@@ -107,7 +116,15 @@ class SmallTraderReadClient(
             body = request.toJsonString()
         )
         return executeRequest(transportRequest) { obj ->
-            AuthLoginResult.fromStrictJson(obj)
+            val loginResult = AuthLoginResult.fromStrictJson(obj)
+            if (loginResult is AuthLoginResult.Success) {
+                val returnedEmail = loginResult.response.actor.email.trim()
+                val requestedEmail = request.email.trim()
+                if (!returnedEmail.equals(requestedEmail, ignoreCase = true)) {
+                    throw CanonicalSerializationException("Actor identity mismatch: response actor.email does not match submitted email")
+                }
+            }
+            loginResult
         }
     }
 
@@ -122,6 +139,7 @@ class SmallTraderReadClient(
         val transportRequest = TransportRequest(
             method = HttpMethod.POST,
             path = path,
+            baseOrigin = validatedBaseOrigin,
             headers = mapOf(
                 "Content-Type" to "application/json",
                 "Accept" to "application/json",
@@ -138,6 +156,7 @@ class SmallTraderReadClient(
      * Fetch authoritative bootstrap configuration for tenant company.
      * GET /api/mobile/v1/companies/{companyId}/bootstrap
      *
+     * Enforces tenant companyId matching requested companyId before exposing DTO.
      * Bearer token is passed ONLY in Authorization header.
      */
     fun getBootstrap(token: String, companyId: ServerUlid): ReadClientResult<BootstrapResponse> {
@@ -145,13 +164,18 @@ class SmallTraderReadClient(
         val transportRequest = TransportRequest(
             method = HttpMethod.GET,
             path = path,
+            baseOrigin = validatedBaseOrigin,
             headers = mapOf(
                 "Accept" to "application/json",
                 "Authorization" to buildAuthHeader(token)
             )
         )
         return executeRequest(transportRequest) { obj ->
-            BootstrapResponse.fromStrictJson(obj)
+            val response = BootstrapResponse.fromStrictJson(obj)
+            if (response.companyId != companyId) {
+                throw CanonicalSerializationException("Tenant mismatch: response company_id does not match requested companyId")
+            }
+            response
         }
     }
 
@@ -159,6 +183,7 @@ class SmallTraderReadClient(
      * Fetch bounded product catalog for tenant company.
      * GET /api/mobile/v1/companies/{companyId}/products
      *
+     * Enforces tenant companyId matching requested companyId before exposing DTO.
      * Pagination is bounded via limit/cursor/search query params; empty results are returned honestly.
      */
     fun getProducts(
@@ -170,6 +195,7 @@ class SmallTraderReadClient(
         val transportRequest = TransportRequest(
             method = HttpMethod.GET,
             path = path,
+            baseOrigin = validatedBaseOrigin,
             queryParams = query.toQueryParams(),
             headers = mapOf(
                 "Accept" to "application/json",
@@ -177,7 +203,11 @@ class SmallTraderReadClient(
             )
         )
         return executeRequest(transportRequest) { obj ->
-            ProductCatalogResponse.fromStrictJson(obj)
+            val response = ProductCatalogResponse.fromStrictJson(obj)
+            if (response.companyId != companyId) {
+                throw CanonicalSerializationException("Tenant mismatch: response company_id does not match requested companyId")
+            }
+            response
         }
     }
 
@@ -185,6 +215,7 @@ class SmallTraderReadClient(
      * Fetch bounded customer directory for tenant company.
      * GET /api/mobile/v1/companies/{companyId}/customers
      *
+     * Enforces tenant companyId matching requested companyId before exposing DTO.
      * Pagination is bounded via limit/cursor/search query params; empty results are returned honestly.
      */
     fun getCustomers(
@@ -196,6 +227,7 @@ class SmallTraderReadClient(
         val transportRequest = TransportRequest(
             method = HttpMethod.GET,
             path = path,
+            baseOrigin = validatedBaseOrigin,
             queryParams = query.toQueryParams(),
             headers = mapOf(
                 "Accept" to "application/json",
@@ -203,13 +235,19 @@ class SmallTraderReadClient(
             )
         )
         return executeRequest(transportRequest) { obj ->
-            CustomerDirectoryResponse.fromStrictJson(obj)
+            val response = CustomerDirectoryResponse.fromStrictJson(obj)
+            if (response.companyId != companyId) {
+                throw CanonicalSerializationException("Tenant mismatch: response company_id does not match requested companyId")
+            }
+            response
         }
     }
 
     private fun buildAuthHeader(token: String): String {
-        require(token.isNotBlank() && token.length >= 20) {
-            "Invalid bearer token: length must be at least 20 characters"
+        try {
+            ValidationUtils.validateToken(token, "token")
+        } catch (e: Exception) {
+            throw IllegalArgumentException(e.message, e)
         }
         return "Bearer $token"
     }
@@ -219,16 +257,17 @@ class SmallTraderReadClient(
         parser: (StrictJsonObject) -> T
     ): ReadClientResult<T> {
         return try {
-            EndpointSecurity.validatePath(request.path)
+            EndpointSecurity.validateMethodAndPath(request.method, request.path)
             val response = transport.execute(request)
             when (response.statusCode) {
-                in 200..299 -> {
+                200 -> {
                     try {
                         val rootElement = StrictJsonParser.parse(response.body)
                         val rootObj = rootElement.asObject()
                         ReadClientResult.Success(parser(rootObj))
-                    } catch (e: Throwable) {
-                        ReadClientResult.ParseFailure("Failed to parse successful response: ${e.message}", e)
+                    } catch (e: Exception) {
+                        if (e is java.util.concurrent.CancellationException) throw e
+                        ReadClientResult.ParseFailure(category = "PARSE_ERROR")
                     }
                 }
                 401 -> {
@@ -247,14 +286,16 @@ class SmallTraderReadClient(
                     val err = try {
                         val rootObj = StrictJsonParser.parse(response.body).asObject()
                         ReadClientErrorResponse.fromStrictJson(rootObj)
-                    } catch (_: Throwable) {
+                    } catch (e: Exception) {
+                        if (e is java.util.concurrent.CancellationException) throw e
                         null
                     }
                     ReadClientResult.HttpError(response.statusCode, err)
                 }
             }
-        } catch (e: Throwable) {
-            ReadClientResult.NetworkUnknown("Transport execution failure: ${e.message}", e)
+        } catch (e: Exception) {
+            if (e is java.util.concurrent.CancellationException) throw e
+            ReadClientResult.NetworkUnknown(category = "NETWORK_ERROR")
         }
     }
 
@@ -262,7 +303,7 @@ class SmallTraderReadClient(
         return try {
             val rootObj = StrictJsonParser.parse(body).asObject()
             ReadClientErrorResponse.fromStrictJson(rootObj)
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
             ReadClientErrorResponse(code = fallbackCode, message = fallbackMessage)
         }
     }

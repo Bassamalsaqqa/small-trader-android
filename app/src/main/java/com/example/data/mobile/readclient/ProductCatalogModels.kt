@@ -10,11 +10,13 @@ import com.example.data.mobile.contract.TaxPercentage
 import com.example.data.mobile.readclient.ValidationUtils.checkAllowedKeys
 import com.example.data.mobile.readclient.ValidationUtils.optionalMoney
 import com.example.data.mobile.readclient.ValidationUtils.optionalString
-import com.example.data.mobile.readclient.ValidationUtils.optionalTaxPercentage
-import com.example.data.mobile.readclient.ValidationUtils.optionalUlid
 import com.example.data.mobile.readclient.ValidationUtils.requireArray
 import com.example.data.mobile.readclient.ValidationUtils.requireBoolean
 import com.example.data.mobile.readclient.ValidationUtils.requireMoney
+import com.example.data.mobile.readclient.ValidationUtils.requireNullableMoney
+import com.example.data.mobile.readclient.ValidationUtils.requireNullableString
+import com.example.data.mobile.readclient.ValidationUtils.requireNullableTaxPercentage
+import com.example.data.mobile.readclient.ValidationUtils.requireNullableUlid
 import com.example.data.mobile.readclient.ValidationUtils.requireNonnegativeQuantity
 import com.example.data.mobile.readclient.ValidationUtils.requireObject
 import com.example.data.mobile.readclient.ValidationUtils.requirePositiveQuantity
@@ -22,6 +24,8 @@ import com.example.data.mobile.readclient.ValidationUtils.requireString
 import com.example.data.mobile.readclient.ValidationUtils.requireUlid
 import com.example.data.mobile.readclient.ValidationUtils.validateDateTime
 import com.example.data.mobile.readclient.ValidationUtils.validateStringBounds
+import java.math.BigDecimal
+import java.util.Collections
 
 data class ProductBaseUnit(
     val id: ServerUlid,
@@ -50,6 +54,7 @@ data class ProductBaseUnit(
 /**
  * Default sales unit for product.
  * NOTE: Per revision 2 decisions, default_unit DTO has no name field.
+ * Direct constructor and copy invariants ensure conversion is positive and salePrice non-negative.
  */
 data class ProductDefaultUnit(
     val unitId: ServerUlid,
@@ -57,6 +62,17 @@ data class ProductDefaultUnit(
     val conversionToBase: PositiveDecimalQuantity,
     val salePrice: MoneyAmount?
 ) {
+    init {
+        require(conversionToBase.value > BigDecimal.ZERO) {
+            "conversion_to_base must be strictly positive"
+        }
+        if (salePrice != null) {
+            require(salePrice.value >= BigDecimal.ZERO) {
+                "sale_price must be non-negative"
+            }
+        }
+    }
+
     companion object {
         private val ALLOWED_KEYS = setOf("unit_id", "product_unit_id", "conversion_to_base", "sale_price")
 
@@ -66,7 +82,7 @@ data class ProductDefaultUnit(
                 unitId = requireUlid(obj, "unit_id"),
                 productUnitId = requireUlid(obj, "product_unit_id"),
                 conversionToBase = requirePositiveQuantity(obj, "conversion_to_base"),
-                salePrice = optionalMoney(obj, "sale_price")
+                salePrice = requireNullableMoney(obj, "sale_price")
             )
         }
     }
@@ -114,8 +130,9 @@ data class ProductPackagingUnit(
  * Enforces truthful nullable paired product tax association:
  * (taxRateId == null && taxRate == null) || (taxRateId != null && taxRate != null).
  * Null pair signifies no product default tax association, NEVER an inferred zero tax or exemption.
+ * Defensive copy protects packaging units list from external modification.
  */
-data class ProductCatalogItem(
+class ProductCatalogItem(
     val id: ServerUlid,
     val sku: String,
     val barcode: String?,
@@ -127,8 +144,10 @@ data class ProductCatalogItem(
     val availableQuantity: NonnegativeDecimalQuantity,
     val baseUnit: ProductBaseUnit,
     val defaultUnit: ProductDefaultUnit,
-    val units: List<ProductPackagingUnit>
+    units: List<ProductPackagingUnit>
 ) {
+    val units: List<ProductPackagingUnit> = Collections.unmodifiableList(units.toList())
+
     init {
         validateStringBounds(sku, "product.sku", minLength = 1, maxLength = 128)
         if (barcode != null) {
@@ -148,6 +167,63 @@ data class ProductCatalogItem(
         }
     }
 
+    fun copy(
+        id: ServerUlid = this.id,
+        sku: String = this.sku,
+        barcode: String? = this.barcode,
+        name: String = this.name,
+        unitPrice: MoneyAmount = this.unitPrice,
+        taxRate: TaxPercentage? = this.taxRate,
+        taxRateId: ServerUlid? = this.taxRateId,
+        isTracked: Boolean = this.isTracked,
+        availableQuantity: NonnegativeDecimalQuantity = this.availableQuantity,
+        baseUnit: ProductBaseUnit = this.baseUnit,
+        defaultUnit: ProductDefaultUnit = this.defaultUnit,
+        units: List<ProductPackagingUnit> = this.units
+    ): ProductCatalogItem = ProductCatalogItem(
+        id, sku, barcode, name, unitPrice, taxRate, taxRateId,
+        isTracked, availableQuantity, baseUnit, defaultUnit, units
+    )
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is ProductCatalogItem) return false
+        return id == other.id &&
+                sku == other.sku &&
+                barcode == other.barcode &&
+                name == other.name &&
+                unitPrice == other.unitPrice &&
+                taxRate == other.taxRate &&
+                taxRateId == other.taxRateId &&
+                isTracked == other.isTracked &&
+                availableQuantity == other.availableQuantity &&
+                baseUnit == other.baseUnit &&
+                defaultUnit == other.defaultUnit &&
+                units == other.units
+    }
+
+    override fun hashCode(): Int {
+        var result = id.hashCode()
+        result = 31 * result + sku.hashCode()
+        result = 31 * result + (barcode?.hashCode() ?: 0)
+        result = 31 * result + name.hashCode()
+        result = 31 * result + unitPrice.hashCode()
+        result = 31 * result + (taxRate?.hashCode() ?: 0)
+        result = 31 * result + (taxRateId?.hashCode() ?: 0)
+        result = 31 * result + isTracked.hashCode()
+        result = 31 * result + availableQuantity.hashCode()
+        result = 31 * result + baseUnit.hashCode()
+        result = 31 * result + defaultUnit.hashCode()
+        result = 31 * result + units.hashCode()
+        return result
+    }
+
+    override fun toString(): String =
+        "ProductCatalogItem(id=$id, sku='$sku', barcode=${if (barcode != null) "'$barcode'" else "null"}, " +
+                "name='[REDACTED]', unitPrice=$unitPrice, taxRate=$taxRate, taxRateId=$taxRateId, " +
+                "isTracked=$isTracked, availableQuantity=$availableQuantity, baseUnit=$baseUnit, " +
+                "defaultUnit=$defaultUnit, unitsCount=${units.size})"
+
     companion object {
         private val ALLOWED_KEYS = setOf(
             "id", "sku", "barcode", "name", "unit_price", "tax_rate",
@@ -158,8 +234,8 @@ data class ProductCatalogItem(
         fun fromStrictJson(obj: StrictJsonObject): ProductCatalogItem {
             checkAllowedKeys(obj, ALLOWED_KEYS, "ProductCatalogItem")
 
-            val taxRateId = optionalUlid(obj, "tax_rate_id")
-            val taxRate = optionalTaxPercentage(obj, "tax_rate")
+            val taxRateId = requireNullableUlid(obj, "tax_rate_id")
+            val taxRate = requireNullableTaxPercentage(obj, "tax_rate")
 
             if (taxRateId == null && taxRate != null) {
                 throw CanonicalSerializationException("tax_rate must be null when tax_rate_id is null")
@@ -195,15 +271,18 @@ data class ProductCatalogItem(
 
 /**
  * Authoritative response payload for GET /api/mobile/v1/companies/{companyId}/products.
+ * Defensive copy protects products list from external modification.
  */
-data class ProductCatalogResponse(
+class ProductCatalogResponse(
     val companyId: ServerUlid,
     val catalogSnapshotVersion: String,
     val generatedAt: String,
     val nextCursor: String?,
     val hasMore: Boolean,
-    val products: List<ProductCatalogItem>
+    products: List<ProductCatalogItem>
 ) {
+    val products: List<ProductCatalogItem> = Collections.unmodifiableList(products.toList())
+
     init {
         validateStringBounds(catalogSnapshotVersion, "catalog_snapshot_version", minLength = 1, maxLength = 64)
         validateDateTime(generatedAt, "generated_at")
@@ -211,6 +290,42 @@ data class ProductCatalogResponse(
             validateStringBounds(nextCursor, "next_cursor", minLength = 1, maxLength = 255)
         }
     }
+
+    fun copy(
+        companyId: ServerUlid = this.companyId,
+        catalogSnapshotVersion: String = this.catalogSnapshotVersion,
+        generatedAt: String = this.generatedAt,
+        nextCursor: String? = this.nextCursor,
+        hasMore: Boolean = this.hasMore,
+        products: List<ProductCatalogItem> = this.products
+    ): ProductCatalogResponse = ProductCatalogResponse(
+        companyId, catalogSnapshotVersion, generatedAt, nextCursor, hasMore, products
+    )
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is ProductCatalogResponse) return false
+        return companyId == other.companyId &&
+                catalogSnapshotVersion == other.catalogSnapshotVersion &&
+                generatedAt == other.generatedAt &&
+                nextCursor == other.nextCursor &&
+                hasMore == other.hasMore &&
+                products == other.products
+    }
+
+    override fun hashCode(): Int {
+        var result = companyId.hashCode()
+        result = 31 * result + catalogSnapshotVersion.hashCode()
+        result = 31 * result + generatedAt.hashCode()
+        result = 31 * result + (nextCursor?.hashCode() ?: 0)
+        result = 31 * result + hasMore.hashCode()
+        result = 31 * result + products.hashCode()
+        return result
+    }
+
+    override fun toString(): String =
+        "ProductCatalogResponse(companyId=$companyId, catalogSnapshotVersion='$catalogSnapshotVersion', " +
+                "generatedAt='$generatedAt', nextCursor='[REDACTED]', hasMore=$hasMore, productsCount=${products.size})"
 
     companion object {
         private val ALLOWED_KEYS = setOf(
@@ -232,7 +347,7 @@ data class ProductCatalogResponse(
                 companyId = requireUlid(obj, "company_id"),
                 catalogSnapshotVersion = requireString(obj, "catalog_snapshot_version", minLength = 1, maxLength = 64),
                 generatedAt = requireString(obj, "generated_at", minLength = 20, maxLength = 35),
-                nextCursor = optionalString(obj, "next_cursor", minLength = 1, maxLength = 255),
+                nextCursor = requireNullableString(obj, "next_cursor", minLength = 1, maxLength = 255),
                 hasMore = requireBoolean(obj, "has_more"),
                 products = products
             )

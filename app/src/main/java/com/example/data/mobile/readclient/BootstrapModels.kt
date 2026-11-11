@@ -22,21 +22,52 @@ import com.example.data.mobile.readclient.ValidationUtils.requireUlid
 import com.example.data.mobile.readclient.ValidationUtils.requireUuid
 import com.example.data.mobile.readclient.ValidationUtils.validateDateTime
 import com.example.data.mobile.readclient.ValidationUtils.validateStringBounds
+import java.util.Collections
 
 /**
  * Staff information in bootstrap response.
  * Role is an informative presentation label only; never an authorization grant.
+ * Defensive copy protects permissions from external modification.
  */
-data class BootstrapStaff(
+class BootstrapStaff(
     val id: ServerUlid,
     val name: String,
     val role: String,
-    val permissions: List<String>
+    permissions: List<String>
 ) {
+    val permissions: List<String> = Collections.unmodifiableList(permissions.toList())
+
     init {
         validateStringBounds(name, "staff.name", minLength = 1, maxLength = 255)
         validateStringBounds(role, "staff.role", minLength = 1, maxLength = 255)
     }
+
+    fun copy(
+        id: ServerUlid = this.id,
+        name: String = this.name,
+        role: String = this.role,
+        permissions: List<String> = this.permissions
+    ): BootstrapStaff = BootstrapStaff(id, name, role, permissions)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is BootstrapStaff) return false
+        return id == other.id &&
+                name == other.name &&
+                role == other.role &&
+                permissions == other.permissions
+    }
+
+    override fun hashCode(): Int {
+        var result = id.hashCode()
+        result = 31 * result + name.hashCode()
+        result = 31 * result + role.hashCode()
+        result = 31 * result + permissions.hashCode()
+        return result
+    }
+
+    override fun toString(): String =
+        "BootstrapStaff(id=$id, name='[REDACTED]', role='$role', permissionsCount=${permissions.size})"
 
     companion object {
         private val ALLOWED_KEYS = setOf("id", "name", "role", "permissions")
@@ -271,8 +302,9 @@ data class OfflinePolicyEnabled(
 
 /**
  * Authoritative response payload for GET /api/mobile/v1/companies/{companyId}/bootstrap.
+ * Defensive copies protect units and taxes from external modification.
  */
-data class BootstrapResponse(
+class BootstrapResponse(
     val companyId: ServerUlid,
     val companyName: String,
     val baseCurrency: String,
@@ -281,11 +313,14 @@ data class BootstrapResponse(
     val deviceLease: DeviceLease?,
     val defaultWarehouse: DefaultWarehouse,
     val approvedCashAccount: ApprovedCashAccount,
-    val units: List<BootstrapUnit>,
-    val taxes: List<BootstrapTax>,
+    units: List<BootstrapUnit>,
+    taxes: List<BootstrapTax>,
     val offlinePolicy: OfflinePolicy,
     val catalogSnapshotVersion: String
 ) {
+    val units: List<BootstrapUnit> = Collections.unmodifiableList(units.toList())
+    val taxes: List<BootstrapTax> = Collections.unmodifiableList(taxes.toList())
+
     init {
         validateStringBounds(companyName, "company_name", minLength = 1, maxLength = 255)
         require(ContractConstants.CURRENCY_CODE_REGEX.matches(baseCurrency)) {
@@ -300,6 +335,65 @@ data class BootstrapResponse(
             }
         }
     }
+
+    fun copy(
+        companyId: ServerUlid = this.companyId,
+        companyName: String = this.companyName,
+        baseCurrency: String = this.baseCurrency,
+        walkInCustomerId: ServerUlid = this.walkInCustomerId,
+        staff: BootstrapStaff = this.staff,
+        deviceLease: DeviceLease? = this.deviceLease,
+        defaultWarehouse: DefaultWarehouse = this.defaultWarehouse,
+        approvedCashAccount: ApprovedCashAccount = this.approvedCashAccount,
+        units: List<BootstrapUnit> = this.units,
+        taxes: List<BootstrapTax> = this.taxes,
+        offlinePolicy: OfflinePolicy = this.offlinePolicy,
+        catalogSnapshotVersion: String = this.catalogSnapshotVersion
+    ): BootstrapResponse = BootstrapResponse(
+        companyId, companyName, baseCurrency, walkInCustomerId, staff,
+        deviceLease, defaultWarehouse, approvedCashAccount, units, taxes,
+        offlinePolicy, catalogSnapshotVersion
+    )
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is BootstrapResponse) return false
+        return companyId == other.companyId &&
+                companyName == other.companyName &&
+                baseCurrency == other.baseCurrency &&
+                walkInCustomerId == other.walkInCustomerId &&
+                staff == other.staff &&
+                deviceLease == other.deviceLease &&
+                defaultWarehouse == other.defaultWarehouse &&
+                approvedCashAccount == other.approvedCashAccount &&
+                units == other.units &&
+                taxes == other.taxes &&
+                offlinePolicy == other.offlinePolicy &&
+                catalogSnapshotVersion == other.catalogSnapshotVersion
+    }
+
+    override fun hashCode(): Int {
+        var result = companyId.hashCode()
+        result = 31 * result + companyName.hashCode()
+        result = 31 * result + baseCurrency.hashCode()
+        result = 31 * result + walkInCustomerId.hashCode()
+        result = 31 * result + staff.hashCode()
+        result = 31 * result + (deviceLease?.hashCode() ?: 0)
+        result = 31 * result + defaultWarehouse.hashCode()
+        result = 31 * result + approvedCashAccount.hashCode()
+        result = 31 * result + units.hashCode()
+        result = 31 * result + taxes.hashCode()
+        result = 31 * result + offlinePolicy.hashCode()
+        result = 31 * result + catalogSnapshotVersion.hashCode()
+        return result
+    }
+
+    override fun toString(): String =
+        "BootstrapResponse(companyId=$companyId, companyName='$companyName', baseCurrency='$baseCurrency', " +
+                "walkInCustomerId=$walkInCustomerId, staff=$staff, deviceLease=$deviceLease, " +
+                "defaultWarehouse=$defaultWarehouse, approvedCashAccount=$approvedCashAccount, " +
+                "unitsCount=${units.size}, taxesCount=${taxes.size}, offlinePolicy=$offlinePolicy, " +
+                "catalogSnapshotVersion='$catalogSnapshotVersion')"
 
     companion object {
         private val ALLOWED_KEYS = setOf(
@@ -319,8 +413,15 @@ data class BootstrapResponse(
                 OfflinePolicyDisabled.fromStrictJson(offlinePolicyObj)
             }
 
-            val deviceLeaseObj = optionalObject(obj, "device_lease")
-            val deviceLease = deviceLeaseObj?.let { DeviceLease.fromStrictJson(it) }
+            if (!obj.properties.containsKey("device_lease")) {
+                throw CanonicalSerializationException("Missing required property 'device_lease'")
+            }
+            val leaseElement = obj.properties["device_lease"]!!
+            val deviceLease = when (leaseElement) {
+                is com.example.data.mobile.contract.StrictJsonNull -> null
+                is StrictJsonObject -> DeviceLease.fromStrictJson(leaseElement)
+                else -> throw CanonicalSerializationException("Property 'device_lease' must be an object or null, got ${leaseElement::class.simpleName}")
+            }
 
             if (!offlinePolicy.enabled && deviceLease != null) {
                 throw CanonicalSerializationException("device_lease must be null when offline policy is disabled")

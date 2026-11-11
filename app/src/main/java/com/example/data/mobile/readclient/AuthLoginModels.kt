@@ -15,6 +15,8 @@ import com.example.data.mobile.readclient.ValidationUtils.requireUlid
 import com.example.data.mobile.readclient.ValidationUtils.validateDateTime
 import com.example.data.mobile.readclient.ValidationUtils.validateEmail
 import com.example.data.mobile.readclient.ValidationUtils.validateStringBounds
+import com.example.data.mobile.readclient.ValidationUtils.validateToken
+import java.util.Collections
 
 private val MFA_CODE_REGEX = Regex("^[0-9]{6}$")
 private val RECOVERY_CODE_REGEX = Regex("^[a-zA-Z0-9]{8,24}(-[a-zA-Z0-9]{8,24})?$")
@@ -57,7 +59,7 @@ data class AuthLoginRequest(
 
     override fun toString(): String =
         "AuthLoginRequest(challengeId=$challengeId, nonce='$nonce', deviceId=$deviceId, " +
-                "deviceName='$deviceName', email='$email', password='[REDACTED]', " +
+                "deviceName='$deviceName', email='[REDACTED]', password='[REDACTED]', " +
                 "mfaCode=${if (mfaCode != null) "'[REDACTED]'" else "null"}, " +
                 "recoveryCode=${if (recoveryCode != null) "'[REDACTED]'" else "null"})"
 
@@ -93,6 +95,9 @@ data class ActorProfile(
         validateStringBounds(role, "actor.role", minLength = 1, maxLength = 255)
         validateStringBounds(passwordEpoch, "actor.password_epoch", minLength = 1, maxLength = 128)
     }
+
+    override fun toString(): String =
+        "ActorProfile(id=$id, name='[REDACTED]', email='[REDACTED]', role='$role', passwordEpoch='[REDACTED]')"
 
     companion object {
         private val ALLOWED_KEYS = setOf("id", "name", "email", "role", "password_epoch")
@@ -144,28 +149,59 @@ data class CompanyMembership(
 /**
  * Successful authentication response.
  * Bearer token is strictly redacted in toString().
+ * Defensive copy protects companies from mutable alias modification.
+ * Does NOT contain invented device response fields (per OpenAPI schema).
  */
-data class AuthLoginSuccessResponse(
+class AuthLoginSuccessResponse(
     val token: String,
     val tokenType: String,
     val expiresAt: String,
     val actor: ActorProfile,
-    val companies: List<CompanyMembership>
+    companies: List<CompanyMembership>
 ) {
+    val companies: List<CompanyMembership> = Collections.unmodifiableList(companies.toList())
+
     init {
-        validateStringBounds(token, "token", minLength = 20, maxLength = 2048)
+        validateToken(token, "token")
         require(tokenType == "Bearer") {
             "token_type must be 'Bearer', got '$tokenType'"
         }
         validateDateTime(expiresAt, "expires_at")
-        require(companies.isNotEmpty()) {
+        require(this.companies.isNotEmpty()) {
             "companies must contain at least one company membership"
         }
     }
 
+    fun copy(
+        token: String = this.token,
+        tokenType: String = this.tokenType,
+        expiresAt: String = this.expiresAt,
+        actor: ActorProfile = this.actor,
+        companies: List<CompanyMembership> = this.companies
+    ): AuthLoginSuccessResponse = AuthLoginSuccessResponse(token, tokenType, expiresAt, actor, companies)
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is AuthLoginSuccessResponse) return false
+        return token == other.token &&
+                tokenType == other.tokenType &&
+                expiresAt == other.expiresAt &&
+                actor == other.actor &&
+                companies == other.companies
+    }
+
+    override fun hashCode(): Int {
+        var result = token.hashCode()
+        result = 31 * result + tokenType.hashCode()
+        result = 31 * result + expiresAt.hashCode()
+        result = 31 * result + actor.hashCode()
+        result = 31 * result + companies.hashCode()
+        return result
+    }
+
     override fun toString(): String =
         "AuthLoginSuccessResponse(token='Bearer [REDACTED]', tokenType='$tokenType', " +
-                "expiresAt='$expiresAt', actor=$actor, companies=$companies)"
+                "expiresAt='$expiresAt', actor=$actor, companiesCount=${companies.size})"
 
     companion object {
         private val ALLOWED_KEYS = setOf("token", "token_type", "expires_at", "actor", "companies")
@@ -216,6 +252,7 @@ data class MfaRequiredResponse(
 
 /**
  * Result of auth login: either full Success or MFA_REQUIRED fresh_challenge retry.
+ * Strictly verifies oneOf branches without allowing mixed or extra unauthorized properties.
  */
 sealed interface AuthLoginResult {
     data class Success(val response: AuthLoginSuccessResponse) : AuthLoginResult
@@ -223,10 +260,23 @@ sealed interface AuthLoginResult {
 
     companion object {
         fun fromStrictJson(obj: StrictJsonObject): AuthLoginResult {
-            if (obj.properties.containsKey("status") || obj.properties.containsKey("retry")) {
+            val hasMfaKey = obj.properties.containsKey("status") || obj.properties.containsKey("retry")
+            val hasSuccessKey = obj.properties.containsKey("token") ||
+                    obj.properties.containsKey("token_type") ||
+                    obj.properties.containsKey("expires_at") ||
+                    obj.properties.containsKey("actor") ||
+                    obj.properties.containsKey("companies")
+
+            if (hasMfaKey && hasSuccessKey) {
+                throw CanonicalSerializationException("Mixed branches in AuthLoginResponse oneOf schema are strictly rejected")
+            }
+            if (hasMfaKey) {
                 return MfaRequired(MfaRequiredResponse.fromStrictJson(obj))
             }
-            return Success(AuthLoginSuccessResponse.fromStrictJson(obj))
+            if (hasSuccessKey) {
+                return Success(AuthLoginSuccessResponse.fromStrictJson(obj))
+            }
+            throw CanonicalSerializationException("Response does not match any branch of AuthLoginResponse oneOf schema")
         }
     }
 }
