@@ -383,11 +383,24 @@ private fun PosSearchAndCategoryHeader(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                StitchBadge(
-                    text = lang.tr(
+                val categoryTotal = if (state.selectedCategory == ProductCategory.ALL) {
+                    state.products.size
+                } else {
+                    state.products.count { it.category == state.selectedCategory }
+                }
+                val badgeText = if (state.searchQuery.isBlank() && categoryTotal > state.filteredProducts.size) {
+                    lang.tr(
+                        "عرض ${WesternFormatters.formatInt(state.filteredProducts.size)} من أصل ${WesternFormatters.formatInt(categoryTotal)}",
+                        "Showing ${WesternFormatters.formatInt(state.filteredProducts.size)} of ${WesternFormatters.formatInt(categoryTotal)}"
+                    )
+                } else {
+                    lang.tr(
                         "${WesternFormatters.formatInt(state.filteredProducts.size)} صنفاً",
                         "${WesternFormatters.formatInt(state.filteredProducts.size)} items"
-                    ),
+                    )
+                }
+                StitchBadge(
+                    text = badgeText,
                     tone = StitchBadgeTone.PRIMARY
                 )
             }

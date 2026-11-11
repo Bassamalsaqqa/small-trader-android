@@ -126,23 +126,13 @@ class OfflineDemoTraderRepository(
 
     override fun getProducts(): List<Product> = products.toList()
     override fun searchProducts(query: String, category: ProductCategory, limit: Int): List<Product> {
-        val q = Product.normalizeKey(WesternFormatters.sanitizeWesternDigits(query.trim()))
-        val categoryFiltered = if (category == ProductCategory.ALL) {
-            products
-        } else {
-            products.filter { it.category == category }
-        }
-        if (q.isEmpty()) {
-            return categoryFiltered.take(limit)
-        }
-        return categoryFiltered
-            .mapNotNull { prod ->
-                val score = prod.computeSearchScore(q)
-                if (score > 0) prod to score else null
-            }
-            .sortedByDescending { it.second }
-            .map { it.first }
-            .take(limit)
+        return ProductSearch.search(
+            products = products,
+            query = query,
+            category = category,
+            limit = limit,
+            stockTrackedOnly = false
+        )
     }
     override fun findProductById(id: String): Product? = products.firstOrNull { it.id == id }
 

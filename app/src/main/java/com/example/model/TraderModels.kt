@@ -1,5 +1,6 @@
 package com.example.model
 
+import com.example.data.ProductSearch
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.DecimalFormat
@@ -115,42 +116,17 @@ data class Product(
     val isLowStock: Boolean
         get() = isStockTracked && stockCount <= minStockThreshold
 
-    val normalizedSearchTokens: String = normalizeKey("$nameAr $nameEn $unitAr $unitEn $barcode")
-    val normalizedBarcode: String = normalizeKey(barcode)
-    val normalizedNameAr: String = normalizeKey(nameAr)
-    val normalizedNameEn: String = normalizeKey(nameEn)
-    val normalizedUnitAr: String = normalizeKey(unitAr)
-    val normalizedUnitEn: String = normalizeKey(unitEn)
+    val normalizedSearchTokens: String = ProductSearch.normalize("$nameAr $nameEn $unitAr $unitEn $barcode ${category.labelAr} ${category.labelEn}")
+    val normalizedBarcode: String = ProductSearch.normalize(barcode)
+    val normalizedNameAr: String = ProductSearch.normalize(nameAr)
+    val normalizedNameEn: String = ProductSearch.normalize(nameEn)
+    val normalizedUnitAr: String = ProductSearch.normalize(unitAr)
+    val normalizedUnitEn: String = ProductSearch.normalize(unitEn)
 
-    fun computeSearchScore(normalizedQuery: String): Int {
-        if (normalizedQuery.isEmpty()) return 0
-        if (normalizedBarcode == normalizedQuery) return 1000
-        if (id == normalizedQuery) return 950
-        if (normalizedBarcode.startsWith(normalizedQuery)) return 800
-        if (normalizedNameAr == normalizedQuery || normalizedNameEn == normalizedQuery) return 700
-        if (normalizedNameAr.startsWith(normalizedQuery) || normalizedNameEn.startsWith(normalizedQuery)) return 600
-        if (normalizedNameAr.contains(" $normalizedQuery") || normalizedNameEn.contains(" $normalizedQuery")) return 500
-        if (normalizedNameAr.contains(normalizedQuery) || normalizedNameEn.contains(normalizedQuery)) return 400
-        if (normalizedSearchTokens.contains(normalizedQuery)) return 200
-        return 0
-    }
+    fun computeSearchScore(normalizedQuery: String): Int = ProductSearch.computeScore(this, normalizedQuery)
 
     companion object {
-        fun normalizeKey(raw: String): String {
-            if (raw.isEmpty()) return ""
-            val sanitized = WesternFormatters.sanitizeWesternDigits(raw)
-            val sb = StringBuilder(sanitized.length)
-            for (ch in sanitized.lowercase()) {
-                when (ch) {
-                    'أ', 'إ', 'آ', 'ٱ' -> sb.append('ا')
-                    'ة' -> sb.append('ه')
-                    'ى' -> sb.append('ي')
-                    in '\u064B'..'\u065F', '\u0670', '\u0640' -> { /* strip diacritics & tatweel */ }
-                    else -> sb.append(ch)
-                }
-            }
-            return sb.toString().trim()
-        }
+        fun normalizeKey(raw: String): String = ProductSearch.normalize(raw)
     }
 }
 
