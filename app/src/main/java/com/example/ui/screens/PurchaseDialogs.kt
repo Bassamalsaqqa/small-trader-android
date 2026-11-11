@@ -931,7 +931,7 @@ fun ReceivePurchaseBillDialog(
                                 IconButton(
                                     onClick = { productSearchQuery = "" },
                                     enabled = !isSubmitting,
-                                    modifier = Modifier.size(24.dp).testTag("clear_purchase_product_search")
+                                    modifier = Modifier.size(48.dp).testTag("clear_purchase_product_search")
                                 ) {
                                     Icon(Icons.Default.Clear, contentDescription = lang.tr("مسح", "Clear"), modifier = Modifier.size(16.dp))
                                 }
@@ -1116,12 +1116,12 @@ fun ReceivePurchaseBillDialog(
                                             },
                                             enabled = !isSubmitting,
                                             modifier = Modifier
-                                                .size(32.dp)
+                                                .size(48.dp)
                                                 .testTag("btn_remove_line_${line.productId}")
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.DeleteOutline,
-                                                contentDescription = "Remove",
+                                                contentDescription = lang.tr("إزالة الصنف", "Remove item"),
                                                 tint = MaterialTheme.colorScheme.error,
                                                 modifier = Modifier.size(18.dp)
                                             )
@@ -1234,8 +1234,8 @@ fun ReceivePurchaseBillDialog(
                     )
                     Text(
                         text = lang.tr(
-                            "ملاحظة: هذا النموذج التجريبي محلي (Offline Demo) يقيد الذمة محلياً واستلام المخزون عبر GRN؛ النظام الأساسي (Laravel) يعتمد قيد المخزون والذمة معاً ذرياً (ADR0013).",
-                            "Note: This offline demo records payables locally with stock receipt via GRN; canonical Laravel backend atomically records stock and payable (ADR0013)."
+                            "نسخة تجريبية: تُحفظ الفاتورة محلياً، ويُسجّل استلام البضاعة بشكل منفصل.",
+                            "Demo: Bills are saved locally; goods receipt is recorded separately."
                         ),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
