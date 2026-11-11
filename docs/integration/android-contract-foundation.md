@@ -12,7 +12,7 @@ This integration foundation implements the pure Kotlin contract primitives, exac
   - Pure Kotlin RFC 8785 subset serializer (`CanonicalJsonSerializer`) implementing Small Trader Restricted Canonical JSON Profile v1 with UTF-16 code unit key sorting, lone surrogate detection, safe integer domain bounds [-(2^53-1), 2^53-1], recursion depth limit (32), and strict negative zero (`-0`) rejection.
   - Pure Kotlin strict JSON parser (`StrictJsonParser`) rejecting duplicate object keys, negative zero, unbounded recursion, oversized strings (>64 KB), and oversized payloads (>1 MB).
   - Offline sale intake domain structures (`OfflineSaleEvent`, `OfflineSaleLine`, `OfflineSalePayment`, `OfflineSaleIntakeRequest`) with strict unexpected property rejection, deterministic boundary checks (timestamps, string caps, cash conservation, line sum equality), defensive list copying, and pre-coercion envelope digest verification.
-  - Frozen JVM regression and golden test suite verifying exact byte-level digest parity against `manifest.sha256` (`a8d04a130bdb0bd909a7cfabdde93fb6f90c96cc07dbedfbd01971bdb07c6733`).
+  - Frozen JVM regression and golden test suite verifying exact byte-level digest parity against `manifest.sha256` (`ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659`, Draft Revision 2).
 - **Explicitly Excluded**:
   - No UI / Jetpack Compose modifications.
   - No ViewModel, existing repository (`TraderRepository`, `SampleCatalog`), or runtime demo wiring edits.
@@ -121,13 +121,28 @@ The pure JVM Gradle test suite runs under JDK 21 (`/home/t3dev/.local/share/andr
 | `DecimalPrimitivesAndRoundingTest` | 7 | Exclusive/inclusive sales line calculations, trailing zeros, `HALF_UP` vs `HALF_EVEN` divergence, float drift immunity, magnitude boundaries, over-scale rejection, tax percentage boundaries, invariant enforcement on all constructor/copy paths, nonnegative vs positive quantity distinction, minorUnits 0..6 validation. |
 | `IdentifierPrimitivesTest` | 4 | Valid ULID acceptance, Crockford exclusion rules (`I`, `L`, `O`, `U`, lowercase, leading > 7, length), UUID validation and rejection as ULID, payload digest validation and lowercase hex format. |
 | `OfflineSaleContractGoldenParityTest` | 8 | Golden offline intake event digest, envelope equality checks, packaging unit mapping, envelope tamper detection, altered payload conflict regression, lost-ACK replay parity, exact decimal lexeme preservation & roundtrip with quantity '1' / unit_price '50', unknown field rejection at all 4 levels, deterministic boundary checks (timestamps, string caps, cash conservation, line sum equality), defensive list copy against mutable alias. |
+| `StringBoundaryParityTest` | 5 | Strict JSON string boundary parsing: unsigned ASCII hex escape digits, surrogate pairs with 64KB UTF-16 limit enforcement after pair append, raw unescaped ASCII control char rejection, 1 MiB UTF-8 byte boundary rejection, signed Unicode escape rejection. |
+| `BoundaryCompatibilityTest` | 3 | API-24-compatible timestamp field checks without java.time, UTF-8 payload byte limits, and explicit three-decimal currency precision. |
+| `ContractManifestDriftTest` | 2 | Verifies `ContractConstants.MANIFEST_SHA256` matches actual hash of `docs/integration/mobile-v1/manifest.sha256` preventing contract drift, `CONTRACT_REVISION == 2`, and validates cryptographic integrity of all manifest entries. |
 
-The foundation has **33 contract unit tests**, including `BoundaryCompatibilityTest` (3 tests): API-24-compatible timestamp field checks, UTF-8 payload byte limits, and explicit three-decimal currency precision.
+The foundation has **40 contract unit tests** (all 7 test classes passing 100%), plus `MerchantCheckoutTest` (6 tests) and `MerchantSaleLifecycleTest` (2 tests), totaling **48 focused JVM unit tests** (0 failed, 0 skipped).
 
-Codex independently ran the 33 contract tests plus `MerchantCheckoutTest` and `MerchantSaleLifecycleTest` after the final boundary corrections. All selected tests passed. The full suite was attempted but stopped after a nonconverging Compose idle wait in existing `NativeVisualEvidenceTest.capture_16_fullApp_home_360dp_font2_stress`; a fresh full-suite pass is not claimed. No emulator or physical-device acceptance was performed.
-Contract manifest hash verified: `a8d04a130bdb0bd909a7cfabdde93fb6f90c96cc07dbedfbd01971bdb07c6733`.
+Python contract validation suite: 210 checks passing (both normal and `-O` optimized python), including all 19 JSON schemas (Draft 2020-12), OpenAPI 3.1 specification, golden fixtures, canonical vectors, regressions, 89 revision 2 positive/negative validation cases, and `manifest.sha256` matching all 39 contract files.
 
+Contract manifest hash verified: `ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659` (Draft Revision 2).
 
-### Cross-platform boundary clarification (pending coordinated contract revision)
+---
 
-Decoded JSON strings are limited to 65,536 UTF-16 code units, including both units of a supplementary character. The parser checks after each complete decoded append; the serializer applies the same limit. Unescaped controls are invalid JSON. Total raw input remains limited to 1 MiB of UTF-8 bytes. Decimal lexemes preserve their exact input without trimming or rounding; scale conversion requires `UNNECESSARY` unless an explicit calculation operation specifies rounding. This clarification is outside the mirrored contract tree; the frozen manifest bytes are unchanged.
+## 9. Draft Revision 2 Coordination & Financial Readiness Boundaries
+
+Coordinated Draft Revision 2 incorporates read/auth/bootstrap contract refinements from `docs/integration/mobile-v1-revision-2-decisions.md`:
+1. **Read/Auth/Bootstrap Refinements**:
+   - MFA fresh retry, immutable staff/device identity, fresh tenant authorization.
+   - Real catalog field widths (companies/warehouses/customers names 255; units 128; ledger code 32; tax rate code 32; no truncation).
+   - Product tax association: nullable tax rate ID pair indicates unknown product tax association, NOT zero tax. No inferred zero tax rate.
+   - Disabled offline policy: offline capabilities remain disabled (`enabled: false`), with no lease allocated.
+2. **Financial Readiness Gate (BLOCKED)**:
+   - Current offline cash financial schemas still lack public `lineTaxRateId` in sale preview; financial readiness remains **BLOCKED**.
+   - No new financial activation. All event versions remain `eventVersion = 1`; golden canonical digest fixtures and financial schemas are unchanged.
+   - No pending event re-keying or repricing.
+   - All API/model runtime remains strictly UNWIRED and offline mode OFF.
