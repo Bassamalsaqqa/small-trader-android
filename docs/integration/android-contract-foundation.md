@@ -126,3 +126,8 @@ The foundation has **33 contract unit tests**, including `BoundaryCompatibilityT
 
 Codex independently ran the 33 contract tests plus `MerchantCheckoutTest` and `MerchantSaleLifecycleTest` after the final boundary corrections. All selected tests passed. The full suite was attempted but stopped after a nonconverging Compose idle wait in existing `NativeVisualEvidenceTest.capture_16_fullApp_home_360dp_font2_stress`; a fresh full-suite pass is not claimed. No emulator or physical-device acceptance was performed.
 Contract manifest hash verified: `a8d04a130bdb0bd909a7cfabdde93fb6f90c96cc07dbedfbd01971bdb07c6733`.
+
+
+### Cross-platform boundary clarification (pending coordinated contract revision)
+
+Decoded JSON strings are limited to 65,536 UTF-16 code units, including both units of a supplementary character. The parser checks after each complete decoded append; the serializer applies the same limit. Unescaped controls are invalid JSON. Total raw input remains limited to 1 MiB of UTF-8 bytes. Decimal lexemes preserve their exact input without trimming or rounding; scale conversion requires `UNNECESSARY` unless an explicit calculation operation specifies rounding. This clarification is outside the mirrored contract tree; the frozen manifest bytes are unchanged.

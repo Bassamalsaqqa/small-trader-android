@@ -180,8 +180,8 @@ class StrictJsonParser private constructor(private val src: String) {
             if (c == '"') {
                 return StrictJsonString(sb.toString())
             }
-            if (sb.length >= ContractConstants.MAX_STRING_LENGTH) {
-                throw CanonicalSerializationException("JSON string length exceeds maximum allowed ${ContractConstants.MAX_STRING_LENGTH}")
+            if (c < ' ') {
+                throw CanonicalSerializationException("Unescaped control character in JSON string")
             }
             if (c == '\\') {
                 if (pos >= len) throw CanonicalSerializationException("Unterminated escape sequence in string")
@@ -209,6 +209,7 @@ class StrictJsonParser private constructor(private val src: String) {
                                     pos += 6
                                     sb.append(char1)
                                     sb.append(code2.toChar())
+                                    checkDecodedStringLength(sb)
                                     continue
                                 }
                             }
@@ -234,8 +235,15 @@ class StrictJsonParser private constructor(private val src: String) {
                     sb.append(c)
                 }
             }
+            checkDecodedStringLength(sb)
         }
         throw CanonicalSerializationException("Unterminated string literal")
+    }
+
+    private fun checkDecodedStringLength(value: StringBuilder) {
+        if (value.length > ContractConstants.MAX_STRING_LENGTH) {
+            throw CanonicalSerializationException("JSON string length exceeds maximum allowed ${ContractConstants.MAX_STRING_LENGTH} UTF-16 code units")
+        }
     }
 
     private fun parseNumber(): StrictJsonNumber {
