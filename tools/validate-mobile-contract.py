@@ -766,14 +766,11 @@ def adapt_offline_cash_to_canonical_receipt(
         if not wire_acct:
             raise ValueError("cash_account_id required to resolve money_account_id")
         try:
-            import inspect
-            sig = inspect.signature(cash_account_resolver)
-            if len(sig.parameters) >= 2:
-                internal_id = cash_account_resolver(company_id or "", wire_acct)
-            else:
-                internal_id = cash_account_resolver(wire_acct)
+            if not isinstance(company_id, str) or not re.fullmatch(r"[0-7][0-9A-HJKMNP-TV-Z]{25}", company_id):
+                raise ValueError("Explicit company identity required")
+            internal_id = cash_account_resolver(company_id, wire_acct)
         except Exception as e:
-            raise ValueError(f"Cash account resolution failed: {e}") from e
+            raise ValueError("Cash account resolution failed") from None
 
         if isinstance(internal_id, bool) or not isinstance(internal_id, int) or internal_id <= 0:
             raise ValueError(f"Resolved money_account_id must be a positive integer, got {internal_id!r}")
@@ -853,14 +850,11 @@ def adapt_online_payment_to_canonical_choice(
             raise ValueError("Missing cash_account_id in payment intent profile")
 
         try:
-            import inspect
-            sig = inspect.signature(cash_account_resolver)
-            if len(sig.parameters) >= 2:
-                internal_money_account_id = cash_account_resolver(company_id, wire_acct_id)
-            else:
-                internal_money_account_id = cash_account_resolver(wire_acct_id)
+            if not isinstance(company_id, str) or not re.fullmatch(r"[0-7][0-9A-HJKMNP-TV-Z]{25}", company_id):
+                raise ValueError("Explicit company identity required")
+            internal_money_account_id = cash_account_resolver(company_id, wire_acct_id)
         except Exception as e:
-            raise ValueError(f"Cash account resolution failed for ULID {wire_acct_id}: {e}") from e
+            raise ValueError("Cash account resolution failed") from None
 
         if (
             isinstance(internal_money_account_id, bool)
@@ -2805,6 +2799,16 @@ def run_suite() -> int:
                 return 1
     print("  OK: Check 35f passed (foreign company cash account resolver fails closed without secrets leak)")
     passed_checks += 1
+
+    # Reject resolver interfaces that cannot receive company scope.
+    try:
+        adapt_online_payment_to_canonical_choice(
+            profile_full_exact, "50.000000", 2, "2026-11-11", lambda account: 1
+        )
+        print("  FAIL: Unscoped one-argument cash account resolver accepted")
+        return 1
+    except ValueError:
+        passed_checks += 1
 
     # Revision 2 positive/negative read/auth fixtures
     cases_rev2 = json.loads((FIXTURES_DIR / "revision-2-validation-cases.json").read_text())
