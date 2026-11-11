@@ -7,6 +7,7 @@
     "company_id",
     "company_name",
     "base_currency",
+    "base_currency_minor_units",
     "walk_in_customer_id",
     "staff",
     "device_lease",
@@ -30,6 +31,12 @@
     "base_currency": {
       "type": "string",
       "pattern": "^[A-Z]{3}$"
+    },
+    "base_currency_minor_units": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 6,
+      "description": "Minor units (0..6) of base_currency from currencies master. Baseline SalesDocumentRules hardcodes JOD?3:2; no runtime parity until all writers qualified; no guessing currency metadata."
     },
     "walk_in_customer_id": {
       "type": "string",
