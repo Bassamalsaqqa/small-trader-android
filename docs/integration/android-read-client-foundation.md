@@ -35,7 +35,7 @@ The client boundary strictly supports exactly 6 authentication, bootstrap, and r
 - **URI Structure Rejection**: Base origins containing userinfo credentials, non-empty paths, query parameters, fragments, or invalid port numbers (> 65535 or < 0) are strictly rejected.
 - **Validated Origin Binding**: Dispatched transport requests explicitly bind `baseOrigin` into `TransportRequest.baseOrigin`.
 - **Method + Path Pair Validation**: Requests are validated against an allowlist of exact method and path templates (`EndpointSecurity.validateMethodAndPath`).
-- **Opaque Cursor Validation**: Cursors are validated as opaque query values (max 255 characters). Contract-valid opaque characters (such as `/`, `=`, `+`, `-`, `_`, `.`) are permitted, while URL schemes (`://`, `//`), query delimiters (`?`), fragments (`#`), and control characters/whitespace are rejected. The client never follows cursors as URLs.
+- **Opaque Cursor Validation**: Cursors are validated as opaque query values (max 255 characters). Contract-valid opaque characters (such as `/`, `=`, `+`, `-`, `_`, `.`) are permitted, without inventing a cursor character grammar. URL-looking text remains query data; the client never follows cursors as URLs. Future transport must percent-encode query values. Origin validation performs no DNS resolution and local HTTP opt-in uses an explicit address allowlist.
 
 ### 2.2 Token & Credential Placement
 - **Tokens in Authorization Header Only**: Authenticated requests (`logout`, `bootstrap`, `products`, `customers`) supply the token exclusively through the HTTP header `Authorization: Bearer <token>`. Tokens are never placed in URL paths, query parameters, request bodies, or log representations.
@@ -129,12 +129,12 @@ The read client foundation unit tests execute under JDK 21 (`/home/t3dev/.local/
 | :--- | :--- | :--- |
 | `ReadClientGoldenParityTest` | 6 | All 6 golden fixtures (`golden-auth-challenge.json`, `golden-auth-login.json`, `golden-auth-logout.json`, `golden-bootstrap.json`, `golden-product-catalog.json`, `golden-customer-directory.json`), verifying exact wire parity, ULID/UUID representations, exact decimal amounts, and field bindings. |
 | `ReadClientRevision2BoundariesTest` | 13 | Fresh MFA challenge acceptance, old nonce-less MFA rejection, strict MFA oneOf branch separation, disabled offline policy with lease rejection, empty mature masters acceptance, truthful nullable paired product tax (both null, both set, mismatched rejections), missing != null key enforcement on nullable fields (`next_cursor`, `tax_rate`, `device_lease`), error details type bounds (object/array/string/null only), max width boundary tests, unexpected property rejections, float money rejections, foreign ULID/UUID rejections, and constructor/copy invariants. |
-| `ReadClientSecurityAndTransportTest` | 9 | Base origin validation (HTTPS required, loopback opt-in only, rejecting paths/queries/fragments/credentials/invalid ports), endpoint allowlist and method+path enforcement, secret redaction in `toString()` (passwords, MFA codes, bearer tokens, customer PII), cursor safety with opaque valid chars (`/`, `=`), bearer token validation with Laravel Sanctum pipe support, and defensive copy immutability. |
+| `ReadClientSecurityAndTransportTest` | 10 | Base origin validation (HTTPS required, loopback opt-in only, rejecting paths/queries/fragments/credentials/invalid ports), endpoint allowlist and method+path enforcement, secret redaction in `toString()` (passwords, MFA codes, bearer tokens, customer PII), cursor safety with opaque valid chars (`/`, `=`), bearer token validation with Laravel Sanctum pipe support, and defensive copy immutability. |
 | `SmallTraderReadClientWorkflowTest` | 21 | End-to-end client dispatch across all 6 endpoints with mock transport, parameter placement, tenant company isolation checks (bootstrap, products, customers), login identity email verification (case-insensitive), exact 200 success enforcement (rejecting 201/204), safe failure categories and zero credential leak on hostile transport exceptions and malformed login secret bodies, and explicit outcome discrimination. |
 
 Combined Mobile Suite XML counts:
 - `com.example.data.mobile.contract.*`: **40 tests** (all 7 classes passing 100%)
-- `com.example.data.mobile.readclient.*`: **49 tests** (all 4 classes passing 100%)
-- **Total Mobile Foundation & Read Client Tests**: **89 tests** (0 failed, 0 skipped).
+- `com.example.data.mobile.readclient.*`: **50 tests** (all 4 classes passing 100%)
+- **Total Mobile Foundation & Read Client Tests**: **90 tests** (0 failed, 0 skipped).
 
 Python contract validation suite: **210 checks passing** (normal and `-O` optimized python), matching `manifest.sha256` (`ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659`, Draft Revision 2).

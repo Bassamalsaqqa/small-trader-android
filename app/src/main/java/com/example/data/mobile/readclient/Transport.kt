@@ -1,7 +1,6 @@
 package com.example.data.mobile.readclient
 
 import com.example.data.mobile.contract.ServerUlid
-import java.net.InetAddress
 import java.net.URI
 import java.util.Collections
 import java.util.Locale
@@ -20,7 +19,7 @@ enum class HttpMethod {
 class TransportRequest(
     val method: HttpMethod,
     val path: String,
-    val baseOrigin: String = "https://api.smalltrader.example",
+    val baseOrigin: String,
     queryParams: Map<String, String> = emptyMap(),
     headers: Map<String, String> = emptyMap(),
     val body: String? = null
@@ -144,43 +143,43 @@ object EndpointSecurity {
         val uri = try {
             URI(trimmed)
         } catch (e: Exception) {
-            throw IllegalArgumentException("Invalid base origin URI: '$origin'", e)
+            throw IllegalArgumentException("Invalid base origin URI")
         }
 
         require(uri.isAbsolute) {
-            "Base origin must be an absolute URI, got '$origin'"
+            "Base origin must be an absolute URI, got [REDACTED]"
         }
 
         val scheme = uri.scheme?.lowercase(Locale.ROOT)
         require(scheme != null) {
-            "Base origin must specify a scheme, got '$origin'"
+            "Base origin must specify a scheme, got [REDACTED]"
         }
 
         val host = uri.host
         require(!host.isNullOrBlank()) {
-            "Base origin must specify a non-empty host, got '$origin'"
+            "Base origin must specify a non-empty host, got [REDACTED]"
         }
 
         val isLoopback = isLoopbackHost(host)
         if (scheme == "http") {
             require(allowHttpLoopback && isLoopback) {
-                "Insecure HTTP base origin '$origin' is prohibited. HTTPS is required by default; loopback HTTP is only permitted with explicit opt-in."
+                "Insecure HTTP base origin [REDACTED] is prohibited. HTTPS is required by default; loopback HTTP is only permitted with explicit opt-in."
             }
         } else if (scheme != "https") {
             throw IllegalArgumentException("Unsupported scheme '$scheme' in base origin. Only HTTPS is allowed (or HTTP loopback with explicit opt-in).")
         }
 
         require(uri.rawUserInfo == null) {
-            "Base origin must not contain userinfo credentials: '$origin'"
+            "Base origin must not contain userinfo credentials: [REDACTED]"
         }
         require(uri.rawPath.isNullOrEmpty() || uri.rawPath == "/") {
-            "Base origin must not contain a path segment: '${uri.rawPath}'"
+            "Base origin must not contain a path segment: [REDACTED]"
         }
         require(uri.rawQuery == null) {
-            "Base origin must not contain query parameters: '$origin'"
+            "Base origin must not contain query parameters: [REDACTED]"
         }
         require(uri.rawFragment == null) {
-            "Base origin must not contain a fragment identifier: '$origin'"
+            "Base origin must not contain a fragment identifier: [REDACTED]"
         }
 
         val port = uri.port
@@ -193,17 +192,8 @@ object EndpointSecurity {
         return if (port != -1) "$scheme://$host:$port" else "$scheme://$host"
     }
 
-    private fun isLoopbackHost(host: String): Boolean {
-        if (host == "localhost" || host == "127.0.0.1" || host == "10.0.2.2" || host == "::1" || host == "[::1]") {
-            return true
-        }
-        return try {
-            val addr = InetAddress.getByName(host)
-            addr.isLoopbackAddress
-        } catch (_: Exception) {
-            false
-        }
-    }
+    private fun isLoopbackHost(host: String): Boolean =
+        host.lowercase(Locale.ROOT) in setOf("localhost", "127.0.0.1", "10.0.2.2", "::1", "[::1]")
 
     fun validatePath(path: String) {
         val matchesAny = ALLOWED_PATH_PATTERNS.any { it.matches(path) }
@@ -236,18 +226,10 @@ object EndpointSecurity {
 
     fun validateCursor(cursor: String?) {
         if (cursor == null) return
-        require(cursor.length in 1..255) {
-            "Pagination cursor length must be between 1 and 255 characters"
+        require(cursor.length <= 255) {
+            "Pagination cursor exceeds contract length bound"
         }
-        require(!cursor.contains("://") && !cursor.startsWith("//")) {
-            "Pagination cursor must be an opaque token, external URL schemes are strictly prohibited"
-        }
-        require(!cursor.contains("?") && !cursor.contains("#")) {
-            "Pagination cursor must not contain query or fragment delimiters"
-        }
-        require(cursor.all { it in '!'..'~' }) {
-            "Pagination cursor must contain only printable ASCII characters without whitespace"
-        }
+        // Opaque data only: the transport must encode this query value, never follow it.
     }
 
     fun authChallengePath(): String = "/api/mobile/v1/auth/challenge"

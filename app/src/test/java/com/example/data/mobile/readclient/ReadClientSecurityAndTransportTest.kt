@@ -175,28 +175,26 @@ class ReadClientSecurityAndTransportTest {
         val query = PaginationQuery(cursor = "c29tZS9jdXJzb3I9PQ==")
         assertEquals("c29tZS9jdXJzb3I9PQ==", query.cursor)
 
-        // External URLs, protocol-relative URLs, queries, fragments, whitespace, and CRLF rejected
-        assertThrows(IllegalArgumentException::class.java) {
-            PaginationQuery(cursor = "https://evil.com/leak")
+        // Even URL-looking text stays in one opaque query value; it cannot replace the path.
+        for (cursor in listOf("", "a/b+=", "https://example.invalid/?q=x#part", "//opaque", "بيانات", "cursor with space", "cursor\r\ndata")) {
+            assertEquals(cursor, PaginationQuery(cursor = cursor).toQueryParams()["cursor"])
         }
         assertThrows(IllegalArgumentException::class.java) {
-            PaginationQuery(cursor = "http://evil.com/leak")
+            PaginationQuery(cursor = "a".repeat(256))
         }
+    }
+
+    @Test
+    fun testOriginValidationDoesNotResolveNamesOrExposeCredentials() {
+        // Numeric shorthand resolves to loopback in InetAddress, but is not an approved local origin.
         assertThrows(IllegalArgumentException::class.java) {
-            PaginationQuery(cursor = "//evil.com/leak")
+            EndpointSecurity.validateBaseOrigin("http://127.1", allowHttpLoopback = true)
         }
-        assertThrows(IllegalArgumentException::class.java) {
-            PaginationQuery(cursor = "cursor?query=param")
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            EndpointSecurity.validateBaseOrigin("https://user:secret-password@example.invalid")
         }
-        assertThrows(IllegalArgumentException::class.java) {
-            PaginationQuery(cursor = "cursor#fragment")
-        }
-        assertThrows(IllegalArgumentException::class.java) {
-            PaginationQuery(cursor = "cursor with space")
-        }
-        assertThrows(IllegalArgumentException::class.java) {
-            PaginationQuery(cursor = "cursor\r\ninjection")
-        }
+        assertFalse(error.toString().contains("secret-password"))
+        assertEquals("https://unresolvable.invalid", EndpointSecurity.validateBaseOrigin("https://unresolvable.invalid"))
     }
 
     @Test
