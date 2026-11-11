@@ -76,8 +76,8 @@ Prior iterations suffered from informal contract specifications, toy validators,
    - The server invoice ULID (`invoice_id`) is strictly distinct from the client event UUID (`client_event_id`).
 
 ### 2.6 Transport Delivery Envelope vs Canonical Accounting Domain Receipt
-1. **Outer Mobile Envelope**: The mobile intake structure (`client_event_id`, `device_id`, `captured_at`, `payload_digest`, and local sync status) acts as a durable delivery and idempotency tracking envelope.
-2. **Inner Canonical Domain Writers**: The backend accounting domain processes the inner economic payload through transactional writers (`CreateSalesInvoiceDraftAction`, `PostSalesInvoiceAction`, `SalesLineCalculator`, `CustomerPayment`), atomically committing the invoice, inventory lot movements, and general ledger journal entries into an immutable central `CommandReceipt`.
+1. **Outer Mobile Envelope**: The mobile intake structure (`client_event_id`, `device_id`, `captured_at`, `payload_digest`, and local sync status) acts as a durable delivery and idempotency tracking envelope. Mobile sales require durable receipt replay uniqueness scoped by `UNIQUE(company_id, client_event_id)` bound to `(actor_id, device_id)` and spanning API versions.
+2. **Inner Canonical Domain Writers & Durable DB Receipts**: Backend source verification confirms that `CommandReceipt` rows in the accounting backend (`ImmediateSaleCommands.php`, `command_receipts` table) ARE durable database receipts stored with full transactional guarantees, NOT merely ephemeral or session-bound records. However, backend `CommandReceipt` idempotency is scoped by `UNIQUE(company_id, user_id, action, idempotency_key)` with `request_hash = hash('sha256', target_invoice_id . '|' . token)` (an invoice/token-hash scoped identity). This differs fundamentally from the mobile delivery requirement of `UNIQUE(company_id, client_event_id)` event-scoped replay identity.
 
 ### 2.7 Bounded Pagination & Search Semantics
 1. Catalog (`GET /products`) and customer (`GET /customers`) endpoints enforce bounded pagination:
@@ -200,14 +200,14 @@ Online sale preview (`POST /api/mobile/v2/companies/{companyId}/sales/preview`) 
     - `settlement_mode`: `"full"` | `"unpaid"` | `"partial"`.
     - `payment_method`: `"cash"` for full/partial; `null` for unpaid (omitted fields in valid request canonically normalize to `null`).
     - `cash_account_id`: Approved cash register Crockford ULID for full/partial; `null` for unpaid (omitted fields in valid request canonically normalize to `null`).
-    - `amount`: Exact monetary decimal string lexeme (`Decimal(amount) == 0` for unpaid; `0 < Decimal(amount) < grand_total` for partial; `Decimal(amount) >= grand_total` for full, allowing tendered excess). Preserves exact string representation (e.g. `'0.000'`) without rounding or lexeme mutation.
+    - `amount`: Exact monetary decimal string lexeme (`Decimal(amount) == 0` for unpaid; `0 < Decimal(amount) < grand_total` for partial; `Decimal(amount) == grand_total` for full, enforcing the orchestrator-selected first-release exact policy). Preserves exact string representation (e.g. `'0.000'`) without rounding or lexeme mutation.
 - **Lexeme Preservation & No Floats**: All quantity and monetary values are strictly validated string decimal lexemes; IEEE-754 floats are forbidden. No implicit rounding, truncating, or repricing occurs prior to canonical hashing.
 - **Restricted JCS Serialization (RFC 8785 Subset)**: Object keys sorted by UTF-16 code units; characters < 0x20 escaped; no whitespace between tokens.
 - **Bound Preview Token Placeholder**: The computed SHA-256 digest is embedded in an illustrative opaque sample token (`preview_token`) consisting of base64-encoded JSON claims `{"version": 2, "company_id": "...", "digest": "sha256:..."}` and an illustrative signature suffix. The token is an illustrative opaque placeholder for contract binding, not fake cryptographic proof.
 
 ### Normative Online Canonical Intent Profile Projection & Payment Semantics
 > [!IMPORTANT]
-> The helper functions in `tools/validate-mobile-contract.py` (`construct_online_sale_intent_profile`, `verify_online_sale_intent_profile`, `verify_payment_decimal_consistency`) are contract and schema test verifiers, NOT server implementations. The authoritative server domain logic and ledger posting reside in backend Laravel services (`ImmediateSaleCommands.php`, `SalesInvoiceCommands.php`, `SalesLineCalculator.php`).
+> The helper functions in `tools/validate-mobile-contract.py` (`construct_online_sale_intent_profile`, `verify_online_sale_intent_profile`, `verify_payment_decimal_consistency`, `adapt_offline_cash_to_canonical_receipt`, `adapt_online_payment_to_canonical_choice`) are contract and schema test verifiers, NOT server implementations. The authoritative server domain logic and ledger posting reside in backend Laravel services (`ImmediateSaleCommands.php`, `SalesInvoiceCommands.php`, `SalesLineCalculator.php`, `PostCustomerPaymentAction.php`).
 
 1. **Mandatory Pre-Projection Schema Validation**:
    - The raw incoming request is validated against `sale-preview-request.json` before any projection occurs. Any unknown property at the root, line, or payment level is rejected immediately with `IntentProfileValidationError`.
@@ -219,15 +219,19 @@ Online sale preview (`POST /api/mobile/v2/companies/{companyId}/sales/preview`) 
      - An unpaid sale carries zero payment tender (`Decimal(amount) == 0`). String decimal lexemes (e.g. `'0.000'`) are preserved verbatim without monetary rounding or format conversion.
      - Per canonical rules (`ImmediateSaleCommands::intent`), an unpaid sale cannot carry cash payment instructions. `payment_method` and `cash_account_id` may be omitted from client requests or supplied as explicit `null`.
      - In the canonical intent profile, omitted payment method and cash account canonically normalize to `null`. If non-null payment instructions are supplied with `unpaid` mode, validation fails closed.
+     - **Documented Command Choice Adapter**: ONLY AFTER strict wire and profile validation and digest derivation, the adapter maps canonical choice EXACTLY to `{"mode": "unpaid"}`, stripping wire payment fields (`amount`, `payment_method`, `cash_account_id`) from the command input so that `ImmediateSaleCommands::intent` (which strictly checks `array_diff(array_keys($choice), ['mode']) === []`) accepts it. Stripping applies ONLY to validated payment snapshot fields; no general null filter is applied across the payload (line `tax_rate_id: null` after 0/false validation MUST remain explicit canonical NoTax).
    - **Partial Settlement (`settlement_mode: "partial"`)**:
      - `payment_method: "cash"` and an approved company cash register `cash_account_id` are required economic fields and must not be omitted or null.
      - The payment amount must be positive and strictly below the qualified grand total (`0 < Decimal(amount) < grand_total`), matching `ImmediateSaleCommands` allocation checks (`! $allocated->isLessThan($total)`).
+     - **Documented Partial Adapter (Proposed Qualification)**: Base currency cash without change maps wire `amount` to canonical `received_amount` AND `invoice_amount` allocation (`allocated_amount`), with FX 1.0000000000, explicit reviewed payment date (`payment_date`), same company active cash account (`money_account_id`), and `payment_currency_amount` matching allocation.
    - **Full Settlement (`settlement_mode: "full"`)**:
      - `payment_method: "cash"` and `cash_account_id` are required economic fields and must not be omitted or null.
-     - Full settlement requires the tendered amount to be at least the qualified grand total (`Decimal(amount) >= grand_total`), matching `ImmediateSaleCommands` which allows tendered excess/change (`$consumed <= $amount`, where `$consumed = $total`).
-   - **Offline Cash Tender Conservation**:
+     - **Backend Canonical Excess vs Change Semantics**: Backend source verification of `ImmediateSaleCommands::intent` (lines 185-242) and `ImmediateSaleCommands::paymentTerms` (lines 248-295) baseline `f8a0cf7` identifies that the prior claim that "full wire amount >= total means change" was incorrect. In backend `paymentTerms`, when `amount > total`, the excess (`amount - consumed`) is recorded as `unallocated_payment_amount` (unallocated customer credit posted to the customer's account), NOT returned change.
+     - **First-Release Online Policy**: To avoid unintended credit accumulation and because the mobile client has no customer credit allocation UX in first release, the orchestrator selected the smallest exact first-release online policy: **FULL wire amount MUST EQUAL grand total (`Decimal(amount) == grand_total`)**. Amounts greater than or less than grand total are strictly rejected by contract verifiers and the first-release adapter. Backend canonical credit semantics remain unchanged (no new credit or change feature introduced).
+   - **Offline Cash Tender & Change Conservation**:
      - Offline transactions retain distinct `amount_tendered`, `amount_settled`, and `change_returned` fields (`mode: "full"`).
      - Conservation invariant `amount_tendered == amount_settled + change_returned` and `amount_settled == grand_total` is strictly verified without falling back to online `amount` or tautological self-comparisons.
+     - **Proposed Canonical Receipt Adapter**: The authoritative canonical receipt amount to post against the customer invoice is the **NET RETAINED** settled amount (`amount_settled`), NOT the tendered amount (`amount_tendered`) when change is returned (e.g. tender 60, total 50, change 10 -> canonical receipt amount 50).
 
 ### Financial Line Schema Amendment
 Both online sale preview (`POST /api/mobile/v2/companies/{companyId}/sales/preview`) and offline event intake (`POST /api/mobile/v2/companies/{companyId}/offline-events`) require:

@@ -2,7 +2,7 @@
 
 Previous Android Git head: `ec8220934839ade0c4fe5408398ab1a313feb09c` (PR4 rev2).
 Previous manifest SHA-256: `ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659` (preserved unchanged as parent rev2 reference).
-Revision 3 manifest SHA-256: `5774161028c9c576bbd6ea66af8e500d0586e904aeaf9759a6ec9f159cc9291d`.
+Revision 3 manifest SHA-256: `2daee635c65672acc6266c6bf838d2075c6f09d9e05697e997a593b4634615b0`.
 API paths preserve `/api/mobile/v1` for revision 2 read/auth representations and introduce explicit `/api/mobile/v2` paths for breaking financial endpoints; this is an explicit draft contract revision 3, not a silent mirror rewrite. Status: **PROPOSED NOT LIVE**.
 
 Read the revision 3 section of ADR-0001 for normative contract specifications. Proposal evidence and source anchors were independently verified against PR9 remote `4a249ca7416f8c45478aa2f163df1369d02172ea` (`docs/integration/financial-tax-protocol-proposal.md`) and Account backend commit `f8a0cf7012c4875bec7320d42e0f8dde58593b52`.
@@ -44,7 +44,9 @@ Calculations match `SalesLineCalculator.php` (ROUND_HALF_UP at minor units):
 The write transaction revalidates the bearer token, device installation UUID binding, tenant company membership, password epoch, and required permissions. No fabricated browser session proofs.
 
 ### Immutable Durable Receipt & Idempotent Replay
-- Dedicated mobile receipt table scoped `UNIQUE(company_id, client_event_id)` bound to original `(actor_id, device_id)`.
+- Backend source audit confirms `CommandReceipt` rows ARE durable database receipts written transactionally to MySQL (`command_receipts`), not merely ephemeral or session-bound artifacts.
+- However, backend `CommandReceipt` idempotency is scoped by `UNIQUE(company_id, user_id, action, idempotency_key)` with `request_hash = hash('sha256', target_invoice_id . '|' . token)`. This invoice/token-hash scoped identity differs from the required mobile intake identity:
+- Mobile intake requires a dedicated durable receipt table scoped `UNIQUE(company_id, client_event_id)` bound to original `(actor_id, device_id)` and spanning API versions.
 - Replay with identical payload bytes/digest returns original canonical outcome (`invoice_id`, `payment_id`, `invoice_number`, `grand_total`).
 - Altered payload bytes/digest returns generic HTTP 409 Conflict.
 - High-concurrency unique insert and row locking require MariaDB qualification tests; schema fixtures assert contract shape only.
@@ -109,13 +111,14 @@ In response to secondary audit review of `construct_online_sale_intent_profile` 
    - `construct_online_sale_intent_profile` mandates raw request validation against `sale-preview-request.json` before any projection. Unknown root, line, or payment properties are rejected.
    - Missing `tax_rate_id` on any line item throws `IntentProfileValidationError`, eliminating the previous `line.get("tax_rate_id")` bug that silently defaulted missing tax IDs to implicit NoTax. Explicit No-Tax requires an explicit `null` with `tax_rate: "0.000000"` and `tax_inclusive: false`.
    - Strict context validation enforces exact known keys `{"actor_id", "company_id", "currency_minor_units"}` and rejects boolean as integer (`currency_minor_units`).
-3. **Genuine Payment Decimal Consistency**:
+3. **Genuine Payment Decimal Consistency & First-Release Online Policy**:
    - `verify_payment_decimal_consistency` separates offline cash tender conservation (`amount_tendered == amount_settled + change_returned`, `amount_settled == grand_total`, `mode: "full"`) from online payment intent (`settlement_mode`).
    - Online payment semantics strictly adhere to backend `ImmediateSaleCommands.php`:
-     - `unpaid`: `Decimal(amount) == 0`. Exact string decimal lexemes (e.g. `'0.000'`) are preserved verbatim without monetary rounding or format normalization.
-     - `partial`: `0 < Decimal(amount) < grand_total` (positive and strictly below grand total).
-     - `full`: `Decimal(amount) >= grand_total` (exact decimal comparison allowing tendered excess / change).
+     - `unpaid`: `Decimal(amount) == 0`. Exact string decimal lexemes (e.g. `'0.000'`) are preserved verbatim without monetary rounding or format normalization. Documented command choice adapter maps EXACTLY to `{"mode": "unpaid"}` only after strict wire validation and digest derivation, stripping wire payment fields from command input without altering wire profile/digest or applying a general null filter (line `tax_rate_id: null` remains explicit canonical NoTax).
+     - `partial`: `0 < Decimal(amount) < grand_total` (positive and strictly below grand total). Proposed adapter maps wire amount to canonical `received_amount` AND `invoice_amount` allocation (FX 1, reviewed date, active cash account).
+     - `full`: `Decimal(amount) == grand_total`. Backend source verification of `ImmediateSaleCommands::intent` (lines 185-242) and `ImmediateSaleCommands::paymentTerms` (lines 248-295) baseline `f8a0cf7` identifies that excess wire amount (`amount > total`) is posted as `unallocated_payment_amount` (unallocated customer credit), NOT returned change. Under the orchestrator-selected smallest first-release online policy, FULL wire amount MUST EQUAL grand total; overpayment and underpayment are strictly rejected.
+   - Offline Cash Capture: Conservation `amount_tendered == amount_settled + change_returned` and `amount_settled == grand_total` is preserved; proposed canonical receipt amount is NET RETAINED settled (e.g. tender 60, total 50, change 10 -> canonical receipt 50), NOT tendered when change given.
    - Eliminates the tautological `amount == amount + 0` fallback.
 4. **Schema Helper vs Server Implementation Scope**:
-   - Verifier functions in `tools/validate-mobile-contract.py` are schema/contract validation helpers for testing and fixture qualification; authoritative transactional validation, state transitions, and ledger posting remain exclusively in Laravel backend services.
+   - Verifier functions and adaptation helpers in `tools/validate-mobile-contract.py` are schema/contract validation helpers for testing and fixture qualification; authoritative transactional validation, state transitions, and ledger posting remain exclusively in Laravel backend services.
 

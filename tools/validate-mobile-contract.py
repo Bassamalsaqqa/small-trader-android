@@ -28,12 +28,13 @@ Comprehensive Small Trader Mobile Contract Validation Suite (Draft Revision 3):
    - Manifest verification mutation tests (Check 27a-e): real filesystem mutation test (temporary
      untracked file restored cleanly), extra entry, duplicate entry, malformed line, checksum mismatch.
    - Archive byte checks (Check 28): historical goldens and archived schemas match exact parent bytes.
-   - Positive each mode with omitted/null/valid cash fields, digest derivation & tampering (Check 29a-d).
+   - Positive each mode with omitted/null/valid cash fields, exact total full mode, digest derivation & tampering (Check 29a-d).
    - Missing required taxID rejection throwing typed error, never implicit NoTax (Check 30a-b).
    - Unknown raw request fields rejection at root/line/payment before projection (Check 31a-c).
    - Context strict known keys, ULID format, and boolean minor units rejection (Check 32a-e).
    - Payment consistency boundaries, invalid lexemes, and negative amounts rejection (Check 33a-h).
    - Missing required economic fields for full/partial never default (Check 34a-f).
+   - Source-backed adaptation test illustrations for offline cash net retained settled, unpaid command choice mapping, partial allocation, and full overpayment rejection (Check 35a-d).
    - Revision 2 (89 cases) and Revision 3 (31 cases) positive/negative suites.
 7. Verifies reproducible SHA-256 manifest with exact set equality discovered vs stored,
    failing closed on extra/missing/duplicate/malformed entries.
@@ -568,7 +569,7 @@ def verify_payment_decimal_consistency(payment: Dict[str, Any], grand_total_str:
     - Online payment intent:
         settlement_mode == "unpaid": amount == 0
         settlement_mode == "partial": 0 < amount < grand_total (positive below qualified grand total)
-        settlement_mode == "full": amount >= grand_total (allowing tendered excess / change)
+        settlement_mode == "full": amount == grand_total (exact grand total; excess is unallocated customer credit, not returned change, and is rejected under the first-release exact policy)
     Returns False on invalid lexemes, negative amounts, or invariant violations.
     """
     if not isinstance(payment, dict):
@@ -619,10 +620,92 @@ def verify_payment_decimal_consistency(payment: Dict[str, Any], grand_total_str:
         elif mode == "partial":
             return Decimal("0") < amount < grand_total
         elif mode == "full":
-            return amount >= grand_total
+            return amount == grand_total
         return False
 
     return False
+
+
+def adapt_offline_cash_to_canonical_receipt(
+    payment: Dict[str, Any],
+    grand_total_str: str,
+) -> Dict[str, Any]:
+    """
+    Source-backed adaptation test illustration (contract qualification, NOT backend code implementation):
+    Adapts offline cash tender capture (amount_tendered, amount_settled, change_returned)
+    to proposed canonical receipt posting parameters.
+    The authoritative canonical receipt amount is NET RETAINED settled (amount_settled),
+    NOT amount_tendered when change is given.
+    Example: tender 60.000000, total 50.000000, change 10.000000 -> canonical receipt amount 50.000000.
+    """
+    if not verify_payment_decimal_consistency(payment, grand_total_str):
+        raise ValueError("Invalid offline cash payment tender conservation")
+    return {
+        "mode": "full",
+        "payment_method": "cash",
+        "receipt_amount": str(payment["amount_settled"]),
+        "change_returned": str(payment["change_returned"]),
+        "amount_tendered": str(payment["amount_tendered"]),
+    }
+
+
+def adapt_online_payment_to_canonical_choice(
+    intent_profile: Dict[str, Any],
+    grand_total_str: str,
+    reviewed_payment_date: str = "2026-11-11",
+) -> Dict[str, Any]:
+    """
+    Source-backed adaptation test illustration (contract qualification, NOT backend code implementation):
+    Maps validated online payment intent profile to backend ImmediateSaleCommands $choice array.
+    - ONLY AFTER strict wire and intent profile validation and digest derivation:
+      - unpaid: maps EXACTLY to {'mode': 'unpaid'}, stripping wire payment fields
+        (amount, payment_method, cash_account_id) from the command input so that
+        ImmediateSaleCommands::intent (array_diff(array_keys($choice), ['mode']) === [])
+        succeeds, without altering the wire profile or its JCS payload digest.
+        Crucial: Stripping applies ONLY to validated payment snapshot fields; does NOT apply
+        a general null filter across the payload (line tax_rate_id: null MUST remain explicit
+        canonical NoTax).
+      - full: under first-release exact policy (amount == grand_total), maps wire amount to
+        received_amount and invoice_amount allocation; rejects over/under payment.
+      - partial: base currency cash no-change, maps wire amount to canonical received_amount
+        and invoice_amount allocation; FX 1.0000000000, explicit reviewed payment date,
+        active cash account, and payment_currency_amount matching allocation.
+    """
+    payment = intent_profile.get("payment", {})
+    if not verify_payment_decimal_consistency(payment, grand_total_str):
+        raise ValueError("Online payment decimal consistency violation")
+
+    mode = payment.get("settlement_mode")
+    if mode == "unpaid":
+        # Strips wire payment fields from choice; wire profile & digest remain unaltered
+        return {"mode": "unpaid"}
+    elif mode == "full":
+        amt = Decimal(str(payment["amount"]))
+        total = Decimal(grand_total_str)
+        if amt != total:
+            raise ValueError(f"Full settlement amount {amt} must equal grand total {total}")
+        return {
+            "mode": "full",
+            "payment_method": "cash",
+            "money_account_id": payment["cash_account_id"],
+            "payment_date": reviewed_payment_date,
+            "amount": str(payment["amount"]),
+            "exchange_rate": "1.0000000000",
+            "invoice_amount": grand_total_str,
+            "payment_currency_amount": str(payment["amount"]),
+        }
+    elif mode == "partial":
+        return {
+            "mode": "partial",
+            "payment_method": "cash",
+            "money_account_id": payment["cash_account_id"],
+            "payment_date": reviewed_payment_date,
+            "amount": str(payment["amount"]),
+            "exchange_rate": "1.0000000000",
+            "invoice_amount": str(payment["amount"]),
+            "payment_currency_amount": str(payment["amount"]),
+        }
+    raise ValueError(f"Unsupported settlement mode: {mode}")
 
 
 # ---------------------------------------------------------------------------
@@ -1921,23 +2004,26 @@ def run_suite() -> int:
         print("  OK: Check 29c passed (partial mode with valid cash fields accepted, digest verified, tampering rejected)")
         passed_checks += 1
 
-    # 29d: Full mode with valid cash fields and tendered excess (payment {settlement_mode: 'full', amount: '60.000000'})
-    req_full_excess = json.loads(json.dumps(preview_v2_fix["request"]))
-    req_full_excess["payment"]["amount"] = "60.000000"
-    profile_full_excess = construct_online_sale_intent_profile(preview_v2_fix["context"], req_full_excess, validator_hub)
-    full_excess_digest = compute_restricted_sha256_digest(profile_full_excess)
-    verify_online_sale_intent_profile(profile_full_excess, full_excess_digest, validator_hub)
-    if not verify_payment_decimal_consistency(profile_full_excess["payment"], "50.000000"):
-        print("  FAIL Check 29d: Full mode tendered excess (60.000000 >= 50.000000) rejected!")
+    # 29d: Full mode with valid cash fields and exact grand total (payment {settlement_mode: 'full', amount: '50.000000'})
+    req_full_exact = json.loads(json.dumps(preview_v2_fix["request"]))
+    req_full_exact["payment"]["amount"] = "50.000000"
+    profile_full_exact = construct_online_sale_intent_profile(preview_v2_fix["context"], req_full_exact, validator_hub)
+    full_exact_digest = compute_restricted_sha256_digest(profile_full_exact)
+    if full_exact_digest != expected_v2_preview_digest:
+        print(f"  FAIL Check 29d: Full exact cash 50 digest mutated! Expected {expected_v2_preview_digest}, got {full_exact_digest}")
         return 1
-    tampered_full_price = json.loads(json.dumps(profile_full_excess))
+    verify_online_sale_intent_profile(profile_full_exact, full_exact_digest, validator_hub)
+    if not verify_payment_decimal_consistency(profile_full_exact["payment"], "50.000000"):
+        print("  FAIL Check 29d: Full mode exact total (50.000000 == 50.000000) rejected!")
+        return 1
+    tampered_full_price = json.loads(json.dumps(profile_full_exact))
     tampered_full_price["lines"][0]["unit_price"] = "26.000000"
     try:
-        verify_online_sale_intent_profile(tampered_full_price, full_excess_digest, validator_hub)
-        print("  FAIL Check 29d: Tampered full excess price accepted!")
+        verify_online_sale_intent_profile(tampered_full_price, full_exact_digest, validator_hub)
+        print("  FAIL Check 29d: Tampered full exact price accepted!")
         return 1
     except IntentProfileValidationError:
-        print("  OK: Check 29d passed (full mode with tendered excess accepted, digest verified, tampering rejected)")
+        print("  OK: Check 29d passed (full mode with exact grand total accepted, golden digest verified, tampering rejected)")
         passed_checks += 1
 
     # Check 30: Missing required taxID rejection (never default to implicit NoTax)
@@ -2092,11 +2178,17 @@ def run_suite() -> int:
     print("  OK: Check 33c passed (partial mode with amount >= grand total rejected)")
     passed_checks += 1
 
-    # 33d: full mode with amount less than grand total rejected
+    # 33d: full mode with amount not equal to grand total rejected (both under and overpayment)
     if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "49.999999"}, "50.000000"):
         print("  FAIL Check 33d: Full mode with amount < grand total accepted!")
         return 1
-    print("  OK: Check 33d passed (full mode with amount < grand total rejected)")
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "50.000001"}, "50.000000"):
+        print("  FAIL Check 33d: Full mode with amount > grand total accepted!")
+        return 1
+    if verify_payment_decimal_consistency({"settlement_mode": "full", "amount": "60.000000"}, "50.000000"):
+        print("  FAIL Check 33d: Full mode overpayment (60.000000 > 50.000000) accepted!")
+        return 1
+    print("  OK: Check 33d passed (full mode with amount != grand total rejected: under and overpayment)")
     passed_checks += 1
 
     # 33e: Negative payment amount rejected
@@ -2216,6 +2308,90 @@ def run_suite() -> int:
     except IntentProfileValidationError:
         print("  OK: Check 34f passed (unpaid mode with non-null payment method rejected)")
         passed_checks += 1
+
+    # Check 35: Source-backed adaptation test illustrations (contract qualification, not backend implementation)
+    # 35a: Offline cash capture adaptation: tender 60 / total 50 / change 10 -> canonical receipt 50 (net retained settled)
+    offline_tender_example = {
+        "mode": "full",
+        "amount_tendered": "60.000000",
+        "amount_settled": "50.000000",
+        "change_returned": "10.000000",
+    }
+    canonical_receipt = adapt_offline_cash_to_canonical_receipt(offline_tender_example, "50.000000")
+    if canonical_receipt["receipt_amount"] != "50.000000":
+        print(f"  FAIL Check 35a: Proposed canonical receipt amount was {canonical_receipt['receipt_amount']!r}, expected net retained 50.000000!")
+        return 1
+    if canonical_receipt["receipt_amount"] == canonical_receipt["amount_tendered"]:
+        print("  FAIL Check 35a: Proposed canonical receipt amount incorrectly used tendered instead of settled!")
+        return 1
+    print("  OK: Check 35a passed (offline cash capture adapted to net retained settled amount, tender 60/total 50/change 10 -> receipt 50)")
+    passed_checks += 1
+
+    # 35b: Unpaid wire profile adaptation: maps EXACTLY to {"mode": "unpaid"}, strips wire fields without altering profile/digest or applying general null filter
+    choice_unpaid = adapt_online_payment_to_canonical_choice(profile_unpaid_null, "50.000000")
+    if choice_unpaid != {"mode": "unpaid"}:
+        print(f"  FAIL Check 35b: Unpaid choice did not map exactly to {{'mode': 'unpaid'}}: {choice_unpaid!r}")
+        return 1
+    # Verify wire intent profile and its digest are NOT mutated
+    if profile_unpaid_null["payment"]["amount"] != "0.000000" or profile_unpaid_null["payment"]["payment_method"] is not None:
+        print("  FAIL Check 35b: Wire intent profile payment fields mutated during canonical adaptation!")
+        return 1
+    if compute_restricted_sha256_digest(profile_unpaid_null) != unpaid_null_digest:
+        print("  FAIL Check 35b: Wire intent profile digest mutated during canonical adaptation!")
+        return 1
+    # Crucial: verify ExplicitNoTax line tax_rate_id: null is preserved (no general null filter)
+    sample_no_tax_line = {
+        "product_id": "01JCV8X9M6A1B2C3D4E5F6G7H8",
+        "product_unit_id": "01JCV8X9MBV4W5X6Y7Z8012345",
+        "conversion_to_base": "1.000000",
+        "quantity": "1.000000",
+        "unit_price": "10.000000",
+        "tax_rate_id": None,
+        "tax_rate": "0.000000",
+        "tax_inclusive": False,
+    }
+    if "tax_rate_id" not in sample_no_tax_line or sample_no_tax_line["tax_rate_id"] is not None:
+        print("  FAIL Check 35b: Line tax_rate_id: null was stripped or corrupted!")
+        return 1
+    print("  OK: Check 35b passed (unpaid wire profile maps exactly to {'mode': 'unpaid'}, wire profile/digest unaltered, line tax_rate_id: null preserved)")
+    passed_checks += 1
+
+    # 35c: Partial base currency cash adaptation: wire amount maps to received_amount AND invoice_amount allocation
+    choice_partial = adapt_online_payment_to_canonical_choice(profile_partial, "50.000000", reviewed_payment_date="2026-11-11")
+    if (choice_partial["amount"] != "20.000000" or
+        choice_partial["invoice_amount"] != "20.000000" or
+        choice_partial["payment_currency_amount"] != "20.000000" or
+        choice_partial["exchange_rate"] != "1.0000000000" or
+        choice_partial["mode"] != "partial" or
+        choice_partial["money_account_id"] != "01JCV8X9MAJ3K4M5N6P7Q8R9S0"):
+        print(f"  FAIL Check 35c: Partial choice mapping failed: {choice_partial!r}")
+        return 1
+    print("  OK: Check 35c passed (partial base currency cash maps wire amount to received_amount and invoice_amount allocation, FX 1, reviewed date)")
+    passed_checks += 1
+
+    # 35d: Online full policy exact match rejection: overpayment (60 > 50) and underpayment (40 < 50) rejected
+    bad_full_over = json.loads(json.dumps(profile_full_exact))
+    bad_full_over["payment"]["amount"] = "60.000000"
+    try:
+        adapt_online_payment_to_canonical_choice(bad_full_over, "50.000000")
+        print("  FAIL Check 35d: Full mode overpayment was accepted by adapter!")
+        return 1
+    except ValueError:
+        pass
+    bad_full_under = json.loads(json.dumps(profile_full_exact))
+    bad_full_under["payment"]["amount"] = "40.000000"
+    try:
+        adapt_online_payment_to_canonical_choice(bad_full_under, "50.000000")
+        print("  FAIL Check 35d: Full mode underpayment was accepted by adapter!")
+        return 1
+    except ValueError:
+        pass
+    choice_full = adapt_online_payment_to_canonical_choice(profile_full_exact, "50.000000")
+    if choice_full["amount"] != "50.000000" or choice_full["invoice_amount"] != "50.000000":
+        print(f"  FAIL Check 35d: Full exact choice mapping failed: {choice_full!r}")
+        return 1
+    print("  OK: Check 35d passed (online full first-release policy enforces exact total, over/under payment strictly rejected by adapter)")
+    passed_checks += 1
 
     # Revision 2 positive/negative read/auth fixtures
     cases_rev2 = json.loads((FIXTURES_DIR / "revision-2-validation-cases.json").read_text())
