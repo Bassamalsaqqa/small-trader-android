@@ -44,13 +44,14 @@ import kotlinx.coroutines.withContext
  * 7. Tracked Logout: Logout job runs with UI reads denied and submissions blocked until local purge completes.
  */
 class StaffWorkspaceViewModel(
-    private val coordinator: StaffSessionCoordinator?,
+    private var coordinator: StaffSessionCoordinator?,
     private val configuredOrigin: String = "",
     private val allowHttpLoopback: Boolean = false,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val authDenialListener: AuthDenialListener? = null,
     initialPhase: StaffWorkspacePhase? = null,
-    initialStorageError: String? = null
+    initialStorageError: String? = null,
+    private val coordinatorFactory: (() -> StaffSessionCoordinator)? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -161,7 +162,7 @@ class StaffWorkspaceViewModel(
      */
     fun restoreSession() {
         val coord = coordinator ?: run {
-            _uiState.update { it.copy(phase = StaffWorkspacePhase.UNCONFIGURED, isSubmitting = false) }
+            retryComposition()
             return
         }
         if (_uiState.value.isSubmitting) return
@@ -190,7 +191,7 @@ class StaffWorkspaceViewModel(
             } catch (e: VirtualMachineError) {
                 throw e
             } catch (e: Exception) {
-                CoordinatorResult.Error(e.message ?: "Failed to restore session")
+                CoordinatorResult.Error("Failed to restore session")
             } finally {
                 if (thisIntent == activeIntentSeq) {
                     _uiState.update { it.copy(isSubmitting = false) }
@@ -346,7 +347,7 @@ class StaffWorkspaceViewModel(
             } catch (e: VirtualMachineError) {
                 throw e
             } catch (e: Exception) {
-                CoordinatorResult.Error(e.message ?: "Failed to acquire challenge")
+                CoordinatorResult.Error("Failed to acquire challenge")
             }
 
             if (thisIntent != activeIntentSeq) return@launch
@@ -379,7 +380,7 @@ class StaffWorkspaceViewModel(
             } catch (e: VirtualMachineError) {
                 throw e
             } catch (e: Exception) {
-                CoordinatorResult.Error(e.message ?: "Login failed")
+                CoordinatorResult.Error("Login failed")
             } finally {
                 if (thisIntent == activeIntentSeq && coord.authState !is StaffAuthState.MfaRequired) {
                     transientPassword = ""
@@ -430,6 +431,7 @@ class StaffWorkspaceViewModel(
                             }
                         }
                         is StaffAuthState.CompanySelectionRequired -> {
+                            clearTransientCredentials()
                             val companies = state.availableCompanies.map { c ->
                                 SafeCompanyViewData(companyId = c.id.value, companyName = c.name)
                             }
@@ -476,7 +478,7 @@ class StaffWorkspaceViewModel(
                     _uiState.update {
                         it.copy(
                             isSubmitting = false,
-                            errorMessage = if (it.language == AppLanguage.AR) "فشل تسجيل الدخول" else result.message
+                            errorMessage = if (it.language == AppLanguage.AR) "فشل تسجيل الدخول" else "Could not complete the request. Try again"
                         )
                     }
                 }
@@ -540,7 +542,7 @@ class StaffWorkspaceViewModel(
             } catch (e: VirtualMachineError) {
                 throw e
             } catch (e: Exception) {
-                CoordinatorResult.Error(e.message ?: "MFA verification failed")
+                CoordinatorResult.Error("MFA verification failed")
             } finally {
                 if (thisIntent == activeIntentSeq) {
                     _uiState.update { it.copy(isSubmitting = false) }
@@ -581,6 +583,7 @@ class StaffWorkspaceViewModel(
                             }
                         }
                         is StaffAuthState.CompanySelectionRequired -> {
+                            clearTransientCredentials()
                             val companies = state.availableCompanies.map { c ->
                                 SafeCompanyViewData(companyId = c.id.value, companyName = c.name)
                             }
@@ -627,7 +630,7 @@ class StaffWorkspaceViewModel(
                     _uiState.update {
                         it.copy(
                             isSubmitting = false,
-                            errorMessage = if (it.language == AppLanguage.AR) "فشل التحقق من الرمز" else result.message
+                            errorMessage = if (it.language == AppLanguage.AR) "فشل التحقق من الرمز" else "Could not complete the request. Try again"
                         )
                     }
                 }
@@ -708,7 +711,7 @@ class StaffWorkspaceViewModel(
             } catch (e: VirtualMachineError) {
                 throw e
             } catch (e: Exception) {
-                CoordinatorResult.Error(e.message ?: "Failed to select company")
+                CoordinatorResult.Error("Failed to select company")
             } finally {
                 if (thisIntent == activeIntentSeq) {
                     _uiState.update { it.copy(isSubmitting = false) }
@@ -764,7 +767,7 @@ class StaffWorkspaceViewModel(
                 }
                 is CoordinatorResult.Error -> {
                     _uiState.update {
-                        it.copy(isSubmitting = false, errorMessage = if (it.language == AppLanguage.AR) "تعذر اختيار المنشأة" else result.message)
+                        it.copy(isSubmitting = false, errorMessage = if (it.language == AppLanguage.AR) "تعذر اختيار المنشأة" else "Could not complete the request. Try again")
                     }
                 }
                 is CoordinatorResult.StaleOperation -> {
@@ -806,7 +809,7 @@ class StaffWorkspaceViewModel(
             } catch (e: VirtualMachineError) {
                 throw e
             } catch (e: Exception) {
-                CoordinatorResult.Error(e.message ?: "Failed to switch company")
+                CoordinatorResult.Error("Failed to switch company")
             } finally {
                 if (thisIntent == activeIntentSeq) {
                     _uiState.update { it.copy(isSubmitting = false) }
@@ -854,7 +857,7 @@ class StaffWorkspaceViewModel(
                 }
                 is CoordinatorResult.Error -> {
                     _uiState.update {
-                        it.copy(isSubmitting = false, errorMessage = if (it.language == AppLanguage.AR) "تعذر تبديل المنشأة" else result.message)
+                        it.copy(isSubmitting = false, errorMessage = if (it.language == AppLanguage.AR) "تعذر تبديل المنشأة" else "Could not complete the request. Try again")
                     }
                 }
                 is CoordinatorResult.StaleOperation -> {
@@ -889,13 +892,10 @@ class StaffWorkspaceViewModel(
         }
 
         val coord = coordinator ?: run {
-            _uiState.update {
-                it.copy(
-                    phase = StaffWorkspacePhase.SIGN_IN,
-                    isSubmitting = false,
-                    errorMessage = messageOnSuccess
-                )
-            }
+            _uiState.update { it.copy(
+                phase = if (coordinatorFactory != null) StaffWorkspacePhase.STORAGE_FAILED else StaffWorkspacePhase.UNCONFIGURED,
+                isSubmitting = false
+            ) }
             return
         }
 
@@ -905,6 +905,10 @@ class StaffWorkspaceViewModel(
                     coord.logout()
                 }
             } catch (e: CancellationException) {
+                if (thisIntent == activeIntentSeq) {
+                    _uiState.update { it.copy(phase = StaffWorkspacePhase.LOCKED,
+                        isSubmitting = false, lockedReason = "Local session clear not confirmed") }
+                }
                 throw e
             } catch (e: VirtualMachineError) {
                 throw e
@@ -935,13 +939,8 @@ class StaffWorkspaceViewModel(
                     }
                 }
                 null -> {
-                    _uiState.update {
-                        it.copy(
-                            phase = StaffWorkspacePhase.SIGN_IN,
-                            isSubmitting = false,
-                            errorMessage = messageOnSuccess
-                        )
-                    }
+                    _uiState.update { it.copy(phase = StaffWorkspacePhase.LOCKED,
+                        isSubmitting = false, lockedReason = "Local session clear not confirmed") }
                 }
             }
         }
@@ -1006,9 +1005,9 @@ class StaffWorkspaceViewModel(
             } catch (e: VirtualMachineError) {
                 throw e
             } catch (e: Exception) {
-                CoordinatorResult.Error(e.message ?: "Failed to load products")
+                CoordinatorResult.Error("Failed to load products")
             } finally {
-                if (thisSeq == productRequestSeq) {
+                if (thisSeq == productRequestSeq && opGen == coord.currentGeneration) {
                     _uiState.update {
                         if (it.activeCompany?.companyId == companyUlid.value) {
                             it.copy(isProductsLoading = false, isProductsLoadingMore = false)
@@ -1083,7 +1082,7 @@ class StaffWorkspaceViewModel(
                         state.copy(
                             isProductsLoading = false,
                             isProductsLoadingMore = false,
-                            productsError = if (state.language == AppLanguage.AR) "تعذر تحميل سجل الأصناف" else result.message
+                            productsError = if (state.language == AppLanguage.AR) "تعذر تحميل سجل الأصناف" else "Could not complete the request. Try again"
                         )
                     }
                 }
@@ -1167,9 +1166,9 @@ class StaffWorkspaceViewModel(
             } catch (e: VirtualMachineError) {
                 throw e
             } catch (e: Exception) {
-                CoordinatorResult.Error(e.message ?: "Failed to load customers")
+                CoordinatorResult.Error("Failed to load customers")
             } finally {
-                if (thisSeq == customerRequestSeq) {
+                if (thisSeq == customerRequestSeq && opGen == coord.currentGeneration) {
                     _uiState.update {
                         if (it.activeCompany?.companyId == companyUlid.value) {
                             it.copy(isCustomersLoading = false, isCustomersLoadingMore = false)
@@ -1244,7 +1243,7 @@ class StaffWorkspaceViewModel(
                         state.copy(
                             isCustomersLoading = false,
                             isCustomersLoadingMore = false,
-                            customersError = if (state.language == AppLanguage.AR) "تعذر تحميل دليل العملاء" else result.message
+                            customersError = if (state.language == AppLanguage.AR) "تعذر تحميل دليل العملاء" else "Could not complete the request. Try again"
                         )
                     }
                 }
@@ -1273,6 +1272,8 @@ class StaffWorkspaceViewModel(
      * Clears products and customers lists immediately from memory.
      */
     private fun clearListsImmediately() {
+        productRequestSeq++
+        customerRequestSeq++
         _uiState.update {
             it.copy(
                 products = emptyList(),
@@ -1339,6 +1340,36 @@ class StaffWorkspaceViewModel(
         customersJob?.cancel()
     }
 
+    private fun retryComposition() {
+        val factory = coordinatorFactory
+        if (factory == null) {
+            _uiState.update { it.copy(phase = StaffWorkspacePhase.UNCONFIGURED, isSubmitting = false) }
+            return
+        }
+        if (_uiState.value.isSubmitting) return
+        val intent = ++activeIntentSeq
+        _uiState.update { it.copy(phase = StaffWorkspacePhase.INITIALIZING, isSubmitting = true) }
+        authJob = viewModelScope.launch {
+            try {
+                val created = withContext(ioDispatcher) { factory() }
+                if (intent != activeIntentSeq) return@launch
+                coordinator = created
+                _uiState.update { it.copy(isSubmitting = false) }
+                restoreSession()
+            } catch (e: CancellationException) {
+                if (intent == activeIntentSeq) {
+                    _uiState.update { it.copy(phase = StaffWorkspacePhase.STORAGE_FAILED, isSubmitting = false) }
+                }
+                throw e
+            } catch (_: Exception) {
+                if (intent == activeIntentSeq) {
+                    _uiState.update { it.copy(phase = StaffWorkspacePhase.STORAGE_FAILED,
+                        isSubmitting = false, storageErrorMessage = "Secure storage initialization failed") }
+                }
+            }
+        }
+    }
+
     class Factory(
         private val context: Context,
         private val configuredOrigin: String,
@@ -1400,7 +1431,11 @@ class StaffWorkspaceViewModel(
                     ioDispatcher = ioDispatcher,
                     authDenialListener = authDenialListener,
                     initialPhase = StaffWorkspacePhase.STORAGE_FAILED,
-                    initialStorageError = e.message ?: "Secure storage initialization failed"
+                    initialStorageError = "Secure storage initialization failed",
+                    coordinatorFactory = {
+                        StaffSessionCoordinator.create(context.applicationContext, configuredOrigin,
+                            effectiveLoopback, authDenialListener)
+                    }
                 ) as T
             }
 

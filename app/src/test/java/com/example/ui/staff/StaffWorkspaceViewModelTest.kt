@@ -916,6 +916,9 @@ class StaffWorkspaceViewModelTest {
         vm2.signIn("staff@example.com", passwordOverride = "pass")
         advanceUntilIdle()
         assertEquals(StaffWorkspacePhase.COMPANY_SELECTION, vm2.uiState.value.phase)
+        val pendingSecret = StaffWorkspaceViewModel::class.java.getDeclaredField("pendingPassword")
+        pendingSecret.isAccessible = true
+        assertEquals("", pendingSecret.get(vm2))
 
         // Selecting company 1 reaches ReadReady
         vm2.selectCompany(testCompanyId1.value)
@@ -934,6 +937,67 @@ class StaffWorkspaceViewModelTest {
         assertEquals(StaffWorkspacePhase.READ_READY, vm2.uiState.value.phase)
         assertEquals(testCompanyId1.value, vm2.uiState.value.activeCompany?.companyId)
     }
+    @Test
+    fun uncertainLogoutLocksInsteadOfClaimingSignedOut() = runTest(testDispatcher) {
+        val throwing = object : StaffSessionCoordinator by fakeCoordinator {
+            override fun logout(): LogoutResult { throw IllegalStateException("private-logout-token") }
+        }
+        val vm = StaffWorkspaceViewModel(throwing, "https://example.test", ioDispatcher = testDispatcher)
+        advanceUntilIdle()
+        vm.logout()
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.LOCKED, vm.uiState.value.phase)
+        assertFalse(vm.uiState.value.isSubmitting)
+        assertFalse(vm.uiState.value.toString().contains("private-logout-token"))
+    }
+
+    @Test
+    fun cancelledLogoutClearsBusyFlagAndRemainsLocked() = runTest(testDispatcher) {
+        val cancelling = object : StaffSessionCoordinator by fakeCoordinator {
+            override fun logout(): LogoutResult { throw kotlinx.coroutines.CancellationException("cancelled") }
+        }
+        val vm = StaffWorkspaceViewModel(cancelling, "https://example.test", ioDispatcher = testDispatcher)
+        advanceUntilIdle()
+        vm.logout()
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.LOCKED, vm.uiState.value.phase)
+        assertFalse(vm.uiState.value.isSubmitting)
+    }
+
+    @Test
+    fun storageCompositionCanBeRetriedWithoutChangingConfiguration() = runTest(testDispatcher) {
+        var attempts = 0
+        val vm = StaffWorkspaceViewModel(null, "https://example.test", ioDispatcher = testDispatcher,
+            initialPhase = StaffWorkspacePhase.STORAGE_FAILED,
+            coordinatorFactory = {
+                attempts++
+                if (attempts == 1) throw IllegalStateException("private-provider-message")
+                fakeCoordinator
+            })
+        vm.restoreSession()
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.STORAGE_FAILED, vm.uiState.value.phase)
+        assertFalse(vm.uiState.value.isSubmitting)
+        assertFalse(vm.uiState.value.toString().contains("private-provider-message"))
+        vm.restoreSession()
+        advanceUntilIdle()
+        assertEquals(2, attempts)
+        assertEquals(StaffWorkspacePhase.SIGN_IN, vm.uiState.value.phase)
+    }
+
+    @Test
+    fun unexpectedLoginFailureDoesNotExposeExceptionInEnglishUi() = runTest(testDispatcher) {
+        fakeCoordinator.loginResultProvider = { _, _, _, _ -> throw IllegalStateException("private-password-secret") }
+        val vm = StaffWorkspaceViewModel(fakeCoordinator, "https://example.test", ioDispatcher = testDispatcher)
+        advanceUntilIdle()
+        if (vm.uiState.value.language != com.example.model.AppLanguage.EN) vm.toggleLanguage()
+        vm.signIn("staff@example.com", passwordOverride = "password")
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.isSubmitting)
+        assertFalse(vm.uiState.value.errorMessage.orEmpty().contains("private-password-secret"))
+        assertNotNull(vm.uiState.value.errorMessage)
+    }
+
 }
 
 private class RoutingMockTransport : ReadClientTransport {

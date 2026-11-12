@@ -100,3 +100,11 @@ The staff workspace is structured into compact, accessible composables conformin
 - **Device Visual Verification**: **NOT VERIFIED**. `device_list` discovered 0 connected Android devices or emulators on the host system.
 - **Hardware Keystore Integration**: **NOT VERIFIED**. Hardware-backed MasterKey generation requires a physical device or emulator running Google Play Services / hardware keystore daemon. Verified via hermetic mock and software-backed tests only.
 - **No Production Activation**: This integration slice introduces no live server configuration changes, no hardcoded production endpoints, and no deployment actions.
+
+### Follow-up error recovery
+
+Unexpected logout exceptions and cancellation leave the workspace locked, with busy indicators reset; the UI never claims credentials were cleared without confirmation. Passwords are cleared as soon as company selection no longer requires them. Unexpected coordinator/provider error text is replaced with fixed messages, and status screens use localized fallback copy instead of displaying raw reasons.
+
+A failed storage composition retains a retry factory for the already validated origin. Retry reconstructs the coordinator off the main thread and reruns session restoration; failure stays in the storage-error screen rather than being mislabeled as missing configuration. Clearing scoped lists invalidates pending query sequence numbers, and loading cleanup also checks coordinator generation.
+
+Additional targeted regressions cover uncertain logout, cancelled logout, storage retry after an initial provider failure, safe English error text, and password clearing at company selection. Device-level validation remains outstanding.

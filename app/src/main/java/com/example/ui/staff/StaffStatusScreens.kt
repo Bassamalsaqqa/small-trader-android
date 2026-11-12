@@ -114,7 +114,7 @@ fun StaffLockedScreen(
                                 lang.tr("عدم تطابق في بيانات الجلسة والمنشأة", "Session and company scope mismatch")
                             reason.contains("CorruptSession") ->
                                 lang.tr("بيانات الجلسة المحفوظة غير صالحة", "Corrupt saved session data")
-                            else -> reason
+                            else -> lang.tr("تعذر التحقق من الجلسة. يرجى المحاولة مجدداً", "Could not verify the session. Please try again")
                         }
                         Text(
                             text = localizedReason,
@@ -195,7 +195,7 @@ fun StaffStorageFailedScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = message ?: lang.tr(
+                    text = lang.tr(
                         "تعذر قراءة أو حفظ مفاتيح الجلسة في مساحة التخزين الخاصة بالتطبيق.",
                         "Failed to read or store session keys in application secure storage."
                     ),
