@@ -101,6 +101,58 @@ The Room database schema is frozen at Version 1 and exported to `app/schemas/com
 6. **Python Suite** (303 checks): `./tools/validate-mobile-contract.py` passes in both normal and `-O` modes.
 7. **Android Lint**: `lintDebug` passes with 0 errors.
 
+---
+
+## 5. Hardening Guarantees & Seven Review Findings
+
+### 1. Discard Untrusted Gateway Reasons & DTO Leak Prevention
+- All untrusted gateway error messages, reasons, and exception messages are completely discarded.
+- Fixed local constants (`SyncDiagnostics`) are used for persisted state, scope lock reasons, error messages, and sync result summaries:
+  - `SyncDiagnostics.BUSINESS_CONFLICT`
+  - `SyncDiagnostics.MEMBERSHIP_DENIED`
+  - `SyncDiagnostics.AUTH_DENIED`
+  - `SyncDiagnostics.INVALID_SERVER_ACK`
+  - `SyncDiagnostics.DIGEST_CORRUPTED`
+  - `SyncDiagnostics.LEGACY_EVENT_VERSION`
+  - `SyncDiagnostics.TRANSIENT_GATEWAY_ERROR`
+  - `SyncDiagnostics.TASK_CANCELLED`
+- Typed `GatewayDiagnosticCategory` metadata is preserved for caller routing while custom safe `toString()` overrides on `SyncStatusOutcome` and `SyncSubmitOutcome` prevent secret leakage from raw DTO representations.
+
+### 2. Fatal Error Propagation & Interruption Lifecycle
+- Coordinator catches specific `CancellationException` and `InterruptedException` alongside general `Exception`.
+- Fatal JVM Errors (`OutOfMemoryError`, `LinkageError`, `AssertionError`, `ThreadDeath`) are never caught or suppressed, propagating immediately without heavy Room/SQLite cleanup.
+- Thread interrupt status (`Thread.currentThread().interrupt()`) is explicitly restored after best-effort local DB cleanup.
+
+### 3. Pre-Dispatch Scoped Re-Read & Backend Idempotency Boundary
+- Before **EVERY** network dispatch (`checkStatus` and especially `submitSale`), the coordinator re-reads the scoped record from the database to verify:
+  1. Record delivery state status is still `IN_FLIGHT`.
+  2. Record claim token matches the coordinator's current `claimToken`.
+  3. Claim lease has not expired (`claimExpiresAt > clock()`).
+  4. Persisted scope lock is not active (`isQueueLocked == false`).
+- Stale or expired claims are suppressed from dispatch.
+- **Race Between Guard and Wire (Distributed Idempotency Notice)**: Local CAS eliminates client-side double dispatch races up to the moment of wire transmission. However, between the pre-dispatch guard check and actual HTTP transmission/receipt, network delays or process freezes may still occur. Therefore, central backend idempotency (via unique `client_event_id` and idempotent ledger posting) remains strictly required; local CAS cannot unilaterally promise exactly-once execution across distributed networks.
+
+### 4. Early Batch Stop & Narrow CAS Batch Cleanup
+- On early batch termination (transient error, auth denial, membership denial, cancellation), remaining owned in-flight records in the batch are safely released back to `pending` via `releaseClaimedBatch(companyId, actorId, deviceId, claimToken)` using narrow CAS.
+- Records claimed by another worker, confirmed, parked, or auth-blocked are never touched or overwritten.
+- Legacy V1 events and malformed UUIDs are safely parked via narrow raw-string key scope+token guarded `parkClaimConflict`.
+
+### 5. Strict RFC 3339 / ISO 8601 Server Acknowledged At Validation
+- `Rfc3339Validator` provides strict, calendar-accurate validation compatible with Android API 24+ without relying on Java 8 `java.time` desugaring.
+- Calendar bounds `[2020..2100]`, non-lenient month/day validation (rejecting invalid dates like Feb 30/31), and full timezone offset support (`Z`, `z`, `[+-]HH:MM`) conform to RFC 3339 without improperly restricting the server to UTC-only.
+- Invalid timestamps fail closed via `UNKNOWN_ACK` without storing false confirmations or corrupting immutable bytes, enabling clean recovery on subsequent passes.
+
+### 6. Raw Payload Digest Integrity Guard
+- Before checking status or dispatching submission, the coordinator recomputes the SHA-256 digest of the raw byte payload (`HashUtils.sha256Hex(record.event.payloadBytes)`).
+- If the computed digest does not match the stored `payloadDigest`, the corrupted record is immediately parked as `CONFLICT` with zero network submission, preserving the immutable original bytes for forensic investigation.
+
+### 7. Accurate Metrics & Testing Proof Boundaries
+- Outcome metrics (`confirmedCount`, `conflictCount`, `timeoutCount`) increment strictly upon successful repository CAS transitions.
+- Testing boundaries: Fake gateways and atomic counters model local state invariants and single canonical server effects in test; they do NOT constitute network token authorization proofs, hardware power-loss tolerance, or MariaDB distributed ledger guarantees.
+
+---
+
 ### Testing Proof Boundaries
 > [!IMPORTANT]
 > **Proof Clarification**: Passing tests verify local SQLite integrity, lease-bounded CAS isolation, and status reconciliation in user-space. They do **not** constitute hardware power-loss proof, kernel-level process termination proof, or central MariaDB ledger settlement proof (which belongs authoritatively to the central Laravel backend).
+

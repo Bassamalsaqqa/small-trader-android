@@ -1,9 +1,12 @@
 package com.example.data.mobile.sync
 
 import com.example.data.mobile.contract.ClientUuid
+import com.example.data.mobile.contract.ContractConstants
 import com.example.data.mobile.contract.PayloadDigest
+import com.example.data.mobile.contract.Rfc3339Validator
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.outbox.OutboxRepository
+import com.example.data.mobile.outbox.OutboxStatus
 import com.example.data.mobile.outbox.QueueLockedException
 import java.util.concurrent.CancellationException
 
@@ -23,6 +26,28 @@ data class SyncBatchResult(
 )
 
 /**
+ * Fixed local diagnostic constants for outbox state, auth locks, and metrics reporting.
+ * Discards all untrusted gateway reasons and exception messages to prevent secret or PII leakage.
+ */
+object SyncDiagnostics {
+    const val BUSINESS_CONFLICT = "BUSINESS_CONFLICT"
+    const val AUTH_DENIED = "AUTH_DENIED"
+    const val MEMBERSHIP_DENIED = "MEMBERSHIP_DENIED"
+    const val TRANSIENT_TIMEOUT = "TRANSIENT_TIMEOUT"
+    const val TRANSIENT_ERROR = "TRANSIENT_ERROR"
+    const val CANCELLED_IN_FLIGHT = "CANCELLED_IN_FLIGHT"
+    const val MALFORMED_CLIENT_EVENT_ID = "MALFORMED_STORED_CLIENT_EVENT_ID"
+    const val MALFORMED_PAYLOAD_DIGEST = "MALFORMED_STORED_PAYLOAD_DIGEST"
+    const val CORRUPT_PAYLOAD_DIGEST = "CORRUPT_PAYLOAD_DIGEST_MISMATCH"
+    const val PAYLOAD_OVERSIZED = "PAYLOAD_OVERSIZED"
+    const val LEGACY_EVENT_VERSION = "LEGACY_EVENT_VERSION_PARKED"
+    const val INVALID_SERVER_ACK = "INVALID_SERVER_ACK"
+    const val QUEUE_LOCKED_AUTH_DENIED = "QUEUE_LOCKED_AUTH_DENIED"
+    const val CLAIM_BATCH_FAILED = "CLAIM_BATCH_FAILED"
+    const val STALE_CLAIM_SUPPRESSED = "STALE_CLAIM_SUPPRESSED"
+}
+
+/**
  * Local sync coordinator foundation interface.
  *
  * Coordinates local outbox drain against a typed [SaleSyncGateway] using lease-bounded CAS.
@@ -31,17 +56,21 @@ data class SyncBatchResult(
  * 1. Bounded batch: 1..100 records claimed via repository CAS lease.
  * 2. Full tenant/user/device scope isolation (no cross-scope payload or digest disclosure).
  * 3. Concurrent coordinators cannot drain the same claimed record (CAS claim lease + claim token).
- * 4. For EACH claimed v2 record, reconciles gateway status BEFORE any submit (including UNKNOWN_ACK).
- * 5. For status Posted: validates exact company, event, digest, invoice ULID, payment ULID before confirmation.
+ * 4. Re-reads scoped record and checks persisted scope lock + valid unexpired lease before EVERY network dispatch.
+ * 5. Recomputes raw payload SHA-256 digest before gateway status or submit; corrupt bytes are parked with zero submission.
+ * 6. For EACH claimed v2 record, reconciles gateway status BEFORE any submit (including UNKNOWN_ACK).
+ * 7. For status Posted: validates exact company, event, digest, invoice ULID, payment ULID, and strict RFC 3339 serverAcknowledgedAt.
  *    Malformed or mismatched acks are NEVER confirmed and local payloads are NEVER replaced.
- * 6. For status NotFound: submits ONLY the original canonical bare event bytes without local repricing or rekeying.
- * 7. Legacy v1 records (eventVersion != 2) are parked without post or silent upgrade.
- * 8. 401 AuthDenied locks the queue for the entire scope via lockQueueOnAuthDenied and preserves all records.
- * 9. 403 MembershipDenied fails closed without retry loops.
- * 10. 409 BusinessConflict marks ONLY the owned non-confirmed record via claim-bound markClaimConflict.
- * 11. Transient/drop/5xx/unknownACK moves claim through recordTimeout and stops without repeated in-turn retries.
- * 12. Cancellation/interruption records UNKNOWN_ACK if request may have been sent, and never swallows fatal errors.
- * 13. All payload byte arrays are defensively copied; exception messages never leak sensitive data.
+ * 8. For status NotFound: submits ONLY the original canonical bare event bytes without local repricing or rekeying.
+ * 9. Legacy v1 records (eventVersion != 2) are parked without post or silent upgrade.
+ * 10. Malformed stored UUIDs are parked via narrow raw-string key scope+token guarded repository method.
+ * 11. 401 AuthDenied locks the queue across the scope via lockQueueOnAuthDenied, preserving records and payloads.
+ * 12. 403 MembershipDenied fails closed without retry loops.
+ * 13. 409 BusinessConflict marks ONLY the owned non-confirmed record via claim-bound markClaimConflict.
+ * 14. Transient/drop/5xx/unknownACK moves claim through recordTimeout and stops without repeated in-turn retries.
+ * 15. Early batch stop safely clears ownership of remaining owned in-flight claims via narrow CAS scope+token.
+ * 16. Fatal errors (OutOfMemoryError, LinkageError, AssertionError, ThreadDeath) and cancellation propagate without heavy DB cleanup.
+ * 17. Discards ALL untrusted gateway strings, exception messages, and hostile class names; uses fixed diagnostics only.
  */
 interface SaleSyncCoordinator {
 
@@ -80,11 +109,11 @@ class SaleSyncCoordinatorImpl(
                 recordsClaimed = 0,
                 authBlocked = true,
                 stoppedEarly = true,
-                summary = "Queue is locked due to authentication denial for company $companyId, actor $actorId"
+                summary = SyncDiagnostics.QUEUE_LOCKED_AUTH_DENIED
             )
         }
 
-        // 2. Claim next eligible batch using lease-bounded CAS
+        // 2. Claim next eligible batch using lease-bounded CAS. Propagate fatal errors and cancellation.
         val batch = try {
             outboxRepository.claimNextBatch(
                 companyId = companyId,
@@ -98,14 +127,18 @@ class SaleSyncCoordinatorImpl(
                 recordsClaimed = 0,
                 authBlocked = true,
                 stoppedEarly = true,
-                summary = "Queue is locked due to authentication denial"
+                summary = SyncDiagnostics.QUEUE_LOCKED_AUTH_DENIED
             )
-        } catch (t: Throwable) {
-            checkFatal(t)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw e
+        } catch (e: Exception) {
             return SyncBatchResult(
                 recordsClaimed = 0,
                 stoppedEarly = true,
-                summary = "Failed to claim batch: ${safeErrorMessage(t)}"
+                summary = SyncDiagnostics.CLAIM_BATCH_FAILED
             )
         }
 
@@ -124,45 +157,98 @@ class SaleSyncCoordinatorImpl(
         var membershipDenied = false
         var stoppedEarly = false
 
-        // 3. Process each claimed record individually with fresh status check before submit
+        // 3. Process each claimed record individually
         for (record in batch.records) {
             val event = record.event
+
+            // Invariant: Malformed stored UUID must not remain poison reclaimed forever.
+            // Park using narrow raw string key scope/token guarded method.
             val clientEventId = try {
                 ClientUuid.parse(event.clientEventId)
             } catch (e: Exception) {
-                // Malformed stored clientEventId: cannot construct typed ClientUuid
-                conflictCount++
+                val updated = outboxRepository.parkClaimConflict(
+                    companyId = companyId,
+                    actorId = actorId,
+                    deviceId = deviceId,
+                    rawClientEventId = event.clientEventId,
+                    claimToken = batch.claimToken,
+                    reason = SyncDiagnostics.MALFORMED_CLIENT_EVENT_ID
+                )
+                if (updated) conflictCount++
                 continue
             }
 
+            // Invariant: Validate stored payload digest format
             val payloadDigest = try {
                 PayloadDigest.parse(event.payloadDigest)
             } catch (e: Exception) {
-                outboxRepository.markClaimConflict(
+                val updated = outboxRepository.markClaimConflict(
                     companyId = companyId,
                     actorId = actorId,
                     deviceId = deviceId,
                     clientEventId = clientEventId,
                     claimToken = batch.claimToken,
-                    reason = "Malformed stored payload digest"
+                    reason = SyncDiagnostics.MALFORMED_PAYLOAD_DIGEST
                 )
-                conflictCount++
+                if (updated) conflictCount++
+                continue
+            }
+
+            // Invariant: Recompute RAW payload SHA-256 hash before gateway status/submit.
+            // Check size bound and reject/park corrupt bytes with generic reason; zero submission.
+            // Immutable original bytes retained in Room (no repair/reprice).
+            if (event.payloadBytes.size > ContractConstants.MAX_PAYLOAD_BYTES) {
+                val updated = outboxRepository.markClaimConflict(
+                    companyId = companyId,
+                    actorId = actorId,
+                    deviceId = deviceId,
+                    clientEventId = clientEventId,
+                    claimToken = batch.claimToken,
+                    reason = SyncDiagnostics.PAYLOAD_OVERSIZED
+                )
+                if (updated) conflictCount++
+                continue
+            }
+
+            val computedDigest = PayloadDigest.fromBytes(event.payloadBytes)
+            if (computedDigest != payloadDigest) {
+                val updated = outboxRepository.markClaimConflict(
+                    companyId = companyId,
+                    actorId = actorId,
+                    deviceId = deviceId,
+                    clientEventId = clientEventId,
+                    claimToken = batch.claimToken,
+                    reason = SyncDiagnostics.CORRUPT_PAYLOAD_DIGEST
+                )
+                if (updated) conflictCount++
                 continue
             }
 
             // Invariant: Missing or legacy v1 records preserved; parked without post or silent upgrade
             if (event.eventVersion != 2) {
-                outboxRepository.markClaimConflict(
+                val updated = outboxRepository.markClaimConflict(
                     companyId = companyId,
                     actorId = actorId,
                     deviceId = deviceId,
                     clientEventId = clientEventId,
                     claimToken = batch.claimToken,
-                    reason = "Legacy event version ${event.eventVersion} cannot be posted to v2 sync gateway; parked without submission"
+                    reason = SyncDiagnostics.LEGACY_EVENT_VERSION
                 )
-                parkedV1Count++
-                conflictCount++
+                if (updated) {
+                    parkedV1Count++
+                    conflictCount++
+                }
                 continue
+            }
+
+            // Invariant: Before EVERY network dispatch (status and submit), re-read scoped record:
+            // Verify status IN_FLIGHT, same claimToken, unexpired lease, and persisted scope lock.
+            // Suppress known stale/post-auth-lock dispatch; no double claim overwrite.
+            // Note: Race between guard and wire still requires backend idempotency; CAS cannot guarantee
+            // exactly-once HTTP/MariaDB delivery.
+            if (!isClaimValidAndUnexpired(companyId, actorId, deviceId, clientEventId, batch.claimToken)) {
+                stoppedEarly = true
+                break
             }
 
             // Invariant: Reconcile gateway status BEFORE any submit (including UNKNOWN_ACK)
@@ -174,19 +260,49 @@ class SaleSyncCoordinatorImpl(
                     clientEventId = clientEventId,
                     payloadDigest = payloadDigest
                 )
-            } catch (t: Throwable) {
-                handleCancellationOrFatal(t, companyId, actorId, deviceId, clientEventId, batch.claimToken)
-                outboxRepository.recordTimeout(
+            } catch (e: CancellationException) {
+                try {
+                    outboxRepository.recordTimeout(
+                        companyId = companyId,
+                        actorId = actorId,
+                        deviceId = deviceId,
+                        clientEventId = clientEventId,
+                        claimToken = batch.claimToken,
+                        errorMessage = SyncDiagnostics.CANCELLED_IN_FLIGHT
+                    )
+                } catch (_: Exception) {}
+                try {
+                    outboxRepository.releaseClaimedBatch(companyId, actorId, deviceId, batch.claimToken)
+                } catch (_: Exception) {}
+                throw e
+            } catch (e: InterruptedException) {
+                try {
+                    outboxRepository.recordTimeout(
+                        companyId = companyId,
+                        actorId = actorId,
+                        deviceId = deviceId,
+                        clientEventId = clientEventId,
+                        claimToken = batch.claimToken,
+                        errorMessage = SyncDiagnostics.CANCELLED_IN_FLIGHT
+                    )
+                } catch (_: Exception) {}
+                try {
+                    outboxRepository.releaseClaimedBatch(companyId, actorId, deviceId, batch.claimToken)
+                } catch (_: Exception) {}
+                Thread.currentThread().interrupt()
+                throw e
+            } catch (e: Exception) {
+                val updated = outboxRepository.recordTimeout(
                     companyId = companyId,
                     actorId = actorId,
                     deviceId = deviceId,
                     clientEventId = clientEventId,
                     claimToken = batch.claimToken,
-                    errorMessage = "Status check failed: ${safeErrorMessage(t)}"
+                    errorMessage = SyncDiagnostics.TRANSIENT_ERROR
                 )
-                timeoutCount++
+                if (updated) timeoutCount++
                 stoppedEarly = true
-                break // Stop pass on status check failure to avoid uncoordinated actions
+                break
             }
 
             when (statusOutcome) {
@@ -211,26 +327,30 @@ class SaleSyncCoordinatorImpl(
                         }
                         if (confirmed) {
                             confirmedCount++
-                        } else {
-                            timeoutCount++
                         }
                     } else {
-                        // Malformed or mismatched server acknowledgement: NEVER confirmed or payload replaced
-                        outboxRepository.recordTimeout(
+                        // Malformed or invalid ack (e.g. invalid date/format): fail without confirmation.
+                        // Transition to UNKNOWN_ACK so it can recover via fresh status on next pass (not false conflict).
+                        val updated = outboxRepository.recordTimeout(
                             companyId = companyId,
                             actorId = actorId,
                             deviceId = deviceId,
                             clientEventId = clientEventId,
                             claimToken = batch.claimToken,
-                            errorMessage = "Server status response contained mismatched or invalid acknowledgement fields"
+                            errorMessage = SyncDiagnostics.INVALID_SERVER_ACK
                         )
-                        timeoutCount++
+                        if (updated) timeoutCount++
                     }
                 }
 
                 is SyncStatusOutcome.NotFound -> {
-                    // Server does not have this record: submit original canonical bare event bytes
-                    // Invariant: ONLY same original canonical event bytes, no local draft/token/receipt creation, no repricing/rekey
+                    // Server does not have this record: submit original canonical bare event bytes.
+                    // Guard: re-read scoped record immediately BEFORE submit to prevent stale dispatch.
+                    if (!isClaimValidAndUnexpired(companyId, actorId, deviceId, clientEventId, batch.claimToken)) {
+                        stoppedEarly = true
+                        break
+                    }
+
                     val canonicalBytesCopy = event.payloadBytes.clone()
                     val submitOutcome = try {
                         gateway.submitSale(
@@ -241,17 +361,47 @@ class SaleSyncCoordinatorImpl(
                             payloadDigest = payloadDigest,
                             canonicalEventUtf8 = canonicalBytesCopy
                         )
-                    } catch (t: Throwable) {
-                        handleCancellationOrFatal(t, companyId, actorId, deviceId, clientEventId, batch.claimToken)
-                        outboxRepository.recordTimeout(
+                    } catch (e: CancellationException) {
+                        try {
+                            outboxRepository.recordTimeout(
+                                companyId = companyId,
+                                actorId = actorId,
+                                deviceId = deviceId,
+                                clientEventId = clientEventId,
+                                claimToken = batch.claimToken,
+                                errorMessage = SyncDiagnostics.CANCELLED_IN_FLIGHT
+                            )
+                        } catch (_: Exception) {}
+                        try {
+                            outboxRepository.releaseClaimedBatch(companyId, actorId, deviceId, batch.claimToken)
+                        } catch (_: Exception) {}
+                        throw e
+                    } catch (e: InterruptedException) {
+                        try {
+                            outboxRepository.recordTimeout(
+                                companyId = companyId,
+                                actorId = actorId,
+                                deviceId = deviceId,
+                                clientEventId = clientEventId,
+                                claimToken = batch.claimToken,
+                                errorMessage = SyncDiagnostics.CANCELLED_IN_FLIGHT
+                            )
+                        } catch (_: Exception) {}
+                        try {
+                            outboxRepository.releaseClaimedBatch(companyId, actorId, deviceId, batch.claimToken)
+                        } catch (_: Exception) {}
+                        Thread.currentThread().interrupt()
+                        throw e
+                    } catch (e: Exception) {
+                        val updated = outboxRepository.recordTimeout(
                             companyId = companyId,
                             actorId = actorId,
                             deviceId = deviceId,
                             clientEventId = clientEventId,
                             claimToken = batch.claimToken,
-                            errorMessage = "Submit sale failed: ${safeErrorMessage(t)}"
+                            errorMessage = SyncDiagnostics.TRANSIENT_ERROR
                         )
-                        timeoutCount++
+                        if (updated) timeoutCount++
                         stoppedEarly = true
                         break
                     }
@@ -277,42 +427,40 @@ class SaleSyncCoordinatorImpl(
                                 }
                                 if (confirmed) {
                                     confirmedCount++
-                                } else {
-                                    timeoutCount++
                                 }
                             } else {
-                                outboxRepository.recordTimeout(
+                                val updated = outboxRepository.recordTimeout(
                                     companyId = companyId,
                                     actorId = actorId,
                                     deviceId = deviceId,
                                     clientEventId = clientEventId,
                                     claimToken = batch.claimToken,
-                                    errorMessage = "Server submit response contained mismatched or invalid acknowledgement fields"
+                                    errorMessage = SyncDiagnostics.INVALID_SERVER_ACK
                                 )
-                                timeoutCount++
+                                if (updated) timeoutCount++
                             }
                         }
 
                         is SyncSubmitOutcome.BusinessConflict -> {
                             // 409 Business conflict: marks ONLY owned claimed non-confirmed record
-                            outboxRepository.markClaimConflict(
+                            val updated = outboxRepository.markClaimConflict(
                                 companyId = companyId,
                                 actorId = actorId,
                                 deviceId = deviceId,
                                 clientEventId = clientEventId,
                                 claimToken = batch.claimToken,
-                                reason = "Business conflict (409): ${safeErrorMessage(submitOutcome.reason)}"
+                                reason = SyncDiagnostics.BUSINESS_CONFLICT
                             )
-                            conflictCount++
+                            if (updated) conflictCount++
                         }
 
                         is SyncSubmitOutcome.AuthDenied -> {
-                            // 401 Auth denied: lock entire scope queue, preserving records and payloads
+                            // 401 Auth denied: lock entire scope queue, transitioning all active records to auth_blocked
                             outboxRepository.lockQueueOnAuthDenied(
                                 companyId = companyId,
                                 actorId = actorId,
                                 deviceId = deviceId,
-                                reason = "Authentication denied (401): ${safeErrorMessage(submitOutcome.reason)}"
+                                reason = SyncDiagnostics.AUTH_DENIED
                             )
                             authBlocked = true
                             stoppedEarly = true
@@ -321,15 +469,15 @@ class SaleSyncCoordinatorImpl(
 
                         is SyncSubmitOutcome.MembershipDenied -> {
                             // 403 Membership denial: fail closed, mark conflict, no retry loops
-                            outboxRepository.markClaimConflict(
+                            val updated = outboxRepository.markClaimConflict(
                                 companyId = companyId,
                                 actorId = actorId,
                                 deviceId = deviceId,
                                 clientEventId = clientEventId,
                                 claimToken = batch.claimToken,
-                                reason = "Membership/forbidden denial (403): ${safeErrorMessage(submitOutcome.reason)}"
+                                reason = SyncDiagnostics.MEMBERSHIP_DENIED
                             )
-                            conflictCount++
+                            if (updated) conflictCount++
                             membershipDenied = true
                             stoppedEarly = true
                             break
@@ -337,15 +485,16 @@ class SaleSyncCoordinatorImpl(
 
                         is SyncSubmitOutcome.TransientUnknown -> {
                             // Transient error: record timeout to move claim to UNKNOWN_ACK; stop pass without in-turn retry
-                            outboxRepository.recordTimeout(
+                            val diag = if (submitOutcome.isTimeout) SyncDiagnostics.TRANSIENT_TIMEOUT else SyncDiagnostics.TRANSIENT_ERROR
+                            val updated = outboxRepository.recordTimeout(
                                 companyId = companyId,
                                 actorId = actorId,
                                 deviceId = deviceId,
                                 clientEventId = clientEventId,
                                 claimToken = batch.claimToken,
-                                errorMessage = "Transient network error: ${safeErrorMessage(submitOutcome.errorMessage)}"
+                                errorMessage = diag
                             )
-                            timeoutCount++
+                            if (updated) timeoutCount++
                             stoppedEarly = true
                             break
                         }
@@ -353,15 +502,15 @@ class SaleSyncCoordinatorImpl(
                 }
 
                 is SyncStatusOutcome.BusinessConflict -> {
-                    outboxRepository.markClaimConflict(
+                    val updated = outboxRepository.markClaimConflict(
                         companyId = companyId,
                         actorId = actorId,
                         deviceId = deviceId,
                         clientEventId = clientEventId,
                         claimToken = batch.claimToken,
-                        reason = "Server reported business conflict (409): ${safeErrorMessage(statusOutcome.reason)}"
+                        reason = SyncDiagnostics.BUSINESS_CONFLICT
                     )
-                    conflictCount++
+                    if (updated) conflictCount++
                 }
 
                 is SyncStatusOutcome.AuthDenied -> {
@@ -369,7 +518,7 @@ class SaleSyncCoordinatorImpl(
                         companyId = companyId,
                         actorId = actorId,
                         deviceId = deviceId,
-                        reason = "Authentication denied (401) during status check: ${safeErrorMessage(statusOutcome.reason)}"
+                        reason = SyncDiagnostics.AUTH_DENIED
                     )
                     authBlocked = true
                     stoppedEarly = true
@@ -377,34 +526,45 @@ class SaleSyncCoordinatorImpl(
                 }
 
                 is SyncStatusOutcome.MembershipDenied -> {
-                    outboxRepository.markClaimConflict(
+                    val updated = outboxRepository.markClaimConflict(
                         companyId = companyId,
                         actorId = actorId,
                         deviceId = deviceId,
                         clientEventId = clientEventId,
                         claimToken = batch.claimToken,
-                        reason = "Membership/forbidden denial (403) during status check: ${safeErrorMessage(statusOutcome.reason)}"
+                        reason = SyncDiagnostics.MEMBERSHIP_DENIED
                     )
-                    conflictCount++
+                    if (updated) conflictCount++
                     membershipDenied = true
                     stoppedEarly = true
                     break
                 }
 
                 is SyncStatusOutcome.TransientUnknown -> {
-                    outboxRepository.recordTimeout(
+                    val diag = if (statusOutcome.isTimeout) SyncDiagnostics.TRANSIENT_TIMEOUT else SyncDiagnostics.TRANSIENT_ERROR
+                    val updated = outboxRepository.recordTimeout(
                         companyId = companyId,
                         actorId = actorId,
                         deviceId = deviceId,
                         clientEventId = clientEventId,
                         claimToken = batch.claimToken,
-                        errorMessage = "Transient status check failure: ${safeErrorMessage(statusOutcome.errorMessage)}"
+                        errorMessage = diag
                     )
-                    timeoutCount++
+                    if (updated) timeoutCount++
                     stoppedEarly = true
                     break
                 }
             }
+        }
+
+        // 4. Early batch stop cleanup: safely clear ownership of remaining uncompleted records
+        // claimed in this batch. If authBlocked is true, lockQueueOnAuthDenied already transitioned
+        // all active scope records to auth_blocked. Otherwise, release remaining owned in-flight
+        // claims back to pending via narrow CAS scope+token.
+        if (stoppedEarly && !authBlocked) {
+            try {
+                outboxRepository.releaseClaimedBatch(companyId, actorId, deviceId, batch.claimToken)
+            } catch (_: Exception) {}
         }
 
         val summary = buildString {
@@ -429,6 +589,33 @@ class SaleSyncCoordinatorImpl(
         )
     }
 
+    /**
+     * Re-reads the scoped outbox record and checks:
+     * 1. Persisted scope lock is NOT active.
+     * 2. Record exists and belongs to the scope.
+     * 3. Delivery status is IN_FLIGHT.
+     * 4. Claim token matches the current batch claim token.
+     * 5. Claim lease is unexpired according to clock().
+     */
+    private fun isClaimValidAndUnexpired(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        clientEventId: ClientUuid,
+        claimToken: String
+    ): Boolean {
+        if (outboxRepository.isQueueLocked(companyId, actorId, deviceId)) {
+            return false
+        }
+        val record = outboxRepository.getRecord(companyId, actorId, deviceId, clientEventId) ?: return false
+        val state = record.deliveryState
+        if (state.status != OutboxStatus.IN_FLIGHT.wireValue) return false
+        if (state.claimToken != claimToken) return false
+        val expiresAt = state.claimExpiresAt ?: return false
+        if (expiresAt <= clock()) return false
+        return true
+    }
+
     private fun isValidAck(
         ack: ServerSaleAck,
         expectedCompanyId: ServerUlid,
@@ -440,51 +627,7 @@ class SaleSyncCoordinatorImpl(
         if (ack.payloadDigest != expectedDigest) return false
         if (!ServerUlid.isValid(ack.invoiceUlid.value)) return false
         if (!ServerUlid.isValid(ack.paymentUlid.value)) return false
-        if (ack.serverAcknowledgedAt.isBlank()) return false
+        if (!Rfc3339Validator.isValid(ack.serverAcknowledgedAt)) return false
         return true
-    }
-
-    private fun handleCancellationOrFatal(
-        t: Throwable,
-        companyId: ServerUlid,
-        actorId: ServerUlid,
-        deviceId: ClientUuid,
-        clientEventId: ClientUuid,
-        claimToken: String
-    ) {
-        if (t is CancellationException || t is InterruptedException) {
-            try {
-                outboxRepository.recordTimeout(
-                    companyId = companyId,
-                    actorId = actorId,
-                    deviceId = deviceId,
-                    clientEventId = clientEventId,
-                    claimToken = claimToken,
-                    errorMessage = "Cancelled while gateway request in flight: ${safeErrorMessage(t)}"
-                )
-            } catch (_: Throwable) {
-                // Suppress secondary exception so primary fatal exception propagates
-            }
-            if (t is InterruptedException) {
-                Thread.currentThread().interrupt()
-            }
-            throw t
-        }
-    }
-
-    private fun checkFatal(t: Throwable) {
-        if (t is VirtualMachineError || t is ThreadDeath) {
-            throw t
-        }
-    }
-
-    private fun safeErrorMessage(t: Throwable): String {
-        return safeErrorMessage(t.message ?: t.javaClass.simpleName)
-    }
-
-    private fun safeErrorMessage(msg: String): String {
-        // Redact potential authorization tokens, keys, or bearer credentials from log/reason strings
-        val redacted = msg.replace(Regex("""(?i)(bearer\s+[\w\-._~+/]+=*|token[:=\s]+[\w\-._~+/]+=*)"""), "[REDACTED_CREDENTIAL]")
-        return if (redacted.length > 256) redacted.substring(0, 256) + "..." else redacted
     }
 }

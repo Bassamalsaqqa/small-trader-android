@@ -9,6 +9,8 @@ import com.example.data.mobile.outbox.CaptureResult
 import com.example.data.mobile.outbox.OutboxDatabase
 import com.example.data.mobile.outbox.OutboxRepository
 import com.example.data.mobile.outbox.OutboxRepositoryImpl
+import com.example.data.mobile.outbox.OutboxEventEntity
+import com.example.data.mobile.outbox.OutboxDeliveryStateEntity
 import com.example.data.mobile.outbox.OutboxStatus
 import com.example.data.mobile.outbox.OutboxTestFixtures
 import org.junit.After
@@ -453,7 +455,7 @@ class SaleSyncCoordinatorTest {
             statusOutcomeProvider = { SyncStatusOutcome.AuthDenied("401 Unauthorized: token expired or revoked") }
         }
 
-        val coordinator = SaleSyncCoordinatorImpl(repository, gateway)
+        val coordinator = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
         val syncResult = coordinator.synchronizeScope(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
 
         assertTrue("authBlocked must be true", syncResult.authBlocked)
@@ -611,7 +613,7 @@ class SaleSyncCoordinatorTest {
             }
         }
 
-        val coordinator = SaleSyncCoordinatorImpl(repository, gateway)
+        val coordinator = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
         val result = coordinator.synchronizeScope(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
 
         assertEquals(1, result.recordsClaimed)
@@ -620,7 +622,7 @@ class SaleSyncCoordinatorTest {
 
         val record = repository.getRecord(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, sampleEvent.clientEventId)!!
         assertEquals(OutboxStatus.CONFLICT, record.status)
-        assertTrue(record.deliveryState.errorMessage!!.contains("Inventory exhausted on server"))
+        assertEquals(SyncDiagnostics.BUSINESS_CONFLICT, record.deliveryState.errorMessage)
 
         // Canonical event bytes are strictly preserved
         val expectedDigest = sampleEvent.computePayloadDigest().value
@@ -640,7 +642,7 @@ class SaleSyncCoordinatorTest {
         assertTrue(captureResult is CaptureResult.Created)
 
         val gateway = FakeSaleSyncGateway()
-        val coordinator = SaleSyncCoordinatorImpl(repository, gateway)
+        val coordinator = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
 
         val result = coordinator.synchronizeScope(v1Event.companyId, v1Event.actorId, v1Event.deviceId)
 
@@ -655,7 +657,7 @@ class SaleSyncCoordinatorTest {
 
         val record = repository.getRecord(v1Event.companyId, v1Event.actorId, v1Event.deviceId, v1Event.clientEventId)!!
         assertEquals(OutboxStatus.CONFLICT, record.status)
-        assertTrue(record.deliveryState.errorMessage!!.contains("Legacy event version 1 cannot be posted to v2 sync gateway; parked without submission"))
+        assertEquals(SyncDiagnostics.LEGACY_EVENT_VERSION, record.deliveryState.errorMessage)
     }
 
     // =========================================================================
@@ -680,7 +682,7 @@ class SaleSyncCoordinatorTest {
             }
         }
 
-        val coordinator = SaleSyncCoordinatorImpl(repository, gateway)
+        val coordinator = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
 
         assertThrows(CancellationException::class.java) {
             coordinator.synchronizeScope(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
@@ -713,7 +715,7 @@ class SaleSyncCoordinatorTest {
             statusOutcomeProvider = { SyncStatusOutcome.MembershipDenied("403 Forbidden: Actor is not an active tenant member") }
         }
 
-        val coordinator = SaleSyncCoordinatorImpl(repository, gateway)
+        val coordinator = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
         val result = coordinator.synchronizeScope(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
 
         assertTrue(result.membershipDenied)
@@ -722,7 +724,7 @@ class SaleSyncCoordinatorTest {
 
         val record = repository.getRecord(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, sampleEvent.clientEventId)!!
         assertEquals(OutboxStatus.CONFLICT, record.status)
-        assertTrue(record.deliveryState.errorMessage!!.contains("Membership/forbidden denial (403)"))
+        assertEquals(SyncDiagnostics.MEMBERSHIP_DENIED, record.deliveryState.errorMessage)
     }
 
     // =========================================================================
@@ -760,7 +762,7 @@ class SaleSyncCoordinatorTest {
             }
         }
 
-        val coordinator = SaleSyncCoordinatorImpl(repository, gateway)
+        val coordinator = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
         coordinator.synchronizeScope(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
 
         val record = repository.getRecord(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, sampleEvent.clientEventId)!!
@@ -769,5 +771,618 @@ class SaleSyncCoordinatorTest {
         // Storage bytes must NOT have been corrupted by gateway mutation!
         assertNotEquals(0.toByte(), record.event.payloadBytes[0])
         assertEquals('{'.code.toByte(), record.event.payloadBytes[0])
+    }
+
+    // =========================================================================
+    // 13. Status NotFound delayed past lease + new claim: no first stale submit
+    // =========================================================================
+
+    @Test
+    fun testStatusNotFoundDelayedPastLeaseNewClaimNoFirstStaleSubmit() {
+        val sampleEvent = OutboxTestFixtures.createSampleEventV2()
+        repository.captureSaleV2(
+            companyId = sampleEvent.companyId,
+            actorId = sampleEvent.actorId,
+            deviceId = sampleEvent.deviceId,
+            currencyMinorUnits = 2,
+            event = sampleEvent
+        )
+
+        val digest = sampleEvent.computePayloadDigest()
+        val expectedAck = ServerSaleAck(
+            companyId = sampleEvent.companyId,
+            clientEventId = sampleEvent.clientEventId,
+            payloadDigest = digest,
+            invoiceUlid = OutboxTestFixtures.SAMPLE_INVOICE_ULID,
+            paymentUlid = OutboxTestFixtures.SAMPLE_PAYMENT_ULID,
+            serverAcknowledgedAt = "2026-11-12T01:35:00Z"
+        )
+
+        var clockTime = 100_000L
+        val repo = OutboxRepositoryImpl(database, clock = { clockTime })
+
+        val gateway = FakeSaleSyncGateway()
+        gateway.statusOutcomeProvider = { SyncStatusOutcome.NotFound }
+        gateway.submitOutcomeProvider = { _, _ ->
+            gateway.serverPostEffectCounter.incrementAndGet()
+            SyncSubmitOutcome.Posted(expectedAck)
+        }
+
+        val coordinator2 = SaleSyncCoordinatorImpl(repo, gateway, clock = { clockTime })
+        var coordinator1SubmitCalled = false
+
+        val interleavingGateway = object : SaleSyncGateway by gateway {
+            override fun checkStatus(
+                companyId: ServerUlid,
+                actorId: ServerUlid,
+                deviceId: ClientUuid,
+                clientEventId: ClientUuid,
+                payloadDigest: PayloadDigest
+            ): SyncStatusOutcome {
+                val res = gateway.checkStatus(companyId, actorId, deviceId, clientEventId, payloadDigest)
+                // Interleave: advance clock past Coordinator 1's lease duration (10s)
+                clockTime += 20_000L
+                // Coordinator 2 claims and successfully submits + confirms
+                val res2 = coordinator2.synchronizeScope(companyId, actorId, deviceId, batchSize = 1, leaseDurationMillis = 10_000L)
+                assertEquals(1, res2.confirmedCount)
+                return res
+            }
+
+            override fun submitSale(
+                companyId: ServerUlid,
+                actorId: ServerUlid,
+                deviceId: ClientUuid,
+                clientEventId: ClientUuid,
+                payloadDigest: PayloadDigest,
+                canonicalEventUtf8: ByteArray
+            ): SyncSubmitOutcome {
+                coordinator1SubmitCalled = true
+                return gateway.submitSale(companyId, actorId, deviceId, clientEventId, payloadDigest, canonicalEventUtf8)
+            }
+        }
+
+        val coordinator1 = SaleSyncCoordinatorImpl(repo, interleavingGateway, clock = { clockTime })
+        val res1 = coordinator1.synchronizeScope(
+            sampleEvent.companyId,
+            sampleEvent.actorId,
+            sampleEvent.deviceId,
+            batchSize = 1,
+            leaseDurationMillis = 10_000L
+        )
+
+        // Coordinator 1 must re-read scoped record before submit, detect stale lease/reclaimed claim, and suppress submit!
+        assertFalse("Coordinator 1 must NOT dispatch submitSale when claim is stale or reclaimed", coordinator1SubmitCalled)
+        assertEquals(0, res1.confirmedCount)
+        assertTrue(res1.stoppedEarly)
+
+        // Exactly one submission occurred (from Coordinator 2)
+        assertEquals("Exactly one canonical server effect executed", 1, gateway.serverPostEffectCounter.get())
+        assertEquals(1, gateway.submitSaleCallCount.get())
+
+        val record = repo.getRecord(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, sampleEvent.clientEventId)!!
+        assertEquals(OutboxStatus.CONFIRMED, record.status)
+    }
+
+    // =========================================================================
+    // 14. Batch of 3 cleanup on transient, cancel, 403, and 401
+    // =========================================================================
+
+    @Test
+    fun testBatch3CleanupOnTransientCancel403AndAuth() {
+        val dummy = OutboxTestFixtures.createSampleEventV2()
+        val companyId = dummy.companyId
+        val actorId = dummy.actorId
+        val deviceId = dummy.deviceId
+
+        // Case A: Transient error on first of 3 records
+        run {
+            val db = OutboxDatabase.buildInMemory(context)
+            val repo = OutboxRepositoryImpl(db)
+
+            val e1 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000001"))
+            val e2 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000002"))
+            val e3 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000003"))
+
+            repo.captureSaleV2(companyId, actorId, deviceId, 2, e1)
+            repo.captureSaleV2(companyId, actorId, deviceId, 2, e2)
+            repo.captureSaleV2(companyId, actorId, deviceId, 2, e3)
+
+            val gateway = FakeSaleSyncGateway().apply {
+                statusOutcomeProvider = {
+                    SyncStatusOutcome.TransientUnknown("Temporary 503 Service Unavailable", isTimeout = false)
+                }
+            }
+
+            val coordinator = SaleSyncCoordinatorImpl(repo, gateway)
+            val res = coordinator.synchronizeScope(companyId, actorId, deviceId, batchSize = 3)
+
+            assertEquals(3, res.recordsClaimed)
+            assertEquals(1, res.timeoutCount)
+            assertTrue(res.stoppedEarly)
+
+            // e1 is in UNKNOWN_ACK
+            val r1 = repo.getRecord(companyId, actorId, deviceId, e1.clientEventId)!!
+            assertEquals(OutboxStatus.UNKNOWN_ACK, r1.status)
+
+            // e2 and e3 were cleaned up back to PENDING (ownership cleared)
+            val r2 = repo.getRecord(companyId, actorId, deviceId, e2.clientEventId)!!
+            assertEquals(OutboxStatus.PENDING, r2.status)
+            assertNull(r2.deliveryState.claimToken)
+            assertNull(r2.deliveryState.claimExpiresAt)
+
+            val r3 = repo.getRecord(companyId, actorId, deviceId, e3.clientEventId)!!
+            assertEquals(OutboxStatus.PENDING, r3.status)
+            assertNull(r3.deliveryState.claimToken)
+            assertNull(r3.deliveryState.claimExpiresAt)
+
+            db.close()
+        }
+
+        // Case B: 403 MembershipDenied on first of 3 records
+        run {
+            val db = OutboxDatabase.buildInMemory(context)
+            val repo = OutboxRepositoryImpl(db)
+
+            val e1 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000001"))
+            val e2 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000002"))
+            val e3 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000003"))
+
+            repo.captureSaleV2(companyId, actorId, deviceId, 2, e1)
+            repo.captureSaleV2(companyId, actorId, deviceId, 2, e2)
+            repo.captureSaleV2(companyId, actorId, deviceId, 2, e3)
+
+            val gateway = FakeSaleSyncGateway().apply {
+                statusOutcomeProvider = {
+                    SyncStatusOutcome.MembershipDenied("403 Forbidden")
+                }
+            }
+
+            val coordinator = SaleSyncCoordinatorImpl(repo, gateway)
+            val res = coordinator.synchronizeScope(companyId, actorId, deviceId, batchSize = 3)
+
+            assertEquals(3, res.recordsClaimed)
+            assertEquals(1, res.conflictCount)
+            assertTrue(res.membershipDenied)
+            assertTrue(res.stoppedEarly)
+
+            val r1 = repo.getRecord(companyId, actorId, deviceId, e1.clientEventId)!!
+            assertEquals(OutboxStatus.CONFLICT, r1.status)
+
+            // e2 and e3 released back to PENDING
+            val r2 = repo.getRecord(companyId, actorId, deviceId, e2.clientEventId)!!
+            assertEquals(OutboxStatus.PENDING, r2.status)
+            assertNull(r2.deliveryState.claimToken)
+
+            val r3 = repo.getRecord(companyId, actorId, deviceId, e3.clientEventId)!!
+            assertEquals(OutboxStatus.PENDING, r3.status)
+            assertNull(r3.deliveryState.claimToken)
+
+            db.close()
+        }
+
+        // Case C: CancellationException during processing
+        run {
+            val db = OutboxDatabase.buildInMemory(context)
+            val repo = OutboxRepositoryImpl(db)
+
+            val e1 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000001"))
+            val e2 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000002"))
+            val e3 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000003"))
+
+            repo.captureSaleV2(companyId, actorId, deviceId, 2, e1)
+            repo.captureSaleV2(companyId, actorId, deviceId, 2, e2)
+            repo.captureSaleV2(companyId, actorId, deviceId, 2, e3)
+
+            val gateway = FakeSaleSyncGateway().apply {
+                statusOutcomeProvider = {
+                    throw CancellationException("Simulated coroutine cancellation")
+                }
+            }
+
+            val coordinator = SaleSyncCoordinatorImpl(repo, gateway)
+            assertThrows(CancellationException::class.java) {
+                coordinator.synchronizeScope(companyId, actorId, deviceId, batchSize = 3)
+            }
+
+            // e1 is UNKNOWN_ACK (cancellation during in-flight status check)
+            val r1 = repo.getRecord(companyId, actorId, deviceId, e1.clientEventId)!!
+            assertEquals(OutboxStatus.UNKNOWN_ACK, r1.status)
+
+            // e2 and e3 released back to PENDING
+            val r2 = repo.getRecord(companyId, actorId, deviceId, e2.clientEventId)!!
+            assertEquals(OutboxStatus.PENDING, r2.status)
+            assertNull(r2.deliveryState.claimToken)
+
+            val r3 = repo.getRecord(companyId, actorId, deviceId, e3.clientEventId)!!
+            assertEquals(OutboxStatus.PENDING, r3.status)
+            assertNull(r3.deliveryState.claimToken)
+
+            db.close()
+        }
+
+        // Case D: 401 AuthDenied locks queue and marks ALL active scope records as AUTH_BLOCKED
+        run {
+            val db = OutboxDatabase.buildInMemory(context)
+            val repo = OutboxRepositoryImpl(db)
+
+            val e1 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000001"))
+            val e2 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000002"))
+            val e3 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000003"))
+
+            repo.captureSaleV2(companyId, actorId, deviceId, 2, e1)
+            repo.captureSaleV2(companyId, actorId, deviceId, 2, e2)
+            repo.captureSaleV2(companyId, actorId, deviceId, 2, e3)
+
+            val gateway = FakeSaleSyncGateway().apply {
+                statusOutcomeProvider = {
+                    SyncStatusOutcome.AuthDenied("401 Token Expired")
+                }
+            }
+
+            val coordinator = SaleSyncCoordinatorImpl(repo, gateway)
+            val res = coordinator.synchronizeScope(companyId, actorId, deviceId, batchSize = 3)
+
+            assertTrue(res.authBlocked)
+            assertTrue(res.stoppedEarly)
+            assertTrue(repo.isQueueLocked(companyId, actorId, deviceId))
+
+            // All 3 records transitioned to AUTH_BLOCKED
+            val r1 = repo.getRecord(companyId, actorId, deviceId, e1.clientEventId)!!
+            assertEquals(OutboxStatus.AUTH_BLOCKED, r1.status)
+            val r2 = repo.getRecord(companyId, actorId, deviceId, e2.clientEventId)!!
+            assertEquals(OutboxStatus.AUTH_BLOCKED, r2.status)
+            val r3 = repo.getRecord(companyId, actorId, deviceId, e3.clientEventId)!!
+            assertEquals(OutboxStatus.AUTH_BLOCKED, r3.status)
+
+            db.close()
+        }
+    }
+
+    // =========================================================================
+    // 15. Corrupt UUID and corrupt bytes park without loop or submission
+    // =========================================================================
+
+    @Test
+    fun testCorruptUUIDAndBytesParkNoLoopOrSubmit() {
+        val sampleEvent = OutboxTestFixtures.createSampleEventV2()
+
+        // 15A: Malformed stored UUID parked via narrow raw-string key; no infinite poison reclaim loop
+        run {
+            val db = OutboxDatabase.buildInMemory(context)
+            val repo = OutboxRepositoryImpl(db)
+
+            val sampleBytes = com.example.data.mobile.contract.CanonicalJsonSerializer.serialize(sampleEvent).toByteArray(Charsets.UTF_8)
+            val rawMalformedId = "not-a-valid-uuid-12345"
+            val eventEntity = OutboxEventEntity(
+                clientEventId = rawMalformedId,
+                companyId = sampleEvent.companyId.value,
+                actorId = sampleEvent.actorId.value,
+                deviceId = sampleEvent.deviceId.value,
+                deviceLeaseId = sampleEvent.deviceLeaseId.value,
+                capturedAt = sampleEvent.capturedAt,
+                payloadDigest = sampleEvent.computePayloadDigest().value,
+                payloadBytes = sampleBytes,
+                eventVersion = 2
+            )
+            val stateEntity = OutboxDeliveryStateEntity(
+                clientEventId = rawMalformedId,
+                companyId = sampleEvent.companyId.value,
+                actorId = sampleEvent.actorId.value,
+                deviceId = sampleEvent.deviceId.value,
+                status = OutboxStatus.PENDING.wireValue,
+                createdAt = 100_000L,
+                updatedAt = 100_000L
+            )
+            db.outboxDao().insertEvent(eventEntity)
+            db.outboxDao().insertDeliveryState(stateEntity)
+
+            val gateway = FakeSaleSyncGateway()
+            val coordinator = SaleSyncCoordinatorImpl(repo, gateway)
+
+            val res1 = coordinator.synchronizeScope(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
+            assertEquals(1, res1.recordsClaimed)
+            assertEquals(1, res1.conflictCount)
+            assertEquals(0, gateway.checkStatusCallCount.get())
+            assertEquals(0, gateway.submitSaleCallCount.get())
+
+            val stateAfter = db.outboxDao().getDeliveryState(sampleEvent.companyId.value, rawMalformedId)!!
+            assertEquals(OutboxStatus.CONFLICT.wireValue, stateAfter.status)
+            assertEquals(SyncDiagnostics.MALFORMED_CLIENT_EVENT_ID, stateAfter.errorMessage)
+
+            // Second pass: must NOT reclaim the parked record!
+            val res2 = coordinator.synchronizeScope(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
+            assertEquals(0, res2.recordsClaimed)
+
+            db.close()
+        }
+
+        // 15B: Corrupt payload bytes (SHA-256 != payloadDigest) parked with zero submission
+        run {
+            val db = OutboxDatabase.buildInMemory(context)
+            val repo = OutboxRepositoryImpl(db)
+
+            val sampleBytes = com.example.data.mobile.contract.CanonicalJsonSerializer.serialize(sampleEvent).toByteArray(Charsets.UTF_8)
+            val corruptedBytes = sampleBytes.clone().apply {
+                this[this.size - 2] = 'Z'.code.toByte()
+            }
+            val eventEntity = OutboxEventEntity(
+                clientEventId = sampleEvent.clientEventId.value,
+                companyId = sampleEvent.companyId.value,
+                actorId = sampleEvent.actorId.value,
+                deviceId = sampleEvent.deviceId.value,
+                deviceLeaseId = sampleEvent.deviceLeaseId.value,
+                capturedAt = sampleEvent.capturedAt,
+                payloadDigest = sampleEvent.computePayloadDigest().value,
+                payloadBytes = corruptedBytes,
+                eventVersion = 2
+            )
+            val stateEntity = OutboxDeliveryStateEntity(
+                clientEventId = sampleEvent.clientEventId.value,
+                companyId = sampleEvent.companyId.value,
+                actorId = sampleEvent.actorId.value,
+                deviceId = sampleEvent.deviceId.value,
+                status = OutboxStatus.PENDING.wireValue,
+                createdAt = 100_000L,
+                updatedAt = 100_000L
+            )
+            db.outboxDao().insertEvent(eventEntity)
+            db.outboxDao().insertDeliveryState(stateEntity)
+
+            val gateway = FakeSaleSyncGateway()
+            val coordinator = SaleSyncCoordinatorImpl(repo, gateway)
+
+            val res = coordinator.synchronizeScope(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
+            assertEquals(1, res.recordsClaimed)
+            assertEquals(1, res.conflictCount)
+            assertEquals(0, gateway.checkStatusCallCount.get()) // zero network calls!
+            assertEquals(0, gateway.submitSaleCallCount.get())
+
+            val record = repo.getRecord(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, sampleEvent.clientEventId)!!
+            assertEquals(OutboxStatus.CONFLICT, record.status)
+            assertEquals(SyncDiagnostics.CORRUPT_PAYLOAD_DIGEST, record.deliveryState.errorMessage)
+
+            // Original corrupted bytes retained immutable in Room (no repair/reprice)
+            assertArrayEquals(corruptedBytes, record.event.payloadBytes)
+
+            db.close()
+        }
+    }
+
+    // =========================================================================
+    // 16. Invalid ack date: no confirmation, recoverable via fresh status
+    // =========================================================================
+
+    @Test
+    fun testInvalidAckDateNoConfirmationAndRecoverableViaFreshStatus() {
+        val sampleEvent = OutboxTestFixtures.createSampleEventV2()
+        repository.captureSaleV2(
+            companyId = sampleEvent.companyId,
+            actorId = sampleEvent.actorId,
+            deviceId = sampleEvent.deviceId,
+            currencyMinorUnits = 2,
+            event = sampleEvent
+        )
+
+        val digest = sampleEvent.computePayloadDigest()
+        // Invalid non-existent calendar date (February 30th)
+        val invalidAck = ServerSaleAck(
+            companyId = sampleEvent.companyId,
+            clientEventId = sampleEvent.clientEventId,
+            payloadDigest = digest,
+            invoiceUlid = OutboxTestFixtures.SAMPLE_INVOICE_ULID,
+            paymentUlid = OutboxTestFixtures.SAMPLE_PAYMENT_ULID,
+            serverAcknowledgedAt = "2026-02-30T10:00:00Z"
+        )
+
+        val gateway = FakeSaleSyncGateway().apply {
+            statusOutcomeProvider = { SyncStatusOutcome.Posted(invalidAck) }
+        }
+
+        val coordinator = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
+        val res1 = coordinator.synchronizeScope(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
+
+        assertEquals(1, res1.recordsClaimed)
+        assertEquals(0, res1.confirmedCount)
+        assertEquals(1, res1.timeoutCount)
+
+        val record1 = repository.getRecord(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, sampleEvent.clientEventId)!!
+        assertEquals(OutboxStatus.UNKNOWN_ACK, record1.status)
+        assertEquals(SyncDiagnostics.INVALID_SERVER_ACK, record1.deliveryState.errorMessage)
+
+        // Pass 2: Gateway provides valid RFC 3339 timestamp with valid offset; recovers cleanly
+        val validAck = invalidAck.copy(serverAcknowledgedAt = "2026-11-12T03:00:00+02:00")
+        gateway.statusOutcomeProvider = { SyncStatusOutcome.Posted(validAck) }
+
+        val res2 = coordinator.synchronizeScope(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
+        assertEquals(1, res2.recordsClaimed)
+        assertEquals(1, res2.confirmedCount)
+
+        val record2 = repository.getRecord(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, sampleEvent.clientEventId)!!
+        assertEquals(OutboxStatus.CONFIRMED, record2.status)
+        assertEquals("2026-11-12T03:00:00+02:00", record2.deliveryState.serverAcknowledgedAt)
+    }
+
+    // =========================================================================
+    // 17. Direct repository API tests for RFC 3339 validation
+    // =========================================================================
+
+    @Test
+    fun testDirectApiInvalidDatesAndValidContractCases() {
+        val sampleEvent = OutboxTestFixtures.createSampleEventV2()
+        val digest = sampleEvent.computePayloadDigest()
+
+        val db = OutboxDatabase.buildInMemory(context)
+        val repo = OutboxRepositoryImpl(db)
+        repo.captureSaleV2(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, 2, sampleEvent)
+
+        val claim = repo.claimNextBatch(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, batchSize = 1)
+
+        // 17A: Invalid dates throw IllegalArgumentException on confirmDelivery
+        assertThrows(IllegalArgumentException::class.java) {
+            repo.confirmDelivery(
+                companyId = sampleEvent.companyId,
+                actorId = sampleEvent.actorId,
+                deviceId = sampleEvent.deviceId,
+                clientEventId = sampleEvent.clientEventId,
+                payloadDigest = digest,
+                invoiceUlid = OutboxTestFixtures.SAMPLE_INVOICE_ULID,
+                paymentUlid = OutboxTestFixtures.SAMPLE_PAYMENT_ULID,
+                serverAcknowledgedAt = "not-a-date",
+                claimToken = claim.claimToken
+            )
+        }
+
+        assertThrows(IllegalArgumentException::class.java) {
+            repo.confirmDelivery(
+                companyId = sampleEvent.companyId,
+                actorId = sampleEvent.actorId,
+                deviceId = sampleEvent.deviceId,
+                clientEventId = sampleEvent.clientEventId,
+                payloadDigest = digest,
+                invoiceUlid = OutboxTestFixtures.SAMPLE_INVOICE_ULID,
+                paymentUlid = OutboxTestFixtures.SAMPLE_PAYMENT_ULID,
+                serverAcknowledgedAt = "2026-02-31T00:00:00Z",
+                claimToken = claim.claimToken
+            )
+        }
+
+        assertThrows(IllegalArgumentException::class.java) {
+            repo.confirmDelivery(
+                companyId = sampleEvent.companyId,
+                actorId = sampleEvent.actorId,
+                deviceId = sampleEvent.deviceId,
+                clientEventId = sampleEvent.clientEventId,
+                payloadDigest = digest,
+                invoiceUlid = OutboxTestFixtures.SAMPLE_INVOICE_ULID,
+                paymentUlid = OutboxTestFixtures.SAMPLE_PAYMENT_ULID,
+                serverAcknowledgedAt = "",
+                claimToken = claim.claimToken
+            )
+        }
+
+        // 17B: Valid RFC 3339 with offset succeeds
+        val confirmed = repo.confirmDelivery(
+            companyId = sampleEvent.companyId,
+            actorId = sampleEvent.actorId,
+            deviceId = sampleEvent.deviceId,
+            clientEventId = sampleEvent.clientEventId,
+            payloadDigest = digest,
+            invoiceUlid = OutboxTestFixtures.SAMPLE_INVOICE_ULID,
+            paymentUlid = OutboxTestFixtures.SAMPLE_PAYMENT_ULID,
+            serverAcknowledgedAt = "2026-11-12T03:00:00+02:00",
+            claimToken = claim.claimToken
+        )
+        assertTrue(confirmed)
+
+        db.close()
+    }
+
+    // =========================================================================
+    // 18. Meaningful malicious short secret/password/Basic/customer data:
+    //     no DB reason, error_message, summary, or toString leak
+    // =========================================================================
+
+    @Test
+    fun testNoSecretLeakInDBReasonSummaryOrToString() {
+        val sampleEvent = OutboxTestFixtures.createSampleEventV2()
+
+        val secretPassword = "SuperSecretPassword123!"
+        val basicAuthHeader = "Basic dXNlcjpwYXNz"
+        val bearerToken = "Bearer secret_api_token_abc"
+        val customerPii = "CustomerCreditCard=4111222233334444"
+
+        // 18A: Outcomes toString() must never leak raw strings
+        val conflictOutcome = SyncStatusOutcome.BusinessConflict(reason = "Failed: $secretPassword")
+        assertFalse("Outcome toString() must not contain secret password", conflictOutcome.toString().contains(secretPassword))
+
+        val authOutcome = SyncStatusOutcome.AuthDenied(reason = "Denied: $bearerToken")
+        assertFalse("Outcome toString() must not contain bearer token", authOutcome.toString().contains(bearerToken))
+
+        val transientOutcome = SyncSubmitOutcome.TransientUnknown(errorMessage = "Error: $basicAuthHeader")
+        assertFalse("Outcome toString() must not contain basic auth", transientOutcome.toString().contains(basicAuthHeader))
+
+        // 18B: Persisted DB state must never contain raw exception messages or untrusted gateway reasons
+        val db = OutboxDatabase.buildInMemory(context)
+        val repo = OutboxRepositoryImpl(db)
+        repo.captureSaleV2(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, 2, sampleEvent)
+
+        val gateway = FakeSaleSyncGateway().apply {
+            statusOutcomeProvider = {
+                SyncStatusOutcome.BusinessConflict(reason = "HostileReason: $customerPii")
+            }
+        }
+
+        val coordinator = SaleSyncCoordinatorImpl(repo, gateway)
+        val res = coordinator.synchronizeScope(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
+
+        assertFalse("Summary must not contain PII", res.summary.contains(customerPii))
+
+        val record = repo.getRecord(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, sampleEvent.clientEventId)!!
+        val dbErrorMessage = record.deliveryState.errorMessage ?: ""
+        assertFalse("DB error_message must not contain PII", dbErrorMessage.contains(customerPii))
+        assertEquals(SyncDiagnostics.BUSINESS_CONFLICT, dbErrorMessage)
+
+        db.close()
+    }
+
+    // =========================================================================
+    // 19. Fatal errors and cancellation propagate without heavy DB cleanup
+    // =========================================================================
+
+    @Test
+    fun testFatalErrorsPropagateWithoutHeavyDbCleanup() {
+        val sampleEvent = OutboxTestFixtures.createSampleEventV2()
+
+        // 19A: OutOfMemoryError propagates immediately
+        run {
+            val db = OutboxDatabase.buildInMemory(context)
+            val repo = OutboxRepositoryImpl(db)
+            repo.captureSaleV2(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, 2, sampleEvent)
+
+            val gateway = FakeSaleSyncGateway().apply {
+                statusOutcomeProvider = { throw OutOfMemoryError("Simulated heap exhaustion") }
+            }
+            val coordinator = SaleSyncCoordinatorImpl(repo, gateway)
+
+            assertThrows(OutOfMemoryError::class.java) {
+                coordinator.synchronizeScope(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
+            }
+            db.close()
+        }
+
+        // 19B: AssertionError propagates immediately
+        run {
+            val db = OutboxDatabase.buildInMemory(context)
+            val repo = OutboxRepositoryImpl(db)
+            repo.captureSaleV2(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, 2, sampleEvent)
+
+            val gateway = FakeSaleSyncGateway().apply {
+                statusOutcomeProvider = { throw AssertionError("Simulated assertion failure") }
+            }
+            val coordinator = SaleSyncCoordinatorImpl(repo, gateway)
+
+            assertThrows(AssertionError::class.java) {
+                coordinator.synchronizeScope(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
+            }
+            db.close()
+        }
+
+        // 19C: InterruptedException restores thread interrupt flag and propagates
+        run {
+            val db = OutboxDatabase.buildInMemory(context)
+            val repo = OutboxRepositoryImpl(db)
+            repo.captureSaleV2(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, 2, sampleEvent)
+
+            val gateway = FakeSaleSyncGateway().apply {
+                statusOutcomeProvider = { throw InterruptedException("Simulated worker thread interrupt") }
+            }
+            val coordinator = SaleSyncCoordinatorImpl(repo, gateway)
+
+            assertThrows(InterruptedException::class.java) {
+                coordinator.synchronizeScope(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
+            }
+            assertTrue("Interrupted status must be restored", Thread.interrupted())
+            db.close()
+        }
     }
 }

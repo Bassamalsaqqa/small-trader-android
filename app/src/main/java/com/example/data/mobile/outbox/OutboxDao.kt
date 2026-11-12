@@ -227,6 +227,26 @@ abstract class OutboxDao {
 
     @Query("""
         UPDATE outbox_delivery_states
+        SET status = 'pending',
+            claim_token = NULL,
+            claim_expires_at = NULL,
+            updated_at = :nowMillis
+        WHERE company_id = :companyId
+          AND actor_id = :actorId
+          AND device_id = :deviceId
+          AND claim_token = :claimToken
+          AND status = 'in_flight'
+    """)
+    abstract fun releaseClaimedBatch(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        claimToken: String,
+        nowMillis: Long
+    ): Int
+
+    @Query("""
+        UPDATE outbox_delivery_states
         SET status = 'confirmed',
             invoice_ulid = :invoiceUlid,
             payment_ulid = :paymentUlid,
