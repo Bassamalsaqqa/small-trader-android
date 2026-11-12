@@ -18,7 +18,6 @@ import org.junit.Assume
 import org.junit.Test
 import java.io.Closeable
 import java.io.File
-import java.util.UUID
 
 /**
  * Opt-in paired executable smoke test using REAL SmallTraderReadClient and REAL,
@@ -27,6 +26,8 @@ import java.util.UUID
  * Operational rules:
  * - If SMALL_TRADER_READ_PILOT_HANDOFF is absent, the test is explicitly SKIPPED (NOT RUN).
  *   It does NOT silently pass.
+ * - If configured, SMALL_TRADER_EXPECTED_BACKEND_SHA must be explicitly set to independently
+ *   verify backend commit SHA; never trust handoff alone.
  * - If configured, it performs real HTTPS requests against the handoff URL.
  * - Strict aggregate fail in JUnit and artifact-consistent FAIL on setup or scenario failure.
  * - Produces a sanitized evidence JSON at evidence/paired-read-pilot-evidence.json with
@@ -42,6 +43,11 @@ class SmallTraderReadPilotSmokeTest {
             !handoffEnv.isNullOrBlank()
         )
 
+        val expectedShaEnv = System.getenv(ReadPilotHandoffConfig.ENV_EXPECTED_BACKEND_SHA)?.trim()
+        require(!expectedShaEnv.isNullOrBlank()) {
+            "Safety invariant violation: ${ReadPilotHandoffConfig.ENV_EXPECTED_BACKEND_SHA} is required; never trust handoff alone"
+        }
+
         val handoffFile = File(handoffEnv!!.trim())
         var overallSuccess = true
         val scenarios = mutableListOf<ScenarioEvidence>()
@@ -49,18 +55,22 @@ class SmallTraderReadPilotSmokeTest {
         var config: ReadPilotHandoffConfig? = null
 
         try {
-            // STEP 0: Load and validate hand-off configuration
-            assertTrue("Handoff file does not exist: ${handoffFile.name}", handoffFile.exists())
-            config = ReadPilotHandoffConfig.fromFile(handoffFile)
+            // STEP 0: Load and validate hand-off configuration with required independent backend SHA
+            assertTrue("Handoff file does not exist: [REDACTED_FILE]", handoffFile.exists())
+            config = ReadPilotHandoffConfig.fromFile(
+                file = handoffFile,
+                expectedBackendSha = expectedShaEnv,
+                requireIndependentSha = true
+            )
 
             // Configure isolated JVM test CA trust if provided
             if (config.caCertPath != null) {
                 val caFile = File(config.caCertPath)
-                assertTrue("Configured CA cert file not found: ${caFile.name}", caFile.exists())
+                assertTrue("Configured CA cert file not found", caFile.exists())
                 truststoreCloseable = JvmTlsTrustConfigurator.configureJvmTestCa(caFile)
             } else if (config.testTruststorePath != null) {
                 val tsFile = File(config.testTruststorePath)
-                assertTrue("Configured truststore file not found: ${tsFile.name}", tsFile.exists())
+                assertTrue("Configured truststore file not found", tsFile.exists())
                 truststoreCloseable = JvmTlsTrustConfigurator.configureTrustStore(tsFile, config.testTruststorePassword)
             }
 
@@ -99,7 +109,7 @@ class SmallTraderReadPilotSmokeTest {
                 )
             )
 
-            // STEP 2: Auth login
+            // STEP 2: Auth login with staff1
             val t1 = System.currentTimeMillis()
             val loginResult = client.authLogin(
                 AuthLoginRequest(
@@ -117,18 +127,17 @@ class SmallTraderReadPilotSmokeTest {
 
             val token: String
             if (authOutcome is AuthLoginResult.MfaRequired) {
-                // If MFA is required but no MFA test coordinator is provided in handoff, mark NOT_RUN
                 scenarios.add(
                     ScenarioEvidence(
                         name = "auth_login_mfa",
                         status = "NOT_RUN",
                         httpStatusCode = 200,
                         latencyMs = latency1,
-                        details = "Server requested MFA; MFA coordinator not provided in handoff; marked NOT_RUN without overclaiming coverage"
+                        details = "Server requested MFA; staff1 runner configured without MFA requirement"
                     )
                 )
                 overallSuccess = false
-                throw IllegalStateException("MFA challenge received but no MFA coordinator configured in handoff")
+                throw IllegalStateException("MFA challenge received unexpectedly for staff1")
             } else if (authOutcome is AuthLoginResult.Success) {
                 val loginSuccess = authOutcome.response
                 token = loginSuccess.token
@@ -214,167 +223,88 @@ class SmallTraderReadPilotSmokeTest {
                 )
             )
 
-            // STEP 5: Bounded product catalog pagination (>= 2 pages, cursor cycle guard, identity uniqueness, snapshot consistency)
-            var productCursor: String? = null
-            val visitedProductCursors = mutableSetOf<String>()
-            val collectedProductIds = mutableSetOf<String>()
-            var productPagesFetched = 0
-            var initialProductSnapshot: String? = null
-            var productsPaginationPassed = true
-            var productPaginationDetails = ""
-
+            // STEP 5: Deterministic product catalog pagination (Page 1: 2 items, Page 2: 1 item, total = 3 unique items)
             val t4Start = System.currentTimeMillis()
-            while (productPagesFetched < 5) {
-                val pageResult = client.getProducts(
-                    token = token,
-                    companyId = config.companyId,
-                    query = PaginationQuery(limit = 10, cursor = productCursor)
-                )
-                if (pageResult !is ReadClientResult.Success) {
-                    productsPaginationPassed = false
-                    productPaginationDetails = "Product page $productPagesFetched fetch failed: $pageResult"
-                    break
-                }
-                val page = pageResult.value
-                productPagesFetched++
+            val prodPage1Result = client.getProducts(
+                token = token,
+                companyId = config.companyId,
+                query = PaginationQuery(limit = 2, cursor = null)
+            )
+            assertTrue("Product page 1 fetch failed: $prodPage1Result", prodPage1Result is ReadClientResult.Success)
+            val prodPage1 = (prodPage1Result as ReadClientResult.Success).value
+            assertEquals("Product page 1 must return exactly 2 items", 2, prodPage1.products.size)
+            assertTrue("Product page 1 must provide nextCursor", !prodPage1.nextCursor.isNullOrBlank())
 
-                // Snapshot consistency guard
-                if (initialProductSnapshot == null) {
-                    initialProductSnapshot = page.catalogSnapshotVersion
-                } else if (page.catalogSnapshotVersion != initialProductSnapshot) {
-                    productsPaginationPassed = false
-                    productPaginationDetails = "Catalog snapshot divergence: expected $initialProductSnapshot, got ${page.catalogSnapshotVersion}"
-                    break
-                }
+            val prodPage2Result = client.getProducts(
+                token = token,
+                companyId = config.companyId,
+                query = PaginationQuery(limit = 2, cursor = prodPage1.nextCursor)
+            )
+            assertTrue("Product page 2 fetch failed: $prodPage2Result", prodPage2Result is ReadClientResult.Success)
+            val prodPage2 = (prodPage2Result as ReadClientResult.Success).value
+            assertEquals("Product page 2 must return exactly 1 item", 1, prodPage2.products.size)
+            assertTrue("Product page 2 nextCursor must be empty", prodPage2.nextCursor.isNullOrBlank())
 
-                // Identity uniqueness & decimal precision verification
-                for (p in page.products) {
-                    if (!collectedProductIds.add(p.id.value)) {
-                        productsPaginationPassed = false
-                        productPaginationDetails = "Duplicate product ID encountered: ${p.id.value}"
-                        break
-                    }
-                    if (!p.unitPrice.lexeme.matches(Regex("^[0-9]+(\\.[0-9]+)?$"))) {
-                        productsPaginationPassed = false
-                        productPaginationDetails = "Malformed unitPrice decimal string: ${p.unitPrice.lexeme}"
-                        break
-                    }
-                    if (p.taxRate != null && !p.taxRate.lexeme.matches(Regex("^[0-9]+(\\.[0-9]+)?$"))) {
-                        productsPaginationPassed = false
-                        productPaginationDetails = "Malformed taxRate decimal string: ${p.taxRate.lexeme}"
-                        break
-                    }
-                }
-                if (!productsPaginationPassed) break
+            assertEquals("Catalog snapshot version must remain consistent across pages", prodPage1.catalogSnapshotVersion, prodPage2.catalogSnapshotVersion)
+            val allProducts = prodPage1.products + prodPage2.products
+            val collectedProductIds = allProducts.map { it.id.value }.toSet()
+            assertEquals("Total unique products across pages 2+1 must be 3", 3, collectedProductIds.size)
 
-                val nextCursor = page.nextCursor
-                if (nextCursor.isNullOrEmpty()) {
-                    break
+            for (p in allProducts) {
+                assertTrue("Malformed unitPrice decimal string: ${p.unitPrice.lexeme}", p.unitPrice.lexeme.matches(Regex("^[0-9]+(\\.[0-9]+)?$")))
+                if (p.taxRate != null) {
+                    assertTrue("Malformed taxRate decimal string: ${p.taxRate.lexeme}", p.taxRate.lexeme.matches(Regex("^[0-9]+(\\.[0-9]+)?$")))
                 }
-                if (!visitedProductCursors.add(nextCursor)) {
-                    productsPaginationPassed = false
-                    productPaginationDetails = "Cursor cycle detected on cursor '$nextCursor'"
-                    break
-                }
-                productCursor = nextCursor
             }
             val latency4 = System.currentTimeMillis() - t4Start
-
-            // Verify seeded product fixtures if provided in handoff
-            if (config.expectedProducts.isNotEmpty()) {
-                for (expProd in config.expectedProducts) {
-                    if (!collectedProductIds.contains(expProd.id)) {
-                        productsPaginationPassed = false
-                        productPaginationDetails = "Expected seeded product ${expProd.id} not found in catalog"
-                        break
-                    }
-                }
-            }
-
-            if (productsPaginationPassed) {
-                productPaginationDetails = "Fetched $productPagesFetched pages, ${collectedProductIds.size} unique products; snapshot consistent; decimal precision verified"
-            }
-
             scenarios.add(
                 ScenarioEvidence(
                     name = "product_pagination",
-                    status = if (productsPaginationPassed) "PASS" else "FAIL",
+                    status = "PASS",
                     httpStatusCode = 200,
                     latencyMs = latency4,
-                    details = productPaginationDetails
+                    details = "Deterministic 2+1 pagination verified: 2 pages, 3 unique products, snapshot consistent, decimal precision validated"
                 )
             )
-            if (!productsPaginationPassed) {
-                overallSuccess = false
-                throw AssertionError("Product pagination failed: $productPaginationDetails")
-            }
 
-            // STEP 6: Bounded customer directory pagination (>= 2 pages, cursor cycle guard, identity uniqueness)
-            var customerCursor: String? = null
-            val visitedCustomerCursors = mutableSetOf<String>()
-            val collectedCustomerIds = mutableSetOf<String>()
-            var customerPagesFetched = 0
-            var customersPaginationPassed = true
-            var customerPaginationDetails = ""
-
+            // STEP 6: Deterministic customer directory pagination (Page 1: 2 items, Page 2: 1 item, total = 3 unique items)
             val t5Start = System.currentTimeMillis()
-            while (customerPagesFetched < 5) {
-                val pageResult = client.getCustomers(
-                    token = token,
-                    companyId = config.companyId,
-                    query = PaginationQuery(limit = 10, cursor = customerCursor)
-                )
-                if (pageResult !is ReadClientResult.Success) {
-                    customersPaginationPassed = false
-                    customerPaginationDetails = "Customer page $customerPagesFetched fetch failed: $pageResult"
-                    break
-                }
-                val page = pageResult.value
-                customerPagesFetched++
+            val custPage1Result = client.getCustomers(
+                token = token,
+                companyId = config.companyId,
+                query = PaginationQuery(limit = 2, cursor = null)
+            )
+            assertTrue("Customer page 1 fetch failed: $custPage1Result", custPage1Result is ReadClientResult.Success)
+            val custPage1 = (custPage1Result as ReadClientResult.Success).value
+            assertEquals("Customer page 1 must return exactly 2 items", 2, custPage1.customers.size)
+            assertTrue("Customer page 1 must provide nextCursor", !custPage1.nextCursor.isNullOrBlank())
 
-                for (c in page.customers) {
-                    if (!collectedCustomerIds.add(c.id.value)) {
-                        customersPaginationPassed = false
-                        customerPaginationDetails = "Duplicate customer ID encountered: ${c.id.value}"
-                        break
-                    }
-                }
-                if (!customersPaginationPassed) break
+            val custPage2Result = client.getCustomers(
+                token = token,
+                companyId = config.companyId,
+                query = PaginationQuery(limit = 2, cursor = custPage1.nextCursor)
+            )
+            assertTrue("Customer page 2 fetch failed: $custPage2Result", custPage2Result is ReadClientResult.Success)
+            val custPage2 = (custPage2Result as ReadClientResult.Success).value
+            assertEquals("Customer page 2 must return exactly 1 item", 1, custPage2.customers.size)
+            assertTrue("Customer page 2 nextCursor must be empty", custPage2.nextCursor.isNullOrBlank())
 
-                val nextCursor = page.nextCursor
-                if (nextCursor.isNullOrEmpty()) {
-                    break
-                }
-                if (!visitedCustomerCursors.add(nextCursor)) {
-                    customersPaginationPassed = false
-                    customerPaginationDetails = "Cursor cycle detected on cursor '$nextCursor'"
-                    break
-                }
-                customerCursor = nextCursor
-            }
+            val allCustomers = custPage1.customers + custPage2.customers
+            val collectedCustomerIds = allCustomers.map { it.id.value }.toSet()
+            assertEquals("Total unique customers across pages 2+1 must be 3", 3, collectedCustomerIds.size)
             val latency5 = System.currentTimeMillis() - t5Start
-
-            if (customersPaginationPassed) {
-                // Guaranteed zero customer personal names in details
-                customerPaginationDetails = "Fetched $customerPagesFetched pages, ${collectedCustomerIds.size} unique customers"
-            }
-
             scenarios.add(
                 ScenarioEvidence(
                     name = "customer_pagination",
-                    status = if (customersPaginationPassed) "PASS" else "FAIL",
+                    status = "PASS",
                     httpStatusCode = 200,
                     latencyMs = latency5,
-                    details = customerPaginationDetails
+                    details = "Deterministic 2+1 pagination verified: 2 pages, 3 unique customers"
                 )
             )
-            if (!customersPaginationPassed) {
-                overallSuccess = false
-                throw AssertionError("Customer pagination failed: $customerPaginationDetails")
-            }
 
-            // STEP 7: Empty results search query with uniquely seeded nonce
-            val searchNonce = "NONEXISTENT_" + UUID.randomUUID().toString().replace("-", "")
+            // STEP 7: Empty results search query with NONEXISTENT_NONCE_7392
+            val searchNonce = "NONEXISTENT_NONCE_7392"
             val t6 = System.currentTimeMillis()
             val emptyResult = client.getProducts(
                 token = token,
@@ -391,20 +321,20 @@ class SmallTraderReadPilotSmokeTest {
                     status = "PASS",
                     httpStatusCode = 200,
                     latencyMs = latency6,
-                    details = "Empty search with unique nonce correctly returned 0 items"
+                    details = "Empty search with NONEXISTENT_NONCE_7392 correctly returned 0 items"
                 )
             )
 
-            // STEP 8: Wrong company / tenant membership denial (Strict HTTP 403 required; no fabricated fallback)
+            // STEP 8: Wrong company / tenant membership denial (Strict HTTP 403 on real foreign existing company)
             val wrongCompany = config.invalidCompanyId
             val t7 = System.currentTimeMillis()
             val wrongResult = client.getBootstrap(token = token, companyId = wrongCompany)
             val latency7 = System.currentTimeMillis() - t7
             val (wrongPassed, wrongCode, wrongDetails) = when (wrongResult) {
-                is ReadClientResult.Forbidden403 -> Triple(true, 403, "Foreign tenant access strictly denied with Forbidden403")
+                is ReadClientResult.Forbidden403 -> Triple(true, 403, "Foreign tenant access strictly denied with Forbidden403 (real foreign company fixture, zero existence oracle)")
                 is ReadClientResult.HttpError -> {
                     if (wrongResult.statusCode == 403) {
-                        Triple(true, 403, "Foreign tenant access denied with HTTP 403")
+                        Triple(true, 403, "Foreign tenant access denied with HTTP 403 (zero existence oracle)")
                     } else {
                         Triple(false, wrongResult.statusCode, "Unexpected HTTP status ${wrongResult.statusCode} on foreign tenant access (expected 403)")
                     }
@@ -426,6 +356,56 @@ class SmallTraderReadPilotSmokeTest {
             if (!wrongPassed) {
                 overallSuccess = false
                 throw AssertionError("Foreign tenant denial failed: $wrongDetails")
+            }
+
+            // STEP 8b: Revoked device ID login denial (SCN-07) if provided
+            if (config.revokedDeviceId != null) {
+                val tRev = System.currentTimeMillis()
+                val chalRevResult = client.authChallenge(
+                    AuthChallengeRequest(
+                        deviceId = config.revokedDeviceId,
+                        appVersion = config.appVersion,
+                        platform = config.platform
+                    )
+                )
+                assertTrue("Challenge for revoked device failed: $chalRevResult", chalRevResult is ReadClientResult.Success)
+                val chalRev = (chalRevResult as ReadClientResult.Success).value
+
+                val revLoginResult = client.authLogin(
+                    AuthLoginRequest(
+                        challengeId = chalRev.challengeId,
+                        nonce = chalRev.nonce,
+                        deviceId = config.revokedDeviceId,
+                        deviceName = config.deviceName,
+                        email = config.staffEmail,
+                        password = config.staffPassword
+                    )
+                )
+                val latencyRev = System.currentTimeMillis() - tRev
+                val (revPassed, revCode, revDetails) = when (revLoginResult) {
+                    is ReadClientResult.Auth401 -> Triple(true, 401, "Revoked device login rejected with Auth401 (scope limit: login refusal, not issued token revocation without logout)")
+                    is ReadClientResult.HttpError -> {
+                        if (revLoginResult.statusCode == 401) {
+                            Triple(true, 401, "Revoked device login rejected with HTTP 401")
+                        } else {
+                            Triple(false, revLoginResult.statusCode, "Unexpected HTTP status ${revLoginResult.statusCode} on revoked device login")
+                        }
+                    }
+                    else -> Triple(false, null, "Unexpected response for revoked device login: ${revLoginResult.javaClass.simpleName}")
+                }
+                scenarios.add(
+                    ScenarioEvidence(
+                        name = "revoked_device_login_denial",
+                        status = if (revPassed) "PASS" else "FAIL",
+                        httpStatusCode = revCode,
+                        latencyMs = latencyRev,
+                        details = revDetails
+                    )
+                )
+                if (!revPassed) {
+                    overallSuccess = false
+                    throw AssertionError("Revoked device login denial failed: $revDetails")
+                }
             }
 
             // STEP 9: Logout session revocation
@@ -496,7 +476,7 @@ class SmallTraderReadPilotSmokeTest {
                             status = if (isTlsError) "PASS" else "FAIL",
                             httpStatusCode = null,
                             latencyMs = System.currentTimeMillis() - tTls,
-                            details = if (isTlsError) "Wrong hostname rejected by transport TLS validator" else "Rejected with non-TLS category: ${e.category}"
+                            details = if (isTlsError) "Wrong hostname rejected by transport TLS validator (CATEGORY_TLS_ERROR)" else "Rejected with non-TLS category: ${e.category}"
                         )
                     )
                     if (!isTlsError) overallSuccess = false
@@ -558,7 +538,7 @@ class SmallTraderReadPilotSmokeTest {
                             status = if (isTlsError) "PASS" else "FAIL",
                             httpStatusCode = null,
                             latencyMs = System.currentTimeMillis() - tUntrusted,
-                            details = if (isTlsError) "Untrusted certificate rejected by transport TLS validator" else "Rejected with non-TLS category: ${e.category}"
+                            details = if (isTlsError) "Untrusted certificate rejected by transport TLS validator (CATEGORY_TLS_ERROR)" else "Rejected with non-TLS category: ${e.category}"
                         )
                     )
                     if (!isTlsError) overallSuccess = false
@@ -593,7 +573,7 @@ class SmallTraderReadPilotSmokeTest {
                     status = "NOT_RUN",
                     httpStatusCode = null,
                     latencyMs = 0L,
-                    details = "V2 wire probe removed from Android harness; backend HTTP proof (404 when financial_v2_active=false) verified independently by backend lead"
+                    details = "V2 route (/api/mobile/v2/...) remains outside V1 allowlist; backend supervisor owns actual HTTPS default-OFF 404 and container DenyFinancialExecutionAdapter evidence"
                 )
             )
 

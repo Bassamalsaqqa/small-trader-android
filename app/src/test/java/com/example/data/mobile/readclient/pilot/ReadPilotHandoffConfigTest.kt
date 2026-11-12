@@ -9,17 +9,16 @@ import com.example.data.mobile.readclient.ReadClientResult
 import com.example.data.mobile.readclient.http.HttpTransportException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 import java.io.File
 import java.nio.file.Files
-import java.nio.file.attribute.PosixFilePermission
 import java.nio.file.attribute.PosixFilePermissions
 import java.time.Instant
 import java.time.temporal.ChronoUnit
-import javax.net.ssl.SSLException
 
 class ReadPilotHandoffConfigTest {
 
@@ -38,8 +37,19 @@ class ReadPilotHandoffConfigTest {
             "credentials.json",
             """
             {
-              "staffEmail": "cashier@smalltrader.example",
-              "staffPassword": "SuperSecretPassword123!"
+              "staff1": {
+                "email": "cashier@smalltrader.example",
+                "password": "SuperSecretPassword123!",
+                "device_id": "8e2b8bc6-f80c-4034-8c88-59368d1f2e10",
+                "device_name": "Pixel 8 Pilot"
+              },
+              "staff2_mfa": {
+                "email": "mfa@smalltrader.example",
+                "password": "MfaSecretPassword123!",
+                "totp_secret": "JBSWY3DPEHPK3PXP",
+                "recovery_codes": ["1111", "2222"]
+              },
+              "revoked_device_id": "00000000-0000-4000-8000-000000000002"
             }
             """.trimIndent()
         )
@@ -47,9 +57,13 @@ class ReadPilotHandoffConfigTest {
         val futureTtl = Instant.now().plus(2, ChronoUnit.DAYS).toString()
         val handoffContent = """
         {
+          "status": "RUNNING",
           "baseUrl": "https://staging.smalltrader.example:8443",
           "backendCommitSha": "7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb",
-          "manifestDigest": "${ReadPilotHandoffConfig.FROZEN_MANIFEST_DIGEST}",
+          "manifestDigest": {
+            "candidateRev3": "${ReadPilotHandoffConfig.EXPECTED_CANDIDATE_REV3}",
+            "primaryPinRev2": "${ReadPilotHandoffConfig.EXPECTED_PRIMARY_PIN_REV2}"
+          },
           "credentialsPath": "${credFile.absolutePath}",
           "deviceId": "8e2b8bc6-f80c-4034-8c88-59368d1f2e10",
           "deviceName": "Pixel 8 Pilot",
@@ -57,6 +71,14 @@ class ReadPilotHandoffConfigTest {
           "platform": "android",
           "companyId": "01JCV8X9M2NQW3TYZ4R5S6789A",
           "invalidCompanyId": "01JCV8X9M2NQW3TYZ4R5S6789B",
+          "https_port": 18400,
+          "wrong_hostname_port": 18600,
+          "untrusted_port": 18800,
+          "php_port": 18000,
+          "php_pid": 12345,
+          "caddy_pid": 12346,
+          "schema_name": "accounting_test_schema",
+          "compositionFoundationSha": "f5d16b356ed9c4d895e4fd07dcb469d756936d9b",
           "expectedMigrations": [
             "2026_11_11_000001_create_mobile_auth_tables",
             "2026_11_11_000002_harden_mobile_auth_tables",
@@ -66,7 +88,26 @@ class ReadPilotHandoffConfigTest {
           "resolvedFlags": {
             "financial_v2_active": false,
             "offline_capture_active": false,
-            "v1_read_pilot_active": true
+            "mobileV1": true,
+            "mobileV2": false,
+            "mobile.enabled": true,
+            "mobile.v2_enabled": false
+          },
+          "fixtures": {
+            "company_a": {
+              "public_id": "01JCV8X9M2NQW3TYZ4R5S6789A",
+              "name": "Company A",
+              "base_currency": "ILS",
+              "products_count": 3,
+              "customers_count": 3
+            },
+            "company_b": {
+              "public_id": "01JCV8X9M2NQW3TYZ4R5S6789B",
+              "name": "Company B",
+              "base_currency": "USD",
+              "products_count": 1,
+              "customers_count": 2
+            }
           },
           "ttlExpiresAt": "$futureTtl"
         }
@@ -77,25 +118,103 @@ class ReadPilotHandoffConfigTest {
     }
 
     @Test
-    fun testValidHandoffWithSeparateCredentialsFile() {
+    fun testValidHandoffWithNestedCredentialsAndDualManifest() {
         val tempDir = File.createTempFile("pilot-test-", "dir")
         tempDir.delete()
         tempDir.mkdirs()
         try {
-            val (handoffFile, credFile) = createValidFixture(tempDir)
-            val config = ReadPilotHandoffConfig.fromFile(handoffFile)
+            val (handoffFile, _) = createValidFixture(tempDir)
+            val config = ReadPilotHandoffConfig.fromFile(
+                file = handoffFile,
+                expectedBackendSha = "7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb",
+                requireIndependentSha = true
+            )
 
             assertEquals("https://staging.smalltrader.example:8443", config.baseUrl)
             assertEquals("7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb", config.backendCommitSha)
-            assertEquals(ReadPilotHandoffConfig.FROZEN_MANIFEST_DIGEST, config.manifestDigest)
+            assertEquals(ReadPilotHandoffConfig.EXPECTED_CANDIDATE_REV3, config.manifestDigest)
+            assertNotNull(config.manifestDigests)
+            assertEquals(ReadPilotHandoffConfig.EXPECTED_CANDIDATE_REV3, config.manifestDigests!!.candidateRev3)
+            assertEquals(ReadPilotHandoffConfig.EXPECTED_PRIMARY_PIN_REV2, config.manifestDigests!!.primaryPinRev2)
             assertEquals("cashier@smalltrader.example", config.staffEmail)
             assertEquals("SuperSecretPassword123!", config.staffPassword)
             assertEquals("8e2b8bc6-f80c-4034-8c88-59368d1f2e10", config.deviceId.value)
             assertEquals("01JCV8X9M2NQW3TYZ4R5S6789A", config.companyId.value)
             assertEquals("01JCV8X9M2NQW3TYZ4R5S6789B", config.invalidCompanyId.value)
+            assertEquals("00000000-0000-4000-8000-000000000002", config.revokedDeviceId?.value)
+            assertEquals("ILS", config.baseCurrency)
             assertEquals(4, config.expectedMigrations.size)
             assertFalse(config.resolvedFlags["financial_v2_active"]!!)
             assertFalse(config.resolvedFlags["offline_capture_active"]!!)
+            assertTrue(config.resolvedFlags["mobileV1"]!!)
+            assertFalse(config.resolvedFlags["mobileV2"]!!)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testIndependentBackendShaMismatchThrows() {
+        val tempDir = File.createTempFile("pilot-test-", "dir")
+        tempDir.delete()
+        tempDir.mkdirs()
+        try {
+            val (handoffFile, _) = createValidFixture(tempDir)
+            try {
+                ReadPilotHandoffConfig.fromFile(
+                    file = handoffFile,
+                    expectedBackendSha = "0000000000000000000000000000000000000000",
+                    requireIndependentSha = true
+                )
+                fail("Expected IllegalArgumentException on backend SHA mismatch")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message?.contains("Backend commit SHA mismatch") == true)
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testMissingIndependentShaWhenRequiredThrows() {
+        val tempDir = File.createTempFile("pilot-test-", "dir")
+        tempDir.delete()
+        tempDir.mkdirs()
+        try {
+            val (handoffFile, _) = createValidFixture(tempDir)
+            try {
+                ReadPilotHandoffConfig.fromFile(
+                    file = handoffFile,
+                    expectedBackendSha = null,
+                    requireIndependentSha = true
+                )
+                fail("Expected IllegalArgumentException when independent SHA is required but null")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message?.contains("Independent expected backend SHA is required") == true)
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testDualManifestTamperedPinFailsClosed() {
+        val tempDir = File.createTempFile("pilot-test-", "dir")
+        tempDir.delete()
+        tempDir.mkdirs()
+        try {
+            val (handoffFile, _) = createValidFixture(tempDir)
+            val tampered = handoffFile.readText(Charsets.UTF_8).replace(
+                ReadPilotHandoffConfig.EXPECTED_PRIMARY_PIN_REV2,
+                "0000000000000000000000000000000000000000000000000000000000000000"
+            )
+            val root = StrictJsonParser.parse(tampered).asObject()
+            try {
+                ReadPilotHandoffConfig.fromJsonObject(root, tempDir)
+                fail("Expected IllegalArgumentException on tampered primaryPinRev2")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message?.contains("Manifest primaryPinRev2 mismatch") == true)
+            }
         } finally {
             tempDir.deleteRecursively()
         }
@@ -172,7 +291,7 @@ class ReadPilotHandoffConfigTest {
         try {
             val (handoffFile, _) = createValidFixture(tempDir)
             val modifiedJson = handoffFile.readText(Charsets.UTF_8).replace(
-                "\"manifestDigest\": \"${ReadPilotHandoffConfig.FROZEN_MANIFEST_DIGEST}\",",
+                Regex("\"manifestDigest\":\\s*\\{[^}]+\\},"),
                 ""
             )
             val root = StrictJsonParser.parse(modifiedJson).asObject()
@@ -180,27 +299,6 @@ class ReadPilotHandoffConfigTest {
             fail("Expected IllegalArgumentException on missing manifestDigest")
         } catch (e: IllegalArgumentException) {
             assertTrue(e.message?.contains("Missing required key 'manifestDigest'") == true)
-        } finally {
-            tempDir.deleteRecursively()
-        }
-    }
-
-    @Test
-    fun testManifestMismatchFailsClosed() {
-        val tempDir = File.createTempFile("pilot-test-", "dir")
-        tempDir.delete()
-        tempDir.mkdirs()
-        try {
-            val (handoffFile, _) = createValidFixture(tempDir)
-            val tampered = handoffFile.readText(Charsets.UTF_8).replace(
-                ReadPilotHandoffConfig.FROZEN_MANIFEST_DIGEST,
-                "0000000000000000000000000000000000000000000000000000000000000000"
-            )
-            val root = StrictJsonParser.parse(tampered).asObject()
-            ReadPilotHandoffConfig.fromJsonObject(root, tempDir)
-            fail("Expected IllegalArgumentException on manifest mismatch")
-        } catch (e: IllegalArgumentException) {
-            assertTrue(e.message?.contains("Manifest digest mismatch") == true)
         } finally {
             tempDir.deleteRecursively()
         }
@@ -250,6 +348,27 @@ class ReadPilotHandoffConfigTest {
     }
 
     @Test
+    fun testMobileV2TrueFailsClosed() {
+        val tempDir = File.createTempFile("pilot-test-", "dir")
+        tempDir.delete()
+        tempDir.mkdirs()
+        try {
+            val (handoffFile, _) = createValidFixture(tempDir)
+            val activatedJson = handoffFile.readText(Charsets.UTF_8).replace(
+                "\"mobileV2\": false",
+                "\"mobileV2\": true"
+            )
+            val root = StrictJsonParser.parse(activatedJson).asObject()
+            ReadPilotHandoffConfig.fromJsonObject(root, tempDir)
+            fail("Expected IllegalArgumentException when mobileV2 is true")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("mobileV2 must be false") == true)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun testInsecureUrlOriginRejections() {
         // HTTP remote rejected
         try {
@@ -285,23 +404,18 @@ class ReadPilotHandoffConfigTest {
     }
 
     @Test
-    fun testMigrationWrongTypeRejected() {
-        val tempDir = File.createTempFile("pilot-test-", "dir")
-        tempDir.delete()
-        tempDir.mkdirs()
+    fun testBoundedStreamingReaderEnforcesMaxSize() {
+        val tempFile = File.createTempFile("large-test-", ".txt")
         try {
-            val (handoffFile, _) = createValidFixture(tempDir)
-            val wrongTypeMigrations = handoffFile.readText(Charsets.UTF_8).replace(
-                "\"2026_11_11_000001_create_mobile_auth_tables\"",
-                "12345"
-            )
-            val root = StrictJsonParser.parse(wrongTypeMigrations).asObject()
-            ReadPilotHandoffConfig.fromJsonObject(root, tempDir)
-            fail("Expected IllegalArgumentException on integer in expectedMigrations")
-        } catch (e: IllegalArgumentException) {
-            assertTrue(e.message?.contains("Invalid type for element") == true)
+            tempFile.writeBytes(ByteArray(100))
+            try {
+                ReadPilotHandoffConfig.readBoundedUtf8(tempFile, maxSizeBytes = 50)
+                fail("Expected IllegalArgumentException when file exceeds max size")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message?.contains("must be between 1 and 50 bytes") == true || e.message?.contains("exceeds maximum allowed size") == true)
+            }
         } finally {
-            tempDir.deleteRecursively()
+            tempFile.delete()
         }
     }
 
@@ -359,7 +473,6 @@ class ReadPilotHandoffConfigTest {
 
     @Test
     fun testInvalidMethodPreflightIsNotTlsError() {
-        // Sending GET /api/mobile/v1/auth/challenge fails at endpoint preflight before touching wire
         try {
             EndpointSecurity.validateMethodAndPath(HttpMethod.GET, "/api/mobile/v1/auth/challenge")
             fail("Expected IllegalArgumentException for unauthorized GET on challenge")

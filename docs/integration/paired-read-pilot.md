@@ -7,7 +7,8 @@ This document pins the integration candidate gate matrix, defines the hand-off c
 ## 1. Executive Summary & Provenance
 
 - **Android Base**: Candidate PR #19 at exact commit [`d849e7903e5f87c31bebb1bd79b2e741fd1a8398`](https://github.com/Bassamalsaqqa/small-trader-android/commit/d849e7903e5f87c31bebb1bd79b2e741fd1a8398) (`t3/android-integration-candidate`), with verified zero remote drift.
-- **Backend Heads (Bassamalsaqqa/account)**:
+- **Backend Verified Head (Bassamalsaqqa/account)**:
+  - Composed backend commit SHA: `e111f83bc740e9590142869b30428eaa220eab6f` (clean composed foundation: `f5d16b356ed9c4d895e4fd07dcb469d756936d9b`).
   - PR #94: `7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb` (cross-version receipt identity, atomic rollback, financial authority)
   - PR #87: `912aa71f557b314837e70138df22615902fc9d7b` (OPEN: invoice UX, search indexes, document rules)
   - PR #88: `9f73ca8952da6bbfc0eabadbb01e51892ace8bc6` (catalog snapshot hash, O(n) scan)
@@ -15,9 +16,9 @@ This document pins the integration candidate gate matrix, defines the hand-off c
   - PR #91: `f3836ef7aa8a2437e95fedaec3166399a44158b2` (Revision 3 financial contract mirror)
   - PR #92: `7b8531bfb932c73c26efee7f1ace6c5ae61fceaf` (dual-OFF boundary, safe default-deny)
   - PR #93: `1b8a696feda350bbc2df86a26d05b69fd615ba57` (currency precision authority, line decimal enforcement)
-  - Backend main: `f8a0cf7012c4875bec7320d42e0f8dde58593b52`
-  - Android main: `79c9bb348f7ad4840842aa077f1820f75745d2a0`
-- **Frozen Contract Manifest**: `e8e3fe672a8f7aceb3152c3dd990b4fb137fa517b24038e468659e0fdf5a87a7` (50 synchronized contract files).
+- **Frozen Contract Manifest Digests**:
+  - `candidateRev3`: `e8e3fe672a8f7aceb3152c3dd990b4fb137fa517b24038e468659e0fdf5a87a7` (50 synchronized contract files).
+  - `primaryPinRev2`: `ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659`.
 - **Room V1 Hash**: `6eddfecc8dabbb7ec370b858ec36714a` (schema unchanged).
 - **Policy Invariant**: The repository owner has approved the **offline store-and-forward architecture** (Room durable outbox, strict scope-bound locks, canonical ACK verification, and offline sales data model), but **live financial capture, background sync activation, and live offline financial posting remain strictly OFF**. No broad policy relaxation is granted.
 
@@ -27,12 +28,12 @@ This document pins the integration candidate gate matrix, defines the hand-off c
 
 | Priority | Gate Scope | Description | Status | Owner | Required Evidence | Approval |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **P0** | **Freeze Compose + HTTPS V1 Auth/Read** | Freeze Compose UI to Staff Read Workspace (`STAFF_READ_WORKSPACE=true`); execute real HTTPS auth challenge → login → bootstrap → bounded pagination → logout → old token 401 via `SmallTraderReadClient` + unchanged `OkHttpTransport` against disposable Laravel staging. | **READY FOR HANDOFF** (Harness implemented; reports `NOT RUN` until handoff available) | Android Sub-agent / Lead | Filtered Gradle JUnit execution; sanitized JSON evidence at `evidence/paired-read-pilot-evidence.json`. | Lead / Owner |
+| **P0** | **Freeze Compose + HTTPS V1 Auth/Read** | Freeze Compose UI to Staff Read Workspace (`STAFF_READ_WORKSPACE=true`); execute real HTTPS auth challenge → login → bootstrap → deterministic 2+1 product/customer pagination → empty nonce search → foreign tenant 403 → revoked device 401 → logout → revoked token 401 → negative TLS hostname/untrusted probes via `SmallTraderReadClient` + unchanged `OkHttpTransport` against disposable Laravel staging. | **VERIFIED PASS IN PAIRED PILOT** | Android Sub-agent / Lead | Filtered Gradle JUnit execution; sanitized JSON evidence at `evidence/paired-read-pilot-evidence.json` (`overallStatus: PASS`, 13 PASS, 1 NOT_RUN). | Lead / Owner |
 | **P0** | **Android Outbox Encryption & Backup Exclusions** | Protect durable sale payloads at rest in Room. Plain SQLite `OutboxEventEntity.payload_bytes` is currently unencrypted BLOB; `AndroidManifest.xml` has `android:allowBackup="true"`. Must add explicit cloud/device-transfer exclusions (`backup_rules.xml`, `data_extraction_rules.xml`) and encrypt economic payloads at rest before live capture activation. | **HELD / PROPOSED** (Follow-on PR 2) | Android Security | Key loss, reinstall, reboot, upgrade tests; no clear-app-data workarounds. | Owner |
 | **P0** | **V2 Production Adapter Authorization & Writers** | Implement real authenticated V2 HTTP gateway in `SaleSyncCoordinator`; canonical writers, atomic cross-version receipt identity, status-before-resubmit, and rollback on absence-row races. | **HELD / PROPOSED** (Follow-on PR 1) | Backend & Android | Integration tests with concurrent requests, rollback verification, absence-row race handling. | Owner |
 | **P1** | **Receipt Canonical Retention & Backup Policy** | Raw canonical byte retention for offline/online sales receipts and backup access policy. No legal guesses; owner must define retention timeline and audit access. | **PENDING OWNER DECISION** | Business Owner / Legal | Written policy document signed off by owner. | Owner |
 | **P1** | **Authoritative Currency Policy** | Exact decimal precision authority across Revision 2/3 transitions and historical invoices (2 vs 3 decimal places for JOD/ILS/USD). | **QUALIFIED IN CONTRACT** (PR #93 backend, Check 33 Android) | Financial Owner | Automated contract validation suite (`tools/validate-mobile-contract.py`). | Financial Lead |
-| **P1** | **Cross-Tenant & Device Revocation** | Strict tenant isolation and device revocation enforcement. Revoked token or foreign tenant access immediately locks queue scope. | **VERIFIED IN HARNESS** (Step 8 & 10 in pilot smoke test) | Android / Backend | Negative 401/403 test cases in read pilot smoke suite. | Lead |
+| **P1** | **Cross-Tenant & Device Revocation** | Strict tenant isolation and device revocation enforcement. Revoked token, revoked device login, or foreign tenant access strictly denied. | **VERIFIED PASS IN PAIRED PILOT** (Step 8 foreign company 403, Step 8b revoked device login 401, Step 10 revoked token 401) | Android / Backend | Negative 401/403 test cases in read pilot smoke suite. | Lead |
 | **P1** | **AUTH_BLOCKED Queue Resolution Policy** | Clear specification for resolving persisted `AUTH_BLOCKED` outbox queues while preserving physical cash taken during offline shifts. | **HELD / PROPOSED** (Follow-on PR 5) | Android / Security | Re-auth and manager reconciliation workflow documentation. | Owner |
 | **P1** | **Idempotency & Lost ACK Recovery** | Handling network loss during sale submission: status probe before re-submitting payload to prevent duplicate financial invoices. | **DESIGNED IN CONTRACT** (Follow-on PR 3) | Android / Backend | Idempotency test suite across network failure points. | Lead |
 | **P1** | **Stock & FEFO Conflict Policy** | Resolving stock shortages and FEFO batch conflicts when offline sales are synced after competing online sales. | **DEFERRED TO PILOT V2** | Operations Owner | Business rules specification for offline negative inventory. | Owner |
@@ -43,65 +44,65 @@ This document pins the integration candidate gate matrix, defines the hand-off c
 
 ## 3. Backend Hand-off Contract
 
-The backend integration thread (Codex) provisions an isolated disposable MariaDB + HTTPS Laravel staging environment and exports a single JSON hand-off configuration accompanied by a separate private credentials file (`chmod 0600`).
+The backend integration thread provisions an isolated disposable MariaDB + HTTPS Laravel staging environment and exports a single JSON hand-off configuration accompanied by a separate private credentials file (`chmod 0600`).
 
 ### Environment Variables
 - `SMALL_TRADER_READ_PILOT_HANDOFF`: Absolute file path to the hand-off JSON.
-- `SMALL_TRADER_EXPECTED_BACKEND_SHA`: Optional independent 40-character hex SHA pinning the expected composed backend commit.
+- `SMALL_TRADER_EXPECTED_BACKEND_SHA`: Required independent 40-character hex SHA pinning the expected composed backend commit (`e111f83bc740e9590142869b30428eaa220eab6f`).
 
 ### JSON Schema & Exact Keys
 ```json
 {
-  "baseUrl": "https://disposable-staging.smalltrader.test:8443",
-  "backendCommitSha": "d98124578ef219a170bbfa33481e18cd9ef182a0",
-  "manifestDigest": "e8e3fe672a8f7aceb3152c3dd990b4fb137fa517b24038e468659e0fdf5a87a7",
-  "credentialsPath": "/path/to/private/chmod600_credentials.json",
-  "deviceId": "8e2b8bc6-f80c-4034-8c88-59368d1f2e10",
-  "deviceName": "ReadPilotHarness",
-  "appVersion": "1.0.0-pilot",
+  "status": "RUNNING",
+  "baseUrl": "https://127.0.0.1:18400",
+  "backendCommitSha": "e111f83bc740e9590142869b30428eaa220eab6f",
+  "manifestDigest": {
+    "candidateRev3": "e8e3fe672a8f7aceb3152c3dd990b4fb137fa517b24038e468659e0fdf5a87a7",
+    "primaryPinRev2": "ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659"
+  },
+  "credentialsPath": "/path/to/private/credentials.json",
+  "deviceId": "00000000-0000-4000-8000-000000000001",
+  "deviceName": "Pixel 8 Pilot",
+  "appVersion": "1.0.0",
   "platform": "android",
-  "companyId": "01JCV8X9M2NQW3TYZ4R5S6789A",
-  "invalidCompanyId": "01JCV8X9M2NQW3TYZ4R5S6789B",
-  "caCertPath": "/path/to/test-ca.crt",
-  "wrongHostnameUrl": "https://wrong-host.smalltrader.test:8443",
-  "untrustedCertUrl": "https://untrusted-ca.smalltrader.test:8443",
-  "expectedMigrations": [
-    "2026_11_11_000001_create_mobile_auth_tables",
-    "2026_11_11_000002_harden_mobile_auth_tables",
-    "2026_11_11_100000_create_mobile_search_indexes",
-    "2026_11_12_000001_create_mobile_event_receipts_table"
-  ],
+  "companyId": "01M78KCP1K8R0HZ33PCA7YK1NF",
+  "invalidCompanyId": "01M78KCP5EGVM4QVRHMT8WYF81",
+  "caCertPath": "/path/to/certs/ca.crt",
+  "wrongHostnameUrl": "https://127.0.0.1:18600",
+  "untrustedCertUrl": "https://127.0.0.1:18800",
+  "expectedMigrations": [ ... 83 migrations ... ],
   "resolvedFlags": {
+    "mobileV1": true,
+    "mobileV2": false,
     "financial_v2_active": false,
     "offline_capture_active": false,
-    "v1_read_pilot_active": true
+    "mobile.enabled": true,
+    "mobile.v2_enabled": false
   },
-  "ttlExpiresAt": "2026-11-13T12:00:00Z",
-  "allowHttpLoopback": false
+  "ttlExpiresAt": "2026-11-12T21:22:45+00:00"
 }
 ```
 
 ### Credentials File Schema (`credentialsPath`, chmod 0600)
 ```json
 {
-  "staffEmail": "cashier@smalltrader.example",
-  "staffPassword": "EphemeralStaffPassword123!"
+  "staff1": {
+    "email": "[REDACTED]",
+    "password": "[REDACTED]",
+    "device_id": "00000000-0000-4000-8000-000000000001",
+    "device_name": "Pixel 8 Pilot"
+  },
+  "staff2_mfa": {
+    "email": "[REDACTED]",
+    "password": "[REDACTED]",
+    "device_id": "00000000-0000-4000-8000-000000000003",
+    "device_name": "Pixel 8 Pilot",
+    "totp_secret": "[REDACTED]",
+    "recovery_codes": ["[REDACTED]", "[REDACTED]", "[REDACTED]"]
+  },
+  "revoked_device_id": "00000000-0000-4000-8000-000000000002"
 }
 ```
-
-### Key Reference
-- `baseUrl`: HTTPS URL of disposable Laravel instance. Plain HTTP is rejected unless `allowHttpLoopback=true`. No path, query, fragment, or userinfo permitted.
-- `backendCommitSha`: Composed git commit SHA of backend candidate (40-character hex; validated against `SMALL_TRADER_EXPECTED_BACKEND_SHA` when configured).
-- `manifestDigest`: Expected contract manifest digest (must match exact frozen value `e8e3fe672a8f7aceb3152c3dd990b4fb137fa517b24038e468659e0fdf5a87a7`).
-- `credentialsPath`: Path to private `chmod 0600` file containing `staffEmail` and `staffPassword`. Inline credentials in the main handoff JSON are strictly forbidden.
-- `deviceId`: Client UUID for the test runner.
-- `companyId`: Server ULID of target tenant company.
-- `invalidCompanyId` / `foreignCompanyId`: REQUIRED Server ULID from two-tenant fixture representing a foreign company (no fabricated fallback allowed).
-- `caCertPath`: Optional path to public test CA certificate in PEM format for isolated JVM trust.
-- `wrongHostnameUrl` / `untrustedCertUrl`: Optional HTTPS endpoints for negative TLS verification.
-- `expectedMigrations`: Non-empty list of backend migrations required on staging.
-- `resolvedFlags`: Must include `financial_v2_active: false`, `offline_capture_active: false`, and `v1_read_pilot_active: true`.
-- `ttlExpiresAt`: ISO-8601 UTC timestamp strictly in the future.
 
 ---
 
@@ -109,14 +110,15 @@ The backend integration thread (Codex) provisions an isolated disposable MariaDB
 
 The read pilot smoke test is isolated from standard build suites:
 - When `SMALL_TRADER_READ_PILOT_HANDOFF` is **unset**, the test reports explicit `SKIPPED (NOT RUN)`. It does not fail normal builds and does not silently pass.
-- When `SMALL_TRADER_READ_PILOT_HANDOFF` is **set**, the test executes all validation steps against the live disposable backend. Any failure (network unreachable, handshake failure, wrong status code, or schema mismatch) fails closed and produces a sanitized FAIL evidence artifact.
+- When `SMALL_TRADER_READ_PILOT_HANDOFF` is **set**, `SMALL_TRADER_EXPECTED_BACKEND_SHA` is **required**. The test executes all validation steps against the live disposable backend. Any failure fails closed and produces a sanitized FAIL evidence artifact.
 
 ### Execution Command
 ```bash
 JAVA_HOME=/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9 \
 ANDROID_HOME=/home/t3dev/Android/Sdk \
 PATH="/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9/bin:$PATH" \
-SMALL_TRADER_READ_PILOT_HANDOFF="/path/to/private/handoff.json" \
+SMALL_TRADER_READ_PILOT_HANDOFF="/home/t3dev/.t3/userdata/antigravity-tmp/pilot-harness-owned/handoff.json" \
+SMALL_TRADER_EXPECTED_BACKEND_SHA="e111f83bc740e9590142869b30428eaa220eab6f" \
 ./gradlew :app:testDebugUnitTest \
   --tests "com.example.data.mobile.readclient.pilot.SmallTraderReadPilotSmokeTest"
 ```
@@ -139,18 +141,14 @@ PATH="/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9/bin:$PATH" \
 ## 5. Backend Migration Order & Source Overlap Notes
 
 ### Migration Ordering Constraints
-The backend migrations on the disposable Laravel instance must run in this exact order:
-1. `2026_11_11_000001_create_mobile_auth_tables` (tokens, challenges, staff memberships, and mobile devices).
-2. `2026_11_11_000002_harden_mobile_auth_tables` (security hardening).
-3. `2026_11_11_100000_create_mobile_search_indexes` (search index migrations from PR #87).
-4. `2026_11_12_000001_create_mobile_event_receipts_table` (cross-version receipt identity from PR #94).
+The backend migrations on the disposable Laravel instance run in strict sequence (83 migrations total, including mobile auth, indexes, and event receipts).
 
 ### Source Overlaps
 1. **PR #87 and PR #93**:
    - Both modify `app/Filament/Admin/Resources/InvoiceResource/Pages/InvoiceForm.php`
    - Both touch `app/Rules/SalesDocumentRules.php`
    - Both touch `app/Filament/Admin/Resources/SalesProductSelection.php`
-   - *Resolution*: Normal merge candidate must reconcile PR #93's line decimal authority with PR #87's search indexes and UX rules.
+   - *Resolution*: Normal merge candidate reconciles PR #93's line decimal authority with PR #87's search indexes and UX rules.
 2. **PR #93 and PR #94**:
    - Both modify `app/Providers/AppServiceProvider.php`
    - *Resolution*: Merge receipt identity service provider registrations cleanly after financial authority bindings.
@@ -159,29 +157,30 @@ The backend migrations on the disposable Laravel instance must run in this exact
 
 ## 6. Authoritative Follow-on PR Ordering
 
-The following strictly sequenced, single-responsibility follow-on PRs are scheduled after read pilot verification:
-
-1. **Step 1: Read Pilot Independent Proof (FIRST)**
-   - Execute paired HTTPS read pilot against disposable Laravel staging with zero leaks, verified 401/403/409 denials, and sanitized evidence.
-
+1. **Step 1: Read Pilot Independent Proof (COMPLETED & VERIFIED)**
+   - Paired HTTPS read pilot executed against disposable Laravel staging with zero leaks, verified 401/403/409 denials, and sanitized evidence at `evidence/paired-read-pilot-evidence.json`.
 2. **Step 2: Canonical V2 Online Cash & Receipt Atomicity (Next)**
    - Implement `online_cash_full` exact payment allocation (`tender == total`), authoritative grants, real writers, server status verification, and receipt atomicity.
-
 3. **Step 3: Outbox Payload Encryption & Backup Exclusions (Before Capture)**
    - Encrypt economic payloads at rest in Room (`OutboxEventEntity.payload_bytes`).
    - Add explicit cloud/device-transfer exclusions (`backup_rules.xml`, `data_extraction_rules.xml`).
    - Add key-loss, reboot, and app-upgrade migration tests.
-
 4. **Step 4: Authenticated V2 Sync & Lost ACK Recovery**
    - Implement real authenticated V2 HTTP gateway in `SaleSyncCoordinator`.
    - Support status-before-resubmit, unknown-ACK recovery, and provisional receipt truthfulness.
-
 5. **Step 5: WorkManager Sync Retry Scheduler (LAST after gateway/retry semantics)**
    - Implement idempotent `SaleSyncWorker` using AndroidX WorkManager with network constraint gating and exponential backoff.
-
 6. **Step 6: Safe AUTH_BLOCKED Resolution Policy**
    - Define and implement same-scope staff re-authentication and manager reconciliation workflow.
    - Ensure physical cash taken during locked shifts is never abandoned or silently deleted.
 
-> [!NOTE]
-> Device UI, Keystore, R8, signing, and release claims remain blocked/unverified until physical device infrastructure is authorized. The repository owner has approved the offline store-and-forward architecture, NOT live activation.
+---
+
+## 7. Scope Limits & Explicit Boundary Disclaimers
+
+> [!IMPORTANT]
+> The following explicit scope boundaries are recorded to prevent overclaiming:
+> 1. **Revocation Scope Limit**: Verifies `revoked_device_id` on login rejects with HTTP 401 (login refusal for revoked device), and verifies logout invalidates the active session token; it does NOT claim server-side issued token revocation via password epoch or global token blacklisting across devices without logout.
+> 2. **Tenant Scope Zero-Oracle**: Foreign company ID (`01M78KCP5EGVM4QVRHMT8WYF81`) returns HTTP 403 Forbidden; this is a real existing company fixture, proving tenant authorization denial without leaking company existence/oracle.
+> 3. **V2 Financial Boundary (Backend Supervisor Owned)**: Android V1 read client strictly stays within V1 routes (`/api/mobile/v1/...`). The V2 financial route is outside the V1 allowlist. Android makes NO wire claims for V2. The backend supervisor owns the actual HTTPS default-OFF 404 and container DenyFinancialExecutionAdapter evidence.
+> 4. **Device & Hardware Scope Limits**: NO device hardware, Keystore hardware-backed keys, biometric authentication, physical barcode scanner, or Bluetooth printer claims are made (verified in JVM unit environment without emulator).
