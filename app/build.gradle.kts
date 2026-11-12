@@ -20,6 +20,14 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    val staffReadWorkspace = project.findProperty("smalltrader.staffReadWorkspace")?.toString()?.toBoolean() ?: false
+    val staffWorkspaceOrigin = project.findProperty("smalltrader.staffWorkspaceOrigin")?.toString() ?: ""
+    val staffAllowHttpLoopback = project.findProperty("smalltrader.staffAllowHttpLoopback")?.toString()?.toBoolean() ?: false
+
+    buildConfigField("boolean", "STAFF_READ_WORKSPACE", staffReadWorkspace.toString())
+    buildConfigField("String", "STAFF_WORKSPACE_ORIGIN", "\"$staffWorkspaceOrigin\"")
+    buildConfigField("boolean", "STAFF_ALLOW_HTTP_LOOPBACK", staffAllowHttpLoopback.toString())
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
