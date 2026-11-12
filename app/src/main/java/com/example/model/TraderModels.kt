@@ -1,5 +1,6 @@
 package com.example.model
 
+import com.example.data.ProductSearch
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.DecimalFormat
@@ -115,27 +116,17 @@ data class Product(
     val isLowStock: Boolean
         get() = isStockTracked && stockCount <= minStockThreshold
 
-    val normalizedSearchTokens: String = normalizeKey("$nameAr $nameEn $unitAr $unitEn $barcode")
-    val normalizedNameAr: String get() = normalizeKey(nameAr)
-    val normalizedNameEn: String get() = normalizeKey(nameEn)
-    val normalizedUnitAr: String get() = normalizeKey(unitAr)
-    val normalizedUnitEn: String get() = normalizeKey(unitEn)
+    val normalizedSearchTokens: String = ProductSearch.normalize("$nameAr $nameEn $unitAr $unitEn $barcode ${category.labelAr} ${category.labelEn}")
+    val normalizedBarcode: String = ProductSearch.normalize(barcode)
+    val normalizedNameAr: String = ProductSearch.normalize(nameAr)
+    val normalizedNameEn: String = ProductSearch.normalize(nameEn)
+    val normalizedUnitAr: String = ProductSearch.normalize(unitAr)
+    val normalizedUnitEn: String = ProductSearch.normalize(unitEn)
+
+    fun computeSearchScore(normalizedQuery: String): Int = ProductSearch.computeScore(this, normalizedQuery)
 
     companion object {
-        fun normalizeKey(raw: String): String {
-            if (raw.isEmpty()) return ""
-            val sb = StringBuilder(raw.length)
-            for (ch in raw.lowercase()) {
-                when (ch) {
-                    'أ', 'إ', 'آ', 'ٱ' -> sb.append('ا')
-                    'ة' -> sb.append('ه')
-                    'ى' -> sb.append('ي')
-                    in '\u064B'..'\u065F', '\u0670', '\u0640' -> { /* strip diacritics & tatweel */ }
-                    else -> sb.append(ch)
-                }
-            }
-            return sb.toString().trim()
-        }
+        fun normalizeKey(raw: String): String = ProductSearch.normalize(raw)
     }
 }
 
