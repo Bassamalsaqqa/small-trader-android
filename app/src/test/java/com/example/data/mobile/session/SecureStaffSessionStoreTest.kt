@@ -648,56 +648,136 @@ class SecureStaffSessionStoreTest {
         assertEquals(SessionReadResult.NoSession, store.readSession(scope))
     }
 
-    // Finding 3: Linearizable Save and Clear - Completed Logout Never Undone by In-Flight Save
     @Test
-    fun `finding 3 - completed clearSession is never undone by concurrent saveSession`() {
-        val executor = Executors.newFixedThreadPool(2)
-        val record = createValidRecord(token = "valid_save_token_1234567890123")
-
-        val store1 = DefaultSecureStaffSessionStore(
-            sessionFile = sessionFile,
-            installationStore = installationStore,
-            cryptoEngine = cryptoEngine,
-            packageName = testPackageName
-        )
-        val store2 = DefaultSecureStaffSessionStore(
-            sessionFile = sessionFile,
-            installationStore = installationStore,
-            cryptoEngine = cryptoEngine,
-            packageName = testPackageName
-        )
-
-        // Seed with initial session
-        store1.saveSession(record)
-        assertTrue(store1.hasSessionFile())
-
-        val clearLatch = CountDownLatch(1)
-        val doneLatch = CountDownLatch(2)
-
-        executor.execute {
-            // Thread 1: clearSession
-            clearLatch.await()
-            store2.clearSession()
-            doneLatch.countDown()
-        }
-
-        executor.execute {
-            // Thread 2: saveSession under lock
-            clearLatch.countDown()
-            try {
-                store1.saveSession(record)
-            } catch (e: Exception) {
-                // Allowed if clear won lock first and key was cleared
+    fun `in flight save completes before waiting logout without resurrection`() {
+        val record = createValidRecord()
+        val encryptEntered = CountDownLatch(1)
+        val releaseEncrypt = CountDownLatch(1)
+        val clearStarted = CountDownLatch(1)
+        val blockingCrypto = object : SessionCryptoEngine by cryptoEngine {
+            override fun encrypt(plaintext: ByteArray, aad: ByteArray): Pair<ByteArray, ByteArray> {
+                encryptEntered.countDown()
+                check(releaseEncrypt.await(5, TimeUnit.SECONDS))
+                return cryptoEngine.encrypt(plaintext, aad)
             }
-            doneLatch.countDown()
         }
+        val savingStore = DefaultSecureStaffSessionStore(sessionFile, installationStore, blockingCrypto, testPackageName)
+        val clearingStore = DefaultSecureStaffSessionStore(sessionFile, installationStore, cryptoEngine, testPackageName)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val save = executor.submit { savingStore.saveSession(record) }
+            assertTrue(encryptEntered.await(5, TimeUnit.SECONDS))
+            val clear = executor.submit {
+                clearStarted.countDown()
+                clearingStore.clearSession()
+            }
+            assertTrue(clearStarted.await(5, TimeUnit.SECONDS))
+            try {
+                clear.get(150, TimeUnit.MILLISECONDS)
+                fail("Logout must wait for the in-flight save critical section")
+            } catch (_: java.util.concurrent.TimeoutException) {
+                // Encryption holds the shared lock until the complete save is committed.
+            }
+            releaseEncrypt.countDown()
+            save.get(5, TimeUnit.SECONDS)
+            clear.get(5, TimeUnit.SECONDS)
+            assertFalse(sessionFile.exists())
+        } finally {
+            releaseEncrypt.countDown()
+            executor.shutdownNow()
+        }
+    }
 
-        assertTrue(doneLatch.await(5, TimeUnit.SECONDS))
-        executor.shutdown()
+    @Test
+    fun `existing invalid identity records fail closed without byte changes`() {
+        val identityFile = File(noBackupDir, InstallationIdentityStore.IDENTITY_FILE_NAME)
+        val samples = listOf(
+            "{}".toByteArray(),
+            "{\"device_id\":\"private-invalid-uuid\"}".toByteArray(),
+            byteArrayOf(0xc3.toByte(), 0x28),
+            ByteArray(1024 * 1024 + 1) { 65 }
+        )
+        for (bytes in samples) {
+            identityFile.writeBytes(bytes)
+            try {
+                InstallationIdentityStore(identityFile).getOrCreateInstallationId()
+                fail("An existing unreadable identity must never be replaced")
+            } catch (e: SessionStorageException) {
+                assertTrue(e.error is SessionStorageError.Corrupt || e.error is SessionStorageError.Oversized)
+                assertFalse(e.toString().contains("private-invalid-uuid"))
+            }
+            assertArrayEquals(bytes, identityFile.readBytes())
+        }
+    }
 
-        // Explicitly invoke clearSession to ensure terminal logout state
-        store2.clearSession()
-        assertFalse("Completed logout must not leave resurrected session", store1.hasSessionFile())
+    @Test
+    fun `identity IO failure preserves original filesystem entry`() {
+        val identityFile = File(noBackupDir, InstallationIdentityStore.IDENTITY_FILE_NAME)
+        assertTrue(identityFile.mkdir())
+        try {
+            InstallationIdentityStore(identityFile).getOrCreateInstallationId()
+            fail("Unreadable identity entry must fail closed")
+        } catch (e: SessionStorageException) {
+            assertTrue(e.error is SessionStorageError.IoError)
+        }
+        assertTrue(identityFile.isDirectory)
+    }
+
+    @Test
+    fun `cached identity does not conceal corruption or missing persisted identity`() {
+        val original = installationStore.getOrCreateInstallationId()
+        val identityFile = File(noBackupDir, InstallationIdentityStore.IDENTITY_FILE_NAME)
+        identityFile.writeText("{}")
+        try {
+            installationStore.getOrCreateInstallationId()
+            fail("Cache must not hide corrupted storage")
+        } catch (e: SessionStorageException) {
+            assertTrue(e.error is SessionStorageError.Corrupt)
+        }
+        assertEquals("{}", identityFile.readText())
+        assertTrue(identityFile.delete())
+        try {
+            installationStore.getOrCreateInstallationId()
+            fail("An initialized identity must not silently rotate after file loss")
+        } catch (e: SessionStorageException) {
+            assertTrue(e.error is SessionStorageError.IoError)
+        }
+        assertFalse(identityFile.exists())
+        assertNotNull(original)
+    }
+
+    @Test
+    fun `logout deletion failure is reported instead of claiming success`() {
+        assertTrue(sessionFile.mkdir())
+        val sentinel = File(sessionFile, "preserved")
+        sentinel.writeText("keep")
+        try {
+            store.clearSession()
+            fail("Failed credential deletion must be reported")
+        } catch (e: SessionStorageException) {
+            assertTrue(e.error is SessionStorageError.IoError)
+        }
+        assertEquals("keep", sentinel.readText())
+    }
+
+    @Test
+    fun `read preserves cancellation and stored ciphertext`() {
+        store.saveSession(createValidRecord())
+        val original = sessionFile.readBytes()
+        val cancellation = java.util.concurrent.CancellationException("private-cancellation")
+        val cancellingCrypto = object : SessionCryptoEngine by cryptoEngine {
+            override fun decrypt(iv: ByteArray, ciphertextWithTag: ByteArray, aad: ByteArray): ByteArray {
+                throw cancellation
+            }
+        }
+        val cancellingStore = DefaultSecureStaffSessionStore(sessionFile, installationStore, cancellingCrypto, testPackageName)
+        try {
+            cancellingStore.readSession(SessionReadScope(store.installationId))
+            fail("Cancellation must propagate")
+        } catch (e: java.util.concurrent.CancellationException) {
+            assertTrue(e === cancellation)
+        }
+        assertArrayEquals(original, sessionFile.readBytes())
     }
 
     // Finding 4: Unique Sibling Temporary Files and Operation-Owned Cleanup

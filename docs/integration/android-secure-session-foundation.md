@@ -117,9 +117,9 @@ When staff logs out (`clearSession()`):
 
 ### Process-Wide Concurrency & Multi-Instance Coordination
 - **Canonical-Path Process Locks**: Synchronized via `SessionProcessLocks` keyed by canonical file path. Multiple store or identity instances targeting the same physical file share the same `ReentrantLock`.
-- **Linearizable Full Save/Read/Clear**: `saveSession` holds the shared lock across key verification, serialization, encryption, and atomic rename. A completed `clearSession()` (logout) cannot be undone or resurrected by a previously in-flight save.
+- **Linearizable Full Save/Read/Clear**: `saveSession` holds the shared lock across key verification, serialization, encryption, and atomic rename. A logout waiting behind an in-flight save runs after that save and removes its record. Saves explicitly started after logout are separate operations; this store does not cancel higher-level pending login jobs.
 - **Key Generation Coordination**: First-key generation is synchronized process-wide by key alias (`SessionProcessLocks.getKeyLock`).
-- **Existing Record Key Recoverability**: Before replacing an existing session file on disk, `saveSession` verifies key recoverability. If the key is missing or permanently invalidated, replacement is refused, existing ciphertext is preserved, and key recreation is prohibited.
+- **Existing Record Key Recoverability**: Before replacing an existing session file on disk, `saveSession` checks key presence; encryption must also succeed before replacement. This does not authenticate old ciphertext during a new login. If the key is missing or permanently invalidated, replacement is refused, existing ciphertext is preserved, and key recreation is prohibited.
 - **Multi-Process Limitation**: Concurrency across independent Android application/service processes sharing storage is **NOT CLAIMED** without OS-level `FileLock` coordination.
 
 ### Error Sanitization & Data Concealment
@@ -131,7 +131,7 @@ When staff logs out (`clearSession()`):
 
 ## 8. Test Verification & Coverage
 
-Hermetic test suites prove all architectural invariants in `com.example.data.mobile.session.SecureStaffSessionStoreTest` (32 unit tests):
+Hermetic tests exercise the following foundation boundaries in `com.example.data.mobile.session.SecureStaffSessionStoreTest` (37 unit tests):
 1. **Encrypt/Read Roundtrip**: Verifies exact preservation of token, ULID, device UUID, password epoch, expiry, and contextual metadata.
 2. **Plaintext Absence**: Proves no raw secret tokens, epochs, emails, or names appear on disk.
 3. **Tamper Resilience**: Proves ciphertext tampering, nonce mutation, AAD manipulation, magic mismatch, and length alteration fail closed with `Corrupt` and preserve the disk file.
@@ -148,13 +148,15 @@ Hermetic test suites prove all architectural invariants in `com.example.data.mob
 14. **RFC 3339 Malformed Input**: Proves strict rejection of invalid calendar dates (non-leap year Feb 29, month 13, day 32), invalid timezone offsets, and trailing newlines (`\n`, `\r\n`).
 15. **Simultaneous Identity Instances**: Proves simultaneously constructed `InstallationIdentityStore` instances coordinate under canonical-path lock and produce identical stable UUIDs.
 16. **Multi-Instance Store Coordination**: Proves distinct `DefaultSecureStaffSessionStore` instances coordinate under canonical-path lock.
-17. **Linearizable Save/Clear Barrier**: Proves a completed `clearSession()` is never resurrected by concurrent in-flight save.
+17. **Linearizable Save/Clear Barrier**: Blocks encryption in one store instance, verifies logout in another instance waits, then verifies no session remains after both complete, without a final cleanup call.
 18. **Unique Sibling Temp Files**: Proves save uses unique sibling temporary files without collisions and operation-owned cleanup.
 19. **Rename Failure No-Truncation**: Proves injected rename failure fails closed and preserves prior valid records without truncation.
 20. **Streaming Read TOCTOU**: Proves bounded stream reader detects file growth exceeding 1 MiB via 1-byte probe.
 21. **Key Recoverability Refusal**: Proves missing-key and locked-key saves over existing files fail closed, preserve disk bytes, and refuse key recreation.
 
 ### Suite Summary & Exact Counts
-- **Targeted Mobile Unit Tests**: 162 unit tests across 16 testsuites (`com.example.data.mobile.*`), 0 failures, 0 errors, 0 skipped.
+- **Targeted Mobile Unit Tests**: 167 unit tests across 16 testsuites (`com.example.data.mobile.*`), 0 failures, 0 errors, 0 skipped.
 - **Contract Verification Suite**: 210 tests passed in both normal (`python3 tools/validate-mobile-contract.py`) and optimized (`python3 -O tools/validate-mobile-contract.py`) execution.
 - **Lint Verification**: 64 baseline warnings in `app/build/reports/lint-results-debug.xml`, 0 errors.
+
+Installation identity reads fail closed on malformed UTF-8/JSON, invalid UUIDs, oversized records, and I/O failure; existing files are never replaced after a read failure. Cached identities do not hide corrupt or missing files. Missing files after initialization require explicit recovery rather than silent UUID rotation. Logout reports a failed file deletion as `IoError`.

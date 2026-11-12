@@ -12,6 +12,9 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
+import java.util.concurrent.CancellationException
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 import kotlin.concurrent.withLock
 
 /**
@@ -29,23 +32,20 @@ class InstallationIdentityStore(
 
     /**
      * Retrieves the stable installation UUID, generating and persisting a new [ClientUuid]
-     * if no valid identity currently exists on disk.
+     * only when no identity exists on disk. Existing unreadable records are preserved and rejected.
      */
     fun getOrCreateInstallationId(): ClientUuid {
-        SessionProcessLocks.getCachedInstallationId(identityFile)?.let { return it }
-
         val lock = SessionProcessLocks.getFileLock(identityFile)
         return lock.withLock {
-            SessionProcessLocks.getCachedInstallationId(identityFile)?.let { return it }
-
             if (identityFile.exists()) {
                 val loaded = loadFromFile()
-                if (loaded != null) {
-                    SessionProcessLocks.cacheInstallationId(identityFile, loaded)
-                    return loaded
-                }
+                SessionProcessLocks.cacheInstallationId(identityFile, loaded)
+                return@withLock loaded
             }
-
+            // A disappeared initialized identity is a storage failure, not a new installation.
+            if (SessionProcessLocks.getCachedInstallationId(identityFile) != null) {
+                throw SessionStorageException(SessionStorageError.IoError("Installation identity file is missing"))
+            }
             val newId = ClientUuid.random()
             persistToFile(newId)
             SessionProcessLocks.cacheInstallationId(identityFile, newId)
@@ -53,17 +53,30 @@ class InstallationIdentityStore(
         }
     }
 
-    private fun loadFromFile(): ClientUuid? {
-        if (!identityFile.exists()) return null
-
-        return try {
-            val bytes = BoundedStreamReader.readBounded(identityFile, MAX_FILE_BYTES.toInt())
-            val jsonStr = String(bytes, Charsets.UTF_8)
-            val obj = StrictJsonParser.parse(jsonStr) as? StrictJsonObject ?: return null
-            val deviceIdProp = obj["device_id"] as? StrictJsonString ?: return null
-            ClientUuid.parse(deviceIdProp.value)
+    private fun loadFromFile(): ClientUuid {
+        val bytes = try {
+            BoundedStreamReader.readBounded(identityFile, MAX_FILE_BYTES.toInt())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SessionStorageException) {
+            throw e
         } catch (e: Exception) {
-            null
+            throw SessionStorageException(SessionStorageError.IoError("Failed to read installation identity"))
+        }
+        return try {
+            val jsonStr = Charsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(bytes)).toString()
+            val obj = StrictJsonParser.parse(jsonStr) as? StrictJsonObject
+                ?: throw IllegalArgumentException()
+            val deviceIdProp = obj["device_id"] as? StrictJsonString
+                ?: throw IllegalArgumentException()
+            ClientUuid.parse(deviceIdProp.value)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw SessionStorageException(SessionStorageError.Corrupt("Invalid installation identity record"))
         }
     }
 

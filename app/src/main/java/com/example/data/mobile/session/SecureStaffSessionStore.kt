@@ -12,6 +12,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
+import java.util.concurrent.CancellationException
 import kotlin.concurrent.withLock
 
 /**
@@ -98,7 +99,8 @@ class DefaultSecureStaffSessionStore internal constructor(
     override val installationId: ClientUuid
         get() = installationStore.getOrCreateInstallationId()
 
-    override fun hasSessionFile(): Boolean = sessionFile.exists()
+    override fun hasSessionFile(): Boolean =
+        SessionProcessLocks.getFileLock(sessionFile).withLock { sessionFile.exists() }
 
     override fun saveSession(record: StaffSessionRecord) {
         val lock = SessionProcessLocks.getFileLock(sessionFile)
@@ -143,6 +145,8 @@ class DefaultSecureStaffSessionStore internal constructor(
                 writeSuccess = true
             } catch (e: SessionStorageException) {
                 throw e
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 throw SessionStorageException(
                     SessionStorageError.IoError("Failed to atomically persist session record")
@@ -170,6 +174,8 @@ class DefaultSecureStaffSessionStore internal constructor(
                     is SessionStorageError.IoError -> SessionReadResult.IoError(err)
                     else -> SessionReadResult.Corrupt(SessionStorageError.Corrupt("Failed to read session file"))
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 return@withLock SessionReadResult.IoError(
                     SessionStorageError.IoError("Failed to read session file from disk")
@@ -201,6 +207,8 @@ class DefaultSecureStaffSessionStore internal constructor(
                     is SessionStorageError.ScopeMismatch -> SessionReadResult.ScopeMismatch(err)
                     is SessionStorageError.IoError -> SessionReadResult.IoError(err)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 return@withLock SessionReadResult.Corrupt(
                     SessionStorageError.Corrupt("Unexpected decryption failure")
@@ -213,6 +221,8 @@ class DefaultSecureStaffSessionStore internal constructor(
                 return@withLock SessionReadResult.Corrupt(
                     SessionStorageError.Corrupt("Failed to parse decrypted session payload")
                 )
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 return@withLock SessionReadResult.Corrupt(
                     SessionStorageError.Corrupt("Malformed session payload")
@@ -222,6 +232,8 @@ class DefaultSecureStaffSessionStore internal constructor(
             // Expiry verification
             val expiresAtEpochMs = try {
                 SessionValidation.parseRfc3339ToEpochMs(record.expiresAt, "expires_at")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 return@withLock SessionReadResult.Corrupt(
                     SessionStorageError.Corrupt("Invalid expires_at timestamp in session payload")
@@ -265,8 +277,8 @@ class DefaultSecureStaffSessionStore internal constructor(
     override fun clearSession() {
         val lock = SessionProcessLocks.getFileLock(sessionFile)
         lock.withLock {
-            if (sessionFile.exists()) {
-                sessionFile.delete()
+            if (sessionFile.exists() && !sessionFile.delete()) {
+                throw SessionStorageException(SessionStorageError.IoError("Failed to clear session record"))
             }
         }
     }
