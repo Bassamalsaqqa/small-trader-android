@@ -157,6 +157,6 @@ Hermetic tests exercise the following foundation boundaries in `com.example.data
 ### Suite Summary & Exact Counts
 - **Targeted Mobile Unit Tests**: 167 unit tests across 16 testsuites (`com.example.data.mobile.*`), 0 failures, 0 errors, 0 skipped.
 - **Contract Verification Suite**: 210 tests passed in both normal (`python3 tools/validate-mobile-contract.py`) and optimized (`python3 -O tools/validate-mobile-contract.py`) execution.
-- **Lint Verification**: 64 baseline warnings in `app/build/reports/lint-results-debug.xml`, 0 errors.
+- **Lint Verification**: 63 baseline warnings in `app/build/reports/lint-results-debug.xml`, 0 errors.
 
 Installation identity reads fail closed on malformed UTF-8/JSON, invalid UUIDs, oversized records, and I/O failure; existing files are never replaced after a read failure. Cached identities do not hide corrupt or missing files. Missing files after initialization require explicit recovery rather than silent UUID rotation. Logout reports a failed file deletion as `IoError`.
