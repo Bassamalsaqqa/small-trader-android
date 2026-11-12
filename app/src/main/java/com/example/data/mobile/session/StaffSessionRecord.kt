@@ -37,6 +37,6 @@ data class StaffSessionRecord(
     override fun toString(): String =
         "StaffSessionRecord(token='Bearer [REDACTED]', actorUlid=$actorUlid, " +
                 "deviceUuid=$deviceUuid, passwordEpoch='[REDACTED]', expiresAt='$expiresAt', " +
-                "selectedCompanyId=$selectedCompanyId, roleLabel=${roleLabel?.let { "'$it'" }}, " +
-                "actorName=${actorName?.let { "'$it'" }}, actorEmail='[REDACTED]', createdAt='$createdAt')"
+                "selectedCompanyId=$selectedCompanyId, roleLabel='[REDACTED]', " +
+                "actorName='[REDACTED]', actorEmail='[REDACTED]', createdAt='$createdAt')"
 }
