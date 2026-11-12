@@ -22,6 +22,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
+import javax.net.ssl.SSLException
 import java.net.URL
 import java.net.URLEncoder
 import java.nio.ByteBuffer
@@ -364,6 +365,12 @@ class OkHttpTransport(
                     throw HttpTransportException(
                         HttpTransportException.CATEGORY_TIMEOUT,
                         "Network socket timeout occurred"
+                    )
+                }
+                is SSLException -> {
+                    throw HttpTransportException(
+                        HttpTransportException.CATEGORY_TLS_ERROR,
+                        "TLS handshake or certificate verification failed"
                     )
                 }
                 is IOException -> {
