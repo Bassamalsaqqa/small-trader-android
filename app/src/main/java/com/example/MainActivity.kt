@@ -62,7 +62,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            SmallTraderApp()
+            if (BuildConfig.STAFF_READ_WORKSPACE) {
+                com.example.ui.staff.StaffWorkspaceApp(
+                    configuredOrigin = BuildConfig.STAFF_WORKSPACE_ORIGIN,
+                    allowHttpLoopback = BuildConfig.DEBUG && BuildConfig.STAFF_ALLOW_HTTP_LOOPBACK
+                )
+            } else {
+                SmallTraderApp()
+            }
         }
     }
 }
