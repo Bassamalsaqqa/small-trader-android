@@ -76,8 +76,8 @@ Prior iterations suffered from informal contract specifications, toy validators,
    - The server invoice ULID (`invoice_id`) is strictly distinct from the client event UUID (`client_event_id`).
 
 ### 2.6 Transport Delivery Envelope vs Canonical Accounting Domain Receipt
-1. **Outer Mobile Envelope**: The mobile intake structure (`client_event_id`, `device_id`, `captured_at`, `payload_digest`, and local sync status) acts as a durable delivery and idempotency tracking envelope.
-2. **Inner Canonical Domain Writers**: The backend accounting domain processes the inner economic payload through transactional writers (`CreateSalesInvoiceDraftAction`, `PostSalesInvoiceAction`, `SalesLineCalculator`, `CustomerPayment`), atomically committing the invoice, inventory lot movements, and general ledger journal entries into an immutable central `CommandReceipt`.
+1. **Outer Mobile Envelope**: The mobile intake structure (`client_event_id`, `device_id`, `captured_at`, `payload_digest`, and local sync status) acts as a durable delivery and idempotency tracking envelope. Mobile sales require durable receipt replay uniqueness scoped by `UNIQUE(company_id, client_event_id)` bound to `(actor_id, device_id)` and spanning API versions.
+2. **Inner Canonical Domain Writers & Durable DB Receipts**: Backend source verification confirms that `CommandReceipt` rows in the accounting backend (`ImmediateSaleCommands.php`, `command_receipts` table) ARE durable database receipts stored with full transactional guarantees, NOT merely ephemeral or session-bound records. However, backend `CommandReceipt` idempotency is scoped by `UNIQUE(company_id, user_id, action, idempotency_key)` with `request_hash = hash('sha256', target_invoice_id . '|' . token)` (an invoice/token-hash scoped identity). This differs fundamentally from the mobile delivery requirement of `UNIQUE(company_id, client_event_id)` event-scoped replay identity.
 
 ### 2.7 Bounded Pagination & Search Semantics
 1. Catalog (`GET /products`) and customer (`GET /customers`) endpoints enforce bounded pagination:
@@ -98,22 +98,31 @@ Prior iterations suffered from informal contract specifications, toy validators,
 
 ---
 
-## 3. OpenAPI 3.1 Endpoint Architecture
+### 3. OpenAPI 3.1 Endpoint Architecture
 
-The contract defines 11 REST endpoints:
-- **7 POST Endpoints with Request & Response Payloads**:
-  1. `POST /api/mobile/v1/auth/challenge`
-  2. `POST /api/mobile/v1/auth/login`
-  3. `POST /api/mobile/v1/auth/logout`
-  4. `POST /api/mobile/v1/devices/{deviceId}/revoke`
-  5. `POST /api/mobile/v1/companies/{companyId}/sales/preview`
-  6. `POST /api/mobile/v1/companies/{companyId}/sales/commit`
-  7. `POST /api/mobile/v1/companies/{companyId}/offline-events`
-- **4 GET Endpoints (Query & Path Parameters Only, No Request Body)**:
-  8. `GET /api/mobile/v1/companies/{companyId}/bootstrap`
-  9. `GET /api/mobile/v1/companies/{companyId}/products`
-  10. `GET /api/mobile/v1/companies/{companyId}/customers`
-  11. `GET /api/mobile/v1/companies/{companyId}/offline-events/{clientEventId}/status`
+The contract defines 16 REST endpoints across explicit API versions:
+- **Preserved API v1 Endpoints (11 endpoints: Read/Auth & Historical Compatibility)**:
+  - *7 POST Endpoints with Request & Response Payloads*:
+    1. `POST /api/mobile/v1/auth/challenge`
+    2. `POST /api/mobile/v1/auth/login`
+    3. `POST /api/mobile/v1/auth/logout`
+    4. `POST /api/mobile/v1/devices/{deviceId}/revoke`
+    5. `POST /api/mobile/v1/companies/{companyId}/sales/preview` (mapped to `archived-v1-sale-preview-request.json` & response)
+    6. `POST /api/mobile/v1/companies/{companyId}/sales/commit`
+    7. `POST /api/mobile/v1/companies/{companyId}/offline-events` (mapped to `archived-v1-offline-sale-intake-request.json`)
+  - *4 GET Endpoints (Query & Path Parameters Only)*:
+    8. `GET /api/mobile/v1/companies/{companyId}/bootstrap` (mapped to `archived-v1-bootstrap-response.json`)
+    9. `GET /api/mobile/v1/companies/{companyId}/products`
+    10. `GET /api/mobile/v1/companies/{companyId}/customers`
+    11. `GET /api/mobile/v1/companies/{companyId}/offline-events/{clientEventId}/status`
+- **Agreed Breaking API v2 Endpoints (5 endpoints: Line Tax Identity, Intake v2 & Minor Units)**:
+  - *4 POST Endpoints with Request & Response Payloads*:
+    12. `POST /api/mobile/v2/companies/{companyId}/sales/preview` (mapped to `sale-preview-request.json` & response)
+    13. `POST /api/mobile/v2/companies/{companyId}/sales/commit` (mapped to `sale-commit-request.json` & response)
+    14. `POST /api/mobile/v2/companies/{companyId}/offline-events` (mapped to `offline-sale-intake-request.json` & response)
+  - *2 GET Endpoints*:
+    15. `GET /api/mobile/v2/companies/{companyId}/bootstrap` (mapped to `bootstrap-response.json` requiring `base_currency_minor_units`)
+    16. `GET /api/mobile/v2/companies/{companyId}/offline-events/{clientEventId}/status`
 
 All error responses across all endpoints standardize on `schemas/error-response.json` (RFC 7807/9457 Problem Details shape).
 
@@ -126,6 +135,7 @@ All error responses across all endpoints standardize on `schemas/error-response.
   UNIQUE KEY uq_mobile_event (company_id, client_event_id)
   ```
   Concurrency is resolved via atomic database constraint plus row locking (`lockForUpdate`) inside a database transaction.
+  The receipt uniqueness domain `(company_id, client_event_id)` spans API versions (must not duplicate across v1 and v2).
 - **Idempotent Replay Handling**:
   - If `(company_id, client_event_id)` matches an existing record and `request.payload_digest == existing.payload_digest`: return stored canonical outcome immediately. Do NOT regenerate invoices, numbers, or accounting lines.
   - If `request.payload_digest != existing.payload_digest`: reject immediately with **HTTP 409 Conflict** and structured conflict evidence.
@@ -155,3 +165,119 @@ Product tax_rate and tax_rate_id form a nullable pair. Null means NO PRODUCT DEF
 ### Restricted parser boundary clarification
 
 Raw JSON payload limit is 1 MiB of UTF-8 bytes. Each decoded JSON string is bounded at 65536 UTF-16 code units, checked after appending a full escaped surrogate pair. Unicode hex escapes accept unsigned ASCII hex digits only; unescaped controls are rejected. Integers must be within the exact safe integer domain [-9007199254740991,9007199254740991], consistently for parsed and raw values. Economic decimal input lexemes are preserved without trimming or rounding; floats are forbidden. Economic bounded-string validation must require a full match (a trailing newline must not pass a dollar-anchor check). These clarify parser requirements, not a change to immutable financial fields or digest vectors.
+
+## Coordinated DRAFT revision 3 (financial contract, line tax amendment, event v2, currency minor units, explicit API v2)
+
+This explicit revision introduces proposed contract revision 3 for financial line tax identity, mode, and conversion snapshots, offline event version 2, currency minor units metadata, and explicit `/api/mobile/v2` breaking endpoint representations. Historical baseline is Git `ec8220934839ade0c4fe5408398ab1a313feb09c`, revision 2 manifest SHA-256 `ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659` (preserved unchanged as parent reference). Status: **PROPOSED NOT LIVE**.
+
+### Distinction Between Endpoint Version (API v2), Contract Revision (Revision 3), and Event Version (v2)
+Three distinct version concepts are strictly separated:
+1. **Endpoint Version (`/api/mobile/v2`)**: The URL route prefix for breaking financial write endpoints. Existing `/api/mobile/v1` routes preserve parent revision-2 read/auth behavior and historical archived schemas (`archived-v1-*.json`) unchanged.
+2. **Contract Revision (Revision 3)**: The coordinated specification version covering schemas, OpenAPI 3.1, ADR-0001, test fixtures, and validation suites.
+3. **Offline Event Version (`event_version: 2`)**: The wire payload version for offline sales events. Offline intake on `/api/mobile/v2` strictly rejects `event_version: 1` with HTTP 409 Conflict without mutating stored client bytes.
+
+### Normative Online Canonical Intent Profile
+Online sale preview (`POST /api/mobile/v2/companies/{companyId}/sales/preview`) normalizes the complete economic intent into one normative canonical intent profile object before computing its canonical SHA-256 digest (`payload_digest`):
+- **Exact Field Selection**:
+  - `actor_id`: Authoritative staff ULID bound from authenticated Bearer session token.
+  - `company_id`: Authoritative company ULID bound from URL route parameter `{companyId}`.
+  - `currency`: ISO-4217 3-character uppercase currency code from request.
+  - `currency_minor_units`: Server-qualified currency minor units (integer `0..6`) from currency master context.
+  - `device_id`: Device UUID from request.
+  - `client_event_id`: Client transaction UUID from request.
+  - `customer_id`: Customer ULID from request.
+  - `warehouse_id`: Warehouse ULID from request.
+  - `lines`: Ordered array of line items preserving client submission order, each containing:
+    - `product_id`: Catalog product ULID.
+    - `product_unit_id`: Packaging unit ULID.
+    - `conversion_to_base`: Positive exact decimal string snapshot.
+    - `quantity`: Positive exact decimal string lexeme.
+    - `unit_price`: Nonnegative exact decimal string lexeme.
+    - `tax_rate_id`: Public nullable Crockford ULID.
+    - `tax_rate`: Exact percentage string snapshot (`0..100`, up to 6 decimals).
+    - `tax_inclusive`: Boolean flag.
+  - `payment`: Cash payment intent containing:
+    - `settlement_mode`: `"full"` | `"unpaid"` | `"partial"`.
+    - `payment_method`: `"cash"` for full/partial; `null` for unpaid (omitted fields in valid request canonically normalize to `null`).
+    - `cash_account_id`: Approved cash register Crockford ULID for full/partial; `null` for unpaid (omitted fields in valid request canonically normalize to `null`).
+    - `amount`: Exact monetary decimal string lexeme (`Decimal(amount) == 0` for unpaid; `0 < Decimal(amount) < grand_total` for partial; `Decimal(amount) == grand_total` for full, enforcing the orchestrator-selected first-release exact policy). Preserves exact string representation (e.g. `'0.000'`) without rounding or lexeme mutation.
+- **Lexeme Preservation & No Floats**: All quantity and monetary values are strictly validated string decimal lexemes; IEEE-754 floats are forbidden. No implicit rounding, truncating, or repricing occurs prior to canonical hashing.
+- **Restricted JCS Serialization (RFC 8785 Subset)**: Object keys sorted by UTF-16 code units; characters < 0x20 escaped; no whitespace between tokens.
+- **Bound Preview Token Placeholder**: The computed SHA-256 digest is embedded in an illustrative opaque sample token (`preview_token`) consisting of base64-encoded JSON claims `{"version": 2, "company_id": "...", "digest": "sha256:..."}` and an illustrative signature suffix. The token is an illustrative opaque placeholder for contract binding, not fake cryptographic proof.
+
+### Normative Online Canonical Intent Profile Projection & Payment Semantics
+> [!IMPORTANT]
+> All helper functions and adapters in `tools/validate-mobile-contract.py` (`construct_online_sale_intent_profile`, `verify_online_sale_intent_profile`, `verify_payment_decimal_consistency`, `adapt_offline_cash_to_canonical_receipt`, `adapt_online_payment_to_canonical_choice`, `calculate_canonical_line`) are proposal demonstrations and contract qualification test verifiers, NOT server implementations. The authoritative server domain logic and ledger posting reside in backend Laravel services (`ImmediateSaleCommands.php`, `SalesInvoiceCommands.php`, `SalesLineCalculator.php`, `PostCustomerPaymentAction.php`).
+
+1. **Mandatory Pre-Projection Schema Validation**:
+   - The raw incoming request is validated against `sale-preview-request.json` before any projection occurs. Any unknown property at the root, line, or payment level is rejected immediately with `IntentProfileValidationError`.
+   - Line items must explicitly specify `tax_rate_id`. Missing `tax_rate_id` throws a clear fixed typed `IntentProfileValidationError`; it never defaults or falls back to implicit NoTax. Explicit No-Tax requires an explicit `null` value with `tax_rate: "0.000000"` and `tax_inclusive: false`.
+   - The route and session context must contain strictly known keys `{"actor_id", "company_id", "currency_minor_units"}`. ULID formats are strictly enforced, and `currency_minor_units` is mandatory explicit context (integer in `0..6`), explicitly rejecting booleans as integers (`isinstance(b, int)` trap), invalid scales, or missing values with no guessing of 2.
+
+2. **First-Release Policy: Positive Financial Grand Total ONLY**:
+   - In accordance with orchestrator policy and backend receipt invariants (`PostCustomerPaymentAction::execute` line 209: receipt amount must be strictly positive), the first-release contract policy permits **strictly positive financial grand totals ONLY** (`grand_total > 0`).
+   - All paid, unpaid, and offline sales reject non-positive totals (`grand_total <= 0`); no zero-invoice or zero-receipt workarounds are supported. Zero-total NoPayment sales may be qualified in future canonical revisions but are NOT claimed now.
+
+3. **Exact Currency Minor Units Representation**:
+   - Received, settled, tender, and change amounts must represent integer currency minor units in `0..6` using exact `Decimal` arithmetic without rounding (`RoundingMode::UNNECESSARY` parity with `MoneyValues::amount` and `ReceiptRequestValues::decimal`).
+   - Trailing zeros (e.g. `50.000000` at minor units = 2) are accepted because they represent exact integer minor units.
+   - Fractional amounts beyond currency minor units (e.g. `0.000001` at minor units = 2 for ILS) are strictly rejected without rounding.
+   - Quantities and packaging conversion to base preserve 6-decimal precision, and tax percentages preserve up to 6-decimal percent, independent of currency minor units.
+   - Numeric finite/domain bounds are validated before helper execution; helpers fail closed on malformed lexemes, NaN, Infinity, floats, or scientific exponent notations with explicit `return False` invariants without crashing.
+
+4. **Source-Backed Payment Semantics Parity (`ImmediateSaleCommands.php` & `PostCustomerPaymentAction.php`)**:
+   - **Unpaid Settlement (`settlement_mode: "unpaid"`)**:
+     - An unpaid sale carries zero payment tender (`Decimal(amount) == 0`) with strictly positive grand total (`grand_total > 0`). String decimal lexemes (e.g. `'0.000'`) are preserved verbatim without monetary rounding or format conversion.
+     - Per canonical rules (`ImmediateSaleCommands::intent`), an unpaid sale cannot carry cash payment instructions. `payment_method` and `cash_account_id` may be omitted from client requests or supplied as explicit `null`.
+     - In the canonical intent profile, omitted payment method and cash account canonically normalize to `null`. If non-null payment instructions are supplied with `unpaid` mode, validation fails closed.
+     - **Documented Command Choice Adapter**: ONLY AFTER strict wire and profile validation and digest derivation, the adapter maps canonical choice EXACTLY to `{"mode": "unpaid"}`, stripping wire payment fields (`amount`, `payment_method`, `cash_account_id`) from the command input so that `ImmediateSaleCommands::intent` (which strictly checks `array_diff(array_keys($choice), ['mode']) === []`) accepts it. No cash account resolver or payment date is required (`unpaidnoresolverneeded`). Stripping applies ONLY to validated payment snapshot fields; no general null filter is applied across the payload (line `tax_rate_id: null` after 0/false validation MUST remain explicit canonical NoTax).
+   - **Partial Settlement (`settlement_mode: "partial"`)**:
+     - `payment_method: "cash"` and an approved company cash register `cash_account_id` are required economic fields and must not be omitted or null.
+     - The payment amount must be positive and strictly below the qualified grand total (`0 < Decimal(amount) < grand_total`), matching `ImmediateSaleCommands` allocation checks (`! $allocated->isLessThan($total)`).
+     - **Documented Partial Adapter (Proposed Qualification)**: Base currency cash without change maps wire `amount` to canonical `received_amount` AND `invoice_amount` allocation (`allocated_amount`), with FX 1.0000000000, explicit reviewed payment date (`payment_date`), same company active cash account (`money_account_id`), and `payment_currency_amount` matching allocation.
+     - **Company-Scoped Cash Account Resolver & Reviewed Date**: The illustrative adapter requires an explicit company-scoped active cash account ULID -> internal positive integer resolver (`money_account_id: int`) and an explicit reviewed payment date with NO default (no invented dates like `2026-11-11`). The resolver is called only after strict wire validation and scoped to company; missing/foreign/inactive accounts fail closed and never return wire ULIDs under `money_account_id`.
+   - **Full Settlement (`settlement_mode: "full"`)**:
+     - `payment_method: "cash"` and `cash_account_id` are required economic fields and must not be omitted or null.
+     - **Backend Canonical Excess vs Change Semantics**: Backend source verification of `ImmediateSaleCommands::intent` (lines 185-242) and `ImmediateSaleCommands::paymentTerms` (lines 248-295) baseline `f8a0cf7` identifies that the prior claim that "full wire amount >= total means change" was incorrect. In backend `paymentTerms`, when `amount > total`, the excess (`amount - consumed`) is recorded as `unallocated_payment_amount` (unallocated customer credit posted to the customer's account), NOT returned change.
+     - **First-Release Online Policy**: To avoid unintended credit accumulation and because the mobile client has no customer credit allocation UX in first release, the orchestrator selected the smallest exact first-release online policy: **FULL wire amount MUST EQUAL grand total (`Decimal(amount) == grand_total`, both strictly positive)**. Amounts greater than or less than grand total are strictly rejected by contract verifiers and the first-release adapter. Backend canonical credit semantics remain unchanged (no new credit or change feature introduced).
+     - **Resolver & Reviewed Date**: Like partial settlement, full settlement requires an explicit company-scoped cash account resolver mapping wire ULID to internal positive integer ID and an explicit reviewed payment date with no invented defaults.
+   - **Offline Cash Tender & Change Conservation**:
+     - Offline transactions retain distinct `amount_tendered`, `amount_settled`, and `change_returned` fields (`mode: "full"`).
+     - Conservation invariant `amount_tendered == amount_settled + change_returned` and `amount_settled == grand_total` (`settled > 0`) is strictly verified without falling back to online `amount` or tautological self-comparisons.
+     - **Proposed Canonical Receipt Adapter & Audit Separation**: The helper result is an illustrative audit mapping, NOT a `PostCustomerPaymentActionDTO`. Offline audit bytes and digest retain `amount_tendered`, `amount_settled`, and `change_returned` separately in `audit`. The authoritative canonical receipt amount to post against the customer invoice is the **NET RETAINED** settled amount (`amount_settled`), NOT the tendered amount (`amount_tendered`) when change is returned (e.g. tender 60, total 50, change 10 -> canonical receipt amount 50). Wire audit fields are never passed unchecked into `PostCustomerPaymentAction`.
+
+### Financial Line Schema Amendment
+Both online sale preview (`POST /api/mobile/v2/companies/{companyId}/sales/preview`) and offline event intake (`POST /api/mobile/v2/companies/{companyId}/offline-events`) require:
+1. `tax_rate_id`: Public nullable 26-character Crockford ULID (`^[0-7][0-9A-HJKMNP-TV-Z]{25}$`).
+2. `tax_rate`: Exact percentage snapshot string (`0..100`, up to 6 decimal places: `^(?:100(?:\\.0{1,6})?|(?:0|[1-9][0-9]?)(?:\\.[0-9]{1,6})?)$`).
+3. `tax_inclusive`: Boolean flag (`true` for gross inclusive tax calculation, `false` for net exclusive tax calculation).
+4. `conversion_to_base`: Positive exact decimal string (`^(?:0\\.(?=[0-9]{1,6}$)[0-9]*[1-9][0-9]*|[1-9][0-9]{0,13}(?:\\.[0-9]{1,6})?)$`) matching the catalog packaging unit conversion multiplier.
+
+### Explicit No-Tax vs. Catalog Null Tax Pair
+- **Catalog Null Pair**: In `GET /products`, `tax_rate: null, tax_rate_id: null` denotes the *absence of a product default tax association*, NEVER zero tax or tax exemption. Mature products have no tax foreign keys.
+- **Explicit No-Tax Selection**: When an operator explicitly selects "No Tax" in the client UI, the line transmits `tax_rate_id: null`, `tax_rate: "0.000000"`, `tax_inclusive: false`. Any combination of `tax_rate_id: null` with non-zero rate or inclusive mode is strictly rejected by the schema and server validation.
+- **Server Master Resolution**: When `tax_rate_id` is non-null, the server resolves the public ULID to an active tax rate master within the authenticated company, revalidating exact percentage and tax mode under the database transaction. Fails closed on mismatch without repricing; never infers or guesses a master record by percentage alone.
+
+### Source Currency Qualification & Financial Defaults
+- **Source Currency Codebase Inconsistency**: Backend `SalesDocumentRules::price` (`app/Services/Sales/SalesDocumentRules.php`) currently hardcodes `$currency === 'JOD' ? 3 : 2`. This is a codebase quirk/inconsistency, not a universal rule or universal rejection of other currencies. Dynamic currency minor unit parity requires qualifying all server financial writers to read `currencies.minor_units`. No client guessing of currency metadata.
+- **Zero Financial Defaults**: No financial defaults exist. Missing tax identity, tax mode, conversion snapshot, or currency scale fails closed; no fallback may invent economic terms.
+- **Offline Policy Null Lease**: When `offline_policy.enabled` is `false` (`availability: "unavailable"`), `device_lease` is strictly `null`. No offline lease is ever granted or retained when offline capture is disabled.
+
+### Arithmetic Qualification & Decimal Parity
+- **JSON Schema Syntax Limitation**: JSON Schema Draft 2020-12 validates string lexeme syntax and regex boundaries only. Multi-field arithmetic consistency is enforced by transactional server domain logic.
+- **Server Decimal Consistency Required**: Backend writers enforce exact arithmetic: line subtotals and taxes, header grand total balance, and cash tender balance (`amount_tendered == amount_settled + change_returned`, `amount_settled == grand_total`).
+- **Fixture Arithmetic Verification**: Fixture arithmetic tests in validation suites invoke genuine exact calculator helpers implementing `SalesLineCalculator.php` / `RoundingMode::HALF_UP` parity. They verify fixture correctness and do not claim universal server runtime validation.
+- **Reference Calculation (ILS gross 50.000000, 16% inclusive, 2 minor units)**:
+  - `subtotal = 50.000000`
+  - `net_before_tax = round(50.00 / 1.16, 2) = 43.100000`
+  - `tax_amount = 50.00 - 43.10 = 6.900000` (NOT unrounded floating `6.896552`)
+  - `line_total = 43.10 + 6.90 = 50.000000`
+
+### Canonical Stale-Preview Behavior
+`SalesInvoiceCommands::computePreviewRevision` fingerprints current product and unit default prices. Any subsequent price edit invalidates the preview token, even if the acting user holds the `sales.invoice.change_price` override permission. The mobile client must preserve this canonical behavior: stale previews fail closed, requiring a fresh preview. No relaxed stale token rules, no silent refresh, and no stale-preview exemption for price overrides.
+
+### Proposed Mobile Authority Boundary & PR88 Middleware Requirements
+- **PR88 Boundary Scope**: PR88's draft `MobileApiBoundary`, provider registration, and exception hook only recognize the `/api/mobile/v1` prefix. Mounting middleware on `/api/mobile/v2` routes would bypass prefix-specific checks if unadapted. A separate reviewed v2 boundary must explicitly cover: default-OFF feature switch, authentication, company context setup/reset, input/schema validation, rate limits, redacted errors, and exception handling.
+- **Token Authority Isolation**: Existing v1 staff and device tokens confer no implicit financial authority on `/api/mobile/v2`; financial token/grant boundaries remain proposed qualifications with no runtime endpoints created here.
+- **Cross-Version Receipt Identity**: The durable receipt uniqueness domain `(company_id, client_event_id)` spans API versions. Original actor/device scope and current authorization must be verified before status or replay disclosure, including legacy unsupported version responses.
+

@@ -1,0 +1,277 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "6eddfecc8dabbb7ec370b858ec36714a",
+    "entities": [
+      {
+        "tableName": "outbox_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`client_event_id` TEXT NOT NULL, `company_id` TEXT NOT NULL, `actor_id` TEXT NOT NULL, `device_id` TEXT NOT NULL, `device_lease_id` TEXT NOT NULL, `captured_at` TEXT NOT NULL, `payload_digest` TEXT NOT NULL, `event_version` INTEGER NOT NULL, `payload_bytes` BLOB NOT NULL, PRIMARY KEY(`company_id`, `client_event_id`))",
+        "fields": [
+          {
+            "fieldPath": "clientEventId",
+            "columnName": "client_event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "companyId",
+            "columnName": "company_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "actorId",
+            "columnName": "actor_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "device_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceLeaseId",
+            "columnName": "device_lease_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "capturedAt",
+            "columnName": "captured_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadDigest",
+            "columnName": "payload_digest",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventVersion",
+            "columnName": "event_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadBytes",
+            "columnName": "payload_bytes",
+            "affinity": "BLOB",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "company_id",
+            "client_event_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_outbox_events_scope",
+            "unique": false,
+            "columnNames": [
+              "company_id",
+              "actor_id",
+              "device_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_outbox_events_scope` ON `${TABLE_NAME}` (`company_id`, `actor_id`, `device_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "outbox_delivery_states",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`client_event_id` TEXT NOT NULL, `company_id` TEXT NOT NULL, `actor_id` TEXT NOT NULL, `device_id` TEXT NOT NULL, `status` TEXT NOT NULL, `attempt_count` INTEGER NOT NULL, `last_attempt_at` INTEGER, `claim_token` TEXT, `claim_expires_at` INTEGER, `invoice_ulid` TEXT, `payment_ulid` TEXT, `server_ulid` TEXT, `server_acknowledged_at` TEXT, `error_message` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`company_id`, `client_event_id`), FOREIGN KEY(`company_id`, `client_event_id`) REFERENCES `outbox_events`(`company_id`, `client_event_id`) ON UPDATE RESTRICT ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "clientEventId",
+            "columnName": "client_event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "companyId",
+            "columnName": "company_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "actorId",
+            "columnName": "actor_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "device_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attemptCount",
+            "columnName": "attempt_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastAttemptAt",
+            "columnName": "last_attempt_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "claimToken",
+            "columnName": "claim_token",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "claimExpiresAt",
+            "columnName": "claim_expires_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "invoiceUlid",
+            "columnName": "invoice_ulid",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "paymentUlid",
+            "columnName": "payment_ulid",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serverUlid",
+            "columnName": "server_ulid",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serverAcknowledgedAt",
+            "columnName": "server_acknowledged_at",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "errorMessage",
+            "columnName": "error_message",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "company_id",
+            "client_event_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_outbox_states_scope_status",
+            "unique": false,
+            "columnNames": [
+              "company_id",
+              "actor_id",
+              "device_id",
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_outbox_states_scope_status` ON `${TABLE_NAME}` (`company_id`, `actor_id`, `device_id`, `status`)"
+          },
+          {
+            "name": "index_outbox_states_status_claim",
+            "unique": false,
+            "columnNames": [
+              "status",
+              "claim_expires_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_outbox_states_status_claim` ON `${TABLE_NAME}` (`status`, `claim_expires_at`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "outbox_events",
+            "onDelete": "RESTRICT",
+            "onUpdate": "RESTRICT",
+            "columns": [
+              "company_id",
+              "client_event_id"
+            ],
+            "referencedColumns": [
+              "company_id",
+              "client_event_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "outbox_scope_locks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`company_id` TEXT NOT NULL, `actor_id` TEXT NOT NULL, `device_id` TEXT NOT NULL, `locked_at` INTEGER NOT NULL, `reason` TEXT NOT NULL, PRIMARY KEY(`company_id`, `actor_id`, `device_id`))",
+        "fields": [
+          {
+            "fieldPath": "companyId",
+            "columnName": "company_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "actorId",
+            "columnName": "actor_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "device_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lockedAt",
+            "columnName": "locked_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "company_id",
+            "actor_id",
+            "device_id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '6eddfecc8dabbb7ec370b858ec36714a')"
+    ]
+  }
+}
