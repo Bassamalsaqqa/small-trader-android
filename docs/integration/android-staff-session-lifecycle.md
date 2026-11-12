@@ -204,8 +204,8 @@ class AuthViewModel(private val coordinator: StaffSessionCoordinator) : ViewMode
 ## 8. Verification & Suite Summary
 
 ### Exact Test Counts
-- **Targeted Mobile Unit Tests**: **211 unit tests** across **17 testsuites** (`com.example.data.mobile.*`), 0 failures, 0 errors, 0 skipped.
-  - `StaffSessionCoordinatorTest`: 44 tests (multithreaded concurrency barriers, atomic compareAndPersist vs logout/newlogin, delayed remote logout vs newlogin, cancellation on remote logout leaving disk absent, concurrent restore invalidated by new generation, stale 401 hooks discarded, credential 401 without outbox queue hook, challenge races and one-time TTL validation, requestChallenge while ReadReady safe rejection, token expiry after bootstrap and query completion, hostile error secret redaction, identity failure honest reporting with zero fabricated UUIDs).
+- **Targeted Mobile Unit Tests**: **218 unit tests** across **17 testsuites** (`com.example.data.mobile.*`), 0 failures, 0 errors, 0 skipped.
+  - `StaffSessionCoordinatorTest`: 51 tests (multithreaded concurrency barriers, atomic compareAndPersist vs logout/newlogin, delayed remote logout vs newlogin, cancellation on remote logout leaving disk absent, concurrent restore invalidated by new generation, stale 401 hooks discarded, credential 401 without outbox queue hook, challenge races and one-time TTL validation, requestChallenge while ReadReady safe rejection, token expiry after bootstrap and query completion, hostile error secret redaction, identity failure honest reporting with zero fabricated UUIDs).
   - `SecureStaffSessionStoreTest`: 37 tests (AES-256-GCM envelope, AAD, installation identity, atomic replacement, bounds).
   - `ReadClient*` and `OkHttpTransport*`: 91 tests (origin isolation, method allowlisting, DTO parsing, loopback, timeout).
   - Contract & Decimal Foundations: 39 tests (exact arithmetic, JCS serialization, Crockford ULID, UUID, boundaries).
@@ -215,3 +215,13 @@ class AuthViewModel(private val coordinator: StaffSessionCoordinator) : ViewMode
 ### Hardware Keystore Verification Notice
 On-device Android Keystore hardware operations were not executed on physical hardware as no active emulator or device session was available via `device_list`. Hermetic test suites execute on JVM using an isolated test cryptographic engine (`JvmAesGcmCryptoEngine`).
 
+
+### Follow-up lifecycle boundaries
+
+A successful restore revalidates bootstrap and commits readiness without rewriting the stored ciphertext or resetting `createdAt`. Accepted login and restored tokens remain private revocation context even when bootstrap fails transiently.
+
+Logout denies reads and clears local credentials before resolving installation identity or dispatching remote revocation. Cancellation during identity lookup therefore cannot skip the purge. Cancellation of the purge itself propagates and leaves the coordinator locked; it never reports successful deletion.
+
+Identity access alone has no lifecycle state side effects. Bootstrap identity failures update state only while their generation owns the commit. An accepted 401 captures an immutable actor/company/device denial event under the lock, then calls the listener outside it. Delivery may overlap a later login, but the event always names the original denied scope, never a new session. Ordinary listener failures produce a fixed error while the coordinator remains locked; consumers must treat this as an unsuccessful queue notification.
+
+Additional regressions cover single-company/restore bootstrap failure followed by remote revocation, byte-exact restore preservation, identity-lookup cancellation after purge, cancellation of local purge, side-effect-free identity access, and a listener that waits for another thread to access coordinator state and then throws a hostile exception.

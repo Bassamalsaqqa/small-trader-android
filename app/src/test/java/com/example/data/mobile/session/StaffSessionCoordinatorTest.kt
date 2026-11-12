@@ -574,7 +574,11 @@ class StaffSessionCoordinatorTest {
         } catch (e: SessionStorageException) {
             assertTrue(e.error is SessionStorageError.Corrupt)
         }
+        assertEquals(StaffAuthState.LoggedOut, coordinator.authState)
+        assertTrue(coordinator.requestChallenge(appVersion) is CoordinatorResult.Error)
         assertTrue(coordinator.authState is StaffAuthState.StorageFailed)
+        assertEquals("corrupted bytes", identityFile.readText())
+        assertTrue(transport.requestsReceived.isEmpty())
     }
 
     @Test
@@ -1552,5 +1556,129 @@ class StaffSessionCoordinatorTest {
         assertEquals(StaffAuthState.LoggedOut, createdCoordinator.authState)
         assertNotNull(createdCoordinator.installationId)
     }
+    private fun loginReadyForDelta() {
+        coordinator.requestChallenge(appVersion)
+        assertTrue(coordinator.login("cashier@smalltrader.example", "password", "Test device") is CoordinatorResult.Success)
+    }
+
+    @Test
+    fun transientSingleCompanyBootstrapRetainsTokenForRevocation() {
+        transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = {
+            throw java.io.IOException("network")
+        }
+        coordinator.requestChallenge(appVersion)
+        coordinator.login("cashier@smalltrader.example", "password", "Test device")
+        assertTrue(coordinator.authState is StaffAuthState.TransientError)
+        val result = coordinator.logout() as LogoutResult.Success
+        assertEquals(RemoteRevocationStatus.Revoked, result.remoteRevocation)
+    }
+
+    @Test
+    fun transientRestoreBootstrapRetainsTokenForRevocation() {
+        loginReadyForDelta()
+        val restored = DefaultStaffSessionCoordinator(readClient, sessionStore, clock = testClock)
+        transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = {
+            throw java.io.IOException("network")
+        }
+        restored.restoreSession()
+        assertTrue(restored.authState is StaffAuthState.TransientError)
+        assertEquals(RemoteRevocationStatus.Revoked, (restored.logout() as LogoutResult.Success).remoteRevocation)
+    }
+
+    @Test
+    fun restorePreservesOriginalCiphertextAndCreationTime() {
+        loginReadyForDelta()
+        val original = sessionFile.readBytes()
+        val created = (coordinator.authState as StaffAuthState.ReadReady).session.createdAt
+        testClock.isoUtc = "2026-11-10T12:01:00Z"
+        testClock.epochMs += 60000
+        val restored = DefaultStaffSessionCoordinator(readClient, sessionStore, clock = testClock)
+        assertTrue(restored.restoreSession() is CoordinatorResult.Success)
+        assertEquals(created, (restored.authState as StaffAuthState.ReadReady).session.createdAt)
+        org.junit.Assert.assertArrayEquals(original, sessionFile.readBytes())
+    }
+
+    @Test
+    fun identityCancellationDuringLogoutHappensAfterCredentialPurge() {
+        loginReadyForDelta()
+        val cancellation = CancellationException("identity cancelled")
+        val cancellingStore = object : SecureStaffSessionStore by sessionStore {
+            override val installationId: ClientUuid get() = throw cancellation
+        }
+        val other = DefaultStaffSessionCoordinator(readClient, cancellingStore, clock = testClock)
+        try {
+            other.logout()
+            fail("Cancellation must propagate")
+        } catch (e: CancellationException) {
+            assertTrue(e === cancellation)
+        }
+        assertFalse(sessionFile.exists())
+        assertEquals(StaffAuthState.LoggedOut, other.authState)
+    }
+
+    @Test
+    fun standaloneIdentityFailureDoesNotMutateLifecycleState() {
+        loginReadyForDelta()
+        val ready = coordinator.authState
+        identityFile.writeText("{}")
+        try {
+            coordinator.installationId
+            fail("Corrupt identity must fail closed")
+        } catch (_: SessionStorageException) {
+            assertTrue(ready === coordinator.authState)
+        }
+    }
+
+    @Test
+    fun denialListenerRunsWithoutCoordinatorMonitorAndOrdinaryFailuresAreSanitized() {
+        loginReadyForDelta()
+        lateinit var other: DefaultStaffSessionCoordinator
+        var observedUnlocked = false
+        val pool = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val listener = object : AuthDenialListener {
+            override fun onAuthDenied(scope: AuthDenialScope) {
+                val result = pool.submit<Boolean> {
+                    other.isScopeActive(other.currentGeneration, scope.companyId)
+                }
+                assertFalse(result.get(2, TimeUnit.SECONDS))
+                observedUnlocked = true
+                throw IllegalStateException("private-token-secret")
+            }
+        }
+        other = DefaultStaffSessionCoordinator(readClient, sessionStore, listener, testClock)
+        assertTrue(other.restoreSession() is CoordinatorResult.Success)
+        transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/products")] = {
+            TransportResponse(401, body = """{"error":{"code":"UNAUTHENTICATED","message":"denied"}}""")
+        }
+        try {
+            val result = other.getProducts()
+            assertTrue(observedUnlocked)
+            assertTrue(other.authState is StaffAuthState.Locked)
+            assertTrue(result is CoordinatorResult.Error)
+            assertFalse(result.toString().contains("private-token-secret"))
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    @Test
+    fun localPurgeCancellationKeepsCoordinatorLocked() {
+        loginReadyForDelta()
+        val cancellingStore = object : SecureStaffSessionStore by sessionStore {
+            override fun clearSession() { throw CancellationException("purge cancelled") }
+        }
+        val other = DefaultStaffSessionCoordinator(readClient, cancellingStore, clock = testClock)
+        assertTrue(other.restoreSession() is CoordinatorResult.Success)
+        try {
+            other.logout()
+            fail("Cancellation must propagate")
+        } catch (_: CancellationException) {
+            assertTrue(other.authState is StaffAuthState.Locked)
+            assertTrue(sessionFile.exists())
+            assertTrue(other.requestChallenge() is CoordinatorResult.Error)
+            assertTrue(other.getProducts() is CoordinatorResult.Error)
+        }
+    }
+
 }
 

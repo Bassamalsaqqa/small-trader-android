@@ -194,17 +194,9 @@ class DefaultStaffSessionCoordinator(
         } catch (e: VirtualMachineError) {
             throw e
         } catch (e: SessionStorageException) {
-            synchronized(stateLock) {
-                _authState = StaffAuthState.StorageFailed("Inaccessible installation identity")
-            }
             throw e
-        } catch (e: Exception) {
-            synchronized(stateLock) {
-                _authState = StaffAuthState.StorageFailed("Failed to resolve installation identity")
-            }
-            throw SessionStorageException(
-                SessionStorageError.Corrupt("Corrupt or inaccessible installation identity")
-            )
+        } catch (_: Exception) {
+            throw SessionStorageException(SessionStorageError.IoError("Installation identity unreadable"))
         }
 
     override fun isScopeActive(generation: Long, companyId: ServerUlid): Boolean {
@@ -218,7 +210,8 @@ class DefaultStaffSessionCoordinator(
     private fun compareAndPersist(
         opGen: Long,
         record: StaffSessionRecord,
-        bootstrap: BootstrapResponse
+        bootstrap: BootstrapResponse,
+        persist: Boolean = true
     ): CoordinatorResult<StaffAuthState> {
         synchronized(stateLock) {
             if (opGen != generation.get()) {
@@ -237,7 +230,7 @@ class DefaultStaffSessionCoordinator(
             }
 
             try {
-                sessionStore.saveSession(record)
+                if (persist) sessionStore.saveSession(record)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: VirtualMachineError) {
@@ -269,7 +262,8 @@ class DefaultStaffSessionCoordinator(
         roleLabel: String?,
         actorName: String?,
         actorEmail: String?,
-        expiresAt: String
+        expiresAt: String,
+        restoredRecord: StaffSessionRecord? = null
     ): CoordinatorResult<StaffAuthState> {
         synchronized(stateLock) {
             if (opGen != generation.get()) {
@@ -292,6 +286,7 @@ class DefaultStaffSessionCoordinator(
                 }
 
                 val devId = synchronized(stateLock) {
+                    if (opGen != generation.get()) return CoordinatorResult.StaleOperation()
                     try {
                         installationId
                     } catch (e: CancellationException) {
@@ -304,7 +299,7 @@ class DefaultStaffSessionCoordinator(
                     }
                 }
 
-                val record = StaffSessionRecord(
+                val record = restoredRecord ?: StaffSessionRecord(
                     token = token,
                     actorUlid = actorUlid,
                     deviceUuid = devId,
@@ -317,19 +312,10 @@ class DefaultStaffSessionCoordinator(
                     createdAt = clock.nowIsoUtc()
                 )
 
-                compareAndPersist(opGen, record, bootstrap)
+                compareAndPersist(opGen, record, bootstrap, persist = restoredRecord == null)
             }
 
-            is ReadClientResult.Auth401 -> {
-                synchronized(stateLock) {
-                    if (opGen != generation.get()) {
-                        return CoordinatorResult.StaleOperation()
-                    }
-                    _authState = StaffAuthState.Locked(LockReason.AuthDenied())
-                    emitAuthDenial(companyId = companyId, actorId = actorUlid)
-                }
-                CoordinatorResult.AuthDenied()
-            }
+            is ReadClientResult.Auth401 -> handleTokenDenied(opGen, companyId, actorUlid)
 
             is ReadClientResult.Forbidden403 -> {
                 synchronized(stateLock) {
@@ -367,25 +353,32 @@ class DefaultStaffSessionCoordinator(
         }
     }
 
-    private fun emitAuthDenial(companyId: ServerUlid, actorId: ServerUlid) {
-        val devId = try {
-            sessionStore.installationId
+    private fun handleTokenDenied(
+        opGen: Long, companyId: ServerUlid, actorId: ServerUlid
+    ): CoordinatorResult<Nothing> {
+        val scope = synchronized(stateLock) {
+            if (opGen != generation.get()) return CoordinatorResult.StaleOperation()
+            _authState = StaffAuthState.Locked(LockReason.AuthDenied())
+            val deviceId = try {
+                sessionStore.installationId
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _authState = StaffAuthState.StorageFailed("Installation identity unreadable")
+                return CoordinatorResult.Error("Installation identity unreadable")
+            }
+            AuthDenialScope(companyId, actorId, deviceId, clock.nowIsoUtc())
+        }
+        // Deliver the immutable scope of the accepted denial outside the state monitor.
+        // A later login cannot change this event's actor/company/device identity.
+        try {
+            authDenialListener?.onAuthDenied(scope)
         } catch (e: CancellationException) {
             throw e
-        } catch (e: VirtualMachineError) {
-            throw e
         } catch (_: Exception) {
-            _authState = StaffAuthState.StorageFailed("Installation identity unreadable")
-            return
+            return CoordinatorResult.Error("Auth denial notification failed")
         }
-
-        val scope = AuthDenialScope(
-            companyId = companyId,
-            actorId = actorId,
-            deviceId = devId,
-            deniedAt = clock.nowIsoUtc()
-        )
-        authDenialListener?.onAuthDenied(scope)
+        return CoordinatorResult.AuthDenied()
     }
 
     override fun restoreSession(): CoordinatorResult<StaffAuthState> {
@@ -504,6 +497,10 @@ class DefaultStaffSessionCoordinator(
 
             is SessionReadResult.Success -> {
                 val record = readResult.session
+                synchronized(stateLock) {
+                    if (opGen != generation.get()) return CoordinatorResult.StaleOperation()
+                    activeTokenContext = record.token
+                }
                 val companyId = record.selectedCompanyId
                 if (companyId == null) {
                     synchronized(stateLock) {
@@ -552,7 +549,8 @@ class DefaultStaffSessionCoordinator(
                     roleLabel = record.roleLabel,
                     actorName = record.actorName,
                     actorEmail = record.actorEmail,
-                    expiresAt = record.expiresAt
+                    expiresAt = record.expiresAt,
+                    restoredRecord = record
                 )
             }
         }
@@ -733,6 +731,10 @@ class DefaultStaffSessionCoordinator(
                             return CoordinatorResult.Error("Received expired token on login")
                         }
 
+                        synchronized(stateLock) {
+                            if (opGen != generation.get()) return CoordinatorResult.StaleOperation()
+                            activeTokenContext = loginSuccess.token
+                        }
                         if (loginSuccess.companies.size > 1) {
                             synchronized(stateLock) {
                                 if (opGen == generation.get()) {
@@ -917,20 +919,8 @@ class DefaultStaffSessionCoordinator(
             activeChallenge = null
             pendingLoginSuccess = null
 
-            deviceId = try {
-                sessionStore.installationId
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: VirtualMachineError) {
-                throw e
-            } catch (_: Exception) {
-                null
-            }
-
-            if (deviceId == null) {
-                _authState = StaffAuthState.StorageFailed("Installation identity unreadable")
-            }
-
+            // Deny reads even if the local purge itself is cancelled or fails.
+            _authState = StaffAuthState.Locked(LockReason.StorageClearFailed(clearErrorReason))
             var failed = false
             try {
                 sessionStore.clearSession()
@@ -946,9 +936,25 @@ class DefaultStaffSessionCoordinator(
 
             if (clearFailed) {
                 _authState = StaffAuthState.Locked(LockReason.StorageClearFailed(clearErrorReason))
-            } else if (deviceId != null) {
+            } else {
                 _authState = StaffAuthState.LoggedOut
             }
+
+            deviceId = try {
+                sessionStore.installationId
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+
+            if (deviceId == null && !clearFailed) {
+                _authState = StaffAuthState.StorageFailed("Installation identity unreadable")
+            }
+
+
         }
 
         var remoteStatus = RemoteRevocationStatus.NotAttempted
@@ -1021,6 +1027,10 @@ class DefaultStaffSessionCoordinator(
             ReadClientResult.NetworkUnknown(category = networkCategory)
         }
 
+        if (result is ReadClientResult.Auth401) {
+            return handleTokenDenied(opGen, companyId, actorUlid)
+        }
+
         synchronized(stateLock) {
             if (opGen != generation.get()) {
                 return CoordinatorResult.StaleOperation()
@@ -1044,7 +1054,6 @@ class DefaultStaffSessionCoordinator(
 
                 is ReadClientResult.Auth401 -> {
                     _authState = StaffAuthState.Locked(LockReason.AuthDenied())
-                    emitAuthDenial(companyId = companyId, actorId = actorUlid)
                     CoordinatorResult.AuthDenied()
                 }
 
