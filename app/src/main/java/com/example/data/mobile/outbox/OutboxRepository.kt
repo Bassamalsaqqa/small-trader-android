@@ -132,6 +132,47 @@ interface OutboxRepository {
     ): Boolean
 
     /**
+     * Marks an in-flight claimed record as CONFLICT following a 409 business conflict
+     * or non-submittable legacy version.
+     * Requires active lease, matching claim token, and matching tenant/actor/device scope.
+     * Never demotes a CONFIRMED record and never modifies an unowned or expired claim.
+     */
+    fun markClaimConflict(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        clientEventId: ClientUuid,
+        claimToken: String,
+        reason: String
+    ): Boolean
+
+    /**
+     * Marks an in-flight claimed record as CONFLICT using a raw string clientEventId.
+     * Narrow, scope-guarded and claim-token-guarded park method that prevents poison pill loops
+     * for malformed stored records that cannot be parsed into typed ClientUuid.
+     */
+    fun parkClaimConflict(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        rawClientEventId: String,
+        claimToken: String,
+        reason: String
+    ): Boolean
+
+    /**
+     * Releases all uncompleted in-flight records claimed by [claimToken] back to pending.
+     * Narrow CAS scope + claim token check ensures no confirmed, conflict, auth_blocked,
+     * or reclaimed records are touched.
+     */
+    fun releaseClaimedBatch(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        claimToken: String
+    ): Int
+
+    /**
      * Confirms delivery strictly upon verified server acknowledgement via worker claim.
      *
      * Invariants:
@@ -702,6 +743,81 @@ class OutboxRepositoryImpl(
         }
     }
 
+    override fun parkClaimConflict(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        rawClientEventId: String,
+        claimToken: String,
+        reason: String
+    ): Boolean {
+        require(claimToken.isNotBlank()) { "claimToken must not be blank" }
+        require(rawClientEventId.isNotBlank()) { "rawClientEventId must not be blank" }
+        val now = clock()
+        return database.runInTransaction<Boolean> {
+            val state = database.outboxDao().getDeliveryState(companyId.value, rawClientEventId)
+                ?: return@runInTransaction false
+
+            if (state.companyId != companyId.value || state.actorId != actorId.value || state.deviceId != deviceId.value) {
+                return@runInTransaction false
+            }
+            if (state.status != OutboxStatus.IN_FLIGHT.wireValue || state.claimToken != claimToken) {
+                return@runInTransaction false
+            }
+            if (state.claimExpiresAt != null && state.claimExpiresAt < now) {
+                return@runInTransaction false
+            }
+
+            val updated = database.outboxDao().markClaimConflict(
+                clientEventId = rawClientEventId,
+                companyId = companyId.value,
+                actorId = actorId.value,
+                deviceId = deviceId.value,
+                claimToken = claimToken,
+                reason = reason,
+                nowMillis = now
+            )
+            updated == 1
+        }
+    }
+
+    override fun markClaimConflict(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        clientEventId: ClientUuid,
+        claimToken: String,
+        reason: String
+    ): Boolean {
+        return parkClaimConflict(
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            rawClientEventId = clientEventId.value,
+            claimToken = claimToken,
+            reason = reason
+        )
+    }
+
+    override fun releaseClaimedBatch(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        claimToken: String
+    ): Int {
+        if (claimToken.isBlank()) return 0
+        val now = clock()
+        return database.runInTransaction<Int> {
+            database.outboxDao().releaseClaimedBatch(
+                companyId = companyId.value,
+                actorId = actorId.value,
+                deviceId = deviceId.value,
+                claimToken = claimToken,
+                nowMillis = now
+            )
+        }
+    }
+
     override fun confirmDelivery(
         companyId: ServerUlid,
         actorId: ServerUlid,
@@ -716,6 +832,7 @@ class OutboxRepositoryImpl(
         require(claimToken.isNotBlank()) { "claimToken must not be blank for worker delivery confirmation" }
         require(ServerUlid.isValid(invoiceUlid.value)) { "Invalid invoice ULID: '${invoiceUlid.value}'" }
         require(ServerUlid.isValid(paymentUlid.value)) { "Invalid payment ULID: '${paymentUlid.value}'" }
+        com.example.data.mobile.contract.Rfc3339Validator.requireValid(serverAcknowledgedAt, "serverAcknowledgedAt")
 
         val now = clock()
 
@@ -815,6 +932,7 @@ class OutboxRepositoryImpl(
     ): Boolean {
         require(ServerUlid.isValid(invoiceUlid.value)) { "Invalid invoice ULID: '${invoiceUlid.value}'" }
         require(ServerUlid.isValid(paymentUlid.value)) { "Invalid payment ULID: '${paymentUlid.value}'" }
+        com.example.data.mobile.contract.Rfc3339Validator.requireValid(serverAcknowledgedAt, "serverAcknowledgedAt")
 
         val now = clock()
 
