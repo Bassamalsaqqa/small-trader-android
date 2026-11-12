@@ -766,7 +766,9 @@ class StaffWorkspaceViewModel(
                     }
                 }
                 is CoordinatorResult.Error -> {
+                    checkAndHandleAuthDenied(result.message)
                     _uiState.update {
+                        if (it.phase == StaffWorkspacePhase.LOCKED) return@update it
                         it.copy(isSubmitting = false, errorMessage = if (it.language == AppLanguage.AR) "تعذر اختيار المنشأة" else "Could not complete the request. Try again")
                     }
                 }
@@ -856,7 +858,9 @@ class StaffWorkspaceViewModel(
                     }
                 }
                 is CoordinatorResult.Error -> {
+                    checkAndHandleAuthDenied(result.message)
                     _uiState.update {
+                        if (it.phase == StaffWorkspacePhase.LOCKED) return@update it
                         it.copy(isSubmitting = false, errorMessage = if (it.language == AppLanguage.AR) "تعذر تبديل المنشأة" else "Could not complete the request. Try again")
                     }
                 }
