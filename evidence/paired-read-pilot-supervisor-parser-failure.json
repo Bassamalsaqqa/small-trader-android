@@ -1,0 +1,17 @@
+{
+  "runId": "9aed15b8-bc89-44e1-b6e8-b41d27de62bd",
+  "timestamp": "2026-11-12T20:10:03Z",
+  "backendHead": "UNKNOWN",
+  "manifestDigest": "e8e3fe672a8f7aceb3152c3dd990b4fb137fa517b24038e468659e0fdf5a87a7",
+  "baseUrl": "https://unknown.staging",
+  "overallStatus": "FAIL",
+  "scenarios": [
+    {
+      "name": "pilot_execution_error",
+      "status": "FAIL",
+      "httpStatusCode": null,
+      "latencyMs": 0,
+      "details": "Execution failed: IllegalArgumentException - Invalid type for key 'taxRate': expected string, got StrictJsonNull"
+    }
+  ]
+}

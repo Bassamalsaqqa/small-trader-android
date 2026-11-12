@@ -123,7 +123,7 @@ SMALL_TRADER_EXPECTED_BACKEND_SHA="e111f83bc740e9590142869b30428eaa220eab6f" \
   --tests "com.example.data.mobile.readclient.pilot.SmallTraderReadPilotSmokeTest"
 ```
 
-### Combined Verification Command (Harness + 393 Focused Tests)
+### Combined Verification Command (Candidate + Pilot Harness)
 ```bash
 JAVA_HOME=/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9 \
 ANDROID_HOME=/home/t3dev/Android/Sdk \
@@ -158,7 +158,7 @@ The backend migrations on the disposable Laravel instance run in strict sequence
 ## 6. Authoritative Follow-on PR Ordering
 
 1. **Step 1: Read Pilot Independent Proof (COMPLETED & VERIFIED)**
-   - Paired HTTPS read pilot executed against disposable Laravel staging with zero leaks, verified 401/403/409 denials, and sanitized evidence at `evidence/paired-read-pilot-evidence.json`.
+   - Paired HTTPS read pilot executed against disposable Laravel staging with zero leaks, verified 401/403 denials, and sanitized evidence at `evidence/paired-read-pilot-evidence.json`.
 2. **Step 2: Canonical V2 Online Cash & Receipt Atomicity (Next)**
    - Implement `online_cash_full` exact payment allocation (`tender == total`), authoritative grants, real writers, server status verification, and receipt atomicity.
 3. **Step 3: Outbox Payload Encryption & Backup Exclusions (Before Capture)**
@@ -181,6 +181,35 @@ The backend migrations on the disposable Laravel instance run in strict sequence
 > [!IMPORTANT]
 > The following explicit scope boundaries are recorded to prevent overclaiming:
 > 1. **Revocation Scope Limit**: Verifies `revoked_device_id` on login rejects with HTTP 401 (login refusal for revoked device), and verifies logout invalidates the active session token; it does NOT claim server-side issued token revocation via password epoch or global token blacklisting across devices without logout.
-> 2. **Tenant Scope Zero-Oracle**: Foreign company ID (`01M78KCP5EGVM4QVRHMT8WYF81`) returns HTTP 403 Forbidden; this is a real existing company fixture, proving tenant authorization denial without leaking company existence/oracle.
+> 2. **Tenant Authorization Boundary**: Foreign company ID (`01M78KCP5EGVM4QVRHMT8WYF81`) returns HTTP 403 Forbidden; this is a real existing company fixture, proving tenant authorization denial. Nonexistent-company status and existence-oracle behavior were not tested.
 > 3. **V2 Financial Boundary (Backend Supervisor Owned)**: Android V1 read client strictly stays within V1 routes (`/api/mobile/v1/...`). The V2 financial route is outside the V1 allowlist. Android makes NO wire claims for V2. The backend supervisor owns the actual HTTPS default-OFF 404 and container DenyFinancialExecutionAdapter evidence.
 > 4. **Device & Hardware Scope Limits**: NO device hardware, Keystore hardware-backed keys, biometric authentication, physical barcode scanner, or Bluetooth printer claims are made (verified in JVM unit environment without emulator).
+
+
+## Supervisor qualification delta
+
+The original `18639cf7` wire run establishes HTTPS authentication/read lifecycle, pagination counts, and TLS denial. Its decimal regex did not prove fixture price equality; the follow-up requires exact product IDs/order/SKUs, six-decimal price strings, nullable tax pairs, and customer IDs/order from independent expectations. A null/null catalog tax pair is unassigned, not an explicit NoTax choice.
+
+Independent expectations were supplied from a read-only query against the owned disposable MariaDB fixture schema, cross-checked with tracked seed literals, never from captured HTTP responses. Artifact SHA-256: `d02e666653937ec9dff6dc3edb1af8e25fcc47bbe0a9f2028bb7645b2e1ad3c7`. Backend pin: `e111f83bc740e9590142869b30428eaa220eab6f`. Both revision pins are mandatory; scalar manifest fallback is rejected, and file/parser entry points require an independent backend SHA by default. The original private handoff remains intact; a separate private derived runner input adds the independently supplied expectations.
+
+This is JVM execution of the production client and transport against disposable HTTPS Laravel. It does not establish Compose device acceptance, hardware Keystore behavior, financial posting, or durable offline synchronization readiness.
+
+
+Supervisor execution completed at `2026-11-12T20:11:26Z`: 19 parser tests plus the configured HTTPS smoke test passed (20 total, zero failures/errors/skips). All 13 V1 scenarios passed; V2 remains explicitly NOT_RUN in this harness. Product fixtures matched `25.000000`, `40.000000`, and `5.500000` without numeric conversion, alongside exact IDs/order/SKUs and null/null tax associations. Customer IDs/order matched independent expectations. The earlier pre-network explicit-null parser failure is preserved separately in `evidence/paired-read-pilot-supervisor-parser-failure.json`; the successful rerun is `evidence/paired-read-pilot-evidence.json`. Backend supervisor received completion acknowledgment before owned staging cleanup. No further network execution is required for source review.
+
+
+Backend completion acknowledgment was honored: owned PHP/Caddy processes were stopped with PID/start-time checks, and only the nonce-verified disposable schema was dropped. The original handoff, independent fixture expectations, derived input, and private credentials were retained under existing permissions. That retired instance is not a target for later reruns; any future paired execution needs a newly verified handoff.
+
+
+## Minimal follow-on PR proposals (activation remains held)
+
+| Slice | Smallest implementation | Required acceptance before activation |
+| --- | --- | --- |
+| Android encrypted outbox + backup exclusions | Encrypt economic event payloads with authenticated scope/event/version binding; explicitly exclude database/session/installation artifacts from cloud and device-transfer backup. Preserve existing queued bytes and identity during conversion and key failure. | Tamper, missing/invalid key, interrupted conversion, reopen, upgrade, and backup-rule checks; no plaintext fallback or silent queue deletion. Hardware Keystore and device upgrade proof remain blocked pending an approved device host. |
+| Laravel canonical V2 online cash | Close PR #94 lock-order, scope/error, typed-value, context, and test-analysis findings, then add a disabled-by-default adapter/route using real membership/financial grants and existing financial/inventory actions. | Atomic root receipt/posting/status transaction, cross-version company/event uniqueness, real MariaDB absence-row races/rollback and lost-ACK reconciliation, exact authoritative currency and payment allocation. Bearer identity alone grants no financial authority. |
+| Android authenticated V2 gateway | Connect the existing status-before-submit coordinator to the independently qualified canonical backend, retaining original encrypted event identity and bytes. | Paired lost-ACK/replay, revoked membership/device, stock/FEFO conflict, and receipt matching tests. Offline stock conflicts require explicit reconciliation; provisional receipts must remain visibly provisional until server confirmation. |
+| Auth-blocked resolution and scheduling | Define reviewed same-scope reauthentication/manager reconciliation, then add bounded WorkManager execution after gateway semantics are proven. | Cash already taken and queued events survive denial; login alone never unlocks queues; no blind retry of conflicts or duplicate financial writer. |
+
+Owner approval is still required for financial activation/deployment/main merge, offline business and stock-conflict policy, and canonical receipt retention policy. These proposals authorize no live posting. The existing Android UX must be preserved through implementation; on-device geometry, Arabic/RTL interaction, instrumentation, and hardware-backed Keystore acceptance remain BLOCKED/UNVERIFIED under the current host constraint. PR #88's O(n) catalog hash snapshot scan also remains an explicit performance gate.
+
+Offline supervisor regression: 413 tests across 39 classes, 412 passed, zero failures/errors, one explicit unconfigured-pilot skip. Both normal and optimized contract validators passed 303 checks each. `lintDebug` completed with 0 errors and 63 baseline warnings. Counts are recorded separately from the configured 20-test live/parser run.

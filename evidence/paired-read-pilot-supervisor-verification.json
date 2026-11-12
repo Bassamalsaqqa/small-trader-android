@@ -1,0 +1,34 @@
+{
+  "backendCommitSha": "e111f83bc740e9590142869b30428eaa220eab6f",
+  "pairedTimestamp": "2026-11-12T20:11:26Z",
+  "pairedTests": {
+    "parser": 19,
+    "liveSmoke": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "readScenariosPassed": 13,
+  "v2FinancialBoundary": "NOT_RUN",
+  "independentFixtureSha256": "d02e666653937ec9dff6dc3edb1af8e25fcc47bbe0a9f2028bb7645b2e1ad3c7",
+  "pairedEvidenceSha256": "d096986f2b5dbc356337b82f4dade8a18aab2e980b9f0c53e792103962c8a930",
+  "proofScope": "Supervisor observed JUnit results and real HTTPS execution; no device, financial, MFA, or existence-oracle acceptance",
+  "stagingState": "STOPPED_SCHEMA_DROPPED_PRIVATE_ARTIFACTS_RETAINED",
+  "offlineFocusedSuite": {
+    "classes": 39,
+    "tests": 413,
+    "passed": 412,
+    "skipped": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipReason": "Opt-in pilot has no configured handoff in offline regression run"
+  },
+  "contractChecks": {
+    "normal": 303,
+    "optimized": 303
+  },
+  "lint": {
+    "Error": 0,
+    "Warning": 63
+  }
+}

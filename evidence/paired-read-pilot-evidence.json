@@ -1,6 +1,6 @@
 {
-  "runId": "d324b68c-002f-4b2a-9613-408d3c0317bb",
-  "timestamp": "2026-11-12T19:51:10Z",
+  "runId": "6b1ec9b6-b34b-47de-beff-2762849e5c94",
+  "timestamp": "2026-11-12T20:11:26Z",
   "backendHead": "e111f83bc740e9590142869b30428eaa220eab6f",
   "manifestDigest": "e8e3fe672a8f7aceb3152c3dd990b4fb137fa517b24038e468659e0fdf5a87a7",
   "baseUrl": "https://127.0.0.1:18400",
@@ -11,91 +11,91 @@
       "name": "auth_challenge",
       "status": "PASS",
       "httpStatusCode": 200,
-      "latencyMs": 502,
-      "details": "Challenge acquired nonce, expiresAt=2026-11-12T19:56:09Z"
+      "latencyMs": 3441,
+      "details": "Challenge acquired nonce, expiresAt=2026-11-12T20:16:24Z"
     },
     {
       "name": "auth_login",
       "status": "PASS",
       "httpStatusCode": 200,
-      "latencyMs": 333,
+      "latencyMs": 451,
       "details": "Authenticated staff actor=01M78KCPG62SVPJX5CMRKR3ZGH, companies=1"
     },
     {
       "name": "reused_challenge_denial",
       "status": "PASS",
       "httpStatusCode": 401,
-      "latencyMs": 31,
+      "latencyMs": 19,
       "details": "Reused challenge strictly rejected with Auth401"
     },
     {
       "name": "bootstrap",
       "status": "PASS",
       "httpStatusCode": 200,
-      "latencyMs": 137,
-      "details": "Bootstrap loaded: company=شركة الأمل للتجزئة, currency=ILS, snapshot=b1dca88a4a294c256cdfab2bde3d44782869ebc174a6ad25df0f2d0cb75f7983"
+      "latencyMs": 296,
+      "details": "Bootstrap loaded: currency=ILS, snapshot=b1dca88a4a294c256cdfab2bde3d44782869ebc174a6ad25df0f2d0cb75f7983"
     },
     {
       "name": "product_pagination",
       "status": "PASS",
       "httpStatusCode": 200,
-      "latencyMs": 190,
-      "details": "Deterministic 2+1 pagination verified: 2 pages, 3 unique products, snapshot consistent, decimal precision validated"
+      "latencyMs": 219,
+      "details": "Deterministic 2+1 pagination verified: 2 pages, 3 unique products, snapshot consistent, exact fixture IDs and price/tax lexemes matched"
     },
     {
       "name": "customer_pagination",
       "status": "PASS",
       "httpStatusCode": 200,
-      "latencyMs": 156,
-      "details": "Deterministic 2+1 pagination verified: 2 pages, 3 unique customers"
+      "latencyMs": 158,
+      "details": "Deterministic 2+1 pagination verified: 2 pages, 3 unique customers matching independent fixture IDs"
     },
     {
       "name": "empty_results_search",
       "status": "PASS",
       "httpStatusCode": 200,
-      "latencyMs": 84,
+      "latencyMs": 96,
       "details": "Empty search with NONEXISTENT_NONCE_7392 correctly returned 0 items"
     },
     {
       "name": "wrong_company_denial",
       "status": "PASS",
       "httpStatusCode": 403,
-      "latencyMs": 19,
-      "details": "Foreign tenant access strictly denied with Forbidden403 (real foreign company fixture, zero existence oracle)"
+      "latencyMs": 18,
+      "details": "Foreign tenant access strictly denied with Forbidden403 (real foreign company fixture, tenant boundary verified; nonexistent-company oracle behavior not tested)"
     },
     {
       "name": "revoked_device_login_denial",
       "status": "PASS",
       "httpStatusCode": 401,
-      "latencyMs": 286,
+      "latencyMs": 280,
       "details": "Revoked device login rejected with Auth401 (scope limit: login refusal, not issued token revocation without logout)"
     },
     {
       "name": "logout",
       "status": "PASS",
       "httpStatusCode": 200,
-      "latencyMs": 27,
+      "latencyMs": 25,
       "details": "Session token revoked on server"
     },
     {
       "name": "revoked_token_401",
       "status": "PASS",
       "httpStatusCode": 401,
-      "latencyMs": 14,
+      "latencyMs": 17,
       "details": "Revoked token rejected with HTTP 401 Auth401"
     },
     {
       "name": "tls_hostname_verification",
       "status": "PASS",
       "httpStatusCode": null,
-      "latencyMs": 29,
+      "latencyMs": 31,
       "details": "Wrong hostname rejected by transport TLS validator (CATEGORY_TLS_ERROR)"
     },
     {
       "name": "tls_untrusted_cert_verification",
       "status": "PASS",
       "httpStatusCode": null,
-      "latencyMs": 16,
+      "latencyMs": 14,
       "details": "Untrusted certificate rejected by transport TLS validator (CATEGORY_TLS_ERROR)"
     },
     {

@@ -93,6 +93,7 @@ class ReadPilotHandoffConfigTest {
             "mobile.enabled": true,
             "mobile.v2_enabled": false
           },
+          "expectedProducts": [{"id":"01JCV8X9M2NQW3TYZ4R5S6789C","sku":"TEST-SKU","exactUnitPrice":"25.000000","taxRate":null,"taxRateId":null}],
           "fixtures": {
             "company_a": {
               "public_id": "01JCV8X9M2NQW3TYZ4R5S6789A",
@@ -115,6 +116,39 @@ class ReadPilotHandoffConfigTest {
 
         val handoffFile = createPrivateFile(tempDir, "handoff.json", handoffContent)
         return Pair(handoffFile, credFile)
+    }
+
+    @Test
+    fun scalarManifestCannotBypassPrimaryRevisionPin() {
+        val dir = Files.createTempDirectory("pilot-dual-pin-").toFile()
+        try {
+            val (handoff, _) = createValidFixture(dir)
+            val scalar = handoff.readText().replace(
+                Regex(""""manifestDigest":\s*\{[^}]+\}"""),
+                "\"manifestDigest\":\"${ReadPilotHandoffConfig.EXPECTED_CANDIDATE_REV3}\""
+            )
+            handoff.writeText(scalar)
+            try {
+                ReadPilotHandoffConfig.fromFile(handoff, expectedBackendSha = "7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb")
+                fail("Scalar manifest must fail closed")
+            } catch (expected: IllegalArgumentException) {
+                assertTrue(expected.message!!.contains("dual-pin object"))
+            }
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun independentShaIsRequiredWithoutOptInParameter() {
+        val dir = Files.createTempDirectory("pilot-independent-pin-").toFile()
+        try {
+            val (handoff, _) = createValidFixture(dir)
+            try {
+                ReadPilotHandoffConfig.fromFile(handoff, expectedBackendSha = null)
+                fail("Missing independent SHA must fail closed by default")
+            } catch (expected: IllegalArgumentException) {
+                assertTrue(expected.message!!.contains("Independent expected backend SHA is required"))
+            }
+        } finally { dir.deleteRecursively() }
     }
 
     @Test
@@ -143,6 +177,9 @@ class ReadPilotHandoffConfigTest {
             assertEquals("01JCV8X9M2NQW3TYZ4R5S6789B", config.invalidCompanyId.value)
             assertEquals("00000000-0000-4000-8000-000000000002", config.revokedDeviceId?.value)
             assertEquals("ILS", config.baseCurrency)
+            assertEquals("25.000000", config.expectedProducts.single().exactUnitPrice)
+            assertNull(config.expectedProducts.single().taxRate)
+            assertNull(config.expectedProducts.single().taxRateId)
             assertEquals(4, config.expectedMigrations.size)
             assertFalse(config.resolvedFlags["financial_v2_active"]!!)
             assertFalse(config.resolvedFlags["offline_capture_active"]!!)
@@ -210,7 +247,7 @@ class ReadPilotHandoffConfigTest {
             )
             val root = StrictJsonParser.parse(tampered).asObject()
             try {
-                ReadPilotHandoffConfig.fromJsonObject(root, tempDir)
+                ReadPilotHandoffConfig.fromJsonObject(root, tempDir, expectedBackendSha = "7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb")
                 fail("Expected IllegalArgumentException on tampered primaryPinRev2")
             } catch (e: IllegalArgumentException) {
                 assertTrue(e.message?.contains("Manifest primaryPinRev2 mismatch") == true)
@@ -227,7 +264,7 @@ class ReadPilotHandoffConfigTest {
         tempDir.mkdirs()
         try {
             val (handoffFile, _) = createValidFixture(tempDir)
-            val config = ReadPilotHandoffConfig.fromFile(handoffFile)
+            val config = ReadPilotHandoffConfig.fromFile(handoffFile, expectedBackendSha = "7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb")
             val str = config.toString()
 
             assertFalse("toString must not leak password", str.contains("SuperSecretPassword123!"))
@@ -252,7 +289,7 @@ class ReadPilotHandoffConfigTest {
             }
             """.trimIndent()
             val root = StrictJsonParser.parse(raw).asObject()
-            ReadPilotHandoffConfig.fromJsonObject(root)
+            ReadPilotHandoffConfig.fromJsonObject(root, expectedBackendSha = "7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb")
             fail("Expected IllegalArgumentException on inline password")
         } catch (e: IllegalArgumentException) {
             assertTrue(e.message?.contains("inline credentials") == true || e.message?.contains("forbidden") == true)
@@ -274,7 +311,7 @@ class ReadPilotHandoffConfigTest {
             }
             """.trimIndent()
             val root = StrictJsonParser.parse(raw).asObject()
-            ReadPilotHandoffConfig.fromJsonObject(root)
+            ReadPilotHandoffConfig.fromJsonObject(root, expectedBackendSha = "7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb")
             fail("Expected IllegalArgumentException on unknown key")
         } catch (e: IllegalArgumentException) {
             assertTrue(e.message?.contains("Unknown key(s)") == true)
@@ -295,7 +332,7 @@ class ReadPilotHandoffConfigTest {
                 ""
             )
             val root = StrictJsonParser.parse(modifiedJson).asObject()
-            ReadPilotHandoffConfig.fromJsonObject(root, tempDir)
+            ReadPilotHandoffConfig.fromJsonObject(root, tempDir, expectedBackendSha = "7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb")
             fail("Expected IllegalArgumentException on missing manifestDigest")
         } catch (e: IllegalArgumentException) {
             assertTrue(e.message?.contains("Missing required key 'manifestDigest'") == true)
@@ -317,7 +354,7 @@ class ReadPilotHandoffConfigTest {
                 "\"ttlExpiresAt\": \"$pastTtl\""
             )
             val root = StrictJsonParser.parse(expired).asObject()
-            ReadPilotHandoffConfig.fromJsonObject(root, tempDir)
+            ReadPilotHandoffConfig.fromJsonObject(root, tempDir, expectedBackendSha = "7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb")
             fail("Expected IllegalArgumentException on expired TTL")
         } catch (e: IllegalArgumentException) {
             assertTrue(e.message?.contains("TTL expired") == true)
@@ -338,7 +375,7 @@ class ReadPilotHandoffConfigTest {
                 "\"financial_v2_active\": true"
             )
             val root = StrictJsonParser.parse(activatedJson).asObject()
-            ReadPilotHandoffConfig.fromJsonObject(root, tempDir)
+            ReadPilotHandoffConfig.fromJsonObject(root, tempDir, expectedBackendSha = "7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb")
             fail("Expected IllegalArgumentException when financial_v2_active is true")
         } catch (e: IllegalArgumentException) {
             assertTrue(e.message?.contains("financial_v2_active must be explicitly false") == true)
@@ -359,7 +396,7 @@ class ReadPilotHandoffConfigTest {
                 "\"mobileV2\": true"
             )
             val root = StrictJsonParser.parse(activatedJson).asObject()
-            ReadPilotHandoffConfig.fromJsonObject(root, tempDir)
+            ReadPilotHandoffConfig.fromJsonObject(root, tempDir, expectedBackendSha = "7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb")
             fail("Expected IllegalArgumentException when mobileV2 is true")
         } catch (e: IllegalArgumentException) {
             assertTrue(e.message?.contains("mobileV2 must be false") == true)

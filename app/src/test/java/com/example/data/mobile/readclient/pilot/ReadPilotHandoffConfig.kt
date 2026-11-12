@@ -4,6 +4,7 @@ import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.StrictJsonArray
 import com.example.data.mobile.contract.StrictJsonBoolean
+import com.example.data.mobile.contract.StrictJsonNull
 import com.example.data.mobile.contract.StrictJsonObject
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.contract.StrictJsonString
@@ -25,7 +26,9 @@ import java.util.Locale
 data class ExpectedProductFixture(
     val id: String,
     val exactUnitPrice: String,
-    val taxRate: String? = null
+    val taxRate: String? = null,
+    val taxRateId: String? = null,
+    val sku: String? = null
 )
 
 /**
@@ -48,7 +51,7 @@ data class ManifestDigests(
  * - Strict JSON key allowlisting: any unknown key in handoff or credentials JSON fails closed.
  * - Type enforcement: strict JSON types enforced (no lenient type coercion).
  * - Origin validation: strict HTTPS absolute origin with no path, query, fragment, or userinfo.
- * - Independent pinning: backendCommitSha validated against independently expected lead SHA when configured.
+ * - Independent pinning: file/parser entry points require an independently expected lead backend SHA by default.
  * - TTL validation: strict future ISO-8601 UTC timestamp check.
  * - Dual-OFF flags: financial_v2_active and offline_capture_active must both be false.
  */
@@ -56,7 +59,7 @@ data class ReadPilotHandoffConfig(
     val baseUrl: String,
     val backendCommitSha: String,
     val manifestDigest: String,
-    val manifestDigests: ManifestDigests? = null,
+    val manifestDigests: ManifestDigests,
     val staffEmail: String,
     val staffPassword: String,
     val deviceId: ClientUuid,
@@ -100,26 +103,20 @@ data class ReadPilotHandoffConfig(
             }
         }
 
-        if (manifestDigests != null) {
-            require(HEX_64_REGEX.matches(manifestDigests.candidateRev3)) {
-                "candidateRev3 must be a 64-character hex SHA-256, got '${manifestDigests.candidateRev3}'"
-            }
-            require(HEX_64_REGEX.matches(manifestDigests.primaryPinRev2)) {
-                "primaryPinRev2 must be a 64-character hex SHA-256, got '${manifestDigests.primaryPinRev2}'"
-            }
-            require(manifestDigests.candidateRev3.equals(EXPECTED_CANDIDATE_REV3, ignoreCase = true)) {
-                "Manifest candidateRev3 mismatch: expected $EXPECTED_CANDIDATE_REV3, got ${manifestDigests.candidateRev3}"
-            }
-            require(manifestDigests.primaryPinRev2.equals(EXPECTED_PRIMARY_PIN_REV2, ignoreCase = true)) {
-                "Manifest primaryPinRev2 mismatch: expected $EXPECTED_PRIMARY_PIN_REV2, got ${manifestDigests.primaryPinRev2}"
-            }
-            require(manifestDigest.equals(EXPECTED_CANDIDATE_REV3, ignoreCase = true)) {
-                "Manifest digest mismatch: expected $EXPECTED_CANDIDATE_REV3, got $manifestDigest"
-            }
-        } else {
-            require(manifestDigest.equals(FROZEN_MANIFEST_DIGEST, ignoreCase = true)) {
-                "Manifest digest mismatch: expected $FROZEN_MANIFEST_DIGEST, got $manifestDigest"
-            }
+        require(HEX_64_REGEX.matches(manifestDigests.candidateRev3)) {
+            "candidateRev3 must be a 64-character hex SHA-256, got '${manifestDigests.candidateRev3}'"
+        }
+        require(HEX_64_REGEX.matches(manifestDigests.primaryPinRev2)) {
+            "primaryPinRev2 must be a 64-character hex SHA-256, got '${manifestDigests.primaryPinRev2}'"
+        }
+        require(manifestDigests.candidateRev3.equals(EXPECTED_CANDIDATE_REV3, ignoreCase = true)) {
+            "Manifest candidateRev3 mismatch: expected $EXPECTED_CANDIDATE_REV3, got ${manifestDigests.candidateRev3}"
+        }
+        require(manifestDigests.primaryPinRev2.equals(EXPECTED_PRIMARY_PIN_REV2, ignoreCase = true)) {
+            "Manifest primaryPinRev2 mismatch: expected $EXPECTED_PRIMARY_PIN_REV2, got ${manifestDigests.primaryPinRev2}"
+        }
+        require(manifestDigest.equals(EXPECTED_CANDIDATE_REV3, ignoreCase = true)) {
+            "Manifest digest mismatch: expected $EXPECTED_CANDIDATE_REV3, got $manifestDigest"
         }
 
         require(staffEmail.isNotBlank()) { "staffEmail must not be blank" }
@@ -464,7 +461,7 @@ data class ReadPilotHandoffConfig(
 
         fun fromEnvironment(
             expectedBackendSha: String? = System.getenv(ENV_EXPECTED_BACKEND_SHA)?.trim(),
-            requireIndependentSha: Boolean = false
+            requireIndependentSha: Boolean = true
         ): ReadPilotHandoffConfig? {
             val path = System.getenv(ENV_HANDOFF_PATH)?.trim()
             if (path.isNullOrEmpty()) {
@@ -484,7 +481,7 @@ data class ReadPilotHandoffConfig(
         fun fromFile(
             file: File,
             expectedBackendSha: String? = System.getenv(ENV_EXPECTED_BACKEND_SHA)?.trim(),
-            requireIndependentSha: Boolean = false
+            requireIndependentSha: Boolean = true
         ): ReadPilotHandoffConfig {
             val rawJson = readBoundedUtf8(file, enforceStrictFilePermissions = false)
             val root = StrictJsonParser.parse(rawJson).asObject()
@@ -500,7 +497,7 @@ data class ReadPilotHandoffConfig(
             root: StrictJsonObject,
             baseDirectory: File = File("."),
             expectedBackendSha: String? = null,
-            requireIndependentSha: Boolean = false
+            requireIndependentSha: Boolean = true
         ): ReadPilotHandoffConfig {
             if (requireIndependentSha) {
                 require(!expectedBackendSha.isNullOrBlank()) {
@@ -529,7 +526,7 @@ data class ReadPilotHandoffConfig(
 
             val manifestElement = root["manifestDigest"] ?: throw IllegalArgumentException("Missing required key 'manifestDigest'")
             val manifestDigestStr: String
-            val manifestDigestsObj: ManifestDigests?
+            val manifestDigestsObj: ManifestDigests
             when (manifestElement) {
                 is StrictJsonObject -> {
                     val unknownManifestKeys = manifestElement.properties.keys - setOf("candidateRev3", "primaryPinRev2")
@@ -549,12 +546,8 @@ data class ReadPilotHandoffConfig(
                     manifestDigestStr = cand
                     manifestDigestsObj = ManifestDigests(candidateRev3 = cand, primaryPinRev2 = prim)
                 }
-                is StrictJsonString -> {
-                    manifestDigestStr = manifestElement.value
-                    manifestDigestsObj = null
-                }
                 else -> {
-                    throw IllegalArgumentException("Invalid type for key 'manifestDigest': expected object or string, got ${manifestElement.javaClass.simpleName}")
+                    throw IllegalArgumentException("Invalid type for key 'manifestDigest': expected dual-pin object, got ${manifestElement.javaClass.simpleName}")
                 }
             }
 
@@ -715,8 +708,8 @@ data class ReadPilotHandoffConfig(
                     if (el is StrictJsonObject) {
                         val id = requireString(el, "id")
                         val unitPrice = requireString(el, "exactUnitPrice")
-                        val taxRate = optionalString(el, "taxRate")
-                        expectedProducts.add(ExpectedProductFixture(id, unitPrice, taxRate))
+                        val taxRate = requireNullableString(el, "taxRate")
+                        expectedProducts.add(ExpectedProductFixture(id, unitPrice, taxRate, requireNullableString(el, "taxRateId"), optionalString(el, "sku")))
                     }
                 }
             }
@@ -772,6 +765,11 @@ data class ReadPilotHandoffConfig(
                 throw IllegalArgumentException("Invalid type for key '$key': expected string, got ${element.javaClass.simpleName}")
             }
             return element.value
+        }
+
+        private fun requireNullableString(obj: StrictJsonObject, key: String): String? {
+            val element = obj[key] ?: throw IllegalArgumentException("Missing required nullable key '$key'")
+            return if (element is StrictJsonNull) null else requireString(obj, key)
         }
 
         private fun optionalString(obj: StrictJsonObject, key: String): String? {

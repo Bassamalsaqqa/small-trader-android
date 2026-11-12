@@ -219,7 +219,7 @@ class SmallTraderReadPilotSmokeTest {
                     status = "PASS",
                     httpStatusCode = 200,
                     latencyMs = latency3,
-                    details = "Bootstrap loaded: company=${bootstrap.companyName}, currency=${bootstrap.baseCurrency}, snapshot=${bootstrap.catalogSnapshotVersion}"
+                    details = "Bootstrap loaded: currency=${bootstrap.baseCurrency}, snapshot=${bootstrap.catalogSnapshotVersion}"
                 )
             )
 
@@ -256,6 +256,18 @@ class SmallTraderReadPilotSmokeTest {
                     assertTrue("Malformed taxRate decimal string: ${p.taxRate.lexeme}", p.taxRate.lexeme.matches(Regex("^[0-9]+(\\.[0-9]+)?$")))
                 }
             }
+            assertEquals("Exactly three independently supplied product fixtures are required", 3, config.expectedProducts.size)
+            assertEquals("Product page ordering must match independent fixture IDs", config.expectedProducts.map { it.id }, allProducts.map { it.id.value })
+            val expectedProductsById = config.expectedProducts.associateBy { it.id }
+            assertEquals("Expected product fixture IDs must be unique", 3, expectedProductsById.size)
+            assertEquals("Product IDs must match independently supplied fixtures", expectedProductsById.keys, collectedProductIds)
+            for (product in allProducts) {
+                val expected = expectedProductsById.getValue(product.id.value)
+                assertEquals("Exact unit-price lexeme must match fixture", expected.exactUnitPrice, product.unitPrice.lexeme)
+                assertEquals("Exact nullable tax-rate lexeme must match fixture", expected.taxRate, product.taxRate?.lexeme)
+                assertEquals("Nullable tax association must match fixture; unassigned is not NoTax", expected.taxRateId, product.taxRateId?.value)
+                assertEquals("SKU must match independent fixture", expected.sku, product.sku)
+            }
             val latency4 = System.currentTimeMillis() - t4Start
             scenarios.add(
                 ScenarioEvidence(
@@ -263,7 +275,7 @@ class SmallTraderReadPilotSmokeTest {
                     status = "PASS",
                     httpStatusCode = 200,
                     latencyMs = latency4,
-                    details = "Deterministic 2+1 pagination verified: 2 pages, 3 unique products, snapshot consistent, decimal precision validated"
+                    details = "Deterministic 2+1 pagination verified: 2 pages, 3 unique products, snapshot consistent, exact fixture IDs and price/tax lexemes matched"
                 )
             )
 
@@ -292,6 +304,10 @@ class SmallTraderReadPilotSmokeTest {
             val allCustomers = custPage1.customers + custPage2.customers
             val collectedCustomerIds = allCustomers.map { it.id.value }.toSet()
             assertEquals("Total unique customers across pages 2+1 must be 3", 3, collectedCustomerIds.size)
+            assertEquals("Exactly three independently supplied customer fixtures are required", 3, config.expectedCustomers.size)
+            assertEquals("Customer page ordering must match independent fixture IDs", config.expectedCustomers, allCustomers.map { it.id.value })
+            assertEquals("Expected customer fixture IDs must be unique", 3, config.expectedCustomers.toSet().size)
+            assertEquals("Customer IDs must match independently supplied fixtures", config.expectedCustomers.toSet(), collectedCustomerIds)
             val latency5 = System.currentTimeMillis() - t5Start
             scenarios.add(
                 ScenarioEvidence(
@@ -299,7 +315,7 @@ class SmallTraderReadPilotSmokeTest {
                     status = "PASS",
                     httpStatusCode = 200,
                     latencyMs = latency5,
-                    details = "Deterministic 2+1 pagination verified: 2 pages, 3 unique customers"
+                    details = "Deterministic 2+1 pagination verified: 2 pages, 3 unique customers matching independent fixture IDs"
                 )
             )
 
@@ -331,10 +347,10 @@ class SmallTraderReadPilotSmokeTest {
             val wrongResult = client.getBootstrap(token = token, companyId = wrongCompany)
             val latency7 = System.currentTimeMillis() - t7
             val (wrongPassed, wrongCode, wrongDetails) = when (wrongResult) {
-                is ReadClientResult.Forbidden403 -> Triple(true, 403, "Foreign tenant access strictly denied with Forbidden403 (real foreign company fixture, zero existence oracle)")
+                is ReadClientResult.Forbidden403 -> Triple(true, 403, "Foreign tenant access strictly denied with Forbidden403 (real foreign company fixture, tenant boundary verified; nonexistent-company oracle behavior not tested)")
                 is ReadClientResult.HttpError -> {
                     if (wrongResult.statusCode == 403) {
-                        Triple(true, 403, "Foreign tenant access denied with HTTP 403 (zero existence oracle)")
+                        Triple(true, 403, "Foreign tenant access denied with HTTP 403 (tenant boundary verified; nonexistent-company oracle behavior not tested)")
                     } else {
                         Triple(false, wrongResult.statusCode, "Unexpected HTTP status ${wrongResult.statusCode} on foreign tenant access (expected 403)")
                     }
