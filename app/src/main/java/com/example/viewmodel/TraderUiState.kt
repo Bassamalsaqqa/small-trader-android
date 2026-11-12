@@ -6,6 +6,7 @@ import com.example.ui.navigation.allowed
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.OfflineDemoTraderRepository
+import com.example.data.ProductSearch
 import com.example.data.SampleCatalog
 import com.example.data.TraderRepository
 import com.example.model.AppLanguage
@@ -147,7 +148,7 @@ data class TraderUiState(
 ) {
     private fun matchesSearchQuery(product: Product, normalizedQuery: String): Boolean {
         if (normalizedQuery.isEmpty()) return true
-        return product.normalizedSearchTokens.contains(normalizedQuery)
+        return ProductSearch.computeScore(product, normalizedQuery) > 0
     }
 
     @Volatile
@@ -172,11 +173,13 @@ data class TraderUiState(
             ) {
                 return cachedResult
             }
-            val q = normalizeForSearch(WesternFormatters.sanitizeWesternDigits(currentQuery.trim()))
-            val result = currentProducts.filter { product ->
-                val matchesCategory = currentCategory == ProductCategory.ALL || product.category == currentCategory
-                matchesCategory && matchesSearchQuery(product, q)
-            }
+            val result = ProductSearch.search(
+                products = currentProducts,
+                query = currentQuery,
+                category = currentCategory,
+                limit = 30,
+                stockTrackedOnly = false
+            )
             cachedFilteredQuery = currentQuery
             cachedFilteredCategory = currentCategory
             cachedFilteredProductsRef = currentProducts
@@ -202,14 +205,12 @@ data class TraderUiState(
             ) {
                 return cachedCount
             }
-            val q = normalizeForSearch(WesternFormatters.sanitizeWesternDigits(currentQuery.trim()))
-            val count = if (q.isEmpty()) {
-                currentProducts.size
-            } else if (selectedCategory == ProductCategory.ALL) {
-                filteredProducts.size
-            } else {
-                currentProducts.count { product -> matchesSearchQuery(product, q) }
-            }
+            val count = ProductSearch.countMatches(
+                products = currentProducts,
+                query = currentQuery,
+                category = ProductCategory.ALL,
+                stockTrackedOnly = false
+            )
             cachedCountQuery = currentQuery
             cachedCountProductsRef = currentProducts
             cachedCountResult = count
@@ -483,7 +484,7 @@ data class TraderUiState(
             TraderScreen.CASH_PAYMENT
         )
 
-        fun normalizeForSearch(raw: String): String = Product.normalizeKey(raw)
+        fun normalizeForSearch(raw: String): String = ProductSearch.normalize(raw)
     }
 }
 

@@ -79,6 +79,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -381,11 +383,24 @@ private fun PosSearchAndCategoryHeader(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                StitchBadge(
-                    text = lang.tr(
+                val categoryTotal = if (state.selectedCategory == ProductCategory.ALL) {
+                    state.products.size
+                } else {
+                    state.products.count { it.category == state.selectedCategory }
+                }
+                val badgeText = if (state.searchQuery.isBlank() && categoryTotal > state.filteredProducts.size) {
+                    lang.tr(
+                        "عرض ${WesternFormatters.formatInt(state.filteredProducts.size)} من أصل ${WesternFormatters.formatInt(categoryTotal)}",
+                        "Showing ${WesternFormatters.formatInt(state.filteredProducts.size)} of ${WesternFormatters.formatInt(categoryTotal)}"
+                    )
+                } else {
+                    lang.tr(
                         "${WesternFormatters.formatInt(state.filteredProducts.size)} صنفاً",
                         "${WesternFormatters.formatInt(state.filteredProducts.size)} items"
-                    ),
+                    )
+                }
+                StitchBadge(
+                    text = badgeText,
                     tone = StitchBadgeTone.PRIMARY
                 )
             }
@@ -468,6 +483,9 @@ private fun PosSearchAndCategoryHeader(
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
+                            .semantics {
+                                contentDescription = lang.tr("البحث عن الأصناف بالاسم أو الباركود", "Search products by name or barcode")
+                            }
                             .testTag("product_search_input")
                     )
                 }
