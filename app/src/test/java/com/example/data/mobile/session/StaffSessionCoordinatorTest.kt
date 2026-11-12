@@ -6,6 +6,7 @@ import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.readclient.ActorProfile
+import com.example.data.mobile.readclient.AuthChallengeResponse
 import com.example.data.mobile.readclient.CompanyMembership
 import com.example.data.mobile.readclient.CustomerDirectoryResponse
 import com.example.data.mobile.readclient.HttpMethod
@@ -69,8 +70,8 @@ class StaffSessionCoordinatorTest {
     private val fixturesDir by lazy { locateFixturesDir() }
 
     private class TestCoordinatorClock(
-        var epochMs: Long = 1794500000000L, // approx Nov 2026
-        var isoUtc: String = "2026-11-12T12:00:00Z"
+        var epochMs: Long = 1794312000000L, // 2026-11-10T12:00:00Z (before golden challenge expires at 12:05:00Z)
+        var isoUtc: String = "2026-11-10T12:00:00Z"
     ) : CoordinatorClock {
         override fun nowEpochMs(): Long = epochMs
         override fun nowIsoUtc(): String = isoUtc
@@ -1146,6 +1147,396 @@ class StaffSessionCoordinatorTest {
     }
 
     @Test
+    fun testStaleCompareAndPersistVsLogoutOrNewLogin() {
+        val bootstrapEntered = CountDownLatch(1)
+        val allowBootstrapFinish = CountDownLatch(1)
+        val bootstrapJson = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+
+        transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = {
+            bootstrapEntered.countDown()
+            allowBootstrapFinish.await(5, TimeUnit.SECONDS)
+            TransportResponse(statusCode = 200, body = bootstrapJson)
+        }
+
+        coordinator.requestChallenge(appVersion)
+
+        val loginResult = AtomicReference<CoordinatorResult<StaffAuthState>>()
+        val loginThread = Thread {
+            val res = coordinator.login(
+                email = "cashier@smalltrader.example",
+                password = "CorrectHorseBatteryStaple123!",
+                deviceName = "Samsung Galaxy Tab A8"
+            )
+            loginResult.set(res)
+        }
+        loginThread.start()
+
+        // Wait until login reaches bootstrap network execution (prior to compareAndPersist)
+        assertTrue(bootstrapEntered.await(5, TimeUnit.SECONDS))
+
+        // Concurrent logout occurs in main thread, advancing generation
+        val logoutRes = coordinator.logout()
+        assertTrue(logoutRes is LogoutResult.Success)
+        assertEquals(StaffAuthState.LoggedOut, coordinator.authState)
+
+        // Allow late bootstrap to complete and attempt compareAndPersist
+        allowBootstrapFinish.countDown()
+        loginThread.join(5000)
+
+        // Late compareAndPersist is aborted under stateLock; stale credentials never saved!
+        assertTrue(loginResult.get() is CoordinatorResult.StaleOperation)
+        assertEquals(StaffAuthState.LoggedOut, coordinator.authState)
+        assertFalse(sessionStore.hasSessionFile())
+    }
+
+    @Test
+    fun testDelayedRemoteLogoutDoesNotClobberNewLogin() {
+        coordinator.requestChallenge(appVersion)
+        val initialLogin = coordinator.login(
+            email = "cashier@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!",
+            deviceName = "Samsung Galaxy Tab A8"
+        )
+        assertTrue(initialLogin is CoordinatorResult.Success)
+        assertTrue(coordinator.authState is StaffAuthState.ReadReady)
+
+        val logoutEntered = CountDownLatch(1)
+        val allowLogoutFinish = CountDownLatch(1)
+
+        transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/logout")] = {
+            logoutEntered.countDown()
+            allowLogoutFinish.await(5, TimeUnit.SECONDS)
+            TransportResponse(statusCode = 200, body = """{"status":"logged_out"}""")
+        }
+
+        val logoutResult = AtomicReference<LogoutResult>()
+        val logoutThread = Thread {
+            logoutResult.set(coordinator.logout())
+        }
+        logoutThread.start()
+
+        // Wait until logout reaches remote transport (local session already cleared)
+        assertTrue(logoutEntered.await(5, TimeUnit.SECONDS))
+        assertFalse(sessionStore.hasSessionFile())
+
+        // User B logs in while User A's remote logout is in flight
+        coordinator.requestChallenge(appVersion)
+        val userBLogin = coordinator.login(
+            email = "cashier@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!",
+            deviceName = "Samsung Galaxy Tab A8"
+        )
+        assertTrue(userBLogin is CoordinatorResult.Success)
+        assertTrue(coordinator.authState is StaffAuthState.ReadReady)
+        assertTrue(sessionStore.hasSessionFile())
+
+        // Now allow User A's remote logout to finish
+        allowLogoutFinish.countDown()
+        logoutThread.join(5000)
+
+        // User A's remote logout completion did NOT clobber User B's state or delete User B's credentials!
+        assertTrue(coordinator.authState is StaffAuthState.ReadReady)
+        assertTrue(sessionStore.hasSessionFile())
+        val diskRecord = sessionStore.readSession(SessionReadScope(expectedDeviceUuid = coordinator.installationId))
+        assertTrue(diskRecord is SessionReadResult.Success)
+    }
+
+    @Test
+    fun testCancellationOnRemoteLogoutLeavesLocalDiskAbsent() {
+        coordinator.requestChallenge(appVersion)
+        coordinator.login(
+            email = "cashier@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!",
+            deviceName = "Samsung Galaxy Tab A8"
+        )
+        assertTrue(sessionStore.hasSessionFile())
+
+        transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/logout")] = {
+            throw CancellationException("Simulated coroutine cancellation during remote logout")
+        }
+
+        try {
+            coordinator.logout()
+            fail("Expected CancellationException to propagate")
+        } catch (e: CancellationException) {
+            assertEquals("Simulated coroutine cancellation during remote logout", e.message)
+        }
+
+        // Local credentials were purged atomically BEFORE remote call!
+        assertFalse(sessionStore.hasSessionFile())
+        assertEquals(StaffAuthState.LoggedOut, coordinator.authState)
+    }
+
+    @Test
+    fun testConcurrentRestoreSessionInvalidatedByNewGeneration() {
+        coordinator.requestChallenge(appVersion)
+        coordinator.login(
+            email = "cashier@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!",
+            deviceName = "Samsung Galaxy Tab A8"
+        )
+        assertTrue(sessionStore.hasSessionFile())
+
+        val bootstrapEntered = CountDownLatch(1)
+        val allowBootstrapFinish = CountDownLatch(1)
+        val bootstrapJson = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+
+        transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = {
+            bootstrapEntered.countDown()
+            allowBootstrapFinish.await(5, TimeUnit.SECONDS)
+            TransportResponse(statusCode = 200, body = bootstrapJson)
+        }
+
+        val restoreResult = AtomicReference<CoordinatorResult<StaffAuthState>>()
+        val restoreThread = Thread {
+            restoreResult.set(coordinator.restoreSession())
+        }
+        restoreThread.start()
+
+        // Wait until restore reaches bootstrap network call
+        assertTrue(bootstrapEntered.await(5, TimeUnit.SECONDS))
+
+        // Concurrent logout advances generation
+        coordinator.logout()
+        assertEquals(StaffAuthState.LoggedOut, coordinator.authState)
+
+        // Unblock bootstrap
+        allowBootstrapFinish.countDown()
+        restoreThread.join(5000)
+
+        // Restore operation was discarded as stale; did not resurrect ReadReady
+        assertTrue(restoreResult.get() is CoordinatorResult.StaleOperation)
+        assertEquals(StaffAuthState.LoggedOut, coordinator.authState)
+    }
+
+    @Test
+    fun testStale401HookAfterCompanySwitchDoesNotEmitDenialForNewScope() {
+        coordinator.requestChallenge(appVersion)
+        coordinator.login(
+            email = "cashier@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!",
+            deviceName = "Samsung Galaxy Tab A8"
+        )
+        assertTrue(coordinator.authState is StaffAuthState.ReadReady)
+
+        val readEntered = CountDownLatch(1)
+        val allowReadFinish = CountDownLatch(1)
+
+        transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/products")] = {
+            readEntered.countDown()
+            allowReadFinish.await(5, TimeUnit.SECONDS)
+            TransportResponse(statusCode = 401, body = """{"error":{"code":"REVOKED_TOKEN","message":"Token revoked"}}""")
+        }
+
+        val readResult = AtomicReference<CoordinatorResult<ProductCatalogResponse>>()
+        val readThread = Thread {
+            readResult.set(coordinator.getProducts())
+        }
+        readThread.start()
+
+        // Wait until read enters transport
+        assertTrue(readEntered.await(5, TimeUnit.SECONDS))
+
+        // Set up second company bootstrap
+        val secondBootstrapJson = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+            .replace(testCompanyUlid.value, testSecondCompanyUlid.value)
+        transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testSecondCompanyUlid/bootstrap")] = {
+            TransportResponse(statusCode = 200, body = secondBootstrapJson)
+        }
+
+        // Switch company to Company B
+        val switchRes = coordinator.switchCompany(testSecondCompanyUlid)
+        assertTrue(switchRes is CoordinatorResult.Success)
+        val currentCompany = (coordinator.authState as StaffAuthState.ReadReady).session.selectedCompanyId
+        assertEquals(testSecondCompanyUlid, currentCompany)
+
+        // Unblock delayed 401 on Company A
+        allowReadFinish.countDown()
+        readThread.join(5000)
+
+        // Delayed 401 was discarded as stale!
+        assertTrue(readResult.get() is CoordinatorResult.StaleOperation)
+        // State remains ReadReady on Company B; not locked by old 401
+        assertTrue(coordinator.authState is StaffAuthState.ReadReady)
+        assertEquals(testSecondCompanyUlid, (coordinator.authState as StaffAuthState.ReadReady).session.selectedCompanyId)
+        // Outbox denial was NOT emitted for Company B
+        assertTrue("No auth denial hook emitted for stale operation", denialCapture.scopes.isEmpty())
+    }
+
+    @Test
+    fun testLoginCredential401DoesNotEmitQueueHook() {
+        transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/login")] = {
+            TransportResponse(statusCode = 401, body = """{"error":{"code":"INVALID_CREDENTIALS","message":"Invalid email or password"}}""")
+        }
+
+        coordinator.requestChallenge(appVersion)
+        val loginRes = coordinator.login(
+            email = "wrong@smalltrader.example",
+            password = "WrongPassword123!",
+            deviceName = "Samsung Galaxy Tab A8"
+        )
+        assertTrue(loginRes is CoordinatorResult.AuthDenied)
+        assertEquals(StaffAuthState.LoggedOut, coordinator.authState)
+        // Credential rejection on login MUST NOT emit outbox denial hook!
+        assertTrue("Wrong password login must NOT emit auth denial scope", denialCapture.scopes.isEmpty())
+    }
+
+    @Test
+    fun testChallengeRacesDelayedConcurrentAndExpiredTTL() {
+        val firstChallengeEntered = CountDownLatch(1)
+        val allowFirstChallengeFinish = CountDownLatch(1)
+
+        val challengeJson = File(fixturesDir, "golden-auth-challenge.json").readText(Charsets.UTF_8)
+        val challengeRes = StrictJsonParser.parse(challengeJson).asObject().require("response")
+
+        var callCount = 0
+        transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/challenge")] = {
+            callCount++
+            if (callCount == 1) {
+                firstChallengeEntered.countDown()
+                allowFirstChallengeFinish.await(5, TimeUnit.SECONDS)
+            }
+            TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(challengeRes))
+        }
+
+        val thread1Res = AtomicReference<CoordinatorResult<AuthChallengeResponse>>()
+        val thread1 = Thread {
+            thread1Res.set(coordinator.requestChallenge(appVersion))
+        }
+        thread1.start()
+
+        assertTrue(firstChallengeEntered.await(5, TimeUnit.SECONDS))
+
+        // Main thread requests second challenge, advancing generation
+        val secondChallengeRes = coordinator.requestChallenge(appVersion)
+        assertTrue(secondChallengeRes is CoordinatorResult.Success)
+
+        // Unblock first challenge
+        allowFirstChallengeFinish.countDown()
+        thread1.join(5000)
+
+        // First challenge was discarded as stale
+        assertTrue(thread1Res.get() is CoordinatorResult.StaleOperation)
+
+        // Now test expired challenge TTL before login wire
+        // Advance clock past golden challenge expiry (2026-11-10T12:05:00Z)
+        testClock.epochMs = 1794312300000L + 1000L // 12:05:01Z
+        transport.requestsReceived.clear()
+
+        val loginRes = coordinator.login(
+            email = "cashier@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!",
+            deviceName = "Samsung Galaxy Tab A8"
+        )
+        assertTrue(loginRes is CoordinatorResult.Error)
+        assertEquals("Authentication challenge expired", (loginRes as CoordinatorResult.Error).message)
+        // Wire request was NEVER sent
+        assertTrue("No login wire call for expired challenge", transport.requestsReceived.none { it.path.endsWith("/login") })
+    }
+
+    @Test
+    fun testRequestChallengeWhileReadReadyReturnsErrorWithoutClobbering() {
+        coordinator.requestChallenge(appVersion)
+        coordinator.login(
+            email = "cashier@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!",
+            deviceName = "Samsung Galaxy Tab A8"
+        )
+        assertTrue(coordinator.authState is StaffAuthState.ReadReady)
+
+        val reqRes = coordinator.requestChallenge(appVersion)
+        assertTrue(reqRes is CoordinatorResult.Error)
+        assertEquals("Cannot request challenge: active session is ReadReady", (reqRes as CoordinatorResult.Error).message)
+        // State remains intact
+        assertTrue(coordinator.authState is StaffAuthState.ReadReady)
+    }
+
+    @Test
+    fun testTokenExpiryAfterBootstrapAndQueryCompletion() {
+        // Test 1: Clock advances during bootstrap
+        val bootstrapJson = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = {
+            // Advance clock past login token expiry (2026-11-17T12:00:00Z = 1794916800000L)
+            testClock.epochMs = 1795000000000L
+            TransportResponse(statusCode = 200, body = bootstrapJson)
+        }
+
+        coordinator.requestChallenge(appVersion)
+        val loginRes = coordinator.login(
+            email = "cashier@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!",
+            deviceName = "Samsung Galaxy Tab A8"
+        )
+        assertTrue(loginRes is CoordinatorResult.Error)
+        assertEquals(StaffAuthState.LoggedOut, coordinator.authState)
+        assertFalse("Expired session never saved to disk", sessionStore.hasSessionFile())
+
+        // Test 2: Clock advances during product query completion
+        testClock.epochMs = 1794312000000L // Reset clock
+        transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = {
+            TransportResponse(statusCode = 200, body = bootstrapJson)
+        }
+        coordinator.requestChallenge(appVersion)
+        coordinator.login(
+            email = "cashier@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!",
+            deviceName = "Samsung Galaxy Tab A8"
+        )
+        assertTrue(coordinator.authState is StaffAuthState.ReadReady)
+
+        val productJson = File(fixturesDir, "golden-product-catalog.json").readText(Charsets.UTF_8)
+        transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/products")] = {
+            testClock.epochMs = 1795000000000L // Expire during query
+            TransportResponse(statusCode = 200, body = productJson)
+        }
+
+        val productsRes = coordinator.getProducts()
+        assertTrue(productsRes is CoordinatorResult.Error)
+        assertEquals(StaffAuthState.LoggedOut, coordinator.authState)
+    }
+
+    @Test
+    fun testHostileStorageExceptionsDoNotLeakSecretsInDiagnostics() {
+        val hostileSecret = "HOSTILE_BEARER_SECRET_KEY_NEVER_LEAK_998877"
+        val hostileStore = object : SecureStaffSessionStore by sessionStore {
+            override fun readSession(scope: SessionReadScope, nowEpochMs: Long): SessionReadResult {
+                throw SessionStorageException(SessionStorageError.Corrupt(hostileSecret))
+            }
+        }
+        val hostileCoord = DefaultStaffSessionCoordinator(
+            readClient = readClient,
+            sessionStore = hostileStore,
+            clock = testClock
+        )
+
+        val res = hostileCoord.restoreSession()
+        assertTrue(res is CoordinatorResult.Error)
+        assertFalse("Hostile secret must not leak in error message", (res as CoordinatorResult.Error).message.contains(hostileSecret))
+        assertFalse("Hostile secret must not leak in error toString", res.toString().contains(hostileSecret))
+        assertFalse("Hostile secret must not leak in authState toString", hostileCoord.authState.toString().contains(hostileSecret))
+    }
+
+    @Test
+    fun testIdentityFailureHonestReportingZeroRandomUuid() {
+        val failingIdentityStore = object : SecureStaffSessionStore by sessionStore {
+            override val installationId: ClientUuid
+                get() = throw SessionStorageException(SessionStorageError.Corrupt("Corrupt identity store"))
+        }
+        val failCoord = DefaultStaffSessionCoordinator(
+            readClient = readClient,
+            sessionStore = failingIdentityStore,
+            clock = testClock
+        )
+
+        transport.requestsReceived.clear()
+        val logoutRes = failCoord.logout()
+        assertTrue(logoutRes is LogoutResult.Success)
+        assertEquals(RemoteRevocationStatus.NotAttempted, (logoutRes as LogoutResult.Success).remoteRevocation)
+        // Assert no random device UUID was fabricated for remote logout wire call
+        assertTrue("No wire calls made with fabricated UUID", transport.requestsReceived.isEmpty())
+    }
+
+    @Test
     fun testProductionCompositionFactoryCreatesCoordinator() {
         val mockContext = object : android.content.ContextWrapper(null) {
             override fun getNoBackupFilesDir(): File = tempDir
@@ -1162,3 +1553,4 @@ class StaffSessionCoordinatorTest {
         assertNotNull(createdCoordinator.installationId)
     }
 }
+

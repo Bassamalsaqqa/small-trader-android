@@ -128,8 +128,8 @@ sealed interface LockReason {
  * (QUEUE_LOCKED_AUTH_DENIED) without deleting pending records.
  */
 data class AuthDenialScope(
-    val companyId: ServerUlid?,
-    val actorId: ServerUlid?,
+    val companyId: ServerUlid,
+    val actorId: ServerUlid,
     val deviceId: ClientUuid,
     val deniedAt: String
 ) {
@@ -168,7 +168,7 @@ sealed interface LogoutResult {
     data class Success(val remoteRevocation: RemoteRevocationStatus) : LogoutResult
     data class StorageClearFailed(
         val remoteRevocation: RemoteRevocationStatus,
-        val message: String
+        val message: String = "Local session clear failed on logout"
     ) : LogoutResult
 }
 
@@ -176,7 +176,12 @@ sealed interface LogoutResult {
  * Typed outcome for coordinator operations.
  */
 sealed interface CoordinatorResult<out T> {
-    data class Success<out T>(val value: T) : CoordinatorResult<T>
+    data class Success<out T>(
+        val value: T,
+        val generation: Long = 0L,
+        val companyId: ServerUlid? = null,
+        val actorId: ServerUlid? = null
+    ) : CoordinatorResult<T>
     data class Error(
         val message: String,
         val category: String = "COORDINATOR_ERROR"

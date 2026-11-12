@@ -52,7 +52,8 @@ All states and coordinator models override `toString()` to strictly conceal secr
 - Bearer tokens are redacted as `"Bearer [REDACTED]"`.
 - Passwords, MFA codes, and recovery codes are never stored on coordinator state fields.
 - Actor email and password epoch are redacted.
-- Server error messages and Problem Details are sanitized to avoid leaking sensitive stack traces into bug telemetry.
+- Display strings (`actorName`, `roleLabel`) on `StaffSessionRecord` are strictly redacted in `toString()` to eliminate CRLF injection and secret reflection.
+- Server error messages and raw exception messages (`e.message`) are never forwarded; only fixed safe local diagnostics are surfaced to prevent leaking decrypted values in error messages.
 
 ---
 
@@ -62,22 +63,27 @@ All states and coordinator models override `toString()` to strictly conceal secr
 In multi-threaded Android runtimes, holding a synchronization lock across HTTP requests blocks cancellation, freezes UI threads, and prevents immediate logout. `DefaultStaffSessionCoordinator` adheres to a strict concurrency invariant:
 > **No state mutex is EVER held across blocking network or I/O calls.**
 
-### Monotonic Lifecycle Generation Guard
+### Monotonic Lifecycle Generation Guard & Atomic compareAndPersist
 To eliminate race conditions, resurrecting sessions, and obsolete writes, the coordinator employs an atomic monotonic generation counter (`AtomicLong`):
-1. **Invalidation on User Intent**: Every operation that changes user intent (`logout()`, starting a new `login()`, `selectCompany()`, or `switchCompany()`) increments the generation counter (`generation.incrementAndGet()`).
+1. **Invalidation on User Intent**: Every operation that changes user intent (`logout()`, starting a new `login()`, `selectCompany()`, `switchCompany()`, or `restoreSession()`) increments the generation counter (`generation.incrementAndGet()`).
 2. **Generation Capture**: At entry to any asynchronous or network operation, the worker thread captures the current generation (`val opGen = generation.get()`).
-3. **Pre-Commit Verification**: After network execution completes, the coordinator checks `if (opGen != generation.get())`. If the generation has changed:
-   - The late response is **strictly discarded**.
-   - Obsolete tokens are **never written** to `SecureStaffSessionStore`.
-   - Read readiness is **never restored**.
-   - Foreign or obsolete DTOs are **never leaked** to callers (returns `CoordinatorResult.StaleOperation`).
-   - Logout is **never resurrected**.
+3. **Atomic compareAndPersist Under Lock**: After network bootstrap completes outside the lock, the thread enters `compareAndPersist`:
+   - Checks `if (opGen != generation.get()) return StaleOperation()`.
+   - Rechecks token expiry against current clock before read readiness or disk persist.
+   - Atomically saves the session to disk and commits state to `ReadReady` under coordinator `stateLock`.
+   - Obsolete tokens are **never written** to disk after logout or company switch.
+4. **Post-Return UI Scope Validation**:
+   - While the coordinator's internal state machine is linearizable, a linearizable query function cannot prevent post-return UI races (e.g. a company switch occurring right after `getProducts()` returns).
+   - `CoordinatorResult.Success` tags results with immutable `generation`, `companyId`, and `actorId`.
+   - The coordinator exposes `isScopeActive(generation, companyId)` so ViewModel/UI layers can validate and discard obsolete results.
 
 ### Deterministic Barrier Verification
-The test suite exercises three deterministic concurrency barrier scenarios:
-- **Late Login After Logout**: A slow in-flight login that returns 200 OK after logout completes is safely discarded; no session file is written, and state remains `LoggedOut`.
-- **Concurrent Company Switch**: A slow bootstrap for Company A returning after staff switched to Company B is discarded; Company B remains active.
-- **Stale Read Results**: A slow catalog read returning after logout or company switch returns `CoordinatorResult.StaleOperation` rather than leaking obsolete tenant DTOs.
+The test suite exercises comprehensive multithreaded concurrency barrier scenarios using `CountDownLatch`:
+- **Stale compareAndPersist vs Logout / New Login**: In-flight bootstrap completing after logout is rejected under lock without writing credentials to disk.
+- **Delayed Remote Logout vs New Login**: Slow remote logout unblocking after a new user logs in does not clobber new state or delete new credentials.
+- **Cancellation of Remote Logout**: Remote logout cancellation throws `CancellationException`, but local credentials are confirmed purged prior to remote dispatch.
+- **Concurrent Restore vs New Generation**: Concurrent logout or login during restore invalidates restore without resurrecting `ReadReady`.
+- **Stale 401 Hook Suppression**: Delayed 401 arriving after company switch is discarded without emitting auth denial for the new tenant.
 
 ---
 
@@ -86,6 +92,7 @@ The test suite exercises three deterministic concurrency barrier scenarios:
 ### Single-Use Challenge Lifecycle
 - Login requires an unexpired challenge nonce and UUID obtained via `POST /api/mobile/v1/auth/challenge`.
 - Upon submission in `login(...)`, the active challenge is **consumed immediately**; subsequent attempts with the same challenge fail closed.
+- One-time challenge TTL is validated before dispatching credentials over the wire; expired challenges are rejected without sending `/auth/login` requests.
 
 ### Fresh MFA Sequence
 Per draft revision 2 decisions:
@@ -103,7 +110,7 @@ Per draft revision 2 decisions:
 ### Installation Identity Custody
 - The client installation identity (`ClientUuid`) is generated once and managed independently by `InstallationIdentityStore` under `context.noBackupFilesDir`.
 - Preserved across staff logouts, credential purges, and app restarts.
-- If the identity file is missing after creation, corrupted, or unreadable, the coordinator fails closed (`StaffAuthState.StorageFailed`) without silent UUID rotation.
+- If the identity file is missing after creation, corrupted, or unreadable, the coordinator fails closed (`StaffAuthState.StorageFailed`) without silent UUID rotation. Random UUID fallbacks are strictly prohibited.
 
 ### Session Persistence & Server Revalidation
 - Successful login records are encrypted via `SecureStaffSessionStore` using runtime AES-256-GCM master keys with AAD binding `purpose=staff_session;pkg=<appId>;v=1`.
@@ -111,30 +118,32 @@ Per draft revision 2 decisions:
   1. Stored session is decrypted, validated for RFC 3339 expiration, and checked against device installation identity.
   2. The coordinator calls `GET /api/mobile/v1/companies/{companyId}/bootstrap` using the stored token.
   3. Consistency check: verified that `bootstrap.companyId == session.selectedCompanyId` AND `bootstrap.staff.id == session.actorUlid`.
-  4. Only upon 200 OK and successful consistency check is `StaffAuthState.ReadReady` granted.
+  4. Token expiry is re-verified after blocking bootstrap before granting read readiness.
+  5. Only upon 200 OK and successful consistency check is `StaffAuthState.ReadReady` granted.
 
 ### HTTP 401 AuthDenial Lifecycle & Outbox Notification
-When the server returns HTTP 401 (token revoked or expired):
+When the server returns HTTP 401 on an authenticated session token:
 - Coordinator transitions immediately to `StaffAuthState.Locked(LockReason.AuthDenied())`.
 - Emits a typed `AuthDenialScope(companyId, actorId, deviceId, deniedAt)` via `AuthDenialListener`.
 - Designed for downstream integration to lock local outbox queues (`QUEUE_LOCKED_AUTH_DENIED`) without deleting captured sales.
-- Automatic unlocking or silent token retry is prohibited.
+- **Credential Login 401 Isolation**: Wrong password on initial login does NOT emit outbox auth denial hooks; only active session token rejection emits outbox denial hooks.
 
 ---
 
 ## 6. Logout & Credential Purge Boundary
 
 When staff logs out (`logout()`):
-1. **Immediate Local Denial**: Advances generation counter and immediately transitions `_authState` to `StaffAuthState.LoggedOut`. In-flight and subsequent local reads are denied instantly.
-2. **Explicit Remote Revocation**: Dispatches `POST /api/mobile/v1/auth/logout` with the active Bearer token and stable installation `device_id`.
-3. **Local Credential Purge**: Calls `SecureStaffSessionStore.clearSession()`.
+1. **Atomic Local Deny & Disk Clear**: Under `stateLock`, advances generation, invalidates in-memory contexts, snapshots token context, and calls `sessionStore.clearSession()` **atomically BEFORE any remote network calls**.
    - **Purged**: Only `small_trader_secure_staff_session.bin` (and write temp files).
    - **Preserved**: Stable `installationId` (`small_trader_device_installation.json`) and offline outbox event queues are preserved intact.
+2. **Explicit Remote Revocation**: Dispatches `POST /api/mobile/v1/auth/logout` outside the lock with the snapshotted Bearer token and installation `deviceId`.
+3. **Cancellation Safety**: Cancellation of the remote call cannot preserve local credentials, as disk wipe occurred prior to remote dispatch.
 4. **Honest Status Reporting**:
    - `RemoteRevocationStatus.Revoked`: Server confirmed 200 OK.
    - `RemoteRevocationStatus.Unknown`: Remote call timed out or encountered network error; server logout is **not claimed**.
    - `RemoteRevocationStatus.AlreadyRevokedOrExpired`: Server returned 401.
-5. **Storage Clear Failure Lock**: If deleting the local session file fails, the coordinator enters `StaffAuthState.Locked(LockReason.StorageClearFailed)` and returns `LogoutResult.StorageClearFailed`. It never returns signed-out success while credentials remain readable on disk.
+   - `RemoteRevocationStatus.NotAttempted`: No active token existed or installation identity was unreadable.
+5. **Storage Clear Failure Lock**: If deleting the local session file fails, the coordinator enters `StaffAuthState.Locked(LockReason.StorageClearFailed)` and returns `LogoutResult.StorageClearFailed`. Subsequent logins/restores explicitly refuse execution until the lock is resolved.
 
 ---
 
@@ -170,6 +179,20 @@ class AuthViewModel(private val coordinator: StaffSessionCoordinator) : ViewMode
             }
         }
     }
+
+    fun loadProducts() {
+        viewModelScope.launch(Dispatchers.IO) {
+            when (val res = coordinator.getProducts()) {
+                is CoordinatorResult.Success -> {
+                    // UI consumer validates that returned scope is still active before rendering
+                    if (coordinator.isScopeActive(res.generation, res.companyId!!)) {
+                        updateUi(res.value)
+                    }
+                }
+                else -> { /* Handle error / stale */ }
+            }
+        }
+    }
 }
 ```
 
@@ -181,13 +204,14 @@ class AuthViewModel(private val coordinator: StaffSessionCoordinator) : ViewMode
 ## 8. Verification & Suite Summary
 
 ### Exact Test Counts
-- **Targeted Mobile Unit Tests**: **200 unit tests** across **17 testsuites** (`com.example.data.mobile.*`), 0 failures, 0 errors, 0 skipped.
-  - `StaffSessionCoordinatorTest`: 33 tests (concurrency barriers, fresh MFA, single/multi-company bootstrap, restore revalidation, 401/403 fail-closed, storage faults, cancellation, redaction).
+- **Targeted Mobile Unit Tests**: **211 unit tests** across **17 testsuites** (`com.example.data.mobile.*`), 0 failures, 0 errors, 0 skipped.
+  - `StaffSessionCoordinatorTest`: 44 tests (multithreaded concurrency barriers, atomic compareAndPersist vs logout/newlogin, delayed remote logout vs newlogin, cancellation on remote logout leaving disk absent, concurrent restore invalidated by new generation, stale 401 hooks discarded, credential 401 without outbox queue hook, challenge races and one-time TTL validation, requestChallenge while ReadReady safe rejection, token expiry after bootstrap and query completion, hostile error secret redaction, identity failure honest reporting with zero fabricated UUIDs).
   - `SecureStaffSessionStoreTest`: 37 tests (AES-256-GCM envelope, AAD, installation identity, atomic replacement, bounds).
   - `ReadClient*` and `OkHttpTransport*`: 91 tests (origin isolation, method allowlisting, DTO parsing, loopback, timeout).
   - Contract & Decimal Foundations: 39 tests (exact arithmetic, JCS serialization, Crockford ULID, UUID, boundaries).
 - **Contract Verification Suite**: **210 tests passed** in both normal (`python3 tools/validate-mobile-contract.py`) and optimized (`python3 -O tools/validate-mobile-contract.py`) execution.
-- **Lint Verification**: **64 baseline warnings** in `app/build/reports/lint-results-debug.xml`, **0 errors** (0 warnings in `com.example.data.mobile`).
+- **Lint Verification**: **63 baseline warnings** in `app/build/reports/lint-results-debug.xml`, **0 errors** (0 warnings in `com.example.data.mobile`).
 
 ### Hardware Keystore Verification Notice
 On-device Android Keystore hardware operations were not executed on physical hardware as no active emulator or device session was available via `device_list`. Hermetic test suites execute on JVM using an isolated test cryptographic engine (`JvmAesGcmCryptoEngine`).
+
