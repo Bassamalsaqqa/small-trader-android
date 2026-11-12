@@ -4,8 +4,10 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.BuildConfig
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.readclient.CustomerDirectoryResponse
+import com.example.data.mobile.readclient.EndpointSecurity
 import com.example.data.mobile.readclient.PaginationQuery
 import com.example.data.mobile.readclient.ProductCatalogResponse
 import com.example.data.mobile.session.AuthDenialListener
@@ -31,27 +33,31 @@ import kotlinx.coroutines.withContext
  *
  * Invariants:
  * 1. Off-main-thread I/O: All coordinator operations run on [ioDispatcher] (default [Dispatchers.IO]).
- * 2. Deduplication: Button submissions are deduplicated while in-flight.
+ * 2. Deduplication & Intent Guarding: Button submissions and UI intents are guarded by active sequence IDs.
  * 3. Scope and Generation Verification: Async responses verify coordinator generation and active company
- *    scope before committing to UI state. Obsolete or stale responses are rejected.
+ *    scope before committing to UI state. Obsolete or stale responses are rejected before modifying state.
  * 4. Immediate List Invalidation: On company switch, logout, or 401 Auth Denial, catalog and directory lists
  *    are wiped immediately from memory. Late responses never repopulate foreign lists.
  * 5. Secret Privacy: Passwords, MFA codes, and recovery codes exist only in transient in-memory references,
  *    never in SavedStateHandle, disk, or UI state classes. Bearer tokens are never exposed in UI state.
+ * 6. Challenge-Before-Login: A fresh challenge nonce must be acquired before dispatching credentials to the wire.
+ * 7. Tracked Logout: Logout job runs with UI reads denied and submissions blocked until local purge completes.
  */
 class StaffWorkspaceViewModel(
-    private val coordinator: StaffSessionCoordinator,
+    private val coordinator: StaffSessionCoordinator?,
     private val configuredOrigin: String = "",
     private val allowHttpLoopback: Boolean = false,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-    private val authDenialListener: AuthDenialListener? = null
+    private val authDenialListener: AuthDenialListener? = null,
+    initialPhase: StaffWorkspacePhase? = null,
+    initialStorageError: String? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
-        if (configuredOrigin.isBlank()) {
-            StaffWorkspaceUiState(phase = StaffWorkspacePhase.UNCONFIGURED)
-        } else {
-            StaffWorkspaceUiState(phase = StaffWorkspacePhase.INITIALIZING)
+        when {
+            initialPhase != null -> StaffWorkspaceUiState(phase = initialPhase, storageErrorMessage = initialStorageError)
+            coordinator == null || configuredOrigin.isBlank() -> StaffWorkspaceUiState(phase = StaffWorkspacePhase.UNCONFIGURED)
+            else -> StaffWorkspaceUiState(phase = StaffWorkspacePhase.INITIALIZING)
         }
     )
     val uiState: StateFlow<StaffWorkspaceUiState> = _uiState.asStateFlow()
@@ -68,8 +74,13 @@ class StaffWorkspaceViewModel(
     private var productsJob: Job? = null
     private var customersJob: Job? = null
 
+    // Main-thread UI intent sequence to invalidate stale completion handlers
+    private var activeIntentSeq: Long = 0L
+    private var productRequestSeq: Long = 0L
+    private var customerRequestSeq: Long = 0L
+
     init {
-        if (configuredOrigin.isNotBlank()) {
+        if (coordinator != null && configuredOrigin.isNotBlank() && _uiState.value.phase == StaffWorkspacePhase.INITIALIZING) {
             restoreSession()
         }
     }
@@ -82,6 +93,14 @@ class StaffWorkspaceViewModel(
         transientMfaCode = ""
         transientRecoveryCode = ""
         pendingPassword = ""
+    }
+
+    /**
+     * Clears secondary MFA codes between attempts while preserving pending password for bounded retry.
+     */
+    fun clearTransientCodes() {
+        transientMfaCode = ""
+        transientRecoveryCode = ""
     }
 
     /**
@@ -122,7 +141,7 @@ class StaffWorkspaceViewModel(
     }
 
     /**
-     * Toggles presentation language between Arabic and English.
+     * Toggles UI language between Arabic (RTL) and English (LTR).
      */
     fun toggleLanguage() {
         _uiState.update {
@@ -141,8 +160,16 @@ class StaffWorkspaceViewModel(
      * Restores persisted session from secure storage, verifying token expiry and bootstrap with server.
      */
     fun restoreSession() {
+        val coord = coordinator ?: run {
+            _uiState.update { it.copy(phase = StaffWorkspacePhase.UNCONFIGURED, isSubmitting = false) }
+            return
+        }
         if (_uiState.value.isSubmitting) return
+
+        val thisIntent = ++activeIntentSeq
         authJob?.cancel()
+        productsJob?.cancel()
+        customersJob?.cancel()
 
         authJob = viewModelScope.launch {
             _uiState.update {
@@ -154,30 +181,47 @@ class StaffWorkspaceViewModel(
                 )
             }
 
-            val result = withContext(ioDispatcher) {
-                coordinator.restoreSession()
+            val result = try {
+                withContext(ioDispatcher) {
+                    coord.restoreSession()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (e: Exception) {
+                CoordinatorResult.Error(e.message ?: "Failed to restore session")
+            } finally {
+                if (thisIntent == activeIntentSeq) {
+                    _uiState.update { it.copy(isSubmitting = false) }
+                }
             }
+
+            if (thisIntent != activeIntentSeq) return@launch
 
             when (result) {
                 is CoordinatorResult.Success -> {
                     when (val state = result.value) {
                         is StaffAuthState.ReadReady -> {
                             val selectedId = state.session.selectedCompanyId
-                            if (selectedId != null && coordinator.isScopeActive(result.generation, selectedId)) {
+                            if (selectedId != null && coord.isScopeActive(result.generation, selectedId)) {
                                 _uiState.update { s ->
                                     s.copy(
                                         phase = StaffWorkspacePhase.READ_READY,
                                         isSubmitting = false,
                                         activeCompany = SafeCompanyViewData(
                                             companyId = state.bootstrap.companyId.value,
-                                            companyName = state.bootstrap.companyName
+                                            companyName = state.bootstrap.companyName,
+                                            currency = state.bootstrap.baseCurrency
                                         ),
                                         staffActor = SafeStaffActorViewData(
                                             actorId = state.bootstrap.staff.id.value,
                                             actorEmail = state.session.actorEmail ?: "",
                                             actorName = state.bootstrap.staff.name,
                                             roleLabel = state.bootstrap.staff.role
-                                        )
+                                        ),
+                                        availableCompanies = emptyList(),
+                                        errorMessage = null
                                     )
                                 }
                                 loadProducts(refresh = true)
@@ -215,7 +259,7 @@ class StaffWorkspaceViewModel(
                     }
                 }
                 is CoordinatorResult.Error -> {
-                    when (val state = coordinator.authState) {
+                    when (val state = coord.authState) {
                         is StaffAuthState.Locked -> {
                             _uiState.update {
                                 it.copy(
@@ -249,7 +293,7 @@ class StaffWorkspaceViewModel(
                     }
                 }
                 is CoordinatorResult.StaleOperation -> {
-                    // Stale operation ignored; newer lifecycle intent active
+                    // Stale operation ignored
                 }
             }
         }
@@ -257,13 +301,22 @@ class StaffWorkspaceViewModel(
 
     /**
      * Authenticates staff with email and password.
-     * The coordinator orchestrates acquiring a fresh challenge nonce hidden from the caller.
+     * Orchestrates acquiring a fresh authentication challenge nonce before submitting credentials to the wire.
      */
     fun signIn(
         email: String,
         passwordOverride: String? = null,
         deviceName: String = "Android Staff Device"
     ) {
+        val coord = coordinator ?: run {
+            _uiState.update {
+                it.copy(
+                    phase = StaffWorkspacePhase.UNCONFIGURED,
+                    errorMessage = if (it.language == AppLanguage.AR) "مساحة استعلام الموظفين غير مهيأة" else "Staff workspace unconfigured"
+                )
+            }
+            return
+        }
         if (_uiState.value.isSubmitting) return
         val pwd = passwordOverride ?: transientPassword
         if (email.isBlank() || pwd.isBlank()) {
@@ -273,6 +326,7 @@ class StaffWorkspaceViewModel(
             return
         }
 
+        val thisIntent = ++activeIntentSeq
         authJob?.cancel()
         productsJob?.cancel()
         customersJob?.cancel()
@@ -282,31 +336,73 @@ class StaffWorkspaceViewModel(
             pendingEmail = email.trim()
             pendingPassword = pwd
 
-            val result = withContext(ioDispatcher) {
-                coordinator.login(
-                    email = pendingEmail,
-                    password = pwd,
-                    deviceName = deviceName
-                )
+            // Step 1: Real challenge request
+            val challengeResult = try {
+                withContext(ioDispatcher) {
+                    coord.requestChallenge()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (e: Exception) {
+                CoordinatorResult.Error(e.message ?: "Failed to acquire challenge")
             }
 
-            if (coordinator.authState !is StaffAuthState.MfaRequired) {
+            if (thisIntent != activeIntentSeq) return@launch
+
+            if (challengeResult !is CoordinatorResult.Success) {
                 clearTransientCredentials()
+                _uiState.update {
+                    it.copy(
+                        isSubmitting = false,
+                        errorMessage = if (it.language == AppLanguage.AR)
+                            "تعذر الحصول على رمز التحدي للمصادقة"
+                        else
+                            "Failed to acquire authentication challenge"
+                    )
+                }
+                return@launch
             }
+
+            // Step 2: Login with credentials and acquired challenge
+            val result = try {
+                withContext(ioDispatcher) {
+                    coord.login(
+                        email = pendingEmail,
+                        password = pwd,
+                        deviceName = deviceName
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (e: Exception) {
+                CoordinatorResult.Error(e.message ?: "Login failed")
+            } finally {
+                if (thisIntent == activeIntentSeq && coord.authState !is StaffAuthState.MfaRequired) {
+                    transientPassword = ""
+                }
+            }
+
+            if (thisIntent != activeIntentSeq) return@launch
 
             when (result) {
                 is CoordinatorResult.Success -> {
-                    when (val state = coordinator.authState) {
+                    when (val state = coord.authState) {
                         is StaffAuthState.ReadReady -> {
+                            clearTransientCredentials()
                             val selectedId = state.session.selectedCompanyId
-                            if (selectedId != null && coordinator.isScopeActive(result.generation, selectedId)) {
+                            if (selectedId != null && coord.isScopeActive(result.generation, selectedId)) {
                                 _uiState.update { s ->
                                     s.copy(
                                         phase = StaffWorkspacePhase.READ_READY,
                                         isSubmitting = false,
                                         activeCompany = SafeCompanyViewData(
                                             companyId = state.bootstrap.companyId.value,
-                                            companyName = state.bootstrap.companyName
+                                            companyName = state.bootstrap.companyName,
+                                            currency = state.bootstrap.baseCurrency
                                         ),
                                         staffActor = SafeStaffActorViewData(
                                             actorId = state.bootstrap.staff.id.value,
@@ -314,6 +410,7 @@ class StaffWorkspaceViewModel(
                                             actorName = state.bootstrap.staff.name,
                                             roleLabel = state.bootstrap.staff.role
                                         ),
+                                        availableCompanies = emptyList(),
                                         errorMessage = null
                                     )
                                 }
@@ -322,6 +419,7 @@ class StaffWorkspaceViewModel(
                             }
                         }
                         is StaffAuthState.MfaRequired -> {
+                            clearTransientCodes()
                             _uiState.update {
                                 it.copy(
                                     phase = StaffWorkspacePhase.MFA_REQUIRED,
@@ -345,16 +443,18 @@ class StaffWorkspaceViewModel(
                             }
                         }
                         else -> {
+                            clearTransientCredentials()
                             _uiState.update {
                                 it.copy(
                                     isSubmitting = false,
-                                    errorMessage = "Unexpected coordinator state after login"
+                                    errorMessage = if (it.language == AppLanguage.AR) "حالة مصادقة غير متوقعة" else "Unexpected authentication state"
                                 )
                             }
                         }
                     }
                 }
                 is CoordinatorResult.AuthDenied -> {
+                    clearTransientCredentials()
                     _uiState.update {
                         it.copy(
                             isSubmitting = false,
@@ -363,6 +463,7 @@ class StaffWorkspaceViewModel(
                     }
                 }
                 is CoordinatorResult.Forbidden -> {
+                    clearTransientCredentials()
                     _uiState.update {
                         it.copy(
                             isSubmitting = false,
@@ -371,10 +472,11 @@ class StaffWorkspaceViewModel(
                     }
                 }
                 is CoordinatorResult.Error -> {
+                    clearTransientCredentials()
                     _uiState.update {
                         it.copy(
                             isSubmitting = false,
-                            errorMessage = result.message
+                            errorMessage = if (it.language == AppLanguage.AR) "فشل تسجيل الدخول" else result.message
                         )
                     }
                 }
@@ -388,6 +490,7 @@ class StaffWorkspaceViewModel(
     /**
      * Retries login with secondary authentication (MFA code or Recovery code).
      * The coordinator orchestrates acquiring a FRESH challenge nonce before dispatching credentials.
+     * Preserves pendingPassword across failed attempts so the user can re-enter their code.
      */
     fun retryWithMfa(
         email: String? = null,
@@ -396,6 +499,7 @@ class StaffWorkspaceViewModel(
         isRecovery: Boolean = false,
         deviceName: String = "Android Staff Device"
     ) {
+        val coord = coordinator ?: return
         if (_uiState.value.isSubmitting) return
         val emailToUse = email?.trim()?.ifBlank { null } ?: pendingEmail
         val pwd = passwordOverride ?: pendingPassword
@@ -413,38 +517,54 @@ class StaffWorkspaceViewModel(
         val mfaCode = if (!isRecovery && _uiState.value.mfaMode == MfaMode.TOTP) code.trim() else null
         val recoveryCode = if (isRecovery || _uiState.value.mfaMode == MfaMode.RECOVERY_CODE) code.trim() else null
 
+        val thisIntent = ++activeIntentSeq
         authJob?.cancel()
 
         authJob = viewModelScope.launch {
             _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
+            // Clear code input on each attempt
+            clearTransientCodes()
 
-            val result = withContext(ioDispatcher) {
-                try {
-                    coordinator.retryLoginWithMfa(
+            val result = try {
+                withContext(ioDispatcher) {
+                    coord.retryLoginWithMfa(
                         email = emailToUse,
                         password = pwd,
                         deviceName = deviceName,
                         mfaCode = mfaCode,
                         recoveryCode = recoveryCode
                     )
-                } finally {
-                    clearTransientCredentials()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (e: Exception) {
+                CoordinatorResult.Error(e.message ?: "MFA verification failed")
+            } finally {
+                if (thisIntent == activeIntentSeq) {
+                    _uiState.update { it.copy(isSubmitting = false) }
                 }
             }
 
+            if (thisIntent != activeIntentSeq) return@launch
+
             when (result) {
                 is CoordinatorResult.Success -> {
-                    when (val state = coordinator.authState) {
+                    // Password fulfilled: clear secret from transient memory
+                    clearTransientCredentials()
+                    when (val state = coord.authState) {
                         is StaffAuthState.ReadReady -> {
                             val selectedId = state.session.selectedCompanyId
-                            if (selectedId != null && coordinator.isScopeActive(result.generation, selectedId)) {
+                            if (selectedId != null && coord.isScopeActive(result.generation, selectedId)) {
                                 _uiState.update { s ->
                                     s.copy(
                                         phase = StaffWorkspacePhase.READ_READY,
                                         isSubmitting = false,
                                         activeCompany = SafeCompanyViewData(
                                             companyId = state.bootstrap.companyId.value,
-                                            companyName = state.bootstrap.companyName
+                                            companyName = state.bootstrap.companyName,
+                                            currency = state.bootstrap.baseCurrency
                                         ),
                                         staffActor = SafeStaffActorViewData(
                                             actorId = state.bootstrap.staff.id.value,
@@ -452,6 +572,7 @@ class StaffWorkspaceViewModel(
                                             actorName = state.bootstrap.staff.name,
                                             roleLabel = state.bootstrap.staff.role
                                         ),
+                                        availableCompanies = emptyList(),
                                         errorMessage = null
                                     )
                                 }
@@ -476,13 +597,15 @@ class StaffWorkspaceViewModel(
                             _uiState.update {
                                 it.copy(
                                     isSubmitting = false,
-                                    errorMessage = "Unexpected coordinator state after MFA"
+                                    errorMessage = if (it.language == AppLanguage.AR) "حالة غير متوقعة بعد التحقق" else "Unexpected state after verification"
                                 )
                             }
                         }
                     }
                 }
                 is CoordinatorResult.AuthDenied -> {
+                    // Bad MFA code: clear codes only, keep pendingPassword so staff can retry entering code!
+                    clearTransientCodes()
                     _uiState.update {
                         it.copy(
                             isSubmitting = false,
@@ -491,6 +614,7 @@ class StaffWorkspaceViewModel(
                     }
                 }
                 is CoordinatorResult.Forbidden -> {
+                    clearTransientCredentials()
                     _uiState.update {
                         it.copy(
                             isSubmitting = false,
@@ -499,10 +623,11 @@ class StaffWorkspaceViewModel(
                     }
                 }
                 is CoordinatorResult.Error -> {
+                    clearTransientCodes()
                     _uiState.update {
                         it.copy(
                             isSubmitting = false,
-                            errorMessage = result.message
+                            errorMessage = if (it.language == AppLanguage.AR) "فشل التحقق من الرمز" else result.message
                         )
                     }
                 }
@@ -514,12 +639,37 @@ class StaffWorkspaceViewModel(
     }
 
     /**
-     * Navigates to company selection view if multiple companies are available.
+     * Navigates to company selection view if multiple companies are known in memory,
+     * or initiates honest change-company re-authentication for restored sessions.
      */
     fun openCompanySelection() {
         if (_uiState.value.availableCompanies.isNotEmpty()) {
             _uiState.update { it.copy(phase = StaffWorkspacePhase.COMPANY_SELECTION) }
+        } else {
+            // Restored session cannot recover membership list from frozen contract: honest re-auth flow
+            val lang = _uiState.value.language
+            val msg = if (lang == AppLanguage.AR)
+                "لتغيير المنشأة، يرجى تسجيل الدخول مجدداً لاختيار منشأة أخرى"
+            else
+                "To switch companies, please sign in again to select a different company"
+            logout(messageOnSuccess = msg)
         }
+    }
+
+    /**
+     * Cancels company selection: returns to active ReadReady workspace if valid, or logs out if initial login.
+     */
+    fun cancelCompanySelection() {
+        val active = _uiState.value.activeCompany
+        val coord = coordinator
+        if (active != null && coord != null) {
+            val ulid = runCatching { ServerUlid.parse(active.companyId) }.getOrNull()
+            if (ulid != null && coord.isScopeActive(coord.currentGeneration, ulid)) {
+                _uiState.update { it.copy(phase = StaffWorkspacePhase.READ_READY, errorMessage = null) }
+                return
+            }
+        }
+        logout()
     }
 
     /**
@@ -539,22 +689,40 @@ class StaffWorkspaceViewModel(
             return
         }
 
-        // Immediately clear previous company lists
+        val coord = coordinator ?: return
+        val thisIntent = ++activeIntentSeq
+        authJob?.cancel()
+        productsJob?.cancel()
+        customersJob?.cancel()
         clearListsImmediately()
 
-        authJob?.cancel()
         authJob = viewModelScope.launch {
             _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
 
-            val result = withContext(ioDispatcher) {
-                coordinator.selectCompany(serverUlid)
+            val result = try {
+                withContext(ioDispatcher) {
+                    coord.selectCompany(serverUlid)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (e: Exception) {
+                CoordinatorResult.Error(e.message ?: "Failed to select company")
+            } finally {
+                if (thisIntent == activeIntentSeq) {
+                    _uiState.update { it.copy(isSubmitting = false) }
+                }
             }
+
+            if (thisIntent != activeIntentSeq) return@launch
 
             when (result) {
                 is CoordinatorResult.Success -> {
-                    val state = coordinator.authState
+                    clearTransientCredentials()
+                    val state = coord.authState
                     if (state is StaffAuthState.ReadReady &&
-                        coordinator.isScopeActive(result.generation, serverUlid)
+                        coord.isScopeActive(result.generation, serverUlid)
                     ) {
                         _uiState.update { s ->
                             s.copy(
@@ -562,7 +730,8 @@ class StaffWorkspaceViewModel(
                                 isSubmitting = false,
                                 activeCompany = SafeCompanyViewData(
                                     companyId = state.bootstrap.companyId.value,
-                                    companyName = state.bootstrap.companyName
+                                    companyName = state.bootstrap.companyName,
+                                    currency = state.bootstrap.baseCurrency
                                 ),
                                 staffActor = SafeStaffActorViewData(
                                     actorId = state.bootstrap.staff.id.value,
@@ -578,6 +747,7 @@ class StaffWorkspaceViewModel(
                     }
                 }
                 is CoordinatorResult.AuthDenied -> {
+                    clearTransientCredentials()
                     clearListsImmediately()
                     _uiState.update {
                         it.copy(
@@ -589,12 +759,12 @@ class StaffWorkspaceViewModel(
                 }
                 is CoordinatorResult.Forbidden -> {
                     _uiState.update {
-                        it.copy(isSubmitting = false, errorMessage = "Access forbidden for selected company")
+                        it.copy(isSubmitting = false, errorMessage = if (it.language == AppLanguage.AR) "تم رفض الوصول للمنشأة المحددة" else "Access forbidden for selected company")
                     }
                 }
                 is CoordinatorResult.Error -> {
                     _uiState.update {
-                        it.copy(isSubmitting = false, errorMessage = result.message)
+                        it.copy(isSubmitting = false, errorMessage = if (it.language == AppLanguage.AR) "تعذر اختيار المنشأة" else result.message)
                     }
                 }
                 is CoordinatorResult.StaleOperation -> {
@@ -617,26 +787,39 @@ class StaffWorkspaceViewModel(
             return
         }
 
-        // Cooperative cancellation of in-flight catalog and directory jobs
+        val coord = coordinator ?: return
+        val thisIntent = ++activeIntentSeq
         productsJob?.cancel()
         customersJob?.cancel()
         authJob?.cancel()
-
-        // Invalidate foreign lists immediately
         clearListsImmediately()
 
         authJob = viewModelScope.launch {
             _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
 
-            val result = withContext(ioDispatcher) {
-                coordinator.switchCompany(serverUlid)
+            val result = try {
+                withContext(ioDispatcher) {
+                    coord.switchCompany(serverUlid)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (e: Exception) {
+                CoordinatorResult.Error(e.message ?: "Failed to switch company")
+            } finally {
+                if (thisIntent == activeIntentSeq) {
+                    _uiState.update { it.copy(isSubmitting = false) }
+                }
             }
+
+            if (thisIntent != activeIntentSeq) return@launch
 
             when (result) {
                 is CoordinatorResult.Success -> {
-                    val state = coordinator.authState
+                    val state = coord.authState
                     if (state is StaffAuthState.ReadReady &&
-                        coordinator.isScopeActive(result.generation, serverUlid)
+                        coord.isScopeActive(result.generation, serverUlid)
                     ) {
                         _uiState.update { s ->
                             s.copy(
@@ -644,7 +827,8 @@ class StaffWorkspaceViewModel(
                                 isSubmitting = false,
                                 activeCompany = SafeCompanyViewData(
                                     companyId = state.bootstrap.companyId.value,
-                                    companyName = state.bootstrap.companyName
+                                    companyName = state.bootstrap.companyName,
+                                    currency = state.bootstrap.baseCurrency
                                 ),
                                 errorMessage = null
                             )
@@ -665,12 +849,12 @@ class StaffWorkspaceViewModel(
                 }
                 is CoordinatorResult.Forbidden -> {
                     _uiState.update {
-                        it.copy(isSubmitting = false, errorMessage = "Access forbidden for new company")
+                        it.copy(isSubmitting = false, errorMessage = if (it.language == AppLanguage.AR) "تم رفض الوصول للمنشأة الجديدة" else "Access forbidden for new company")
                     }
                 }
                 is CoordinatorResult.Error -> {
                     _uiState.update {
-                        it.copy(isSubmitting = false, errorMessage = result.message)
+                        it.copy(isSubmitting = false, errorMessage = if (it.language == AppLanguage.AR) "تعذر تبديل المنشأة" else result.message)
                     }
                 }
                 is CoordinatorResult.StaleOperation -> {
@@ -681,10 +865,11 @@ class StaffWorkspaceViewModel(
     }
 
     /**
-     * Logs out active staff: cancels all in-flight jobs, purges in-memory lists and transient
-     * credentials, invalidates generation, and transitions immediately to SIGN_IN.
+     * Logs out active staff: cancels in-flight jobs, wipes lists, clears transient secrets,
+     * and tracks coordinator.logout() execution while disabling submissions until local purge completes.
      */
-    fun logout() {
+    fun logout(messageOnSuccess: String? = null) {
+        val thisIntent = ++activeIntentSeq
         productsJob?.cancel()
         customersJob?.cancel()
         authJob?.cancel()
@@ -692,27 +877,80 @@ class StaffWorkspaceViewModel(
         clearTransientCredentials()
         clearListsImmediately()
 
+        // Disable new login until local purge result is known
         _uiState.update {
             it.copy(
-                phase = StaffWorkspacePhase.SIGN_IN,
+                isSubmitting = true,
                 activeCompany = null,
                 staffActor = null,
                 availableCompanies = emptyList(),
-                isSubmitting = false,
-                errorMessage = null
+                errorMessage = messageOnSuccess
             )
         }
 
-        viewModelScope.launch {
-            withContext(ioDispatcher) {
-                coordinator.logout()
+        val coord = coordinator ?: run {
+            _uiState.update {
+                it.copy(
+                    phase = StaffWorkspacePhase.SIGN_IN,
+                    isSubmitting = false,
+                    errorMessage = messageOnSuccess
+                )
+            }
+            return
+        }
+
+        authJob = viewModelScope.launch {
+            val logoutResult = try {
+                withContext(ioDispatcher) {
+                    coord.logout()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+
+            if (thisIntent != activeIntentSeq) return@launch
+
+            when (logoutResult) {
+                is LogoutResult.StorageClearFailed -> {
+                    // Storage clear failed: stays locked / error recovery
+                    _uiState.update {
+                        it.copy(
+                            phase = StaffWorkspacePhase.LOCKED,
+                            isSubmitting = false,
+                            lockedReason = "Local session clear failed on logout"
+                        )
+                    }
+                }
+                is LogoutResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            phase = StaffWorkspacePhase.SIGN_IN,
+                            isSubmitting = false,
+                            errorMessage = messageOnSuccess
+                        )
+                    }
+                }
+                null -> {
+                    _uiState.update {
+                        it.copy(
+                            phase = StaffWorkspacePhase.SIGN_IN,
+                            isSubmitting = false,
+                            errorMessage = messageOnSuccess
+                        )
+                    }
+                }
             }
         }
     }
 
     /**
      * Fetches bounded product catalog for the selected company.
-     * Enforces generation and active company scope check before committing to UI state.
+     * Enforces ownership guard before processing any result branch, resets pagination safely on refresh,
+     * and deduplicates item IDs before exposing to Compose.
      */
     fun loadProducts(refresh: Boolean = false, loadMore: Boolean = false) {
         val activeCompany = _uiState.value.activeCompany ?: return
@@ -721,9 +959,10 @@ class StaffWorkspaceViewModel(
         } catch (_: Exception) {
             return
         }
+        val coord = coordinator ?: return
 
         if (loadMore) {
-            if (_uiState.value.isProductsLoadingMore || !_uiState.value.productsHasMore || _uiState.value.productsNextCursor == null) {
+            if (_uiState.value.isProductsLoading || _uiState.value.isProductsLoadingMore || !_uiState.value.productsHasMore || _uiState.value.productsNextCursor == null) {
                 return
             }
         } else if (refresh) {
@@ -732,76 +971,108 @@ class StaffWorkspaceViewModel(
             return
         }
 
-        val opGen = coordinator.currentGeneration
+        val thisSeq = ++productRequestSeq
+        val opGen = coord.currentGeneration
         val cursor = if (loadMore) _uiState.value.productsNextCursor else null
+        val targetSearch = _uiState.value.productSearchQuery.ifBlank { null }
 
         productsJob = viewModelScope.launch {
             _uiState.update {
                 if (loadMore) {
                     it.copy(isProductsLoadingMore = true, productsError = null)
                 } else {
-                    it.copy(isProductsLoading = true, productsError = null)
+                    it.copy(
+                        isProductsLoading = true,
+                        isProductsLoadingMore = false,
+                        productsError = null,
+                        productsNextCursor = null,
+                        productsHasMore = false
+                    )
                 }
             }
 
             val query = PaginationQuery(
                 limit = 50,
                 cursor = cursor,
-                search = _uiState.value.productSearchQuery.ifBlank { null }
+                search = targetSearch
             )
 
-            val result = withContext(ioDispatcher) {
-                coordinator.getProducts(query)
+            val result = try {
+                withContext(ioDispatcher) {
+                    coord.getProducts(query)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (e: Exception) {
+                CoordinatorResult.Error(e.message ?: "Failed to load products")
+            } finally {
+                if (thisSeq == productRequestSeq) {
+                    _uiState.update {
+                        if (it.activeCompany?.companyId == companyUlid.value) {
+                            it.copy(isProductsLoading = false, isProductsLoadingMore = false)
+                        } else it
+                    }
+                }
             }
 
-            if (result is CoordinatorResult.AuthDenied) {
-                clearListsImmediately()
-                _uiState.update { state ->
-                    state.copy(
-                        phase = StaffWorkspacePhase.LOCKED,
-                        isProductsLoading = false,
-                        isProductsLoadingMore = false,
-                        lockedReason = "Authentication revoked or invalid (HTTP 401)"
-                    )
-                }
+            // Ownership check BEFORE every result branch:
+            // 1. Intent / search sequence check
+            if (thisSeq != productRequestSeq) {
                 return@launch
             }
-
-            // Verify active scope before state commit
-            if (!coordinator.isScopeActive(opGen, companyUlid)) {
+            // 2. Active company check
+            if (_uiState.value.activeCompany?.companyId != companyUlid.value) {
+                return@launch
+            }
+            // 3. Coordinator generation check
+            if (opGen != coord.currentGeneration) {
                 return@launch
             }
 
             when (result) {
                 is CoordinatorResult.Success -> {
-                    val response = result.value
-                    _uiState.update { state ->
-                        if (state.activeCompany?.companyId != companyUlid.value) return@update state
-                        val updatedList = if (loadMore) {
-                            state.products + response.products
-                        } else {
-                            response.products
+                    if (coord.isScopeActive(opGen, companyUlid)) {
+                        val response = result.value
+                        _uiState.update { state ->
+                            if (state.activeCompany?.companyId != companyUlid.value) return@update state
+                            val combined = if (loadMore) {
+                                state.products + response.products
+                            } else {
+                                response.products
+                            }
+                            val deduped = combined.distinctBy { it.id.value }
+                            state.copy(
+                                products = deduped,
+                                isProductsLoading = false,
+                                isProductsLoadingMore = false,
+                                productsNextCursor = response.nextCursor,
+                                productsHasMore = response.hasMore,
+                                productsError = null
+                            )
                         }
-                        state.copy(
-                            products = updatedList,
-                            isProductsLoading = false,
-                            isProductsLoadingMore = false,
-                            productsNextCursor = response.nextCursor,
-                            productsHasMore = response.hasMore,
-                            productsError = null
-                        )
                     }
                 }
                 is CoordinatorResult.AuthDenied -> {
-                    // Handled above before scope check
-                }
-                is CoordinatorResult.Forbidden -> {
+                    clearListsImmediately()
                     _uiState.update { state ->
-                        if (state.activeCompany?.companyId != companyUlid.value) return@update state
                         state.copy(
+                            phase = StaffWorkspacePhase.LOCKED,
                             isProductsLoading = false,
                             isProductsLoadingMore = false,
-                            productsError = "Catalog access forbidden"
+                            lockedReason = "Authentication revoked or invalid (HTTP 401)"
+                        )
+                    }
+                }
+                is CoordinatorResult.Forbidden -> {
+                    clearListsImmediately()
+                    _uiState.update { state ->
+                        state.copy(
+                            phase = StaffWorkspacePhase.LOCKED,
+                            isProductsLoading = false,
+                            isProductsLoadingMore = false,
+                            lockedReason = "Tenant access forbidden (HTTP 403)"
                         )
                     }
                 }
@@ -812,7 +1083,7 @@ class StaffWorkspaceViewModel(
                         state.copy(
                             isProductsLoading = false,
                             isProductsLoadingMore = false,
-                            productsError = result.message
+                            productsError = if (state.language == AppLanguage.AR) "تعذر تحميل سجل الأصناف" else result.message
                         )
                     }
                 }
@@ -824,16 +1095,23 @@ class StaffWorkspaceViewModel(
     }
 
     /**
-     * Updates product search query and re-executes search.
+     * Updates product search query and re-executes search with cursor and loading reset.
      */
     fun updateProductSearchQuery(query: String) {
-        _uiState.update { it.copy(productSearchQuery = query) }
+        _uiState.update {
+            it.copy(
+                productSearchQuery = query,
+                productsNextCursor = null,
+                productsHasMore = false
+            )
+        }
         loadProducts(refresh = true)
     }
 
     /**
      * Fetches bounded customer directory for the selected company.
-     * Enforces generation and active company scope check before committing to UI state.
+     * Enforces ownership guard before processing any result branch, resets pagination safely on refresh,
+     * and deduplicates item IDs before exposing to Compose.
      */
     fun loadCustomers(refresh: Boolean = false, loadMore: Boolean = false) {
         val activeCompany = _uiState.value.activeCompany ?: return
@@ -842,9 +1120,10 @@ class StaffWorkspaceViewModel(
         } catch (_: Exception) {
             return
         }
+        val coord = coordinator ?: return
 
         if (loadMore) {
-            if (_uiState.value.isCustomersLoadingMore || !_uiState.value.customersHasMore || _uiState.value.customersNextCursor == null) {
+            if (_uiState.value.isCustomersLoading || _uiState.value.isCustomersLoadingMore || !_uiState.value.customersHasMore || _uiState.value.customersNextCursor == null) {
                 return
             }
         } else if (refresh) {
@@ -853,76 +1132,108 @@ class StaffWorkspaceViewModel(
             return
         }
 
-        val opGen = coordinator.currentGeneration
+        val thisSeq = ++customerRequestSeq
+        val opGen = coord.currentGeneration
         val cursor = if (loadMore) _uiState.value.customersNextCursor else null
+        val targetSearch = _uiState.value.customerSearchQuery.ifBlank { null }
 
         customersJob = viewModelScope.launch {
             _uiState.update {
                 if (loadMore) {
                     it.copy(isCustomersLoadingMore = true, customersError = null)
                 } else {
-                    it.copy(isCustomersLoading = true, customersError = null)
+                    it.copy(
+                        isCustomersLoading = true,
+                        isCustomersLoadingMore = false,
+                        customersError = null,
+                        customersNextCursor = null,
+                        customersHasMore = false
+                    )
                 }
             }
 
             val query = PaginationQuery(
                 limit = 50,
                 cursor = cursor,
-                search = _uiState.value.customerSearchQuery.ifBlank { null }
+                search = targetSearch
             )
 
-            val result = withContext(ioDispatcher) {
-                coordinator.getCustomers(query)
+            val result = try {
+                withContext(ioDispatcher) {
+                    coord.getCustomers(query)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (e: Exception) {
+                CoordinatorResult.Error(e.message ?: "Failed to load customers")
+            } finally {
+                if (thisSeq == customerRequestSeq) {
+                    _uiState.update {
+                        if (it.activeCompany?.companyId == companyUlid.value) {
+                            it.copy(isCustomersLoading = false, isCustomersLoadingMore = false)
+                        } else it
+                    }
+                }
             }
 
-            if (result is CoordinatorResult.AuthDenied) {
-                clearListsImmediately()
-                _uiState.update { state ->
-                    state.copy(
-                        phase = StaffWorkspacePhase.LOCKED,
-                        isCustomersLoading = false,
-                        isCustomersLoadingMore = false,
-                        lockedReason = "Authentication revoked or invalid (HTTP 401)"
-                    )
-                }
+            // Ownership check BEFORE every result branch:
+            // 1. Intent / search sequence check
+            if (thisSeq != customerRequestSeq) {
                 return@launch
             }
-
-            // Verify active scope before state commit
-            if (!coordinator.isScopeActive(opGen, companyUlid)) {
+            // 2. Active company check
+            if (_uiState.value.activeCompany?.companyId != companyUlid.value) {
+                return@launch
+            }
+            // 3. Coordinator generation check
+            if (opGen != coord.currentGeneration) {
                 return@launch
             }
 
             when (result) {
                 is CoordinatorResult.Success -> {
-                    val response = result.value
-                    _uiState.update { state ->
-                        if (state.activeCompany?.companyId != companyUlid.value) return@update state
-                        val updatedList = if (loadMore) {
-                            state.customers + response.customers
-                        } else {
-                            response.customers
+                    if (coord.isScopeActive(opGen, companyUlid)) {
+                        val response = result.value
+                        _uiState.update { state ->
+                            if (state.activeCompany?.companyId != companyUlid.value) return@update state
+                            val combined = if (loadMore) {
+                                state.customers + response.customers
+                            } else {
+                                response.customers
+                            }
+                            val deduped = combined.distinctBy { it.id.value }
+                            state.copy(
+                                customers = deduped,
+                                isCustomersLoading = false,
+                                isCustomersLoadingMore = false,
+                                customersNextCursor = response.nextCursor,
+                                customersHasMore = response.hasMore,
+                                customersError = null
+                            )
                         }
-                        state.copy(
-                            customers = updatedList,
-                            isCustomersLoading = false,
-                            isCustomersLoadingMore = false,
-                            customersNextCursor = response.nextCursor,
-                            customersHasMore = response.hasMore,
-                            customersError = null
-                        )
                     }
                 }
                 is CoordinatorResult.AuthDenied -> {
-                    // Handled above before scope check
-                }
-                is CoordinatorResult.Forbidden -> {
+                    clearListsImmediately()
                     _uiState.update { state ->
-                        if (state.activeCompany?.companyId != companyUlid.value) return@update state
                         state.copy(
+                            phase = StaffWorkspacePhase.LOCKED,
                             isCustomersLoading = false,
                             isCustomersLoadingMore = false,
-                            customersError = "Customer directory access forbidden"
+                            lockedReason = "Authentication revoked or invalid (HTTP 401)"
+                        )
+                    }
+                }
+                is CoordinatorResult.Forbidden -> {
+                    clearListsImmediately()
+                    _uiState.update { state ->
+                        state.copy(
+                            phase = StaffWorkspacePhase.LOCKED,
+                            isCustomersLoading = false,
+                            isCustomersLoadingMore = false,
+                            lockedReason = "Tenant access forbidden (HTTP 403)"
                         )
                     }
                 }
@@ -933,7 +1244,7 @@ class StaffWorkspaceViewModel(
                         state.copy(
                             isCustomersLoading = false,
                             isCustomersLoadingMore = false,
-                            customersError = result.message
+                            customersError = if (state.language == AppLanguage.AR) "تعذر تحميل دليل العملاء" else result.message
                         )
                     }
                 }
@@ -945,10 +1256,16 @@ class StaffWorkspaceViewModel(
     }
 
     /**
-     * Updates customer directory search query and re-executes search.
+     * Updates customer directory search query and re-executes search with cursor and loading reset.
      */
     fun updateCustomerSearchQuery(query: String) {
-        _uiState.update { it.copy(customerSearchQuery = query) }
+        _uiState.update {
+            it.copy(
+                customerSearchQuery = query,
+                customersNextCursor = null,
+                customersHasMore = false
+            )
+        }
         loadCustomers(refresh = true)
     }
 
@@ -975,11 +1292,11 @@ class StaffWorkspaceViewModel(
     }
 
     /**
-     * Checks if a returned error indicates 401 Auth Denial, in which case
-     * in-memory data is cleared immediately and UI transitions to LOCKED.
+     * Helper to lock session immediately if coordinator transitioned to Locked.
      */
     private fun checkAndHandleAuthDenied(errorMessage: String) {
-        val state = coordinator.authState
+        val coord = coordinator ?: return
+        val state = coord.authState
         if (state is StaffAuthState.Locked) {
             clearListsImmediately()
             _uiState.update {
@@ -1014,6 +1331,14 @@ class StaffWorkspaceViewModel(
         }
     }
 
+    override fun onCleared() {
+        super.onCleared()
+        clearTransientCredentials()
+        authJob?.cancel()
+        productsJob?.cancel()
+        customersJob?.cancel()
+    }
+
     class Factory(
         private val context: Context,
         private val configuredOrigin: String,
@@ -1023,16 +1348,66 @@ class StaffWorkspaceViewModel(
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            val coordinator = StaffSessionCoordinator.create(
-                context = context.applicationContext,
-                baseOrigin = configuredOrigin,
-                allowHttpLoopback = allowHttpLoopback,
-                authDenialListener = authDenialListener
-            )
+            val effectiveLoopback = BuildConfig.DEBUG && allowHttpLoopback
+
+            // 1. Validate configuredOrigin safely before attempting composition
+            if (configuredOrigin.isBlank()) {
+                return StaffWorkspaceViewModel(
+                    coordinator = null,
+                    configuredOrigin = configuredOrigin,
+                    allowHttpLoopback = effectiveLoopback,
+                    ioDispatcher = ioDispatcher,
+                    authDenialListener = authDenialListener,
+                    initialPhase = StaffWorkspacePhase.UNCONFIGURED
+                ) as T
+            }
+
+            val isValidOrigin = try {
+                EndpointSecurity.validateBaseOrigin(configuredOrigin, effectiveLoopback)
+                true
+            } catch (_: Exception) {
+                false
+            }
+
+            if (!isValidOrigin) {
+                return StaffWorkspaceViewModel(
+                    coordinator = null,
+                    configuredOrigin = configuredOrigin,
+                    allowHttpLoopback = effectiveLoopback,
+                    ioDispatcher = ioDispatcher,
+                    authDenialListener = authDenialListener,
+                    initialPhase = StaffWorkspacePhase.UNCONFIGURED
+                ) as T
+            }
+
+            // 2. Safe coordinator composition: handle Keystore/Storage unavailability gracefully without crash
+            val coordinator = try {
+                StaffSessionCoordinator.create(
+                    context = context.applicationContext,
+                    baseOrigin = configuredOrigin,
+                    allowHttpLoopback = effectiveLoopback,
+                    authDenialListener = authDenialListener
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (e: Exception) {
+                return StaffWorkspaceViewModel(
+                    coordinator = null,
+                    configuredOrigin = configuredOrigin,
+                    allowHttpLoopback = effectiveLoopback,
+                    ioDispatcher = ioDispatcher,
+                    authDenialListener = authDenialListener,
+                    initialPhase = StaffWorkspacePhase.STORAGE_FAILED,
+                    initialStorageError = e.message ?: "Secure storage initialization failed"
+                ) as T
+            }
+
             return StaffWorkspaceViewModel(
                 coordinator = coordinator,
                 configuredOrigin = configuredOrigin,
-                allowHttpLoopback = allowHttpLoopback,
+                allowHttpLoopback = effectiveLoopback,
                 ioDispatcher = ioDispatcher,
                 authDenialListener = authDenialListener
             ) as T

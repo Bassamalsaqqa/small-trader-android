@@ -97,7 +97,7 @@ fun StaffWorkspaceScreen(
         StaffWorkspaceHeader(
             activeCompany = uiState.activeCompany,
             staffActor = uiState.staffActor,
-            canSwitchCompany = uiState.availableCompanies.size > 1,
+            canSwitchCompany = uiState.activeCompany != null,
             isDarkTheme = uiState.isDarkTheme,
             lang = lang,
             onSwitchCompany = onSwitchCompany,
@@ -174,6 +174,7 @@ fun StaffWorkspaceScreen(
                         hasMore = uiState.productsHasMore,
                         searchQuery = uiState.productSearchQuery,
                         errorMessage = uiState.productsError,
+                        currencyCode = uiState.activeCompany?.currency ?: "USD",
                         lang = lang,
                         onSearchChange = onSearchProducts,
                         onRefresh = onRefreshProducts,
@@ -346,11 +347,11 @@ private fun StaffWorkspaceHeader(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Truthful non-authority notice per AGENTS.md § 1
+            // Truthful non-authority notice
             Text(
                 text = lang.tr(
-                    "عرض استعلامي فقط - لا تمنح صلاحيات ترحيل مالي",
-                    "Informative read-only display - conveys zero ledger posting authority"
+                    "عرض فقط",
+                    "View only"
                 ),
                 fontSize = 10.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -362,6 +363,11 @@ private fun StaffWorkspaceHeader(
 /**
  * Product catalog view with search, exact wire prices, packaging units, and bounded pagination.
  */
+private fun formatCurrencyAmount(amount: String, currencyCode: String): String {
+    val code = currencyCode.trim()
+    return if (code.isNotEmpty()) "$amount $code" else amount
+}
+
 @Composable
 private fun StaffProductCatalogView(
     products: List<ProductCatalogItem>,
@@ -370,6 +376,7 @@ private fun StaffProductCatalogView(
     hasMore: Boolean,
     searchQuery: String,
     errorMessage: String?,
+    currencyCode: String = "USD",
     lang: AppLanguage,
     onSearchChange: (String) -> Unit,
     onRefresh: () -> Unit,
@@ -499,7 +506,7 @@ private fun StaffProductCatalogView(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(products, key = { it.id.value }) { product ->
-                    ProductCatalogItemCard(product = product, lang = lang)
+                    ProductCatalogItemCard(product = product, currencyCode = currencyCode, lang = lang)
                 }
 
                 // Pagination footer
@@ -542,6 +549,7 @@ private fun StaffProductCatalogView(
 @Composable
 private fun ProductCatalogItemCard(
     product: ProductCatalogItem,
+    currencyCode: String = "USD",
     lang: AppLanguage
 ) {
     Card(
@@ -611,7 +619,7 @@ private fun ProductCatalogItemCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "${product.unitPrice.toPlainString()} ₪",
+                        text = formatCurrencyAmount(product.unitPrice.toPlainString(), currencyCode),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
@@ -636,7 +644,7 @@ private fun ProductCatalogItemCard(
             // Default sales unit price
             Spacer(modifier = Modifier.height(6.dp))
             val salePriceText = if (product.defaultUnit.salePrice != null) {
-                "${product.defaultUnit.salePrice.toPlainString()} ₪"
+                formatCurrencyAmount(product.defaultUnit.salePrice.toPlainString(), currencyCode)
             } else {
                 lang.tr("غير محدد", "Unavailable")
             }
@@ -651,7 +659,7 @@ private fun ProductCatalogItemCard(
             val taxText = if (product.taxRateId != null && product.taxRate != null) {
                 "${product.taxRate.value.toPlainString()}%"
             } else {
-                lang.tr("بدون ضريبة محددة للصنف (افتراضي غير مرتبط)", "No default product tax association (not exempt)")
+                lang.tr("غير محددة", "Unassigned")
             }
             Text(
                 text = lang.tr("الضريبة: ", "Tax: ") + taxText,
@@ -669,7 +677,11 @@ private fun ProductCatalogItemCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 product.units.forEach { unit ->
-                    val unitPriceLabel = if (unit.salePrice != null) "${unit.salePrice.toPlainString()} ₪" else lang.tr("غير محدد", "Unavailable")
+                    val unitPriceLabel = if (unit.salePrice != null) {
+                        formatCurrencyAmount(unit.salePrice.toPlainString(), currencyCode)
+                    } else {
+                        lang.tr("غير محدد", "Unavailable")
+                    }
                     Text(
                         text = "• ${unit.name} (${unit.code}): 1 = ${unit.conversionToBase.value.toPlainString()} ${product.baseUnit.name} | $unitPriceLabel",
                         fontSize = 11.sp,

@@ -21,13 +21,27 @@ import com.example.data.mobile.readclient.ProductBaseUnit
 import com.example.data.mobile.readclient.ProductCatalogItem
 import com.example.data.mobile.readclient.ProductCatalogResponse
 import com.example.data.mobile.readclient.ProductDefaultUnit
+import com.example.data.mobile.contract.CanonicalJsonSerializer
+import com.example.data.mobile.contract.StrictJsonParser
+import com.example.data.mobile.readclient.HttpMethod
+import com.example.data.mobile.readclient.ReadClientTransport
+import com.example.data.mobile.readclient.SmallTraderReadClient
+import com.example.data.mobile.readclient.TransportRequest
+import com.example.data.mobile.readclient.TransportResponse
+import com.example.data.mobile.session.CoordinatorClock
 import com.example.data.mobile.session.CoordinatorResult
+import com.example.data.mobile.session.DefaultSecureStaffSessionStore
+import com.example.data.mobile.session.DefaultStaffSessionCoordinator
+import com.example.data.mobile.session.InstallationIdentityStore
+import com.example.data.mobile.session.JvmAesGcmCryptoEngine
 import com.example.data.mobile.session.LockReason
 import com.example.data.mobile.session.LogoutResult
 import com.example.data.mobile.session.RemoteRevocationStatus
+import com.example.data.mobile.session.SecureStaffSessionStore
 import com.example.data.mobile.session.StaffAuthState
 import com.example.data.mobile.session.StaffSessionCoordinator
 import com.example.data.mobile.session.StaffSessionRecord
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -498,6 +512,448 @@ class StaffWorkspaceViewModelTest {
         vm.toggleTheme()
         assertTrue(vm.uiState.value.isDarkTheme)
     }
+
+    private fun locateFixturesDir(): File {
+        val base = System.getProperty("user.dir") ?: "."
+        val root = generateSequence(File(base)) { it.parentFile }
+            .firstOrNull { File(it, "docs/integration/mobile-v1/fixtures").exists() }
+            ?: error("Could not locate docs/integration/mobile-v1/fixtures from $base")
+        return File(root, "docs/integration/mobile-v1/fixtures")
+    }
+
+    private data class RealCoordinatorEnv(
+        val coordinator: DefaultStaffSessionCoordinator,
+        val transport: RoutingMockTransport,
+        val sessionStore: DefaultSecureStaffSessionStore,
+        val tempDir: File
+    )
+
+    private fun setupRealCoordinator(): RealCoordinatorEnv {
+        val tempDir = File.createTempFile("vm_test_", "_dir").apply {
+            delete()
+            mkdirs()
+        }
+        val sessionFile = File(tempDir, SecureStaffSessionStore.SESSION_FILE_NAME)
+        val identityFile = File(tempDir, InstallationIdentityStore.IDENTITY_FILE_NAME)
+        val installationStore = InstallationIdentityStore(identityFile)
+        val cryptoEngine = JvmAesGcmCryptoEngine()
+        val sessionStore = DefaultSecureStaffSessionStore(
+            sessionFile = sessionFile,
+            installationStore = installationStore,
+            cryptoEngine = cryptoEngine,
+            packageName = "com.aistudio.smalltrader.psdukx"
+        )
+        val transport = RoutingMockTransport()
+        val readClient = SmallTraderReadClient(transport, "https://api.smalltrader.example")
+        val coordinator = DefaultStaffSessionCoordinator(
+            readClient = readClient,
+            sessionStore = sessionStore,
+            clock = TestCoordinatorClock()
+        )
+        return RealCoordinatorEnv(coordinator, transport, sessionStore, tempDir)
+    }
+
+    @Test
+    fun realCoordinator_signIn_wireChallengeToLoginToBootstrapToProductsCustomers_andPersistsSession() = runTest(testDispatcher) {
+        val env = setupRealCoordinator()
+        try {
+            val fixtures = locateFixturesDir()
+            val challengeJson = File(fixtures, "golden-auth-challenge.json").readText(Charsets.UTF_8)
+            val challengeRes = StrictJsonParser.parse(challengeJson).asObject().require("response")
+            val loginJson = File(fixtures, "golden-auth-login.json").readText(Charsets.UTF_8)
+            val loginRes = StrictJsonParser.parse(loginJson).asObject().require("response")
+            val bootstrapJson = File(fixtures, "golden-bootstrap.json").readText(Charsets.UTF_8)
+            val productJson = File(fixtures, "golden-product-catalog.json").readText(Charsets.UTF_8)
+            val customerJson = File(fixtures, "golden-customer-directory.json").readText(Charsets.UTF_8)
+
+            env.transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/challenge")] = {
+                TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(challengeRes))
+            }
+            env.transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/login")] = {
+                TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(loginRes))
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/bootstrap")] = {
+                TransportResponse(statusCode = 200, body = bootstrapJson)
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/products")] = {
+                TransportResponse(statusCode = 200, body = productJson)
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/customers")] = {
+                TransportResponse(statusCode = 200, body = customerJson)
+            }
+
+            val vm = StaffWorkspaceViewModel(
+                coordinator = env.coordinator,
+                configuredOrigin = "https://api.smalltrader.example",
+                ioDispatcher = testDispatcher
+            )
+            advanceUntilIdle()
+
+            // 1. Initial phase is SIGN_IN
+            assertEquals(StaffWorkspacePhase.SIGN_IN, vm.uiState.value.phase)
+
+            // 2. Perform sign in: triggers wire challenge -> login -> bootstrap -> products & customers
+            vm.signIn("cashier@smalltrader.example", passwordOverride = "CorrectHorseBatteryStaple123!")
+            advanceUntilIdle()
+
+            // Verify sequential requests over wire
+            assertTrue("Expected at least 5 requests on wire", env.transport.requestsReceived.size >= 5)
+            assertEquals("/api/mobile/v1/auth/challenge", env.transport.requestsReceived[0].path)
+            assertEquals("/api/mobile/v1/auth/login", env.transport.requestsReceived[1].path)
+            assertTrue(
+                "Login request body must contain challenge nonce",
+                env.transport.requestsReceived[1].body?.contains("9f834928abceef761234509876abcdef1234567890abcdef1234567890abcdef") == true
+            )
+            assertEquals("/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/bootstrap", env.transport.requestsReceived[2].path)
+
+            // Verify secure storage persistence
+            assertTrue("Session must be securely persisted to disk", env.sessionStore.hasSessionFile())
+
+            // Verify UI state reaches READ_READY with products, customers, and truthful base currency
+            val state = vm.uiState.value
+            assertEquals(StaffWorkspacePhase.READ_READY, state.phase)
+            assertEquals("01JCV8X9M2NQW3TYZ4R5S6789A", state.activeCompany?.companyId)
+            assertEquals("Al-Amal Retail Company", state.activeCompany?.companyName)
+            assertEquals("ILS", state.activeCompany?.currency)
+            assertEquals("Ahmad Cashier", state.staffActor?.actorName)
+            assertEquals("cashier", state.staffActor?.roleLabel)
+            assertEquals(2, state.products.size)
+            assertEquals("SKU-OLIVE-OIL-1L", state.products[0].sku)
+            assertEquals(2, state.customers.size)
+        } finally {
+            env.tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun realCoordinator_mfaRetry_freshChallengeAcquiredWithExactNonce_badCodeFailsAndCorrectRetrySucceeds() = runTest(testDispatcher) {
+        val env = setupRealCoordinator()
+        try {
+            val fixtures = locateFixturesDir()
+            val loginJson = File(fixtures, "golden-auth-login.json").readText(Charsets.UTF_8)
+            val loginRes = StrictJsonParser.parse(loginJson).asObject().require("response")
+            val bootstrapJson = File(fixtures, "golden-bootstrap.json").readText(Charsets.UTF_8)
+            val productJson = File(fixtures, "golden-product-catalog.json").readText(Charsets.UTF_8)
+            val customerJson = File(fixtures, "golden-customer-directory.json").readText(Charsets.UTF_8)
+
+            var challengeCount = 0
+            val nonces = listOf(
+                "nonce_11111111111111111111111111111111",
+                "nonce_22222222222222222222222222222222",
+                "nonce_33333333333333333333333333333333"
+            )
+            env.transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/challenge")] = {
+                val nonce = nonces[challengeCount % nonces.size]
+                challengeCount++
+                TransportResponse(
+                    statusCode = 200,
+                    body = """{"challenge_id":"a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d","nonce":"$nonce","expires_at":"2026-11-10T12:05:00Z"}"""
+                )
+            }
+
+            env.transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/login")] = { req ->
+                val body = req.body ?: ""
+                when {
+                    !body.contains("mfa_code") || body.contains("\"mfa_code\":null") -> {
+                        assertTrue("Initial login must use challenge nonce 1", body.contains(nonces[0]))
+                        TransportResponse(statusCode = 200, body = """{"status":"MFA_REQUIRED","retry":"fresh_challenge"}""")
+                    }
+                    body.contains("000000") -> {
+                        assertTrue("First MFA retry must use fresh challenge nonce 2", body.contains(nonces[1]))
+                        TransportResponse(statusCode = 401, body = """{"error":{"code":"AUTH_DENIED","message":"Invalid MFA code"}}""")
+                    }
+                    body.contains("123456") -> {
+                        assertTrue("Second MFA retry must use fresh challenge nonce 3", body.contains(nonces[2]))
+                        TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(loginRes))
+                    }
+                    else -> TransportResponse(statusCode = 400, body = """{"error":{"code":"BAD_REQUEST","message":"Unexpected code"}}""")
+                }
+            }
+
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/bootstrap")] = {
+                TransportResponse(statusCode = 200, body = bootstrapJson)
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/products")] = {
+                TransportResponse(statusCode = 200, body = productJson)
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/customers")] = {
+                TransportResponse(statusCode = 200, body = customerJson)
+            }
+
+            val vm = StaffWorkspaceViewModel(
+                coordinator = env.coordinator,
+                configuredOrigin = "https://api.smalltrader.example",
+                ioDispatcher = testDispatcher
+            )
+            advanceUntilIdle()
+
+            // 1. Initial sign-in with password -> triggers MFA_REQUIRED
+            vm.signIn("cashier@smalltrader.example", passwordOverride = "CorrectHorseBatteryStaple123!")
+            advanceUntilIdle()
+
+            assertEquals(StaffWorkspacePhase.MFA_REQUIRED, vm.uiState.value.phase)
+            assertEquals(1, challengeCount)
+
+            // 2. Submit bad MFA code -> retryLoginWithMfa acquires fresh challenge 2, fails with 401
+            vm.setTransientMfaCode("000000")
+            vm.retryWithMfa()
+            advanceUntilIdle()
+
+            assertEquals(StaffWorkspacePhase.MFA_REQUIRED, vm.uiState.value.phase)
+            assertNotNull(vm.uiState.value.errorMessage)
+            assertEquals(2, challengeCount)
+
+            // 3. Submit correct MFA code -> retryLoginWithMfa acquires fresh challenge 3, succeeds
+            vm.setTransientMfaCode("123456")
+            vm.retryWithMfa()
+            advanceUntilIdle()
+
+            assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+            assertEquals("Al-Amal Retail Company", vm.uiState.value.activeCompany?.companyName)
+            assertEquals(3, challengeCount)
+        } finally {
+            env.tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun realCoordinator_http403Forbidden_locksCoordinator_wipesScopedListsAndResetsSpinners() = runTest(testDispatcher) {
+        val env = setupRealCoordinator()
+        try {
+            val fixtures = locateFixturesDir()
+            val challengeJson = File(fixtures, "golden-auth-challenge.json").readText(Charsets.UTF_8)
+            val challengeRes = StrictJsonParser.parse(challengeJson).asObject().require("response")
+            val loginJson = File(fixtures, "golden-auth-login.json").readText(Charsets.UTF_8)
+            val loginRes = StrictJsonParser.parse(loginJson).asObject().require("response")
+            val bootstrapJson = File(fixtures, "golden-bootstrap.json").readText(Charsets.UTF_8)
+            val productJson = File(fixtures, "golden-product-catalog.json").readText(Charsets.UTF_8)
+            val customerJson = File(fixtures, "golden-customer-directory.json").readText(Charsets.UTF_8)
+
+            env.transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/challenge")] = {
+                TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(challengeRes))
+            }
+            env.transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/login")] = {
+                TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(loginRes))
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/bootstrap")] = {
+                TransportResponse(statusCode = 200, body = bootstrapJson)
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/products")] = {
+                TransportResponse(statusCode = 200, body = productJson)
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/customers")] = {
+                TransportResponse(statusCode = 200, body = customerJson)
+            }
+
+            val vm = StaffWorkspaceViewModel(
+                coordinator = env.coordinator,
+                configuredOrigin = "https://api.smalltrader.example",
+                ioDispatcher = testDispatcher
+            )
+            advanceUntilIdle()
+
+            vm.signIn("cashier@smalltrader.example", passwordOverride = "CorrectHorseBatteryStaple123!")
+            advanceUntilIdle()
+            assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+            assertEquals(2, vm.uiState.value.products.size)
+
+            // Now product endpoint returns 403 Forbidden
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/products")] = {
+                TransportResponse(statusCode = 403, body = """{"error":{"code":"FORBIDDEN","message":"Membership revoked"}}""")
+            }
+
+            vm.loadProducts(refresh = true)
+            advanceUntilIdle()
+
+            val lockedState = vm.uiState.value
+            assertEquals(StaffWorkspacePhase.LOCKED, lockedState.phase)
+            assertTrue("Products must be cleared on 403", lockedState.products.isEmpty())
+            assertTrue("Customers must be cleared on 403", lockedState.customers.isEmpty())
+            assertFalse("Products loading must be reset", lockedState.isProductsLoading)
+            assertFalse("Products loading more must be reset", lockedState.isProductsLoadingMore)
+            assertNotNull(lockedState.lockedReason)
+        } finally {
+            env.tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun realCoordinator_trackedLogout_purgesDiskAndDeniesUIReads() = runTest(testDispatcher) {
+        val env = setupRealCoordinator()
+        try {
+            val fixtures = locateFixturesDir()
+            val challengeJson = File(fixtures, "golden-auth-challenge.json").readText(Charsets.UTF_8)
+            val challengeRes = StrictJsonParser.parse(challengeJson).asObject().require("response")
+            val loginJson = File(fixtures, "golden-auth-login.json").readText(Charsets.UTF_8)
+            val loginRes = StrictJsonParser.parse(loginJson).asObject().require("response")
+            val logoutJson = File(fixtures, "golden-auth-logout.json").readText(Charsets.UTF_8)
+            val logoutRes = StrictJsonParser.parse(logoutJson).asObject().require("response")
+            val bootstrapJson = File(fixtures, "golden-bootstrap.json").readText(Charsets.UTF_8)
+            val productJson = File(fixtures, "golden-product-catalog.json").readText(Charsets.UTF_8)
+            val customerJson = File(fixtures, "golden-customer-directory.json").readText(Charsets.UTF_8)
+
+            env.transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/challenge")] = {
+                TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(challengeRes))
+            }
+            env.transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/login")] = {
+                TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(loginRes))
+            }
+            env.transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/logout")] = {
+                TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(logoutRes))
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/bootstrap")] = {
+                TransportResponse(statusCode = 200, body = bootstrapJson)
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/products")] = {
+                TransportResponse(statusCode = 200, body = productJson)
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/customers")] = {
+                TransportResponse(statusCode = 200, body = customerJson)
+            }
+
+            val vm = StaffWorkspaceViewModel(
+                coordinator = env.coordinator,
+                configuredOrigin = "https://api.smalltrader.example",
+                ioDispatcher = testDispatcher
+            )
+            advanceUntilIdle()
+
+            vm.signIn("cashier@smalltrader.example", passwordOverride = "CorrectHorseBatteryStaple123!")
+            advanceUntilIdle()
+            assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+            assertTrue(env.sessionStore.hasSessionFile())
+
+            vm.logout()
+            advanceUntilIdle()
+
+            val state = vm.uiState.value
+            assertEquals(StaffWorkspacePhase.SIGN_IN, state.phase)
+            assertFalse("Session file must be deleted on logout", env.sessionStore.hasSessionFile())
+            assertTrue(state.products.isEmpty())
+            assertTrue(state.customers.isEmpty())
+            assertNull(state.activeCompany)
+            assertNull(state.staffActor)
+        } finally {
+            env.tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun productList_deduplicatesItemsWithSameId() = runTest(testDispatcher) {
+        val item1 = fakeCoordinator.createProductItem("01JCV8X9M2NQW3TYZ4R5S67891", "P-1", "Product One")
+        val itemDuplicate = fakeCoordinator.createProductItem("01JCV8X9M2NQW3TYZ4R5S67891", "P-1", "Product One Duplicate")
+
+        fakeCoordinator.getProductsHandler = {
+            ProductCatalogResponse(
+                companyId = testCompanyId1,
+                catalogSnapshotVersion = "snap_1",
+                generatedAt = "2026-11-10T12:00:00Z",
+                nextCursor = null,
+                hasMore = false,
+                products = listOf(item1, itemDuplicate)
+            )
+        }
+
+        fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyId1, "Al-Zaytouna")
+        fakeCoordinator.restoreResult = CoordinatorResult.Success(fakeCoordinator.authState, generation = 1L, companyId = testCompanyId1)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher
+        )
+        advanceUntilIdle()
+
+        // Verify deduped to 1 item
+        assertEquals(1, vm.uiState.value.products.size)
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S67891", vm.uiState.value.products[0].id.value)
+    }
+
+    @Test
+    fun restoredSession_companySwitch_showsHonestReAuth_andCancelReturnsToReadReady() = runTest(testDispatcher) {
+        // Case 1: Restored session with empty availableCompanies -> honest re-auth prompt on SIGN_IN
+        fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyId1, "Al-Zaytouna")
+        fakeCoordinator.restoreResult = CoordinatorResult.Success(fakeCoordinator.authState, generation = 1L, companyId = testCompanyId1)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher
+        )
+        advanceUntilIdle()
+
+        assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+
+        // Opening company selection on restored session (where availableCompanies is empty)
+        vm.openCompanySelection()
+        advanceUntilIdle()
+
+        // Restored session honest re-auth flow
+        assertEquals(StaffWorkspacePhase.SIGN_IN, vm.uiState.value.phase)
+        assertNotNull(vm.uiState.value.errorMessage)
+        assertTrue(vm.uiState.value.errorMessage!!.contains("تسجيل الدخول مجدداً"))
+
+        // Case 2: Session with populated availableCompanies -> transitions to COMPANY_SELECTION, cancel returns to READ_READY
+        fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyId1, "Al-Zaytouna")
+        val vm2 = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher
+        )
+        advanceUntilIdle()
+
+        // Simulate login result with multiple companies
+        fakeCoordinator.loginResultProvider = { _, _, _, _ ->
+            fakeCoordinator.authState = StaffAuthState.CompanySelectionRequired(
+                actor = ActorProfile(testActorId, "Bassam", "staff@example.com", "Cashier", "epoch_1"),
+                availableCompanies = listOf(
+                    CompanyMembership(testCompanyId1, "Al-Zaytouna Branch 1", "ILS", true),
+                    CompanyMembership(testCompanyId2, "Al-Zaytouna Branch 2", "ILS", false)
+                )
+            )
+            CoordinatorResult.Success(fakeCoordinator.authState, generation = 2L)
+        }
+        vm2.signIn("staff@example.com", passwordOverride = "pass")
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.COMPANY_SELECTION, vm2.uiState.value.phase)
+
+        // Selecting company 1 reaches ReadReady
+        vm2.selectCompany(testCompanyId1.value)
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.READ_READY, vm2.uiState.value.phase)
+        assertEquals(2, vm2.uiState.value.availableCompanies.size)
+
+        // Now openCompanySelection moves to COMPANY_SELECTION
+        vm2.openCompanySelection()
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.COMPANY_SELECTION, vm2.uiState.value.phase)
+
+        // Cancel returns back to READ_READY
+        vm2.cancelCompanySelection()
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.READ_READY, vm2.uiState.value.phase)
+        assertEquals(testCompanyId1.value, vm2.uiState.value.activeCompany?.companyId)
+    }
+}
+
+private class RoutingMockTransport : ReadClientTransport {
+    val handlers = mutableMapOf<Pair<HttpMethod, String>, (TransportRequest) -> TransportResponse>()
+    val requestsReceived = mutableListOf<TransportRequest>()
+
+    override fun execute(request: TransportRequest): TransportResponse {
+        requestsReceived.add(request)
+        val handler = handlers[Pair(request.method, request.path)]
+            ?: return TransportResponse(statusCode = 404, body = """{"error":{"code":"NOT_FOUND","message":"Path not mapped: ${request.path}"}}""")
+        return handler(request)
+    }
+}
+
+private class TestCoordinatorClock(
+    var epochMs: Long = 1794312000000L, // 2026-11-10T12:00:00Z
+    var isoUtc: String = "2026-11-10T12:00:00Z"
+) : CoordinatorClock {
+    override fun nowEpochMs(): Long = epochMs
+    override fun nowIsoUtc(): String = isoUtc
 }
 
 /**

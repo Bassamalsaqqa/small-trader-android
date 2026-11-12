@@ -23,10 +23,11 @@ data class SafeStaffActorViewData(
  */
 data class SafeCompanyViewData(
     val companyId: String,
-    val companyName: String
+    val companyName: String,
+    val currency: String = "USD"
 ) {
     override fun toString(): String =
-        "SafeCompanyViewData(companyId=$companyId, companyName='[REDACTED]')"
+        "SafeCompanyViewData(companyId=$companyId, companyName='[REDACTED]', currency='$currency')"
 }
 
 /**

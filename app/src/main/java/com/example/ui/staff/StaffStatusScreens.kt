@@ -84,8 +84,8 @@ fun StaffLockedScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = lang.tr(
-                        "تم قفل جلسة الاستعلام لأسباب أمنية (رفض مصادقة أو انتهاء صلاحية الرمز أو قفل المفاتيح).",
-                        "The staff session is locked due to security policy (auth denial, token expiration, or key invalidation)."
+                        "انتهت صلاحية الجلسة أو تم قفلها لأسباب أمنية. يرجى تسجيل الدخول مجدداً للمتابعة.",
+                        "The staff session is locked or expired. Please sign in again to continue."
                     ),
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center,
@@ -101,8 +101,23 @@ fun StaffLockedScreen(
                             containerColor = MaterialTheme.colorScheme.errorContainer
                         )
                     ) {
+                        val localizedReason = when {
+                            reason.contains("401") || reason.contains("AuthDenied") || reason.contains("revoked") ->
+                                lang.tr("تم إبطال صلاحية الدخول للجلسة", "Session authentication revoked or expired")
+                            reason.contains("403") || reason.contains("Forbidden") || reason.contains("MembershipDenied") ->
+                                lang.tr("تم رفض الوصول لهذه المنشأة", "Access denied for this company")
+                            reason.contains("StorageClearFailed") || reason.contains("clear failed") ->
+                                lang.tr("تعذر مسح بيانات الجلسة محلياً", "Local session data could not be cleared")
+                            reason.contains("KeyUnavailable") || reason.contains("KeyLocked") ->
+                                lang.tr("مفاتيح التشفير الآمنة غير متاحة", "Secure keystore keys unavailable")
+                            reason.contains("ScopeMismatch") ->
+                                lang.tr("عدم تطابق في بيانات الجلسة والمنشأة", "Session and company scope mismatch")
+                            reason.contains("CorruptSession") ->
+                                lang.tr("بيانات الجلسة المحفوظة غير صالحة", "Corrupt saved session data")
+                            else -> reason
+                        }
                         Text(
-                            text = reason,
+                            text = localizedReason,
                             color = MaterialTheme.colorScheme.onErrorContainer,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(10.dp),
@@ -275,23 +290,13 @@ fun StaffOfflineScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = lang.tr(
-                        "تعذر إكمال طلب الاستعلام بسبب انقطاع الشبكة أو تعذر الوصول إلى الخادم. النظام لا يقوم بالتحويل التلقائي للبيانات التجريبية حفاظاً على موثوقية السجلات.",
-                        "Read query could not complete due to network interruption or unreachable server. The system strictly never falls back to mock demo data."
+                        "تعذر إكمال طلب الاستعلام بسبب انقطاع الشبكة أو تعذر الوصول إلى الخادم. يرجى التحقق من اتصال الإنترنت وإعادة المحاولة.",
+                        "Read query could not complete due to network interruption or unreachable server. Please check your internet connection and try again."
                     ),
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
-                if (!category.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = "[$category]",
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
 
                 Spacer(modifier = Modifier.height(24.dp))
 
@@ -361,8 +366,8 @@ fun StaffUnconfiguredScreen(
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
                     text = lang.tr(
-                        "تم تفعيل وضع مساحة الموظفين (STAFF_READ_WORKSPACE)، ولكن لم يتم تحديد عنوان الخادم (STAFF_WORKSPACE_ORIGIN).\n\nيرجى تحديد عنوان الخادم في ملف gradle.properties أو عبر أمر البناء:\n-Psmalltrader.staffWorkspaceOrigin=https://your-server.example.com",
-                        "STAFF_READ_WORKSPACE is enabled, but STAFF_WORKSPACE_ORIGIN is empty.\n\nPlease configure the server origin in gradle.properties or via build argument:\n-Psmalltrader.staffWorkspaceOrigin=https://your-server.example.com"
+                        "لم يتم تحديد عنوان الخادم لمساحة استعلام الموظفين. يرجى مراجعة مسؤول النظام لتهيئة إعدادات الخادم.",
+                        "Staff workspace server origin is not configured. Please contact your system administrator to configure the server origin."
                     ),
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center,

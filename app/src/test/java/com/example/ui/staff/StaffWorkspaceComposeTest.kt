@@ -165,7 +165,7 @@ class StaffWorkspaceComposeTest {
         val uiState = StaffWorkspaceUiState(
             phase = StaffWorkspacePhase.READ_READY,
             selectedTab = StaffWorkspaceTab.PRODUCTS,
-            activeCompany = SafeCompanyViewData("01JCV8X9M2NQW3TYZ4R5S6789A", "سوبرماركت الزيتونة"),
+            activeCompany = SafeCompanyViewData("01JCV8X9M2NQW3TYZ4R5S6789A", "سوبرماركت الزيتونة", currency = "ILS"),
             staffActor = SafeStaffActorViewData("01JCV8X9M2NQW3TYZ4R5S6789C", "staff@test.com", "باسم السقا", "كاشير"),
             products = listOf(product),
             productsHasMore = true,
@@ -195,12 +195,12 @@ class StaffWorkspaceComposeTest {
         // Verify Header elements
         composeTestRule.onNodeWithText("سوبرماركت الزيتونة").assertIsDisplayed()
         composeTestRule.onNodeWithText("الموظف: باسم السقا").assertIsDisplayed()
-        composeTestRule.onNodeWithText("عرض استعلامي فقط - لا تمنح صلاحيات ترحيل مالي").assertIsDisplayed()
+        composeTestRule.onNodeWithText("عرض فقط").assertIsDisplayed()
 
         // Verify Product details
         composeTestRule.onNodeWithText("زيت زيتون بكر ممتاز").assertExists()
         composeTestRule.onNodeWithText("SKU-OIL-1L").assertExists()
-        composeTestRule.onNodeWithText("30.00 ₪").assertExists()
+        composeTestRule.onNodeWithText("30.00 ILS").assertExists()
         composeTestRule.onNodeWithText("75.000000 كيلوغرام").assertExists()
 
         // Click Load More
@@ -270,11 +270,95 @@ class StaffWorkspaceComposeTest {
         }
 
         composeTestRule.onNodeWithText("جلسة العمل مقفلة").assertIsDisplayed()
-        composeTestRule.onNodeWithText("تم إلغاء صلاحية الرمز المميز من الخادم (HTTP 401)").assertIsDisplayed()
+        composeTestRule.onNodeWithText("تم إبطال صلاحية الدخول للجلسة").assertIsDisplayed()
 
         composeTestRule.onNodeWithTag("staff_locked_reauth_button").performClick()
         composeTestRule.waitForIdle()
 
         assertTrue(reAuthClicked)
+    }
+
+    @Test
+    fun workspaceScreen_unassignedTaxRate_rendersTruthfulCopy() {
+        val baseUnit = ProductBaseUnit(ServerUlid("01JCV8X9M2NQW3TYZ4R5S6789E"), "PCS", "قطعة")
+        val defaultUnit = ProductDefaultUnit(
+            unitId = ServerUlid("01JCV8X9M2NQW3TYZ4R5S6789E"),
+            productUnitId = ServerUlid("01JCV8X9M2NQW3TYZ4R5S67891"),
+            conversionToBase = PositiveDecimalQuantity("1.0"),
+            salePrice = MoneyAmount("15.00")
+        )
+        val productWithNullTax = ProductCatalogItem(
+            id = ServerUlid("01JCV8X9M2NQW3TYZ4R5S67891"),
+            sku = "SKU-UNTAXED",
+            barcode = "00000000",
+            name = "منتج معفى من الضريبة",
+            unitPrice = MoneyAmount("15.00"),
+            taxRate = null,
+            taxRateId = null,
+            isTracked = true,
+            availableQuantity = NonnegativeDecimalQuantity("10.000000"),
+            baseUnit = baseUnit,
+            defaultUnit = defaultUnit,
+            units = emptyList()
+        )
+
+        val uiState = StaffWorkspaceUiState(
+            phase = StaffWorkspacePhase.READ_READY,
+            selectedTab = StaffWorkspaceTab.PRODUCTS,
+            activeCompany = SafeCompanyViewData("01JCV8X9M2NQW3TYZ4R5S6789A", "سوبرماركت التجربة", currency = "USD"),
+            products = listOf(productWithNullTax),
+            language = AppLanguage.AR
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffWorkspaceScreen(
+                    uiState = uiState,
+                    onSelectTab = {},
+                    onLoadMoreProducts = {},
+                    onRefreshProducts = {},
+                    onSearchProducts = {},
+                    onLoadMoreCustomers = {},
+                    onRefreshCustomers = {},
+                    onSearchCustomers = {},
+                    onSwitchCompany = {},
+                    onLogout = {},
+                    onToggleLanguage = {},
+                    onToggleTheme = {}
+                )
+            }
+        }
+
+        // Verify nullable tax rate display shows "غير محددة"
+        composeTestRule.onNodeWithText("الضريبة: غير محددة").assertExists()
+        composeTestRule.onNodeWithText("15.00 USD").assertExists()
+    }
+
+    @Test
+    fun companySelectScreen_showsCancelWhenActiveCompanyExists_andLogoutOtherwise() {
+        val companies = listOf(
+            SafeCompanyViewData("01JCV8X9M2NQW3TYZ4R5S6789A", "شركة أ"),
+            SafeCompanyViewData("01JCV8X9M2NQW3TYZ4R5S6789B", "شركة ب")
+        )
+
+        // Case 1: activeCompany != null -> button says "إلغاء"
+        val stateWithActive = StaffWorkspaceUiState(
+            phase = StaffWorkspacePhase.COMPANY_SELECTION,
+            activeCompany = SafeCompanyViewData("01JCV8X9M2NQW3TYZ4R5S6789A", "شركة أ"),
+            availableCompanies = companies,
+            language = AppLanguage.AR
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffCompanySelectScreen(
+                    uiState = stateWithActive,
+                    onSelectCompany = {},
+                    onCancel = {}
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("إلغاء").assertIsDisplayed()
     }
 }

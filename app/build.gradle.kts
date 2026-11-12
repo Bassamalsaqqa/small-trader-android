@@ -8,6 +8,25 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
+fun escapeJavaStringLiteral(value: String): String {
+  val sb = StringBuilder("\"")
+  for (c in value) {
+    when (c) {
+      '\\' -> sb.append("\\\\")
+      '"' -> sb.append("\\\"")
+      '\b' -> sb.append("\\b")
+      '\t' -> sb.append("\\t")
+      '\n' -> sb.append("\\n")
+      '\u000C' -> sb.append("\\f")
+      '\r' -> sb.append("\\r")
+      in '\u0000'..'\u001F', in '\u007F'..'\u009F' -> sb.append(String.format("\\u%04x", c.code))
+      else -> sb.append(c)
+    }
+  }
+  sb.append("\"")
+  return sb.toString()
+}
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -23,11 +42,10 @@ android {
 
     val staffReadWorkspace = project.findProperty("smalltrader.staffReadWorkspace")?.toString()?.toBoolean() ?: false
     val staffWorkspaceOrigin = project.findProperty("smalltrader.staffWorkspaceOrigin")?.toString() ?: ""
-    val staffAllowHttpLoopback = project.findProperty("smalltrader.staffAllowHttpLoopback")?.toString()?.toBoolean() ?: false
 
     buildConfigField("boolean", "STAFF_READ_WORKSPACE", staffReadWorkspace.toString())
-    buildConfigField("String", "STAFF_WORKSPACE_ORIGIN", "\"$staffWorkspaceOrigin\"")
-    buildConfigField("boolean", "STAFF_ALLOW_HTTP_LOOPBACK", staffAllowHttpLoopback.toString())
+    buildConfigField("String", "STAFF_WORKSPACE_ORIGIN", escapeJavaStringLiteral(staffWorkspaceOrigin))
+    buildConfigField("boolean", "STAFF_ALLOW_HTTP_LOOPBACK", "false")
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
@@ -64,16 +82,20 @@ android {
       } else {
         signingConfigs.getByName("release")
       }
+      buildConfigField("boolean", "STAFF_ALLOW_HTTP_LOOPBACK", "false")
     }
     create("benchmark") {
       initWith(getByName("release"))
       matchingFallbacks += listOf("release")
       signingConfig = signingConfigs.getByName("debugConfig")
+      buildConfigField("boolean", "STAFF_ALLOW_HTTP_LOOPBACK", "false")
     }
     debug {
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")
+      val staffAllowHttpLoopback = project.findProperty("smalltrader.staffAllowHttpLoopback")?.toString()?.toBoolean() ?: false
+      buildConfigField("boolean", "STAFF_ALLOW_HTTP_LOOPBACK", staffAllowHttpLoopback.toString())
     }
   }
   compileOptions {

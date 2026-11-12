@@ -87,7 +87,7 @@ fun StaffWorkspaceApp(
                         onSelectCompany = { companyId ->
                             viewModel.selectCompany(companyId)
                         },
-                        onCancel = { viewModel.logout() }
+                        onCancel = { viewModel.cancelCompanySelection() }
                     )
                 }
                 StaffWorkspacePhase.READ_READY -> {
@@ -100,11 +100,7 @@ fun StaffWorkspaceApp(
                         onLoadMoreCustomers = { viewModel.loadCustomers(loadMore = true) },
                         onRefreshCustomers = { viewModel.loadCustomers(refresh = true) },
                         onSearchCustomers = { viewModel.updateCustomerSearchQuery(it) },
-                        onSwitchCompany = {
-                            if (uiState.availableCompanies.isNotEmpty()) {
-                                viewModel.openCompanySelection()
-                            }
-                        },
+                        onSwitchCompany = { viewModel.openCompanySelection() },
                         onLogout = { viewModel.logout() },
                         onToggleLanguage = { viewModel.toggleLanguage() },
                         onToggleTheme = { viewModel.toggleTheme() }

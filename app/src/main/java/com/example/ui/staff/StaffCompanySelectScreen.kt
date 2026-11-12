@@ -187,7 +187,11 @@ fun StaffCompanySelectScreen(
                 enabled = !uiState.isSubmitting
             ) {
                 Text(
-                    text = lang.tr("تسجيل الخروج", "Logout"),
+                    text = if (uiState.activeCompany != null) {
+                        lang.tr("إلغاء", "Cancel")
+                    } else {
+                        lang.tr("تسجيل الخروج", "Logout")
+                    },
                     fontSize = 14.sp
                 )
             }
