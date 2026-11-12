@@ -6,13 +6,12 @@ import com.example.data.mobile.contract.ClientUuid
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import java.util.concurrent.locks.ReentrantLock
+import java.util.UUID
 import kotlin.concurrent.withLock
 
 /**
@@ -78,9 +77,14 @@ interface SecureStaffSessionStore {
 /**
  * Standard implementation of [SecureStaffSessionStore].
  *
- * Single-process concurrency safe via [ReentrantLock].
- * Note: Multi-process concurrency is NOT claimed; multi-process file access across isolated Android
- * service processes requires inter-process [java.nio.channels.FileLock] coordination.
+ * Concurrency is coordinated across instances within the same JVM process by canonical file path.
+ * Multi-process file access across isolated Android processes is NOT claimed without OS-level FileLock.
+ *
+ * Crash durability: Writes synchronize file descriptor data to storage before atomic rename.
+ * POSIX directory metadata durability across power-loss crash requires parent directory fsync which is
+ * not portably exposed in Java/Android userland without native directory file descriptor opening.
+ * On atomic replacement failure, operations fail closed and preserve prior records intact without
+ * destructive restore or key recreation.
  */
 class DefaultSecureStaffSessionStore internal constructor(
     private val sessionFile: File,
@@ -89,7 +93,7 @@ class DefaultSecureStaffSessionStore internal constructor(
     private val packageName: String
 ) : SecureStaffSessionStore {
 
-    private val lock = ReentrantLock()
+    internal var renameOperation: (File, File) -> Boolean = { src, dst -> src.renameTo(dst) }
 
     override val installationId: ClientUuid
         get() = installationStore.getOrCreateInstallationId()
@@ -97,29 +101,33 @@ class DefaultSecureStaffSessionStore internal constructor(
     override fun hasSessionFile(): Boolean = sessionFile.exists()
 
     override fun saveSession(record: StaffSessionRecord) {
-        val parent = sessionFile.parentFile
-        if (parent != null && !parent.exists()) {
-            parent.mkdirs()
-        }
-
-        val aad = buildAad(packageName)
-        val plaintext = SessionWireFormat.serialize(record)
-        if (plaintext.size > MAX_FILE_BYTES) {
-            throw SessionStorageException(
-                SessionStorageError.Oversized(plaintext.size.toLong(), MAX_FILE_BYTES)
-            )
-        }
-
-        val (iv, ciphertext) = cryptoEngine.encrypt(plaintext, aad)
-        val envelopeBytes = buildEnvelope(iv, ciphertext)
-        if (envelopeBytes.size > MAX_FILE_BYTES) {
-            throw SessionStorageException(
-                SessionStorageError.Oversized(envelopeBytes.size.toLong(), MAX_FILE_BYTES)
-            )
-        }
-
+        val lock = SessionProcessLocks.getFileLock(sessionFile)
         lock.withLock {
-            val tempFile = File(sessionFile.parentFile, "${sessionFile.name}.tmp")
+            val existingFileExists = sessionFile.exists()
+            cryptoEngine.ensureKeyUsable(forExistingRecord = existingFileExists)
+
+            val aad = buildAad(packageName)
+            val plaintext = SessionWireFormat.serialize(record)
+            if (plaintext.size > MAX_FILE_BYTES) {
+                throw SessionStorageException(
+                    SessionStorageError.Oversized(plaintext.size.toLong(), MAX_FILE_BYTES)
+                )
+            }
+
+            val (iv, ciphertext) = cryptoEngine.encrypt(plaintext, aad)
+            val envelopeBytes = buildEnvelope(iv, ciphertext)
+            if (envelopeBytes.size > MAX_FILE_BYTES) {
+                throw SessionStorageException(
+                    SessionStorageError.Oversized(envelopeBytes.size.toLong(), MAX_FILE_BYTES)
+                )
+            }
+
+            val parent = sessionFile.parentFile ?: File(".")
+            if (!parent.exists()) {
+                parent.mkdirs()
+            }
+
+            val tempFile = File(parent, "${sessionFile.name}.${UUID.randomUUID()}.tmp")
             var writeSuccess = false
             try {
                 FileOutputStream(tempFile).use { fos ->
@@ -127,11 +135,14 @@ class DefaultSecureStaffSessionStore internal constructor(
                     fos.flush()
                     fos.fd.sync()
                 }
-                if (!tempFile.renameTo(sessionFile)) {
-                    tempFile.copyTo(sessionFile, overwrite = true)
-                    tempFile.delete()
+                if (!renameOperation(tempFile, sessionFile)) {
+                    throw SessionStorageException(
+                        SessionStorageError.IoError("Failed to atomically replace session file")
+                    )
                 }
                 writeSuccess = true
+            } catch (e: SessionStorageException) {
+                throw e
             } catch (e: Exception) {
                 throw SessionStorageException(
                     SessionStorageError.IoError("Failed to atomically persist session record")
@@ -145,34 +156,35 @@ class DefaultSecureStaffSessionStore internal constructor(
     }
 
     override fun readSession(scope: SessionReadScope, nowEpochMs: Long): SessionReadResult {
-        lock.withLock {
+        val lock = SessionProcessLocks.getFileLock(sessionFile)
+        return lock.withLock {
             if (!sessionFile.exists()) {
-                return SessionReadResult.NoSession
-            }
-
-            val fileLength = sessionFile.length()
-            if (fileLength > MAX_FILE_BYTES) {
-                return SessionReadResult.Oversized(
-                    SessionStorageError.Oversized(fileLength, MAX_FILE_BYTES)
-                )
-            }
-            if (fileLength < MIN_ENVELOPE_BYTES) {
-                return SessionReadResult.Corrupt(
-                    SessionStorageError.Corrupt("Session file is truncated (length $fileLength < $MIN_ENVELOPE_BYTES bytes)")
-                )
+                return@withLock SessionReadResult.NoSession
             }
 
             val envelopeBytes = try {
-                FileInputStream(sessionFile).use { it.readBytes() }
+                BoundedStreamReader.readBounded(sessionFile, MAX_FILE_BYTES.toInt())
+            } catch (e: SessionStorageException) {
+                return@withLock when (val err = e.error) {
+                    is SessionStorageError.Oversized -> SessionReadResult.Oversized(err)
+                    is SessionStorageError.IoError -> SessionReadResult.IoError(err)
+                    else -> SessionReadResult.Corrupt(SessionStorageError.Corrupt("Failed to read session file"))
+                }
             } catch (e: Exception) {
-                return SessionReadResult.IoError(
+                return@withLock SessionReadResult.IoError(
                     SessionStorageError.IoError("Failed to read session file from disk")
+                )
+            }
+
+            if (envelopeBytes.size < MIN_ENVELOPE_BYTES) {
+                return@withLock SessionReadResult.Corrupt(
+                    SessionStorageError.Corrupt("Session file is truncated or envelope header invalid")
                 )
             }
 
             // Verify envelope header
             val (iv, ciphertext) = parseEnvelope(envelopeBytes)
-                ?: return SessionReadResult.Corrupt(
+                ?: return@withLock SessionReadResult.Corrupt(
                     SessionStorageError.Corrupt("Invalid session file magic or corrupted header envelope")
                 )
 
@@ -180,7 +192,7 @@ class DefaultSecureStaffSessionStore internal constructor(
             val plaintext = try {
                 cryptoEngine.decrypt(iv, ciphertext, aad)
             } catch (e: SessionStorageException) {
-                return when (val err = e.error) {
+                return@withLock when (val err = e.error) {
                     is SessionStorageError.Locked -> SessionReadResult.Locked(err)
                     is SessionStorageError.Unavailable -> SessionReadResult.Unavailable(err)
                     is SessionStorageError.Corrupt -> SessionReadResult.Corrupt(err)
@@ -190,7 +202,7 @@ class DefaultSecureStaffSessionStore internal constructor(
                     is SessionStorageError.IoError -> SessionReadResult.IoError(err)
                 }
             } catch (e: Exception) {
-                return SessionReadResult.Corrupt(
+                return@withLock SessionReadResult.Corrupt(
                     SessionStorageError.Corrupt("Unexpected decryption failure")
                 )
             }
@@ -198,11 +210,11 @@ class DefaultSecureStaffSessionStore internal constructor(
             val record = try {
                 SessionWireFormat.deserialize(plaintext)
             } catch (e: CanonicalSerializationException) {
-                return SessionReadResult.Corrupt(
-                    SessionStorageError.Corrupt("Failed to parse decrypted session JSON: ${e.message}")
+                return@withLock SessionReadResult.Corrupt(
+                    SessionStorageError.Corrupt("Failed to parse decrypted session payload")
                 )
             } catch (e: Exception) {
-                return SessionReadResult.Corrupt(
+                return@withLock SessionReadResult.Corrupt(
                     SessionStorageError.Corrupt("Malformed session payload")
                 )
             }
@@ -211,53 +223,50 @@ class DefaultSecureStaffSessionStore internal constructor(
             val expiresAtEpochMs = try {
                 SessionValidation.parseRfc3339ToEpochMs(record.expiresAt, "expires_at")
             } catch (e: Exception) {
-                return SessionReadResult.Corrupt(
+                return@withLock SessionReadResult.Corrupt(
                     SessionStorageError.Corrupt("Invalid expires_at timestamp in session payload")
                 )
             }
 
             if (nowEpochMs >= expiresAtEpochMs) {
                 val nowIso = formatIsoUtc(Date(nowEpochMs))
-                return SessionReadResult.Expired(
+                return@withLock SessionReadResult.Expired(
                     SessionStorageError.Expired(record.expiresAt, nowIso)
                 )
             }
 
             // Scope verification
             if (scope.expectedDeviceUuid != record.deviceUuid) {
-                return SessionReadResult.ScopeMismatch(
+                return@withLock SessionReadResult.ScopeMismatch(
                     SessionStorageError.ScopeMismatch(
-                        "Scope mismatch: session belongs to device '${record.deviceUuid}', expected '${scope.expectedDeviceUuid}'"
+                        "Scope mismatch: device UUID does not match session"
                     )
                 )
             }
             if (scope.expectedActorUlid != null && scope.expectedActorUlid != record.actorUlid) {
-                return SessionReadResult.ScopeMismatch(
+                return@withLock SessionReadResult.ScopeMismatch(
                     SessionStorageError.ScopeMismatch(
-                        "Scope mismatch: session belongs to actor '${record.actorUlid}', expected '${scope.expectedActorUlid}'"
+                        "Scope mismatch: actor ULID does not match session"
                     )
                 )
             }
             if (scope.expectedCompanyId != null && scope.expectedCompanyId != record.selectedCompanyId) {
-                return SessionReadResult.ScopeMismatch(
+                return@withLock SessionReadResult.ScopeMismatch(
                     SessionStorageError.ScopeMismatch(
-                        "Scope mismatch: session belongs to company '${record.selectedCompanyId}', expected '${scope.expectedCompanyId}'"
+                        "Scope mismatch: company ID does not match session"
                     )
                 )
             }
 
-            return SessionReadResult.Success(record)
+            SessionReadResult.Success(record)
         }
     }
 
     override fun clearSession() {
+        val lock = SessionProcessLocks.getFileLock(sessionFile)
         lock.withLock {
             if (sessionFile.exists()) {
                 sessionFile.delete()
-            }
-            val tempFile = File(sessionFile.parentFile, "${sessionFile.name}.tmp")
-            if (tempFile.exists()) {
-                tempFile.delete()
             }
         }
     }

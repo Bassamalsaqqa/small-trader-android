@@ -54,11 +54,11 @@ internal object SessionWireFormat {
 
         val element = StrictJsonParser.parse(jsonStr)
         val obj = element as? StrictJsonObject
-            ?: throw CanonicalSerializationException("Session root must be a JSON object, got ${element::class.simpleName}")
+            ?: throw CanonicalSerializationException("Session root must be a JSON object")
 
         for (key in obj.properties.keys) {
             if (key !in ALLOWED_KEYS) {
-                throw CanonicalSerializationException("Unknown property '$key' in session JSON payload")
+                throw CanonicalSerializationException("Unknown property in session JSON payload")
             }
         }
 
@@ -77,20 +77,20 @@ internal object SessionWireFormat {
         val actorUlid = try {
             ServerUlid.parse(actorIdStr)
         } catch (e: Exception) {
-            throw CanonicalSerializationException("Invalid actor_id ULID: '$actorIdStr'")
+            throw CanonicalSerializationException("Invalid actor_id ULID in session payload")
         }
 
         val deviceUuid = try {
             ClientUuid.parse(deviceIdStr)
         } catch (e: Exception) {
-            throw CanonicalSerializationException("Invalid device_id UUID: '$deviceIdStr'")
+            throw CanonicalSerializationException("Invalid device_id UUID in session payload")
         }
 
         val selectedCompanyId = selectedCompanyIdStr?.let {
             try {
                 ServerUlid.parse(it)
             } catch (e: Exception) {
-                throw CanonicalSerializationException("Invalid selected_company_id ULID: '$it'")
+                throw CanonicalSerializationException("Invalid selected_company_id ULID in session payload")
             }
         }
 
@@ -109,15 +109,15 @@ internal object SessionWireFormat {
     }
 
     private fun requireString(obj: StrictJsonObject, key: String): String {
-        val prop = obj[key] ?: throw CanonicalSerializationException("Missing required property '$key'")
+        val prop = obj[key] ?: throw CanonicalSerializationException("Missing required property in session payload")
         return (prop as? StrictJsonString)?.value
-            ?: throw CanonicalSerializationException("Property '$key' must be a JSON string, got ${prop::class.simpleName}")
+            ?: throw CanonicalSerializationException("Invalid property type in session payload")
     }
 
     private fun optionalString(obj: StrictJsonObject, key: String): String? {
         val prop = obj[key] ?: return null
         if (prop is StrictJsonNull) return null
         return (prop as? StrictJsonString)?.value
-            ?: throw CanonicalSerializationException("Property '$key' must be a JSON string or null, got ${prop::class.simpleName}")
+            ?: throw CanonicalSerializationException("Invalid property type in session payload")
     }
 }

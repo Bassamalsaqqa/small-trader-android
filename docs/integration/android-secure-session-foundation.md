@@ -103,30 +103,40 @@ When staff logs out (`clearSession()`):
 
 ## 7. Atomic Storage & Concurrency Guarantees
 
-### Crash-Safe Atomic Replace
-- Writes are performed using a temporary file (`small_trader_secure_staff_session.bin.tmp`).
-- Flushes data and synchronizes file descriptor to physical disk (`fos.fd.sync()`).
-- Atomically replaces the target file via atomic rename (`tempFile.renameTo(sessionFile)`).
-- If write fails, the temporary file is deleted in `finally`, leaving any prior valid record completely intact.
+### Crash-Safe Atomic Replace & Durability Limits
+- **Unique Sibling Temporary Files**: Writes are staged using uniquely named sibling temporary files (`small_trader_secure_staff_session.bin.<UUID>.tmp`) in the same directory, preventing filename collisions across concurrent operations.
+- **Operation-Owned Cleanup**: Each write operation strictly tracks and cleans up its own temporary file in `finally` on failure. `clearSession()` deletes only the session file itself and never touches external temporary files.
+- **Physical Media Flush**: Flushes data and synchronizes file descriptor to physical disk (`fos.fd.sync()`).
+- **Atomic Replace Without Truncation Fallback**: Atomically replaces the target file via Android API 24-compatible atomic rename (`tempFile.renameTo(sessionFile)`). On rename failure, the operation fails closed with `SessionStorageError.IoError` and deletes the temp file. The dangerous `copyTo(overwrite = true)` fallback has been removed to prevent truncating or destroying prior valid records.
+- **Crash Durability Limits (Honest Qualification)**: File descriptor sync (`fsync`) ensures data bytes reach persistent storage before rename. However, POSIX directory metadata durability across sudden power-loss crash requires parent directory `fsync` (which is not portably exposed in Java/Android userland without native file descriptors). Under crash-stop scenarios, atomic replacement guarantees that partial writes never corrupt prior valid records, and no destructive recovery or key recreation is ever performed.
 
-### Bounded Memory & Serialization Safety
-- **Finite 1 MiB Upper Bound**: Files exceeding 1 MiB (`1,048,576 bytes`) are rejected immediately before reading into memory or allocating buffers.
+### Bounded Memory & Streaming Safety (TOCTOU Elimination)
+- **Bounded Streaming Read**: Reads are streamed via `BoundedStreamReader` up to 1 MiB with a 1-byte probe (`1,048,577 bytes`). If a file or stream grows beyond 1 MiB during reading, the operation immediately fails closed with `SessionStorageError.Oversized` without reading unbounded data.
+- **Allocation Cap**: Initial buffer allocation is capped at `minOf(file.length(), 1024 * 1024)`, preventing unbounded pre-allocation attacks. Both `SecureStaffSessionStore` and `InstallationIdentityStore` enforce bounded reads.
 - **Zero Java Serialization**: Deserialization uses `StrictJsonParser` with canonical JSON. Java standard serialization (`ObjectInputStream`) is completely avoided to prevent remote code execution and deserialization exploits.
 
-### Single-Process Concurrency & Multi-Process Boundary
-- **Single-Process Safe**: Multi-threaded read, write, and clear operations within the same process are synchronized via `ReentrantLock`.
-- **Multi-Process Limitation**: Multi-process concurrency across independent Android application/service processes sharing storage is **NOT CLAIMED** without OS-level `FileLock` coordination.
+### Process-Wide Concurrency & Multi-Instance Coordination
+- **Canonical-Path Process Locks**: Synchronized via `SessionProcessLocks` keyed by canonical file path. Multiple store or identity instances targeting the same physical file share the same `ReentrantLock`.
+- **Linearizable Full Save/Read/Clear**: `saveSession` holds the shared lock across key verification, serialization, encryption, and atomic rename. A completed `clearSession()` (logout) cannot be undone or resurrected by a previously in-flight save.
+- **Key Generation Coordination**: First-key generation is synchronized process-wide by key alias (`SessionProcessLocks.getKeyLock`).
+- **Existing Record Key Recoverability**: Before replacing an existing session file on disk, `saveSession` verifies key recoverability. If the key is missing or permanently invalidated, replacement is refused, existing ciphertext is preserved, and key recreation is prohibited.
+- **Multi-Process Limitation**: Concurrency across independent Android application/service processes sharing storage is **NOT CLAIMED** without OS-level `FileLock` coordination.
+
+### Error Sanitization & Data Concealment
+- Outward error results strictly discard raw platform exception text, variable interpolation, and decrypted payloads.
+- Scope mismatches and corruption errors use fixed safe category messages without reflecting decrypted fields or expected ULIDs/UUIDs.
+- `CancellationException` and fatal JVM errors (`VirtualMachineError`) are preserved and rethrown.
 
 ---
 
 ## 8. Test Verification & Coverage
 
-Hermetic test suites prove all architectural invariants in `com.example.data.mobile.session.SecureStaffSessionStoreTest`:
+Hermetic test suites prove all architectural invariants in `com.example.data.mobile.session.SecureStaffSessionStoreTest` (32 unit tests):
 1. **Encrypt/Read Roundtrip**: Verifies exact preservation of token, ULID, device UUID, password epoch, expiry, and contextual metadata.
 2. **Plaintext Absence**: Proves no raw secret tokens, epochs, emails, or names appear on disk.
 3. **Tamper Resilience**: Proves ciphertext tampering, nonce mutation, AAD manipulation, magic mismatch, and length alteration fail closed with `Corrupt` and preserve the disk file.
 4. **Key Invalidation**: Proves missing keys return `Unavailable` and locked keys return `Locked` without file deletion or key recreation.
-5. **Scope Isolation**: Proves device, actor, or company mismatch conceals tokens.
+5. **Scope Isolation**: Proves device, actor, or company mismatch conceals tokens with sanitized messages.
 6. **Expiry Enforcement**: Proves expired sessions return `Expired` and conceal tokens while preserving file records.
 7. **Oversized / Truncated Files**: Proves >1 MiB files fail with `Oversized` without memory allocation, and truncated envelopes fail with `Corrupt`.
 8. **Atomic Fault Recovery**: Proves write failures leave previous valid records undamaged.
@@ -134,3 +144,17 @@ Hermetic test suites prove all architectural invariants in `com.example.data.mob
 10. **Logout Isolation**: Proves `clearSession()` preserves the installation UUID and simulated outbox queue sentinels intact.
 11. **Redaction Fidelity**: Proves `toString()` and error messages never expose secret credentials.
 12. **Storage Path**: Proves factory resolves strictly within `context.noBackupFilesDir`.
+13. **RFC 3339 Strict Parsing**: Proves millisecond fraction (`.123Z`), nonzero seconds, positive/negative offsets with/without fractions, and exact expiry boundaries (`now == expiry - 1` vs `now == expiry`).
+14. **RFC 3339 Malformed Input**: Proves strict rejection of invalid calendar dates (non-leap year Feb 29, month 13, day 32), invalid timezone offsets, and trailing newlines (`\n`, `\r\n`).
+15. **Simultaneous Identity Instances**: Proves simultaneously constructed `InstallationIdentityStore` instances coordinate under canonical-path lock and produce identical stable UUIDs.
+16. **Multi-Instance Store Coordination**: Proves distinct `DefaultSecureStaffSessionStore` instances coordinate under canonical-path lock.
+17. **Linearizable Save/Clear Barrier**: Proves a completed `clearSession()` is never resurrected by concurrent in-flight save.
+18. **Unique Sibling Temp Files**: Proves save uses unique sibling temporary files without collisions and operation-owned cleanup.
+19. **Rename Failure No-Truncation**: Proves injected rename failure fails closed and preserves prior valid records without truncation.
+20. **Streaming Read TOCTOU**: Proves bounded stream reader detects file growth exceeding 1 MiB via 1-byte probe.
+21. **Key Recoverability Refusal**: Proves missing-key and locked-key saves over existing files fail closed, preserve disk bytes, and refuse key recreation.
+
+### Suite Summary & Exact Counts
+- **Targeted Mobile Unit Tests**: 162 unit tests across 16 testsuites (`com.example.data.mobile.*`), 0 failures, 0 errors, 0 skipped.
+- **Contract Verification Suite**: 210 tests passed in both normal (`python3 tools/validate-mobile-contract.py`) and optimized (`python3 -O tools/validate-mobile-contract.py`) execution.
+- **Lint Verification**: 64 baseline warnings in `app/build/reports/lint-results-debug.xml`, 0 errors.

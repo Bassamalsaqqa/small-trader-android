@@ -6,13 +6,12 @@ import com.example.data.mobile.contract.StrictJsonObject
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.contract.StrictJsonString
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import java.util.concurrent.locks.ReentrantLock
+import java.util.UUID
 import kotlin.concurrent.withLock
 
 /**
@@ -20,46 +19,45 @@ import kotlin.concurrent.withLock
  *
  * This identity is generated once per app installation and is strictly preserved across staff logouts,
  * application restarts, and credential purges.
+ *
+ * Concurrency is coordinated across instances within the same JVM process by canonical file path.
+ * Multi-process file access across isolated Android processes is NOT claimed.
  */
 class InstallationIdentityStore(
     private val identityFile: File
 ) {
-    private val lock = ReentrantLock()
-
-    @Volatile
-    private var cachedId: ClientUuid? = null
 
     /**
      * Retrieves the stable installation UUID, generating and persisting a new [ClientUuid]
      * if no valid identity currently exists on disk.
      */
     fun getOrCreateInstallationId(): ClientUuid {
-        cachedId?.let { return it }
+        SessionProcessLocks.getCachedInstallationId(identityFile)?.let { return it }
 
+        val lock = SessionProcessLocks.getFileLock(identityFile)
         return lock.withLock {
-            cachedId?.let { return it }
+            SessionProcessLocks.getCachedInstallationId(identityFile)?.let { return it }
 
             if (identityFile.exists()) {
                 val loaded = loadFromFile()
                 if (loaded != null) {
-                    cachedId = loaded
+                    SessionProcessLocks.cacheInstallationId(identityFile, loaded)
                     return loaded
                 }
             }
 
             val newId = ClientUuid.random()
             persistToFile(newId)
-            cachedId = newId
+            SessionProcessLocks.cacheInstallationId(identityFile, newId)
             newId
         }
     }
 
     private fun loadFromFile(): ClientUuid? {
         if (!identityFile.exists()) return null
-        if (identityFile.length() > MAX_FILE_BYTES) return null
 
         return try {
-            val bytes = FileInputStream(identityFile).use { it.readBytes() }
+            val bytes = BoundedStreamReader.readBounded(identityFile, MAX_FILE_BYTES.toInt())
             val jsonStr = String(bytes, Charsets.UTF_8)
             val obj = StrictJsonParser.parse(jsonStr) as? StrictJsonObject ?: return null
             val deviceIdProp = obj["device_id"] as? StrictJsonString ?: return null
@@ -70,12 +68,12 @@ class InstallationIdentityStore(
     }
 
     private fun persistToFile(uuid: ClientUuid) {
-        val parent = identityFile.parentFile
-        if (parent != null && !parent.exists()) {
+        val parent = identityFile.parentFile ?: File(".")
+        if (!parent.exists()) {
             parent.mkdirs()
         }
 
-        val tempFile = File(identityFile.parentFile, "${identityFile.name}.tmp")
+        val tempFile = File(parent, "${identityFile.name}.${UUID.randomUUID()}.tmp")
         val timestamp = formatIsoUtc(Date())
         val map = linkedMapOf<String, Any?>(
             "device_id" to uuid.value,
@@ -91,8 +89,9 @@ class InstallationIdentityStore(
                 fos.fd.sync()
             }
             if (!tempFile.renameTo(identityFile)) {
-                tempFile.copyTo(identityFile, overwrite = true)
-                tempFile.delete()
+                throw SessionStorageException(
+                    SessionStorageError.IoError("Failed to atomically replace installation identity file")
+                )
             }
             success = true
         } finally {

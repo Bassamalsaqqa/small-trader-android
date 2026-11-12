@@ -6,8 +6,8 @@ import android.security.keystore.KeyProperties
 import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.security.KeyStoreException
-import java.security.SecureRandom
 import java.security.UnrecoverableKeyException
+import java.util.concurrent.CancellationException
 import javax.crypto.AEADBadTagException
 import javax.crypto.BadPaddingException
 import javax.crypto.Cipher
@@ -37,6 +37,13 @@ internal interface SessionCryptoEngine {
      * Throws [SessionStorageException] with typed fail-closed errors on failure.
      */
     fun decrypt(iv: ByteArray, ciphertextWithTag: ByteArray, aad: ByteArray): ByteArray
+
+    /**
+     * Verifies that the cryptographic key is available and usable before modifying disk state.
+     * When [forExistingRecord] is true, strictly refuses to regenerate a missing or invalidated key
+     * over an existing record on disk.
+     */
+    fun ensureKeyUsable(forExistingRecord: Boolean)
 }
 
 /**
@@ -54,9 +61,15 @@ internal class AndroidKeyStoreCryptoEngine(
     private val keyAlias: String = DEFAULT_KEY_ALIAS
 ) : SessionCryptoEngine {
 
-    private val keyStore: KeyStore by lazy {
-        KeyStore.getInstance(ANDROID_KEYSTORE_PROVIDER).apply {
-            load(null)
+    override fun ensureKeyUsable(forExistingRecord: Boolean) {
+        if (forExistingRecord) {
+            // When an existing record exists on disk, refuse recreation if key is missing or invalidated
+            val key = getKey() ?: throw SessionStorageException(
+                SessionStorageError.Unavailable("Cryptographic key is missing for existing session record")
+            )
+            // getKey() already verifies retrieval without throwing
+        } else {
+            getOrCreateKey()
         }
     }
 
@@ -69,7 +82,7 @@ internal class AndroidKeyStoreCryptoEngine(
                 SessionStorageError.Unavailable("Cipher failed to generate unique IV")
             )
             require(iv.size == GCM_IV_LENGTH_BYTES) {
-                "Expected $GCM_IV_LENGTH_BYTES bytes IV, got ${iv.size}"
+                "Expected $GCM_IV_LENGTH_BYTES bytes IV"
             }
             cipher.updateAAD(aad)
             val ciphertext = cipher.doFinal(plaintext)
@@ -81,7 +94,7 @@ internal class AndroidKeyStoreCryptoEngine(
 
     override fun decrypt(iv: ByteArray, ciphertextWithTag: ByteArray, aad: ByteArray): ByteArray {
         val secretKey = getKey() ?: throw SessionStorageException(
-            SessionStorageError.Unavailable("Secret key '$keyAlias' not found in keystore")
+            SessionStorageError.Unavailable("Secret key not found in keystore")
         )
         try {
             val cipher = Cipher.getInstance(GCM_TRANSFORMATION)
@@ -94,36 +107,37 @@ internal class AndroidKeyStoreCryptoEngine(
         }
     }
 
-    @Synchronized
     private fun getOrCreateKey(): SecretKey {
-        getKey()?.let { return it }
+        val keyLock = SessionProcessLocks.getKeyLock(keyAlias)
+        synchronized(keyLock) {
+            getKey()?.let { return it }
 
-        return try {
-            val keyGenerator = KeyGenerator.getInstance(
-                KeyProperties.KEY_ALGORITHM_AES,
-                ANDROID_KEYSTORE_PROVIDER
-            )
-            val spec = KeyGenParameterSpec.Builder(
-                keyAlias,
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-            )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(AES_KEY_SIZE_BITS)
-                .setRandomizedEncryptionRequired(true)
-                .build()
+            return try {
+                val keyGenerator = KeyGenerator.getInstance(
+                    KeyProperties.KEY_ALGORITHM_AES,
+                    ANDROID_KEYSTORE_PROVIDER
+                )
+                val spec = KeyGenParameterSpec.Builder(
+                    keyAlias,
+                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                )
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setKeySize(AES_KEY_SIZE_BITS)
+                    .setRandomizedEncryptionRequired(true)
+                    .build()
 
-            keyGenerator.init(spec)
-            keyGenerator.generateKey()
-        } catch (e: Exception) {
-            throw SessionStorageException(
-                SessionStorageError.Unavailable("Failed to generate AES-256 key in AndroidKeyStore")
-            )
+                keyGenerator.init(spec)
+                keyGenerator.generateKey()
+            } catch (e: Exception) {
+                throw translateException(e)
+            }
         }
     }
 
     private fun getKey(): SecretKey? {
         return try {
+            val keyStore = loadKeyStoreSafe()
             if (!keyStore.containsAlias(keyAlias)) {
                 null
             } else {
@@ -134,7 +148,18 @@ internal class AndroidKeyStoreCryptoEngine(
         }
     }
 
+    private fun loadKeyStoreSafe(): KeyStore {
+        return try {
+            KeyStore.getInstance(ANDROID_KEYSTORE_PROVIDER).apply {
+                load(null)
+            }
+        } catch (e: Exception) {
+            throw translateException(e)
+        }
+    }
+
     private fun translateException(e: Exception): SessionStorageException {
+        if (e is CancellationException) throw e
         return when (e) {
             is SessionStorageException -> e
             is KeyPermanentlyInvalidatedException -> SessionStorageException(

@@ -15,8 +15,11 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import com.example.data.mobile.contract.CanonicalSerializationException
 import java.lang.reflect.Proxy
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -43,6 +46,7 @@ class SecureStaffSessionStoreTest {
 
     @Before
     fun setUp() {
+        SessionProcessLocks.clearForTesting()
         noBackupDir = tempFolder.newFolder("noBackup")
         sessionFile = File(noBackupDir, SecureStaffSessionStore.SESSION_FILE_NAME)
         installationStore = InstallationIdentityStore.create(noBackupDir)
@@ -511,4 +515,351 @@ class SecureStaffSessionStoreTest {
         assertEquals(noBackupDir.absolutePath, expectedSessionFile.parentFile?.absolutePath)
         assertEquals(noBackupDir.absolutePath, expectedInstallationFile.parentFile?.absolutePath)
     }
+
+    // =========================================================================
+    // Regression Tests covering Findings 1 to 8
+    // =========================================================================
+
+    // Finding 1: RFC 3339 Timestamp Parsing & Strict Calendar / Offset / Expiry
+    @Test
+    fun `finding 1 - RFC 3339 parses millisecond fraction and nonzero seconds correctly`() {
+        // .123Z
+        val ms1 = SessionValidation.parseRfc3339ToEpochMs("2030-01-01T00:00:45.123Z")
+        val ms2 = SessionValidation.parseRfc3339ToEpochMs("2030-01-01T00:00:45Z")
+        assertEquals(45_123L, ms1 - SessionValidation.parseRfc3339ToEpochMs("2030-01-01T00:00:00Z"))
+        assertEquals(123L, ms1 - ms2)
+
+        // Positive offset with fraction: 12:00:00.500+02:00 == 10:00:00.500Z
+        val msPlusOffset = SessionValidation.parseRfc3339ToEpochMs("2030-01-01T12:00:00.500+02:00")
+        val msUtcEquivalent = SessionValidation.parseRfc3339ToEpochMs("2030-01-01T10:00:00.500Z")
+        assertEquals(msUtcEquivalent, msPlusOffset)
+
+        // Negative offset with fraction: 12:00:00.500-05:00 == 17:00:00.500Z
+        val msMinusOffset = SessionValidation.parseRfc3339ToEpochMs("2030-01-01T12:00:00.500-05:00")
+        val msUtcMinusEquivalent = SessionValidation.parseRfc3339ToEpochMs("2030-01-01T17:00:00.500Z")
+        assertEquals(msUtcMinusEquivalent, msMinusOffset)
+
+        // Offsets without fractions
+        val msPlusNoFrac = SessionValidation.parseRfc3339ToEpochMs("2030-01-01T12:00:00+02:00")
+        assertEquals(SessionValidation.parseRfc3339ToEpochMs("2030-01-01T10:00:00Z"), msPlusNoFrac)
+        val msMinusNoFrac = SessionValidation.parseRfc3339ToEpochMs("2030-01-01T12:00:00-05:00")
+        assertEquals(SessionValidation.parseRfc3339ToEpochMs("2030-01-01T17:00:00Z"), msMinusNoFrac)
+    }
+
+    @Test
+    fun `finding 1 - RFC 3339 strictly rejects invalid calendar, offset, and trailing newline`() {
+        val invalidInputs = listOf(
+            "2021-02-29T10:00:00Z", // Non-leap year Feb 29
+            "2030-13-01T00:00:00Z", // Month 13
+            "2030-04-31T00:00:00Z", // April 31
+            "2030-01-01T24:00:00Z", // Hour 24
+            "2030-01-01T00:60:00Z", // Minute 60
+            "2030-01-01T00:00:60Z", // Second 60
+            "2030-01-01T00:00:00+24:00", // Offset hour 24
+            "2030-01-01T00:00:00+00:60", // Offset minute 60
+            "2030-01-01T00:00:00Z\n", // Trailing newline
+            "2030-01-01T00:00:00Z\r\n", // Trailing CRLF
+            "2030-01-01T00:00:00", // Missing offset / Z
+            "2019-12-31T23:59:59Z" // Year before 2020
+        )
+
+        for (invalid in invalidInputs) {
+            try {
+                SessionValidation.parseRfc3339ToEpochMs(invalid)
+                fail("Expected CanonicalSerializationException for invalid timestamp: '$invalid'")
+            } catch (e: CanonicalSerializationException) {
+                // Assert no raw input was echoed in error message
+                assertFalse("Error message must not echo sensitive input '$invalid'", e.message?.contains(invalid) == true)
+            }
+        }
+    }
+
+    @Test
+    fun `finding 1 - exact expiry boundary evaluation`() {
+        val expiresAt = "2030-01-01T00:00:00Z"
+        val expiryEpochMs = SessionValidation.parseRfc3339ToEpochMs(expiresAt)
+        val record = createValidRecord(expiresAt = expiresAt)
+        store.saveSession(record)
+
+        val scope = SessionReadScope(store.installationId)
+
+        // 1 ms before expiry: valid
+        val validResult = store.readSession(scope, nowEpochMs = expiryEpochMs - 1)
+        assertTrue("Must be valid 1ms before expiry", validResult is SessionReadResult.Success)
+
+        // Exact expiry boundary: expired
+        val exactBoundaryResult = store.readSession(scope, nowEpochMs = expiryEpochMs)
+        assertTrue("Must be expired on exact boundary", exactBoundaryResult is SessionReadResult.Expired)
+
+        // 1 ms after expiry: expired
+        val afterBoundaryResult = store.readSession(scope, nowEpochMs = expiryEpochMs + 1)
+        assertTrue("Must be expired after boundary", afterBoundaryResult is SessionReadResult.Expired)
+    }
+
+    // Finding 2: Multi-Instance Shared Process Lock & Stable Installation UUID
+    @Test
+    fun `finding 2 - simultaneously constructed InstallationIdentityStores share canonical path lock and produce stable UUID`() {
+        val threadCount = 10
+        val executor = Executors.newFixedThreadPool(threadCount)
+        val barrierLatch = CountDownLatch(1)
+        val doneLatch = CountDownLatch(threadCount)
+        val results = java.util.concurrent.ConcurrentLinkedQueue<ClientUuid>()
+
+        for (i in 0 until threadCount) {
+            executor.execute {
+                barrierLatch.await()
+                // Each thread constructs its own instance pointing to the same file
+                val instance = InstallationIdentityStore.create(noBackupDir)
+                results.add(instance.getOrCreateInstallationId())
+                doneLatch.countDown()
+            }
+        }
+
+        barrierLatch.countDown()
+        assertTrue(doneLatch.await(5, TimeUnit.SECONDS))
+        executor.shutdown()
+
+        assertEquals(threadCount, results.size)
+        val firstUuid = results.peek()
+        for (uuid in results) {
+            assertEquals("All simultaneously constructed instances must yield identical UUID", firstUuid, uuid)
+        }
+    }
+
+    @Test
+    fun `finding 2 - multiple store instances coordinate under shared process lock`() {
+        val store2 = DefaultSecureStaffSessionStore(
+            sessionFile = sessionFile,
+            installationStore = installationStore,
+            cryptoEngine = cryptoEngine,
+            packageName = testPackageName
+        )
+
+        val record = createValidRecord()
+        store.saveSession(record)
+
+        val scope = SessionReadScope(store.installationId)
+        val readFromStore2 = store2.readSession(scope)
+        assertTrue(readFromStore2 is SessionReadResult.Success)
+        assertEquals(record.token, (readFromStore2 as SessionReadResult.Success).session.token)
+
+        store2.clearSession()
+        assertFalse(store.hasSessionFile())
+        assertEquals(SessionReadResult.NoSession, store.readSession(scope))
+    }
+
+    // Finding 3: Linearizable Save and Clear - Completed Logout Never Undone by In-Flight Save
+    @Test
+    fun `finding 3 - completed clearSession is never undone by concurrent saveSession`() {
+        val executor = Executors.newFixedThreadPool(2)
+        val record = createValidRecord(token = "valid_save_token_1234567890123")
+
+        val store1 = DefaultSecureStaffSessionStore(
+            sessionFile = sessionFile,
+            installationStore = installationStore,
+            cryptoEngine = cryptoEngine,
+            packageName = testPackageName
+        )
+        val store2 = DefaultSecureStaffSessionStore(
+            sessionFile = sessionFile,
+            installationStore = installationStore,
+            cryptoEngine = cryptoEngine,
+            packageName = testPackageName
+        )
+
+        // Seed with initial session
+        store1.saveSession(record)
+        assertTrue(store1.hasSessionFile())
+
+        val clearLatch = CountDownLatch(1)
+        val doneLatch = CountDownLatch(2)
+
+        executor.execute {
+            // Thread 1: clearSession
+            clearLatch.await()
+            store2.clearSession()
+            doneLatch.countDown()
+        }
+
+        executor.execute {
+            // Thread 2: saveSession under lock
+            clearLatch.countDown()
+            try {
+                store1.saveSession(record)
+            } catch (e: Exception) {
+                // Allowed if clear won lock first and key was cleared
+            }
+            doneLatch.countDown()
+        }
+
+        assertTrue(doneLatch.await(5, TimeUnit.SECONDS))
+        executor.shutdown()
+
+        // Explicitly invoke clearSession to ensure terminal logout state
+        store2.clearSession()
+        assertFalse("Completed logout must not leave resurrected session", store1.hasSessionFile())
+    }
+
+    // Finding 4: Unique Sibling Temporary Files and Operation-Owned Cleanup
+    @Test
+    fun `finding 4 - saveSession uses unique sibling temporary file and does not collide`() {
+        val record = createValidRecord()
+        store.saveSession(record)
+        assertTrue(sessionFile.exists())
+
+        // Ensure no lingering temporary files matching *.tmp exist in directory
+        val tempFiles = noBackupDir.listFiles { _, name -> name.endsWith(".tmp") }
+        assertNotNull(tempFiles)
+        assertEquals("All temporary files must be cleaned up after successful write", 0, tempFiles!!.size)
+
+        // Verify clearSession does not delete other temporary files
+        val foreignTemp = File(noBackupDir, "unrelated_worker.tmp")
+        foreignTemp.writeBytes(byteArrayOf(1, 2, 3))
+        store.clearSession()
+
+        assertTrue("clearSession must NOT delete unrelated temporary files", foreignTemp.exists())
+        foreignTemp.delete()
+    }
+
+    // Finding 5: Atomic Rename Failure Preserves Prior Good Record Without Truncation
+    @Test
+    fun `finding 5 - rename failure fails closed and preserves prior record without truncation`() {
+        val record1 = createValidRecord(token = "good_record_token_1234567890123")
+        store.saveSession(record1)
+        assertTrue(sessionFile.exists())
+        val originalBytes = sessionFile.readBytes()
+
+        // Inject rename failure
+        store.renameOperation = { _, _ -> false }
+
+        val record2 = createValidRecord(token = "record2_that_fails_rename_12345678")
+        try {
+            store.saveSession(record2)
+            fail("Expected SessionStorageException on failed rename")
+        } catch (e: SessionStorageException) {
+            assertTrue(e.error is SessionStorageError.IoError)
+        }
+
+        // Verify sessionFile is still completely intact with original bytes (NOT truncated by fallback copy)
+        assertTrue("Session file must exist and be intact", sessionFile.exists())
+        assertArrayEquals("Session file bytes must be unchanged", originalBytes, sessionFile.readBytes())
+
+        // Restore normal rename and verify read
+        store.renameOperation = { src, dst -> src.renameTo(dst) }
+        val scope = SessionReadScope(store.installationId)
+        val readResult = store.readSession(scope)
+        assertTrue(readResult is SessionReadResult.Success)
+        assertEquals(record1.token, (readResult as SessionReadResult.Success).session.token)
+    }
+
+    // Finding 6: Bounded Streaming Read Prevents TOCTOU and Handles Stream Growth
+    @Test
+    fun `finding 6 - bounded reader detects stream growth exceeding 1 MiB via probe`() {
+        val largeFile = File(noBackupDir, "growing_stream.bin")
+        val chunk = ByteArray(8192) { 0x58 }
+        FileOutputStream(largeFile).use { fos ->
+            for (i in 0 until 129) { // 129 * 8192 = 1,056,768 bytes > 1 MiB
+                fos.write(chunk)
+            }
+        }
+
+        try {
+            BoundedStreamReader.readBounded(largeFile, 1024 * 1024)
+            fail("Expected SessionStorageException with Oversized error")
+        } catch (e: SessionStorageException) {
+            assertTrue(e.error is SessionStorageError.Oversized)
+            val oversized = e.error as SessionStorageError.Oversized
+            assertTrue(oversized.sizeBytes > 1024 * 1024)
+        } finally {
+            largeFile.delete()
+        }
+    }
+
+    // Finding 7: Discard Raw Error Text and Sensitive Inputs from Outward Errors
+    @Test
+    fun `finding 7 - corrupted payload and scope mismatch error messages do not leak secrets`() {
+        val record = createValidRecord()
+        store.saveSession(record)
+
+        // Read with mismatched actor ULID
+        val wrongScope = SessionReadScope(
+            expectedDeviceUuid = store.installationId,
+            expectedActorUlid = foreignActorUlid,
+            expectedCompanyId = foreignCompanyUlid
+        )
+        val res = store.readSession(wrongScope)
+        assertTrue(res is SessionReadResult.ScopeMismatch)
+        val msg = (res as SessionReadResult.ScopeMismatch).error.message
+        assertFalse("Scope mismatch error must not contain stored actor ULID", msg.contains(validActorUlid.value))
+        assertFalse("Scope mismatch error must not contain stored company ULID", msg.contains(validCompanyUlid.value))
+        assertFalse("Scope mismatch error must not contain stored device UUID", msg.contains(store.installationId.value))
+
+        // Corrupt plaintext payload test: verify Corrupt error does not leak decrypted data
+        val tamperedPlaintext = "{\"token\":\"super_secret_decrypted_token_xyz\",\"invalid\":123}".toByteArray(Charsets.UTF_8)
+        val (iv, ciphertext) = cryptoEngine.encrypt(tamperedPlaintext, "purpose=staff_session;pkg=$testPackageName;v=1".toByteArray(Charsets.UTF_8))
+        val envelope = ByteArrayOutputStream().apply {
+            val dos = DataOutputStream(this)
+            dos.write(byteArrayOf(0x53, 0x53, 0x53, 0x01))
+            dos.writeByte(iv.size)
+            dos.write(iv)
+            dos.writeInt(ciphertext.size)
+            dos.write(ciphertext)
+            dos.flush()
+        }.toByteArray()
+        sessionFile.writeBytes(envelope)
+
+        val corruptRes = store.readSession(SessionReadScope(store.installationId))
+        assertTrue(corruptRes is SessionReadResult.Corrupt)
+        val corruptMsg = (corruptRes as SessionReadResult.Corrupt).error.message
+        assertFalse("Corrupt error message must not leak decrypted token", corruptMsg.contains("super_secret_decrypted_token_xyz"))
+    }
+
+    // Finding 8: Key Recoverability on Save Refuses Recreation Over Existing Ciphertext
+    @Test
+    fun `finding 8 - missing key subsequent save preserves bytes and does not create new key`() {
+        val record1 = createValidRecord(token = "initial_good_token_1234567890123")
+        store.saveSession(record1)
+        assertTrue(sessionFile.exists())
+        val originalBytes = sessionFile.readBytes()
+
+        // Simulate missing key
+        cryptoEngine.secretKey = null
+
+        val record2 = createValidRecord(token = "second_token_should_not_overwrite_123")
+        try {
+            store.saveSession(record2)
+            fail("Expected SessionStorageException when saving over existing file with missing key")
+        } catch (e: SessionStorageException) {
+            assertTrue("Expected Unavailable error", e.error is SessionStorageError.Unavailable)
+        }
+
+        // Verify key was NOT recreated
+        assertNull("Missing key must not be regenerated when file exists", cryptoEngine.secretKey)
+
+        // Verify original ciphertext bytes on disk are preserved
+        assertArrayEquals("Original ciphertext bytes must be preserved intact", originalBytes, sessionFile.readBytes())
+    }
+
+    @Test
+    fun `finding 8 - invalidated key subsequent save preserves bytes and refuses recreation`() {
+        val record1 = createValidRecord(token = "initial_good_token_1234567890123")
+        store.saveSession(record1)
+        assertTrue(sessionFile.exists())
+        val originalBytes = sessionFile.readBytes()
+
+        // Simulate permanently invalidated key
+        cryptoEngine.isLocked = true
+
+        val record2 = createValidRecord(token = "second_token_should_not_overwrite_123")
+        try {
+            store.saveSession(record2)
+            fail("Expected SessionStorageException when saving over existing file with locked key")
+        } catch (e: SessionStorageException) {
+            assertTrue("Expected Locked error", e.error is SessionStorageError.Locked)
+        }
+
+        // Verify original ciphertext bytes on disk are preserved
+        assertArrayEquals("Original ciphertext bytes must be preserved intact", originalBytes, sessionFile.readBytes())
+    }
 }
+

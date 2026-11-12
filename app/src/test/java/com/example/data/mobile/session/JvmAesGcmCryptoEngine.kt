@@ -1,6 +1,7 @@
 package com.example.data.mobile.session
 
 import java.security.SecureRandom
+import java.util.concurrent.CancellationException
 import javax.crypto.AEADBadTagException
 import javax.crypto.BadPaddingException
 import javax.crypto.Cipher
@@ -21,6 +22,19 @@ internal class JvmAesGcmCryptoEngine(
 ) : SessionCryptoEngine {
 
     private val secureRandom = SecureRandom()
+
+    override fun ensureKeyUsable(forExistingRecord: Boolean) {
+        if (isLocked) {
+            throw SessionStorageException(
+                SessionStorageError.Locked("Simulated key locked or permanently invalidated")
+            )
+        }
+        if (forExistingRecord && secretKey == null) {
+            throw SessionStorageException(
+                SessionStorageError.Unavailable("Simulated secret key not found in keystore")
+            )
+        }
+    }
 
     override fun encrypt(plaintext: ByteArray, aad: ByteArray): Pair<ByteArray, ByteArray> {
         if (isLocked) {
@@ -59,6 +73,8 @@ internal class JvmAesGcmCryptoEngine(
             cipher.init(Cipher.DECRYPT_MODE, key, spec)
             cipher.updateAAD(aad)
             cipher.doFinal(ciphertextWithTag)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: AEADBadTagException) {
             throw SessionStorageException(
                 SessionStorageError.Corrupt("Ciphertext authentication tag verification failed")
@@ -69,7 +85,7 @@ internal class JvmAesGcmCryptoEngine(
             )
         } catch (e: Exception) {
             throw SessionStorageException(
-                SessionStorageError.Corrupt("Decryption failed: ${e.message}")
+                SessionStorageError.Corrupt("Decryption failed")
             )
         }
     }
