@@ -996,6 +996,9 @@ class StaffWorkspaceViewModelTest {
         assertFalse(vm.uiState.value.isSubmitting)
         assertFalse(vm.uiState.value.errorMessage.orEmpty().contains("private-password-secret"))
         assertNotNull(vm.uiState.value.errorMessage)
+        val pendingSecret = StaffWorkspaceViewModel::class.java.getDeclaredField("pendingPassword")
+        pendingSecret.isAccessible = true
+        assertEquals("", pendingSecret.get(vm))
     }
 
 }

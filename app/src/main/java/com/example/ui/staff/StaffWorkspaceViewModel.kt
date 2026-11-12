@@ -383,7 +383,7 @@ class StaffWorkspaceViewModel(
                 CoordinatorResult.Error("Login failed")
             } finally {
                 if (thisIntent == activeIntentSeq && coord.authState !is StaffAuthState.MfaRequired) {
-                    transientPassword = ""
+                    clearTransientCredentials()
                 }
             }
 
