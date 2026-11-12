@@ -224,7 +224,7 @@ The original paired run remains historical bounded V1 wire evidence. The backend
 - Pilot commit: `e111f83bc740e9590142869b30428eaa220eab6f`.
 - Tree: `f1ae3acebfab14d213254bfdfdc1588325f6febc`.
 - Direct parent/composed foundation: `f5d16b356ed9c4d895e4fd07dcb469d756936d9b`.
-- External retrieval was reported unavailable by the GitHub reviewer. A secret-inspected source-only review ref or verifiable source bundle, parent/merge inventory, migrations and environment-source hashes must be supplied by the backend supervisor before calling the pair independently reproducible. Do not resurrect the retired instance or alter the historical evidence to imply this gate has passed.
+- External retrieval was unavailable at the GitHub review checkpoint. It is now verified through source-only ref `origin/t3/preserved-v1-read-pilot-e111f83`, which resolves to exact `e111f83bc740e9590142869b30428eaa220eab6f` by `git ls-remote`. This closes external source retrievability, not backend test safety, runtime-source attestation, financial acceptance, or whole-pair reproducibility. Do not resurrect the retired instance or rewrite historical evidence.
 
 The dependency graph below was checked against GitHub PR base/head metadata and `git merge-base --is-ancestor` against the pilot commit. Each exact head is an ancestor of the pilot. This describes source inclusion, not authorization to merge or run unsafe tests.
 
@@ -243,4 +243,9 @@ The exact #87/#93 changed-file intersection is the three corrected Livewire/Serv
 
 Performance remains unqualified: the saved single run reports challenge 3441 ms, login 451 ms, bootstrap 296 ms, catalog 219 ms and customers 158 ms. It does not separate cold startup, TLS, JVM or Laravel costs and establishes neither warm latency nor p95. A future freshly owned staging run should record a bounded first-request/repeated-request trace with process/client lifecycle and source pins; no fast-launch claim is made from the retired run.
 
-Next review gate: independently verify backend P0 refusal/teardown safety and published source custody, then review the smallest disabled-by-default V2 online cash-sale proposal using existing canonical financial/inventory actions and real grants. Preserve the working read pilot and UI; no financial posting is enabled by this documentation correction.
+Next review gate: independently verify backend P0 refusal/teardown safety, then review the smallest disabled-by-default V2 online cash-sale proposal using existing canonical financial/inventory actions and real grants. Preserve the working read pilot and UI; no financial posting is enabled by this documentation correction.
+
+
+### Source-custody publication verification
+
+The Android supervisor independently matched the preserved remote ref and both supplied artifact hashes. The source-publication attestation records commit/tree/parents, seven-merge graph, source hashes for migrations/environment/config/lock/harness, and the bounded inspection scope. Attestation SHA-256: `f07fdaa894e3270bb4c36cb9e1af27b47d35e817931987f071054962ca853edd`. Frozen source bundle SHA-256: `8e43b8319d7350904fba4210e4eb0ffb82940db6225f940adf5d17467a3fa336`. Artifacts are retained under the owned `pr94-p0-preservation` directory; they are not application credentials. Bounded tracked-tree pattern inspection is not an absolute secret-free guarantee. No private/ignored runtime artifacts were published by this verification, and the original pilot worktree/evidence is unchanged. The P0 affected-test hold remains active.
