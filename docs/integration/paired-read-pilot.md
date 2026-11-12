@@ -28,13 +28,13 @@ This document pins the integration candidate gate matrix, defines the hand-off c
 | Priority | Gate Scope | Description | Status | Owner | Required Evidence | Approval |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **P0** | **Freeze Compose + HTTPS V1 Auth/Read** | Freeze Compose UI to Staff Read Workspace (`STAFF_READ_WORKSPACE=true`); execute real HTTPS auth challenge → login → bootstrap → bounded pagination → logout → old token 401 via `SmallTraderReadClient` + unchanged `OkHttpTransport` against disposable Laravel staging. | **READY FOR HANDOFF** (Harness implemented; reports `NOT RUN` until handoff available) | Android Sub-agent / Lead | Filtered Gradle JUnit execution; sanitized JSON evidence at `evidence/paired-read-pilot-evidence.json`. | Lead / Owner |
-| **P0** | **Android Outbox Encryption & Backup Exclusions** | Protect durable sale payloads at rest in Room. Plain SQLite `OutboxEventEntity.payload_bytes` is currently unencrypted BLOB; `AndroidManifest.xml` has `android:allowBackup="true"`. Must add explicit cloud/device-transfer exclusions (`backup_rules.xml`, `data_extraction_rules.xml`) and encrypt economic payloads at rest before live capture activation. | **HELD / PROPOSED** (Follow-on PR-A) | Android Security | Key loss, reinstall, reboot, upgrade tests; no clear-app-data workarounds. | Owner |
-| **P0** | **V2 Production Adapter Authorization & Writers** | Implement real authenticated V2 HTTP gateway in `SaleSyncCoordinator`; canonical writers, atomic cross-version receipt identity, status-before-resubmit, and rollback on absence-row races. | **HELD / PROPOSED** (Follow-on PR-C) | Backend & Android | Integration tests with concurrent requests, rollback verification, absence-row race handling. | Owner |
+| **P0** | **Android Outbox Encryption & Backup Exclusions** | Protect durable sale payloads at rest in Room. Plain SQLite `OutboxEventEntity.payload_bytes` is currently unencrypted BLOB; `AndroidManifest.xml` has `android:allowBackup="true"`. Must add explicit cloud/device-transfer exclusions (`backup_rules.xml`, `data_extraction_rules.xml`) and encrypt economic payloads at rest before live capture activation. | **HELD / PROPOSED** (Follow-on PR 2) | Android Security | Key loss, reinstall, reboot, upgrade tests; no clear-app-data workarounds. | Owner |
+| **P0** | **V2 Production Adapter Authorization & Writers** | Implement real authenticated V2 HTTP gateway in `SaleSyncCoordinator`; canonical writers, atomic cross-version receipt identity, status-before-resubmit, and rollback on absence-row races. | **HELD / PROPOSED** (Follow-on PR 1) | Backend & Android | Integration tests with concurrent requests, rollback verification, absence-row race handling. | Owner |
 | **P1** | **Receipt Canonical Retention & Backup Policy** | Raw canonical byte retention for offline/online sales receipts and backup access policy. No legal guesses; owner must define retention timeline and audit access. | **PENDING OWNER DECISION** | Business Owner / Legal | Written policy document signed off by owner. | Owner |
 | **P1** | **Authoritative Currency Policy** | Exact decimal precision authority across Revision 2/3 transitions and historical invoices (2 vs 3 decimal places for JOD/ILS/USD). | **QUALIFIED IN CONTRACT** (PR #93 backend, Check 33 Android) | Financial Owner | Automated contract validation suite (`tools/validate-mobile-contract.py`). | Financial Lead |
 | **P1** | **Cross-Tenant & Device Revocation** | Strict tenant isolation and device revocation enforcement. Revoked token or foreign tenant access immediately locks queue scope. | **VERIFIED IN HARNESS** (Step 8 & 10 in pilot smoke test) | Android / Backend | Negative 401/403 test cases in read pilot smoke suite. | Lead |
-| **P1** | **AUTH_BLOCKED Queue Resolution Policy** | Clear specification for resolving persisted `AUTH_BLOCKED` outbox queues while preserving physical cash taken during offline shifts. | **HELD / PROPOSED** (Follow-on PR-D) | Android / Security | Re-auth and manager reconciliation workflow documentation. | Owner |
-| **P1** | **Idempotency & Lost ACK Recovery** | Handling network loss during sale submission: status probe before re-submitting payload to prevent duplicate financial invoices. | **DESIGNED IN CONTRACT** (Follow-on PR-C) | Android / Backend | Idempotency test suite across network failure points. | Lead |
+| **P1** | **AUTH_BLOCKED Queue Resolution Policy** | Clear specification for resolving persisted `AUTH_BLOCKED` outbox queues while preserving physical cash taken during offline shifts. | **HELD / PROPOSED** (Follow-on PR 5) | Android / Security | Re-auth and manager reconciliation workflow documentation. | Owner |
+| **P1** | **Idempotency & Lost ACK Recovery** | Handling network loss during sale submission: status probe before re-submitting payload to prevent duplicate financial invoices. | **DESIGNED IN CONTRACT** (Follow-on PR 3) | Android / Backend | Idempotency test suite across network failure points. | Lead |
 | **P1** | **Stock & FEFO Conflict Policy** | Resolving stock shortages and FEFO batch conflicts when offline sales are synced after competing online sales. | **DEFERRED TO PILOT V2** | Operations Owner | Business rules specification for offline negative inventory. | Owner |
 | **P1** | **Provisional Receipt Truthfulness** | UI must label offline receipts strictly as "Provisional / Unposted" until canonical server ACK is received with official invoice number. | **VERIFIED IN CONTRACT** (No fake POSTED status displayed) | Android UI | UI review against `SURFACE_COVERAGE.md`. | Product Owner |
 | **P1** | **Device Acceptance & PR #88 Scan Performance** | Physical Pixel hardware validation (Arabic RTL, TalkBack, IME, barcode scanner, Bluetooth printer) + resolving PR #88's O(n) catalog hash snapshot full scan. | **BLOCKED UNVERIFIED** (No device infra / KVM in harness) | Hardware QA | Physical device run and catalog snapshot query benchmark. | Owner |
@@ -43,58 +43,65 @@ This document pins the integration candidate gate matrix, defines the hand-off c
 
 ## 3. Backend Hand-off Contract
 
-The backend integration thread (Codex) provisions an isolated disposable MariaDB + HTTPS Laravel staging environment and exports a single JSON hand-off configuration.
+The backend integration thread (Codex) provisions an isolated disposable MariaDB + HTTPS Laravel staging environment and exports a single JSON hand-off configuration accompanied by a separate private credentials file (`chmod 0600`).
 
-### Environment Variable
-The pilot test runner expects the absolute file path to the hand-off JSON in:
-```bash
-SMALL_TRADER_READ_PILOT_HANDOFF="/path/to/private/handoff.json"
-```
+### Environment Variables
+- `SMALL_TRADER_READ_PILOT_HANDOFF`: Absolute file path to the hand-off JSON.
+- `SMALL_TRADER_EXPECTED_BACKEND_SHA`: Optional independent 40-character hex SHA pinning the expected composed backend commit.
 
 ### JSON Schema & Exact Keys
 ```json
 {
   "baseUrl": "https://disposable-staging.smalltrader.test:8443",
-  "backendCommitSha": "7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb",
+  "backendCommitSha": "d98124578ef219a170bbfa33481e18cd9ef182a0",
   "manifestDigest": "e8e3fe672a8f7aceb3152c3dd990b4fb137fa517b24038e468659e0fdf5a87a7",
-  "staffEmail": "cashier@smalltrader.example",
-  "staffPassword": "EphemeralStaffPassword123!",
+  "credentialsPath": "/path/to/private/chmod600_credentials.json",
   "deviceId": "8e2b8bc6-f80c-4034-8c88-59368d1f2e10",
   "deviceName": "ReadPilotHarness",
   "appVersion": "1.0.0-pilot",
   "platform": "android",
   "companyId": "01JCV8X9M2NQW3TYZ4R5S6789A",
+  "invalidCompanyId": "01JCV8X9M2NQW3TYZ4R5S6789B",
   "caCertPath": "/path/to/test-ca.crt",
-  "credentialsPath": "/path/to/private/chmod600_credentials.json",
-  "invalidCompanyId": "01JCV8X9M2NQW3TYZ4R5S6789Z",
   "wrongHostnameUrl": "https://wrong-host.smalltrader.test:8443",
   "untrustedCertUrl": "https://untrusted-ca.smalltrader.test:8443",
-  "v2FinancialProbeUrl": "/api/mobile/v2/companies/01JCV8X9M2NQW3TYZ4R5S6789A/sales",
   "expectedMigrations": [
-    "2026_11_10_000001_create_mobile_auth_tables",
-    "2026_11_10_000002_create_mobile_devices_table",
-    "2026_11_10_000003_create_mobile_event_receipts_table"
+    "2026_11_11_000001_create_mobile_auth_tables",
+    "2026_11_11_000002_harden_mobile_auth_tables",
+    "2026_11_11_100000_create_mobile_search_indexes",
+    "2026_11_12_000001_create_mobile_event_receipts_table"
   ],
   "resolvedFlags": {
     "financial_v2_active": false,
-    "offline_capture_active": false
+    "offline_capture_active": false,
+    "v1_read_pilot_active": true
   },
   "ttlExpiresAt": "2026-11-13T12:00:00Z",
   "allowHttpLoopback": false
 }
 ```
 
+### Credentials File Schema (`credentialsPath`, chmod 0600)
+```json
+{
+  "staffEmail": "cashier@smalltrader.example",
+  "staffPassword": "EphemeralStaffPassword123!"
+}
+```
+
 ### Key Reference
-- `baseUrl`: HTTPS URL of disposable Laravel instance. Plain HTTP is rejected unless `allowHttpLoopback=true`.
-- `backendCommitSha`: Expected git commit SHA of backend candidate (fails closed on mismatch).
-- `manifestDigest`: Expected contract manifest digest (must match `e8e3fe672a8f7aceb3152c3dd990b4fb137fa517b24038e468659e0fdf5a87a7`).
-- `staffEmail` / `staffPassword`: Ephemeral test credentials (may be provided inline or in a separate file referenced by `credentialsPath`).
+- `baseUrl`: HTTPS URL of disposable Laravel instance. Plain HTTP is rejected unless `allowHttpLoopback=true`. No path, query, fragment, or userinfo permitted.
+- `backendCommitSha`: Composed git commit SHA of backend candidate (40-character hex; validated against `SMALL_TRADER_EXPECTED_BACKEND_SHA` when configured).
+- `manifestDigest`: Expected contract manifest digest (must match exact frozen value `e8e3fe672a8f7aceb3152c3dd990b4fb137fa517b24038e468659e0fdf5a87a7`).
+- `credentialsPath`: Path to private `chmod 0600` file containing `staffEmail` and `staffPassword`. Inline credentials in the main handoff JSON are strictly forbidden.
 - `deviceId`: Client UUID for the test runner.
-- `companyId`: Server ULID of the target tenant company.
+- `companyId`: Server ULID of target tenant company.
+- `invalidCompanyId` / `foreignCompanyId`: REQUIRED Server ULID from two-tenant fixture representing a foreign company (no fabricated fallback allowed).
 - `caCertPath`: Optional path to public test CA certificate in PEM format for isolated JVM trust.
-- `wrongHostnameUrl` / `untrustedCertUrl`: Optional endpoints for negative TLS verification.
-- `v2FinancialProbeUrl`: Optional probe endpoint to verify that unapproved V2 financial routes return 404/403.
-- `ttlExpiresAt`: Disposable staging instance expiration timestamp.
+- `wrongHostnameUrl` / `untrustedCertUrl`: Optional HTTPS endpoints for negative TLS verification.
+- `expectedMigrations`: Non-empty list of backend migrations required on staging.
+- `resolvedFlags`: Must include `financial_v2_active: false`, `offline_capture_active: false`, and `v1_read_pilot_active: true`.
+- `ttlExpiresAt`: ISO-8601 UTC timestamp strictly in the future.
 
 ---
 
@@ -102,7 +109,7 @@ SMALL_TRADER_READ_PILOT_HANDOFF="/path/to/private/handoff.json"
 
 The read pilot smoke test is isolated from standard build suites:
 - When `SMALL_TRADER_READ_PILOT_HANDOFF` is **unset**, the test reports explicit `SKIPPED (NOT RUN)`. It does not fail normal builds and does not silently pass.
-- When `SMALL_TRADER_READ_PILOT_HANDOFF` is **set**, the test executes all 12 validation steps against the live disposable backend. Any failure (network unreachable, handshake failure, wrong status code, or schema mismatch) fails closed.
+- When `SMALL_TRADER_READ_PILOT_HANDOFF` is **set**, the test executes all validation steps against the live disposable backend. Any failure (network unreachable, handshake failure, wrong status code, or schema mismatch) fails closed and produces a sanitized FAIL evidence artifact.
 
 ### Execution Command
 ```bash
@@ -131,6 +138,13 @@ PATH="/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9/bin:$PATH" \
 
 ## 5. Backend Migration Order & Source Overlap Notes
 
+### Migration Ordering Constraints
+The backend migrations on the disposable Laravel instance must run in this exact order:
+1. `2026_11_11_000001_create_mobile_auth_tables` (tokens, challenges, staff memberships, and mobile devices).
+2. `2026_11_11_000002_harden_mobile_auth_tables` (security hardening).
+3. `2026_11_11_100000_create_mobile_search_indexes` (search index migrations from PR #87).
+4. `2026_11_12_000001_create_mobile_event_receipts_table` (cross-version receipt identity from PR #94).
+
 ### Source Overlaps
 1. **PR #87 and PR #93**:
    - Both modify `app/Filament/Admin/Resources/InvoiceResource/Pages/InvoiceForm.php`
@@ -141,33 +155,33 @@ PATH="/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9/bin:$PATH" \
    - Both modify `app/Providers/AppServiceProvider.php`
    - *Resolution*: Merge receipt identity service provider registrations cleanly after financial authority bindings.
 
-### Migration Ordering Constraints
-The backend migrations on the disposable Laravel instance must be run in this exact order:
-1. `mobile_auth` v1 schema migrations (tokens, challenges, staff memberships).
-2. `mobile_devices` table creation.
-3. `mobile_event_receipts` table creation (receipt foreign keys **must** be declared after `mobile_devices` to prevent FK constraint failure).
-4. Security hardening migrations.
-5. Search index migrations from PR #87.
-
 ---
 
-## 6. Minimal Follow-on PR Proposals (Post-Pilot Execution)
+## 6. Authoritative Follow-on PR Ordering
 
-The following minimal, single-responsibility PRs are scheduled after read pilot verification:
+The following strictly sequenced, single-responsibility follow-on PRs are scheduled after read pilot verification:
 
-1. **PR-A: Outbox Payload Encryption & Backup Exclusions (P0 before capture)**
-   - Add SQLCipher / AES-GCM encrypted payload serializer for `OutboxEventEntity.payload_bytes`.
-   - Update `AndroidManifest.xml`, `backup_rules.xml`, and `data_extraction_rules.xml` to explicitly exclude Room databases from cloud backup and device transfer.
+1. **Step 1: Read Pilot Independent Proof (FIRST)**
+   - Execute paired HTTPS read pilot against disposable Laravel staging with zero leaks, verified 401/403/409 denials, and sanitized evidence.
+
+2. **Step 2: Canonical V2 Online Cash & Receipt Atomicity (Next)**
+   - Implement `online_cash_full` exact payment allocation (`tender == total`), authoritative grants, real writers, server status verification, and receipt atomicity.
+
+3. **Step 3: Outbox Payload Encryption & Backup Exclusions (Before Capture)**
+   - Encrypt economic payloads at rest in Room (`OutboxEventEntity.payload_bytes`).
+   - Add explicit cloud/device-transfer exclusions (`backup_rules.xml`, `data_extraction_rules.xml`).
    - Add key-loss, reboot, and app-upgrade migration tests.
 
-2. **PR-B: WorkManager Sync Retry Scheduler (P0 completeness)**
-   - Implement idempotent `SaleSyncWorker` using AndroidX WorkManager.
-   - Enforce network constraint gating (CONNECTED only), exponential backoff, and execution window limits.
+4. **Step 4: Authenticated V2 Sync & Lost ACK Recovery**
+   - Implement real authenticated V2 HTTP gateway in `SaleSyncCoordinator`.
+   - Support status-before-resubmit, unknown-ACK recovery, and provisional receipt truthfulness.
 
-3. **PR-C: Authenticated V2 Financial Gateway & Canonical Receipt Reconciliation (P0 before writes)**
-   - Implement `SaleSyncCoordinator` real V2 HTTP gateway.
-   - Support status-before-resubmit, unknown-ACK recovery, and atomic rollback on absence-row races.
+5. **Step 5: WorkManager Sync Retry Scheduler (LAST after gateway/retry semantics)**
+   - Implement idempotent `SaleSyncWorker` using AndroidX WorkManager with network constraint gating and exponential backoff.
 
-4. **PR-D: AUTH_BLOCKED Resolution & Manager Audit Workflow (P1)**
+6. **Step 6: Safe AUTH_BLOCKED Resolution Policy**
    - Define and implement same-scope staff re-authentication and manager reconciliation workflow.
    - Ensure physical cash taken during locked shifts is never abandoned or silently deleted.
+
+> [!NOTE]
+> Device UI, Keystore, R8, signing, and release claims remain blocked/unverified until physical device infrastructure is authorized. The repository owner has approved the offline store-and-forward architecture, NOT live activation.
