@@ -65,9 +65,7 @@ class MainActivity : ComponentActivity() {
             if (BuildConfig.STAFF_READ_WORKSPACE) {
                 val context = androidx.compose.ui.platform.LocalContext.current
                 val authDenialListener = androidx.compose.runtime.remember(context) {
-                    val db = com.example.data.mobile.outbox.OutboxDatabase.buildDatabase(context)
-                    val outboxRepo = com.example.data.mobile.outbox.OutboxRepositoryImpl(db)
-                    com.example.data.mobile.integration.OutboxAuthDenialBridge(outboxRepo)
+                    com.example.data.mobile.integration.OutboxAuthDenialBridge.create(context.applicationContext)
                 }
                 com.example.ui.staff.StaffWorkspaceApp(
                     configuredOrigin = BuildConfig.STAFF_WORKSPACE_ORIGIN,

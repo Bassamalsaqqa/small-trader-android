@@ -40,6 +40,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 
 /**
  * End-to-end integration tests verifying the runtime bridge between
@@ -202,7 +204,7 @@ class AuthDenialOutboxLockIntegrationTest {
     }
 
     @Test
-    fun testAccepted401CompositionThroughListenerLocksEmptyRoomQueueThenV2CaptureProducesAuthBlocked() {
+    fun testAccepted401CompositionThroughListenerLocksEmptyRoomQueueThenV2CaptureProducesAuthBlocked() = runBlocking(Dispatchers.IO) {
         val coordinator = createCoordinator(bridge)
         val deviceId = coordinator.installationId
 
@@ -320,17 +322,14 @@ class AuthDenialOutboxLockIntegrationTest {
     }
 
     @Test
-    fun testCallbackFailureSurfacesTypedLockedBehaviorWithoutLeakingTokens() {
+    fun testCallbackFailureSurfacesTypedLockedBehaviorWithoutLeakingTokens() = runBlocking(Dispatchers.IO) {
         val initialCoord = createCoordinator(bridge)
         val deviceId = initialCoord.installationId
         persistValidSession(deviceId = deviceId)
         transport.return401OnProducts = true
 
-        val failingBridge = object : com.example.data.mobile.session.AuthDenialListener {
-            override fun onAuthDenied(scope: AuthDenialScope) {
-                // Simulate an unexpected disk/Room failure during notification hook
-                throw android.database.sqlite.SQLiteDiskIOException("Simulated disk I/O failure during scope lock")
-            }
+        val failingBridge = OutboxAuthDenialBridge {
+            throw android.database.sqlite.SQLiteDiskIOException("private-provider-secret")
         }
 
         val failingCoordinator = DefaultStaffSessionCoordinator(
@@ -348,6 +347,9 @@ class AuthDenialOutboxLockIntegrationTest {
         // Now trigger product fetch returning 401
         val productsResult = failingCoordinator.getProducts()
 
+        assertTrue(productsResult is CoordinatorResult.Error)
+        assertFalse(productsResult.toString().contains("private-provider-secret"))
+
         // Coordinator catches listener exception and transitions authState to Locked
         assertTrue("Coordinator must be Locked", failingCoordinator.authState is StaffAuthState.Locked)
         val reason = (failingCoordinator.authState as StaffAuthState.Locked).reason
@@ -359,4 +361,19 @@ class AuthDenialOutboxLockIntegrationTest {
             sessionFile.readText(Charsets.ISO_8859_1).contains("sanctum_token_integration_001")
         )
     }
+    @Test
+    fun testMainThreadMisuseRejectsBeforeRepositoryInitialization() {
+        assertEquals(android.os.Looper.getMainLooper(), android.os.Looper.myLooper())
+        var opened = false
+        val lazyBridge = OutboxAuthDenialBridge {
+            opened = true
+            outboxRepository
+        }
+        assertThrows(IllegalStateException::class.java) {
+            lazyBridge.onAuthDenied(AuthDenialScope(testCompanyUlid, testActorUlid, testDeviceId, testClock.isoUtc))
+        }
+        assertFalse(opened)
+        assertFalse(outboxRepository.isQueueLocked(testCompanyUlid, testActorUlid, testDeviceId))
+    }
+
 }
