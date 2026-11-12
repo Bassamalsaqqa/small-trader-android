@@ -12,7 +12,7 @@ This document pins the integration candidate gate matrix, defines the hand-off c
   - PR #94: `7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb` (cross-version receipt identity, atomic rollback, financial authority)
   - PR #87: `912aa71f557b314837e70138df22615902fc9d7b` (OPEN: invoice UX, search indexes, document rules)
   - PR #88: `9f73ca8952da6bbfc0eabadbb01e51892ace8bc6` (catalog snapshot hash, O(n) scan)
-  - PR #89: `cb97c9a7b864b3a40e5dc4fe03c9f168fd5c59e8` (idempotency, lock ordering)
+  - PR #89: `cb97c9a7b864b3a40e5dc4fe03c9f168fd5c59e8` (Revision 2 contract mirror; not receipt idempotency)
   - PR #91: `f3836ef7aa8a2437e95fedaec3166399a44158b2` (Revision 3 financial contract mirror)
   - PR #92: `7b8531bfb932c73c26efee7f1ace6c5ae61fceaf` (dual-OFF boundary, safe default-deny)
   - PR #93: `1b8a696feda350bbc2df86a26d05b69fd615ba57` (currency precision authority, line decimal enforcement)
@@ -145,9 +145,9 @@ The backend migrations on the disposable Laravel instance run in strict sequence
 
 ### Source Overlaps
 1. **PR #87 and PR #93**:
-   - Both modify `app/Filament/Admin/Resources/InvoiceResource/Pages/InvoiceForm.php`
-   - Both touch `app/Rules/SalesDocumentRules.php`
-   - Both touch `app/Filament/Admin/Resources/SalesProductSelection.php`
+   - Both modify `app/Livewire/Pages/Sales/InvoiceForm.php`
+   - Both touch `app/Services/Sales/SalesDocumentRules.php`
+   - Both touch `app/Services/Sales/SalesProductSelection.php`
    - *Resolution*: Normal merge candidate reconciles PR #93's line decimal authority with PR #87's search indexes and UX rules.
 2. **PR #93 and PR #94**:
    - Both modify `app/Providers/AppServiceProvider.php`
@@ -213,3 +213,34 @@ Backend completion acknowledgment was honored: owned PHP/Caddy processes were st
 Owner approval is still required for financial activation/deployment/main merge, offline business and stock-conflict policy, and canonical receipt retention policy. These proposals authorize no live posting. The existing Android UX must be preserved through implementation; on-device geometry, Arabic/RTL interaction, instrumentation, and hardware-backed Keystore acceptance remain BLOCKED/UNVERIFIED under the current host constraint. PR #88's O(n) catalog hash snapshot scan also remains an explicit performance gate.
 
 Offline supervisor regression: 413 tests across 39 classes, 412 passed, zero failures/errors, one explicit unconfigured-pilot skip. Both normal and optimized contract validators passed 303 checks each. `lintDebug` completed with 0 errors and 63 baseline warnings. Counts are recorded separately from the configured 20-test live/parser run.
+
+
+## GitHub follow-up reviews: safety, source custody and dependency corrections
+
+Reviews `account#94/5882502845` and `small-trader-android#20/5882510757` identify a new P0 in the backend test harness. `MobileEventReceiptIdentityTest` and `MobileReceiptRollbackAtomicityTest` removed RefreshDatabase but retained ownership checks in its uninvoked hook while teardown still performs broad deletes. **Do not execute either class against an existing database.** The backend supervisor owns an explicit setup guard, zero-mutation refusal proof, teardown revalidation and subsequent testing only in a freshly owned disposable MariaDB schema. Prior component test results do not clear this new test-safety gate. Financial activation and full-stack merge remain held.
+
+The original paired run remains historical bounded V1 wire evidence. The backend SHA environment comparison checks metadata agreement; it alone does not attest which source a remote process executes. Local object verification found:
+
+- Pilot commit: `e111f83bc740e9590142869b30428eaa220eab6f`.
+- Tree: `f1ae3acebfab14d213254bfdfdc1588325f6febc`.
+- Direct parent/composed foundation: `f5d16b356ed9c4d895e4fd07dcb469d756936d9b`.
+- External retrieval was reported unavailable by the GitHub reviewer. A secret-inspected source-only review ref or verifiable source bundle, parent/merge inventory, migrations and environment-source hashes must be supplied by the backend supervisor before calling the pair independently reproducible. Do not resurrect the retired instance or alter the historical evidence to imply this gate has passed.
+
+The dependency graph below was checked against GitHub PR base/head metadata and `git merge-base --is-ancestor` against the pilot commit. Each exact head is an ancestor of the pilot. This describes source inclusion, not authorization to merge or run unsafe tests.
+
+| Backend PR | Base | Exact included head | Purpose |
+| --- | --- | --- | --- |
+| #86 | main | `614b1da44ef8715d64a2477e635246f760a3f84c` | Contract serializer foundation |
+| #87 | main | `912aa71f557b314837e70138df22615902fc9d7b` | Web invoice/purchase workflow (open, not draft) |
+| #88 | #86 branch | `9f73ca8952da6bbfc0eabadbb01e51892ace8bc6` | V1 auth/read API |
+| #89 | #86 branch | `cb97c9a7b864b3a40e5dc4fe03c9f168fd5c59e8` | Revision 2 mirror |
+| #91 | #89 branch | `f3836ef7aa8a2437e95fedaec3166399a44158b2` | Revision 3 mirror/pure helpers |
+| #92 | #88 branch | `7b8531bfb932c73c26efee7f1ace6c5ae61fceaf` | Disabled V2 boundary |
+| #93 | main | `1b8a696feda350bbc2df86a26d05b69fd615ba57` | Currency qualification |
+| #94 | #92 branch | `7bb6d779e52ca2f284045d66f8f3f6aee7b4e6fb` | Receipt identity foundation; P0 test-safety hold |
+
+The exact #87/#93 changed-file intersection is the three corrected Livewire/Services paths in section 5. At the pilot tree their Git blob IDs are respectively `903535dfbf04b5a0309feaaf4c51e9092bee3afe`, `f6bb7cd336d4a3911978bdfff7576c8482e6ccde`, and `fe027e83739f36f4c98439a059ad149eeef9353e`. The exact #93/#94 intersection is `app/Providers/AppServiceProvider.php`. These checks verify the recorded merge tree, not financial correctness of the resolutions.
+
+Performance remains unqualified: the saved single run reports challenge 3441 ms, login 451 ms, bootstrap 296 ms, catalog 219 ms and customers 158 ms. It does not separate cold startup, TLS, JVM or Laravel costs and establishes neither warm latency nor p95. A future freshly owned staging run should record a bounded first-request/repeated-request trace with process/client lifecycle and source pins; no fast-launch claim is made from the retired run.
+
+Next review gate: independently verify backend P0 refusal/teardown safety and published source custody, then review the smallest disabled-by-default V2 online cash-sale proposal using existing canonical financial/inventory actions and real grants. Preserve the working read pilot and UI; no financial posting is enabled by this documentation correction.
