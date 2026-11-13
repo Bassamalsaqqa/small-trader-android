@@ -1,0 +1,20 @@
+{
+  "baseCommit": "6825da4a922a4b39ee7c50f8dcf6cd90de28798b",
+  "executor": "Codex supervisor",
+  "scope": "Test-only follow-up; production code unchanged",
+  "tests": 30,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "command": ":app:testDebugUnitTest --tests com.example.data.mobile.outbox.EncryptedOutboxTest --max-workers=2",
+  "testSourceSha256": "1a826284565b17ab1790b97809c0d95c1eeda6fff8723882b372cbe5224933ac",
+  "logSha256": "c8a287652f6aef5e0efed5ce1c1e771520911c836b366b9351daab01deccd469",
+  "checks": [
+    "ThreadMXBean observes second thread BLOCKED on actual production alias monitor owned by first engine before releasing generation",
+    "Missing, invalidated and wrong-key mixed queues have non-null claim/server mapping sentinels and persisted auth locks before reopen comparison"
+  ],
+  "limits": [
+    "JVM crypto backend only, no native Keystore or device acceptance",
+    "Prior full-suite, lint and Python counts are historical, not rerun for this test-only follow-up"
+  ]
+}

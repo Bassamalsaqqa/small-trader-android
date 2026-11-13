@@ -419,6 +419,22 @@ class EncryptedOutboxTest {
         db.close()
     }
 
+    private fun populateMixedQueuePreservationSentinels(db: OutboxDatabase) {
+        val sql = db.openHelper.writableDatabase
+        // Deliberately non-null persistence sentinels: accidental clearing must be observable.
+        sql.execSQL("""UPDATE outbox_delivery_states SET status = 'in_flight', attempt_count = 3,
+            last_attempt_at = 4000, claim_token = 'preserved-claim', claim_expires_at = 9000,
+            invoice_ulid = '01ARZ3NDEKTSV4RRFFQ69G5FAV', payment_ulid = '01ARZ3NDEKTSV4RRFFQ69G5FAW',
+            server_ulid = '01ARZ3NDEKTSV4RRFFQ69G5FAX', server_acknowledged_at = '2026-11-13T12:00:00Z',
+            error_message = 'fixed-preservation-sentinel'""")
+        sql.execSQL("""INSERT OR IGNORE INTO outbox_scope_locks
+            (company_id, actor_id, device_id, locked_at, reason)
+            SELECT company_id, actor_id, device_id, 3000, 'fixed-auth-lock-sentinel' FROM outbox_events""")
+        val snapshot = takeSnapshot(db)
+        assertTrue(snapshot.scopeLocks.isNotEmpty())
+        assertTrue(snapshot.deliveryStates.all { it.claimToken == "preserved-claim" && it.invoiceUlid != null && it.paymentUlid != null && it.serverUlid != null && it.serverAcknowledgedAt != null })
+    }
+
     // Case 3: mixed plaintext + cipher conversion missing/invalid key refuses and preserves entire queue/keygenerationcounter
     @Test
     fun mixedPlaintextAndCipherConversionMissingKeyRefusesAndPreservesEntireQueueAndKeyGenCounterOnDisk() {
@@ -468,6 +484,7 @@ class EncryptedOutboxTest {
             )
         )
 
+        populateMixedQueuePreservationSentinels(db)
         val snapshotBefore = takeSnapshot(db)
         assertEquals(2, snapshotBefore.events.size)
         val snapEvent1 = snapshotBefore.events.first { it.clientEventId == plainEntity1.clientEventId }
@@ -554,6 +571,7 @@ class EncryptedOutboxTest {
             )
         )
 
+        populateMixedQueuePreservationSentinels(db)
         val snapshotBefore = takeSnapshot(db)
         assertEquals(2, snapshotBefore.events.size)
         assertEquals(2, snapshotBefore.deliveryStates.size)
@@ -638,6 +656,7 @@ class EncryptedOutboxTest {
             )
         )
 
+        populateMixedQueuePreservationSentinels(db)
         val snapshotBefore = takeSnapshot(db)
         assertEquals(2, snapshotBefore.events.size)
         assertEquals(2, snapshotBefore.deliveryStates.size)
@@ -1496,6 +1515,7 @@ class EncryptedOutboxTest {
 
         val errors = CopyOnWriteArrayList<Throwable>()
         val thread2FinishedBeforeRelease = AtomicBoolean(false)
+        val thread2Calling = CountDownLatch(1)
 
         val t1 = Thread {
             try {
@@ -1512,6 +1532,7 @@ class EncryptedOutboxTest {
                 assertTrue("Thread 1 must enter key generation and hold lock",
                     fakeBackend.generationStartedLatch.await(5, TimeUnit.SECONDS))
                 // Thread 2 calls production ensureKeyUsable(false); must block on production keyLock held by Thread 1
+                thread2Calling.countDown()
                 engine2.ensureKeyUsable(false)
                 if (fakeBackend.releaseGenerationLatch.count > 0) {
                     thread2FinishedBeforeRelease.set(true)
@@ -1528,15 +1549,23 @@ class EncryptedOutboxTest {
         assertTrue("Thread 1 must enter key generation within timeout",
             fakeBackend.generationStartedLatch.await(5, TimeUnit.SECONDS))
 
-        // Give thread 2 time to reach the lock and block
-        Thread.sleep(50)
-        assertFalse("Thread 2 must be blocked by production keyLock while thread 1 holds it",
-            thread2FinishedBeforeRelease.get())
-        assertEquals("Exactly one key generation attempt must occur while thread 1 holds lock",
-            1, fakeBackend.generationAttempts.get())
-
-        // Release thread 1 to complete key generation
-        fakeBackend.releaseGenerationLatch.countDown()
+        try {
+            assertTrue("Second production invocation must start", thread2Calling.await(5, TimeUnit.SECONDS))
+            val bean = java.lang.management.ManagementFactory.getThreadMXBean()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+            var observedProductionLockWait = false
+            while (System.nanoTime() < deadline && !observedProductionLockWait) {
+                val info = bean.getThreadInfo(t2.id)
+                observedProductionLockWait = info != null && info.threadState == Thread.State.BLOCKED &&
+                    info.lockOwnerId == t1.id && info.lockInfo?.identityHashCode == System.identityHashCode(lock1)
+                if (!observedProductionLockWait) Thread.yield()
+            }
+            assertTrue("Second engine must actually wait on the production alias lock owned by first engine", observedProductionLockWait)
+            assertFalse("Second invocation cannot finish before generation release", thread2FinishedBeforeRelease.get())
+            assertEquals("Only the lock owner may generate", 1, fakeBackend.generationAttempts.get())
+        } finally {
+            fakeBackend.releaseGenerationLatch.countDown()
+        }
 
         t1.join(5000)
         t2.join(5000)
