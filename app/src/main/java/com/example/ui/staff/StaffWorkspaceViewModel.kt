@@ -55,8 +55,11 @@ class StaffWorkspaceViewModel(
     initialPhase: StaffWorkspacePhase? = null,
     initialStorageError: String? = null,
     private val coordinatorFactory: (() -> StaffSessionCoordinator)? = null,
-    private val outboxHealthInspector: OutboxHealthInspector? = null
+    outboxHealthInspector: OutboxHealthInspector? = null
 ) : ViewModel() {
+
+    private val outboxHealthInspector: OutboxHealthInspector =
+        outboxHealthInspector ?: com.example.data.mobile.outbox.UnavailableOutboxHealthInspector()
 
     private val _uiState = MutableStateFlow(
         when {
@@ -85,98 +88,94 @@ class StaffWorkspaceViewModel(
     private var productRequestSeq: Long = 0L
     private var customerRequestSeq: Long = 0L
 
+    // Active authenticated tenant and device scope for outbox inspection
+    private var activeScopeCompanyId: String? = null
+    private var activeScopeActorId: String? = null
+    private var activeScopeDeviceId: String? = null
+
     init {
         if (coordinator != null && configuredOrigin.isNotBlank() && _uiState.value.phase == StaffWorkspacePhase.INITIALIZING) {
-            if (outboxHealthInspector != null) {
-                checkOutboxHealthAndRestore()
-            } else {
-                restoreSession()
-            }
+            restoreSession()
         }
     }
 
     /**
-     * Inspects local outbox health off the main thread before permitting normal workspace session restoration.
+     * Inspects local outbox health scoped strictly to the authenticated (companyId, actorId, deviceId).
+     * Runs off the main thread after entering READ_READY.
+     * Never blocks normal read workspace navigation or product/customer queries.
      */
-    fun checkOutboxHealthAndRestore() {
-        val inspector = outboxHealthInspector ?: run {
-            restoreSession()
-            return
-        }
+    fun triggerScopedOutboxHealth(companyId: String, actorId: String, deviceId: String) {
+        activeScopeCompanyId = companyId
+        activeScopeActorId = actorId
+        activeScopeDeviceId = deviceId
+
         val intentId = ++activeIntentSeq
         outboxHealthJob?.cancel()
         outboxHealthJob = viewModelScope.launch {
             val health = try {
-                inspector.inspectHealth()
+                outboxHealthInspector.inspectHealth(companyId, actorId, deviceId)
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 OutboxHealthResult(
-                    status = OutboxHealthStatus.CORRUPT,
+                    status = OutboxHealthStatus.STORAGE_UNAVAILABLE,
                     totalEvents = 0,
                     probedCount = 0,
                     isSampleProbe = false,
-                    messageEn = "Failed to inspect outbox health.",
-                    messageAr = "تعذر فحص حالة طابور الترحيل.",
+                    messageEn = "We have not changed stored sales. Some records need help before syncing.",
+                    messageAr = "لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                    detailMessageEn = "Contact support",
+                    detailMessageAr = "يرجى التواصل مع الدعم الفني.",
                     canRetry = true
                 )
             }
             if (intentId != activeIntentSeq) return@launch
-
-            if (health.isOperational) {
-                _uiState.update { it.copy(outboxHealthResult = health, isOutboxRetrying = false) }
-                restoreSession()
-            } else {
-                _uiState.update {
-                    it.copy(
-                        phase = StaffWorkspacePhase.OUTBOX_RECOVERY_REQUIRED,
-                        outboxHealthResult = health,
-                        isOutboxRetrying = false
-                    )
-                }
+            if (_uiState.value.phase != StaffWorkspacePhase.READ_READY ||
+                _uiState.value.activeCompany?.companyId != companyId
+            ) {
+                return@launch
             }
+            _uiState.update { it.copy(outboxHealthResult = health, isOutboxRetrying = false) }
         }
     }
 
     /**
-     * Retries outbox health inspection off the main thread.
+     * Retries scoped outbox health inspection off the main thread.
      * Never regenerates key or modifies/destroys outbox records.
      */
     fun retryOutboxHealth() {
-        val inspector = outboxHealthInspector ?: return
+        val companyId = activeScopeCompanyId ?: _uiState.value.activeCompany?.companyId ?: return
+        val actorId = activeScopeActorId ?: _uiState.value.staffActor?.actorId ?: return
+        val deviceId = activeScopeDeviceId ?: return
+
         val intentId = ++activeIntentSeq
         _uiState.update { it.copy(isOutboxRetrying = true) }
         outboxHealthJob?.cancel()
         outboxHealthJob = viewModelScope.launch {
             val health = try {
-                inspector.inspectHealth()
+                outboxHealthInspector.inspectHealth(companyId, actorId, deviceId)
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 OutboxHealthResult(
-                    status = OutboxHealthStatus.CORRUPT,
+                    status = OutboxHealthStatus.STORAGE_UNAVAILABLE,
                     totalEvents = 0,
                     probedCount = 0,
                     isSampleProbe = false,
-                    messageEn = "Failed to inspect outbox health.",
-                    messageAr = "تعذر فحص حالة طابور الترحيل.",
+                    messageEn = "We have not changed stored sales. Some records need help before syncing.",
+                    messageAr = "لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                    detailMessageEn = "Contact support",
+                    detailMessageAr = "يرجى التواصل مع الدعم الفني.",
                     canRetry = true
                 )
             }
             if (intentId != activeIntentSeq) return@launch
-
-            if (health.isOperational) {
-                _uiState.update { it.copy(outboxHealthResult = health, isOutboxRetrying = false) }
-                restoreSession()
-            } else {
-                _uiState.update {
-                    it.copy(
-                        phase = StaffWorkspacePhase.OUTBOX_RECOVERY_REQUIRED,
-                        outboxHealthResult = health,
-                        isOutboxRetrying = false
-                    )
-                }
+            if (_uiState.value.phase != StaffWorkspacePhase.READ_READY ||
+                _uiState.value.activeCompany?.companyId != companyId
+            ) {
+                return@launch
             }
+            _uiState.update { it.copy(outboxHealthResult = health, isOutboxRetrying = false) }
         }
     }
 
@@ -265,6 +264,10 @@ class StaffWorkspaceViewModel(
         authJob?.cancel()
         productsJob?.cancel()
         customersJob?.cancel()
+        outboxHealthJob?.cancel()
+        activeScopeCompanyId = null
+        activeScopeActorId = null
+        activeScopeDeviceId = null
 
         authJob = viewModelScope.launch {
             _uiState.update {
@@ -272,7 +275,9 @@ class StaffWorkspaceViewModel(
                     phase = StaffWorkspacePhase.INITIALIZING,
                     isSubmitting = true,
                     errorMessage = null,
-                    lockedReason = null
+                    lockedReason = null,
+                    outboxHealthResult = null,
+                    isOutboxRetrying = false
                 )
             }
 
@@ -300,12 +305,15 @@ class StaffWorkspaceViewModel(
                         is StaffAuthState.ReadReady -> {
                             val selectedId = state.session.selectedCompanyId
                             if (selectedId != null && coord.isScopeActive(result.generation, selectedId)) {
+                                val compId = state.bootstrap.companyId.value
+                                val actId = state.session.actorUlid.value
+                                val devId = state.session.deviceUuid.value
                                 _uiState.update { s ->
                                     s.copy(
                                         phase = StaffWorkspacePhase.READ_READY,
                                         isSubmitting = false,
                                         activeCompany = SafeCompanyViewData(
-                                            companyId = state.bootstrap.companyId.value,
+                                            companyId = compId,
                                             companyName = state.bootstrap.companyName,
                                             currency = state.bootstrap.baseCurrency
                                         ),
@@ -321,6 +329,7 @@ class StaffWorkspaceViewModel(
                                 }
                                 loadProducts(refresh = true)
                                 loadCustomers(refresh = true)
+                                triggerScopedOutboxHealth(compId, actId, devId)
                             } else {
                                 transitionToSignIn()
                             }
@@ -425,9 +434,13 @@ class StaffWorkspaceViewModel(
         authJob?.cancel()
         productsJob?.cancel()
         customersJob?.cancel()
+        outboxHealthJob?.cancel()
+        activeScopeCompanyId = null
+        activeScopeActorId = null
+        activeScopeDeviceId = null
 
         authJob = viewModelScope.launch {
-            _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
+            _uiState.update { it.copy(isSubmitting = true, errorMessage = null, outboxHealthResult = null, isOutboxRetrying = false) }
             pendingEmail = email.trim()
             pendingPassword = pwd
 
@@ -490,12 +503,15 @@ class StaffWorkspaceViewModel(
                             clearTransientCredentials()
                             val selectedId = state.session.selectedCompanyId
                             if (selectedId != null && coord.isScopeActive(result.generation, selectedId)) {
+                                val compId = state.bootstrap.companyId.value
+                                val actId = state.session.actorUlid.value
+                                val devId = state.session.deviceUuid.value
                                 _uiState.update { s ->
                                     s.copy(
                                         phase = StaffWorkspacePhase.READ_READY,
                                         isSubmitting = false,
                                         activeCompany = SafeCompanyViewData(
-                                            companyId = state.bootstrap.companyId.value,
+                                            companyId = compId,
                                             companyName = state.bootstrap.companyName,
                                             currency = state.bootstrap.baseCurrency
                                         ),
@@ -511,6 +527,7 @@ class StaffWorkspaceViewModel(
                                 }
                                 loadProducts(refresh = true)
                                 loadCustomers(refresh = true)
+                                triggerScopedOutboxHealth(compId, actId, devId)
                             }
                         }
                         is StaffAuthState.MfaRequired -> {
@@ -615,9 +632,13 @@ class StaffWorkspaceViewModel(
 
         val thisIntent = ++activeIntentSeq
         authJob?.cancel()
+        outboxHealthJob?.cancel()
+        activeScopeCompanyId = null
+        activeScopeActorId = null
+        activeScopeDeviceId = null
 
         authJob = viewModelScope.launch {
-            _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
+            _uiState.update { it.copy(isSubmitting = true, errorMessage = null, outboxHealthResult = null, isOutboxRetrying = false) }
             // Clear code input on each attempt
             clearTransientCodes()
 
@@ -653,12 +674,15 @@ class StaffWorkspaceViewModel(
                         is StaffAuthState.ReadReady -> {
                             val selectedId = state.session.selectedCompanyId
                             if (selectedId != null && coord.isScopeActive(result.generation, selectedId)) {
+                                val compId = state.bootstrap.companyId.value
+                                val actId = state.session.actorUlid.value
+                                val devId = state.session.deviceUuid.value
                                 _uiState.update { s ->
                                     s.copy(
                                         phase = StaffWorkspacePhase.READ_READY,
                                         isSubmitting = false,
                                         activeCompany = SafeCompanyViewData(
-                                            companyId = state.bootstrap.companyId.value,
+                                            companyId = compId,
                                             companyName = state.bootstrap.companyName,
                                             currency = state.bootstrap.baseCurrency
                                         ),
@@ -674,6 +698,7 @@ class StaffWorkspaceViewModel(
                                 }
                                 loadProducts(refresh = true)
                                 loadCustomers(refresh = true)
+                                triggerScopedOutboxHealth(compId, actId, devId)
                             }
                         }
                         is StaffAuthState.CompanySelectionRequired -> {
@@ -740,8 +765,9 @@ class StaffWorkspaceViewModel(
      * or initiates honest change-company re-authentication for restored sessions.
      */
     fun openCompanySelection() {
+        outboxHealthJob?.cancel()
         if (_uiState.value.availableCompanies.isNotEmpty()) {
-            _uiState.update { it.copy(phase = StaffWorkspacePhase.COMPANY_SELECTION) }
+            _uiState.update { it.copy(phase = StaffWorkspacePhase.COMPANY_SELECTION, outboxHealthResult = null, isOutboxRetrying = false) }
         } else {
             // Restored session cannot recover membership list from frozen contract: honest re-auth flow
             val lang = _uiState.value.language
@@ -757,6 +783,7 @@ class StaffWorkspaceViewModel(
      * Cancels company selection: returns to active ReadReady workspace if valid, or logs out if initial login.
      */
     fun cancelCompanySelection() {
+        outboxHealthJob?.cancel()
         val active = _uiState.value.activeCompany
         val coord = coordinator
         if (active != null && coord != null) {
@@ -791,10 +818,14 @@ class StaffWorkspaceViewModel(
         authJob?.cancel()
         productsJob?.cancel()
         customersJob?.cancel()
+        outboxHealthJob?.cancel()
+        activeScopeCompanyId = null
+        activeScopeActorId = null
+        activeScopeDeviceId = null
         clearListsImmediately()
 
         authJob = viewModelScope.launch {
-            _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
+            _uiState.update { it.copy(isSubmitting = true, errorMessage = null, outboxHealthResult = null, isOutboxRetrying = false) }
 
             val result = try {
                 withContext(ioDispatcher) {
@@ -821,12 +852,15 @@ class StaffWorkspaceViewModel(
                     if (state is StaffAuthState.ReadReady &&
                         coord.isScopeActive(result.generation, serverUlid)
                     ) {
+                        val compId = state.bootstrap.companyId.value
+                        val actId = state.session.actorUlid.value
+                        val devId = state.session.deviceUuid.value
                         _uiState.update { s ->
                             s.copy(
                                 phase = StaffWorkspacePhase.READ_READY,
                                 isSubmitting = false,
                                 activeCompany = SafeCompanyViewData(
-                                    companyId = state.bootstrap.companyId.value,
+                                    companyId = compId,
                                     companyName = state.bootstrap.companyName,
                                     currency = state.bootstrap.baseCurrency
                                 ),
@@ -841,6 +875,7 @@ class StaffWorkspaceViewModel(
                         }
                         loadProducts(refresh = true)
                         loadCustomers(refresh = true)
+                        triggerScopedOutboxHealth(compId, actId, devId)
                     }
                 }
                 is CoordinatorResult.AuthDenied -> {
@@ -891,10 +926,14 @@ class StaffWorkspaceViewModel(
         productsJob?.cancel()
         customersJob?.cancel()
         authJob?.cancel()
+        outboxHealthJob?.cancel()
+        activeScopeCompanyId = null
+        activeScopeActorId = null
+        activeScopeDeviceId = null
         clearListsImmediately()
 
         authJob = viewModelScope.launch {
-            _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
+            _uiState.update { it.copy(isSubmitting = true, errorMessage = null, outboxHealthResult = null, isOutboxRetrying = false) }
 
             val result = try {
                 withContext(ioDispatcher) {
@@ -920,12 +959,15 @@ class StaffWorkspaceViewModel(
                     if (state is StaffAuthState.ReadReady &&
                         coord.isScopeActive(result.generation, serverUlid)
                     ) {
+                        val compId = state.bootstrap.companyId.value
+                        val actId = state.session.actorUlid.value
+                        val devId = state.session.deviceUuid.value
                         _uiState.update { s ->
                             s.copy(
                                 phase = StaffWorkspacePhase.READ_READY,
                                 isSubmitting = false,
                                 activeCompany = SafeCompanyViewData(
-                                    companyId = state.bootstrap.companyId.value,
+                                    companyId = compId,
                                     companyName = state.bootstrap.companyName,
                                     currency = state.bootstrap.baseCurrency
                                 ),
@@ -934,6 +976,7 @@ class StaffWorkspaceViewModel(
                         }
                         loadProducts(refresh = true)
                         loadCustomers(refresh = true)
+                        triggerScopedOutboxHealth(compId, actId, devId)
                     }
                 }
                 is CoordinatorResult.AuthDenied -> {
@@ -974,6 +1017,10 @@ class StaffWorkspaceViewModel(
         productsJob?.cancel()
         customersJob?.cancel()
         authJob?.cancel()
+        outboxHealthJob?.cancel()
+        activeScopeCompanyId = null
+        activeScopeActorId = null
+        activeScopeDeviceId = null
 
         clearTransientCredentials()
         clearListsImmediately()
@@ -985,7 +1032,9 @@ class StaffWorkspaceViewModel(
                 activeCompany = null,
                 staffActor = null,
                 availableCompanies = emptyList(),
-                errorMessage = messageOnSuccess
+                errorMessage = messageOnSuccess,
+                outboxHealthResult = null,
+                isOutboxRetrying = false
             )
         }
 
@@ -1436,6 +1485,7 @@ class StaffWorkspaceViewModel(
         authJob?.cancel()
         productsJob?.cancel()
         customersJob?.cancel()
+        outboxHealthJob?.cancel()
     }
 
     private fun retryComposition() {
@@ -1446,7 +1496,11 @@ class StaffWorkspaceViewModel(
         }
         if (_uiState.value.isSubmitting) return
         val intent = ++activeIntentSeq
-        _uiState.update { it.copy(phase = StaffWorkspacePhase.INITIALIZING, isSubmitting = true) }
+        outboxHealthJob?.cancel()
+        activeScopeCompanyId = null
+        activeScopeActorId = null
+        activeScopeDeviceId = null
+        _uiState.update { it.copy(phase = StaffWorkspacePhase.INITIALIZING, isSubmitting = true, outboxHealthResult = null, isOutboxRetrying = false) }
         authJob = viewModelScope.launch {
             try {
                 val created = withContext(ioDispatcher) { factory() }
@@ -1479,11 +1533,11 @@ class StaffWorkspaceViewModel(
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             val effectiveLoopback = BuildConfig.DEBUG && allowHttpLoopback
-            val effectiveInspector = outboxHealthInspector ?: try {
+            val effectiveInspector: OutboxHealthInspector = outboxHealthInspector ?: try {
                 val db = com.example.data.mobile.outbox.OutboxDatabase.buildDatabase(context.applicationContext)
                 com.example.data.mobile.outbox.DefaultOutboxHealthInspector(db, ioDispatcher = ioDispatcher)
             } catch (_: Exception) {
-                null
+                com.example.data.mobile.outbox.UnavailableOutboxHealthInspector()
             }
 
             // 1. Validate configuredOrigin safely before attempting composition

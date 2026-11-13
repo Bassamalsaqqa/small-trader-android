@@ -108,6 +108,9 @@ data class StaffWorkspaceUiState(
     val language: AppLanguage = AppLanguage.AR,
     val isDarkTheme: Boolean = false
 ) {
+    val isQueueProcessingReady: Boolean
+        get() = outboxHealthResult?.isOperational == true
+
     override fun toString(): String =
         "StaffWorkspaceUiState(phase=$phase, selectedTab=$selectedTab, isSubmitting=$isSubmitting, " +
                 "productsCount=${products.size}, customersCount=${customers.size}, language=${language.code})"

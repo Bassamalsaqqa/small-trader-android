@@ -59,28 +59,36 @@ Final local validation: 429 tests across 39 suites: 428 passed, 1 retired pilot 
 
 Supervisor test-only follow-up: 30 EncryptedOutboxTest cases passed, zero failures/errors/skips. The concurrency test now observes the second thread BLOCKED on the exact production alias monitor, with the first engine as owner, before generation is released. Mixed-key fixtures populate claims/server mappings and auth locks so clearing them is observable. Evidence: encrypted-outbox-evidence/supervisor-test-followup.json. This does not claim a new full-suite/lint run or native-device proof.
 
-## Startup Legacy Upgrade and Recovery Health Gate (PR 21 Review Follow-up)
+## Startup Legacy Upgrade and Recovery Health Gate (PR 21 / PR 22 Qualified Gate)
 
-Resolves GitHub PR 21 review `5895663783`.
+Resolves GitHub PR 21 review `5895663783` and addresses independent Huda Codex review findings on PR 22:
 
-### 1. Scope and Architectural Intent
-- Pre-existing Room v1 plaintext records must not be accessed or converted without an explicit, verified recovery process.
-- Bounded startup health inspection (`OutboxHealthInspector`) runs off the main thread (`ioDispatcher`) before session restoration or normal workspace navigation.
-- If the outbox is operational (`HEALTHY` or `NEW_EMPTY`), normal session restoration continues seamlessly.
-- If the outbox requires recovery (`LEGACY_PLAINTEXT`, `MIXED_QUEUE`, `KEY_UNAVAILABLE`, `ENCRYPTED_LOCKED`, `CORRUPT`), the workspace routes to `StaffWorkspacePhase.OUTBOX_RECOVERY_REQUIRED` (`StaffOutboxRecoveryScreen`).
+### 1. Architectural Separation: Outbox Health Processing Gate vs Authorized Read Access
+- **Separation of Concerns**: Outbox queue health inspection gates queued financial processing and recovery controls only (`uiState.isQueueProcessingReady`); it **never** blocks authorized staff login, catalog reading, or session logout.
+- **Cross-Scope Isolation**: Local legacy plaintext or corrupted records under Company A never block Company B staff from valid login, reading product/customer catalogs, or operating in their read workspace.
+- **Post-Authentication Scoping**: No pre-authentication foreign payload inspection is performed. Health inspection triggers strictly *after* entering `READ_READY`, bounded to immutable `(companyId, actorId, deviceId)`.
+- **Integrated Workspace Recovery Banner**: Health inspection results do not replace global navigation or eject the user to an error screen. Instead, a permitted local storage warning banner (`StaffOutboxRecoveryBanner`) is rendered at the top of `StaffWorkspaceScreen`, while the read catalog and customer directory remain fully accessible underneath.
+- **Factory Failure Handling**: If health inspector instantiation fails, the factory falls back to `UnavailableOutboxHealthInspector` (reporting `STORAGE_UNAVAILABLE` with safe retry enabled), ensuring failed dependencies never silently grant queue processing authority or act as a `null` success bypass.
 
-### 2. Critical Trust Boundary: Plaintext Installation Provenance
-- An all-plaintext legacy Room v1 database has **no cryptographic installation provenance**. Mere local staff login, current installation UUID, or a user checkbox is **not proof** of same-installation or owner recovery authority.
-- Conversion remains **strictly closed**:
-  - No invented server recovery grant.
-  - No "Convert" button that blindly blesses copied plaintext.
-  - No fabricated tokens or automatic calls to `convertLegacyPayloads()`.
-- The user is presented with a non-destructive, truthful guidance screen explaining that unsynced records are preserved on device and reviewed operator recovery is required.
-- Safe retry re-inspects storage without key generation or destructive reset.
+### 2. Full Probe vs Sample & Every-Row MAC Authentication
+- **Every Probed Row Authenticated**: Every returned probed row in the scoped window is decrypted and authenticated against its AAD metadata. A subsequent row with a valid `STO/1` header but tampered ciphertext or invalid MAC immediately flags `CORRUPT`.
+- **Honest Partial Sampling**: Probing a subset of a queue larger than the probe window never grants `isOperational = true` or `isQueueProcessingReady = true`. Instead, it reports `PARTIAL_UNCHECKED`, preventing partial sample checks from declaring an entire queue operational.
 
-### 3. Privacy and Operational Honesty
-- **Scope Privacy**: Foreign company identifiers, foreign company names, foreign queue counts, and client event UUIDs are strictly excluded from UI messages and state models.
-- **Bounded Probing**: For large queues, health inspection samples the earliest records (`sampleEventsForHealthProbe(limit = 10)`). It reports whether the check was an honest sample probe (`isSampleProbe = true`) and never claims whole-queue cryptographic integrity from a sample probe.
-- **Zero Key Generation on Inspection**: Empty databases return `NEW_EMPTY` without generating a Keystore key. Encrypted queues with missing or locked keys fail closed without generating replacement keys.
-- **Off-Main Enforcement**: `DefaultOutboxHealthInspector` asserts `Looper.myLooper() != Looper.getMainLooper()` and executes strictly on the configured I/O dispatcher with coroutine cancellation propagation.
+### 3. Scoped Queries, Privacy, and Generation Barriers
+- **Scoped DAO Operations**: All probe queries (`scopedEventCount`, `scopedNonEncryptedEventCount`, `scopedSampleEventsForHealthProbe`) are bound to the authorized `(company_id, actor_id, device_id)` tuple. Zero foreign records or unauthenticated counts are queried or exposed.
+- **Sanitized Diagnostics**: `OutboxHealthResult.toString()` sanitizes details and never formats or decodes raw payload bytes or leaks foreign IDs.
+- **Generation & Intent Barriers**: In-flight `outboxHealthJob` instances are cancelled and generation-fenced across login, logout, company selection, company switching, session restoration, and retry. Stale completion from an earlier scope or cancelled session cannot overwrite state, restore an obsolete session, or leave the UI in a busy state.
+
+### 4. Bounded SQL Projection & Room Memory Protection
+- **SQLite Projection Before Room Materialization**: Probing queries select `length(payload_bytes)` and `substr(payload_bytes, 1, :maxEnvelopeBytes + 1)` alongside row metadata. This ensures that oversized or maliciously inflated SQLite BLOBs are evaluated within the database engine without allocating whole multi-megabyte payloads in the Android JVM CursorWindow.
+- **Strict Bounds**: Hard cap of `maxProbeCount = 10`. Records exceeding `maxEnvelopeBytes` (1 MiB + STO header + nonce + tag) fail closed as `CORRUPT` (oversized envelope).
+
+### 5. Truthful Plain Bilingual Copy & Accessibility
+- **Truthful EN/AR Copy**: The recovery banner uses plain, honest messaging without false integrity claims:
+  - English: `"We have not changed stored sales. Some records need help before syncing."` with guidance `"Contact support"`.
+  - Arabic: `"لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة."` with guidance `"يرجى التواصل مع الدعم الفني."`.
+- **Accessibility & UX**: All interactive elements (e.g. Retry button) adhere to a minimum touch target of 44dp, support RTL layout natively, and operate without requiring keyboard or focus traps.
+
+### 6. Conversion Boundary Unwired
+- Explicit conversion (`convertLegacyPayloads`) remains intentionally unwired until an owner-controlled recovery flow is qualified; this gate does not claim an automatic migration or active sync worker.
 

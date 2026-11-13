@@ -515,8 +515,8 @@ fun StaffOutboxRecoveryScreen(
                 ) {
                     Text(
                         text = lang.tr(
-                            "كافة السجلات غير المرحّلة محفوظة بأمان على هذا الجهاز",
-                            "All unsynced offline records are preserved safely on this device"
+                            "لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                            "We have not changed stored sales. Some records need help before syncing."
                         ),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
@@ -525,6 +525,16 @@ fun StaffOutboxRecoveryScreen(
                         textAlign = TextAlign.Center
                     )
                 }
+
+                // Recovery guidance
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = lang.tr("يرجى التواصل مع الدعم الفني.", "Contact support"),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center
+                )
 
                 // Explicit trust / authority notice for legacy plaintext
                 if (status == OutboxHealthStatus.LEGACY_PLAINTEXT) {

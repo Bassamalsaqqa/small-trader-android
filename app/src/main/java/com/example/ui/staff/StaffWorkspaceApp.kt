@@ -111,7 +111,8 @@ fun StaffWorkspaceApp(
                         onSwitchCompany = { viewModel.openCompanySelection() },
                         onLogout = { viewModel.logout() },
                         onToggleLanguage = { viewModel.toggleLanguage() },
-                        onToggleTheme = { viewModel.toggleTheme() }
+                        onToggleTheme = { viewModel.toggleTheme() },
+                        onRetryOutboxHealth = { viewModel.retryOutboxHealth() }
                     )
                 }
                 StaffWorkspacePhase.LOCKED -> {

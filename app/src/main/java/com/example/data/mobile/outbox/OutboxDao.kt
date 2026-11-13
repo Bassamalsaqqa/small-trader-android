@@ -1,21 +1,108 @@
 package com.example.data.mobile.outbox
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 
+data class OutboxHealthProbeEntity(
+    @ColumnInfo(name = "client_event_id")
+    val clientEventId: String,
+    @ColumnInfo(name = "company_id")
+    val companyId: String,
+    @ColumnInfo(name = "actor_id")
+    val actorId: String,
+    @ColumnInfo(name = "device_id")
+    val deviceId: String,
+    @ColumnInfo(name = "device_lease_id")
+    val deviceLeaseId: String,
+    @ColumnInfo(name = "captured_at")
+    val capturedAt: String,
+    @ColumnInfo(name = "payload_digest")
+    val payloadDigest: String,
+    @ColumnInfo(name = "event_version")
+    val eventVersion: Int,
+    @ColumnInfo(name = "payload_length")
+    val payloadLength: Int,
+    @ColumnInfo(name = "bounded_payload_bytes", typeAffinity = ColumnInfo.BLOB)
+    val boundedPayloadBytes: ByteArray
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is OutboxHealthProbeEntity) return false
+        return clientEventId == other.clientEventId &&
+                companyId == other.companyId &&
+                actorId == other.actorId &&
+                deviceId == other.deviceId &&
+                deviceLeaseId == other.deviceLeaseId &&
+                capturedAt == other.capturedAt &&
+                payloadDigest == other.payloadDigest &&
+                eventVersion == other.eventVersion &&
+                payloadLength == other.payloadLength &&
+                boundedPayloadBytes.contentEquals(other.boundedPayloadBytes)
+    }
+
+    override fun hashCode(): Int {
+        var result = clientEventId.hashCode()
+        result = 31 * result + companyId.hashCode()
+        result = 31 * result + actorId.hashCode()
+        result = 31 * result + deviceId.hashCode()
+        result = 31 * result + deviceLeaseId.hashCode()
+        result = 31 * result + capturedAt.hashCode()
+        result = 31 * result + payloadDigest.hashCode()
+        result = 31 * result + eventVersion
+        result = 31 * result + payloadLength
+        result = 31 * result + boundedPayloadBytes.contentHashCode()
+        return result
+    }
+}
+
 @Dao
 abstract class OutboxDao {
     @Query("SELECT COUNT(*) FROM outbox_events")
     abstract fun eventCount(): Int
 
+    @Query("""
+        SELECT COUNT(*) FROM outbox_events
+        WHERE company_id = :companyId
+          AND actor_id = :actorId
+          AND device_id = :deviceId
+    """)
+    abstract fun scopedEventCount(companyId: String, actorId: String, deviceId: String): Int
+
+    @Query("""
+        SELECT COUNT(*) FROM outbox_events
+        WHERE company_id = :companyId
+          AND actor_id = :actorId
+          AND device_id = :deviceId
+          AND substr(payload_bytes, 1, 4) != x'53544f01'
+    """)
+    abstract fun scopedNonEncryptedEventCount(companyId: String, actorId: String, deviceId: String): Int
+
     @Query("SELECT * FROM outbox_events")
     abstract fun allEventsForConversion(): List<OutboxEventEntity>
 
-    @Query("SELECT * FROM outbox_events ORDER BY captured_at ASC LIMIT :limit")
-    abstract fun sampleEventsForHealthProbe(limit: Int): List<OutboxEventEntity>
+    @Query("""
+        SELECT client_event_id, company_id, actor_id, device_id, device_lease_id,
+               captured_at, payload_digest, event_version,
+               length(payload_bytes) AS payload_length,
+               substr(payload_bytes, 1, :maxEnvelopeBytesPlusOne) AS bounded_payload_bytes
+        FROM outbox_events
+        WHERE company_id = :companyId
+          AND actor_id = :actorId
+          AND device_id = :deviceId
+        ORDER BY captured_at ASC
+        LIMIT :limit
+    """)
+    abstract fun scopedSampleEventsForHealthProbe(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        maxEnvelopeBytesPlusOne: Int,
+        limit: Int
+    ): List<OutboxHealthProbeEntity>
 
     @Query("UPDATE outbox_events SET payload_bytes = :bytes WHERE company_id = :companyId AND client_event_id = :eventId")
     abstract fun replacePayloadForConversion(companyId: String, eventId: String, bytes: ByteArray): Int
