@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" tests="23" skipped="0" failures="0" errors="0" timestamp="2026-11-13T14:47:33.299Z" hostname="pasta-hp-worker" time="1.14">
+  <properties/>
+  <testcase name="testScopeParameterMismatchRejectedBeforeDbAccess" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.054"/>
+  <testcase name="testTopLevelSameUuidDifferentCompanyIndependent" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.049"/>
+  <testcase name="testTerminalConfirmedRecordCannotBeDemotedByAlteredV2Capture" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.045"/>
+  <testcase name="testCurrencyOverprecisionRejectedBeforeWrite" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.036"/>
+  <testcase name="testInjectedTransactionFailureFullRollbackNoOrphanState" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.036"/>
+  <testcase name="testDiskCloseReopenExactV2BytesVersionAndDigest" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.045"/>
+  <testcase name="testOversizePayloadRejectedBeforeDecodeAndWrite" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.063"/>
+  <testcase name="testDuplicateV2CaptureReturnsDuplicateWithoutMutation" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.06"/>
+  <testcase name="testRawOnlyCanonicalBareEventAccepted" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.092"/>
+  <testcase name="testTimeoutAndReconciliationPreservesExactBytesAndUuidNoReserialization" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.087"/>
+  <testcase name="testAuthLockEmptyQueueAtomicallyBlocksNewV2Capture" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.062"/>
+  <testcase name="testCrossVersionSameIdV1V2ConflictPreservesOriginalV1" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.049"/>
+  <testcase name="testTypedModelAndRawDifferentLexemeOrEventRejectedWithoutAffectingExisting" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.042"/>
+  <testcase name="testIntakeWithoutRawSerializesInitialCanonicalEventByteParity" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.034"/>
+  <testcase name="testCrossVersionSameIdV2V1ConflictPreservesOriginalV2" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.037"/>
+  <testcase name="testRawEnvelopeAndExtraWrapperKeysRejectedBeforeWrite" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.035"/>
+  <testcase name="testTypedValidModelWithRawEmptyObjectRejectedBeforeWrite" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.031"/>
+  <testcase name="testCrossVersionLostAckRawIdentityPreserved" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.053"/>
+  <testcase name="testInputAndOutputAliasDefenseV2" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.035"/>
+  <testcase name="testCrossScopeZeroLeakGenericRejection" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.035"/>
+  <testcase name="testNoncanonicalWhitespaceAndKeyOrderRejectedNoRewrite" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.046"/>
+  <testcase name="testStrictUtf8RejectsMalformedBytesWithoutSilentReplacementV2" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.031"/>
+  <testcase name="testCanonicalBareEventBytesCaptureAndDiskReopenExact" classname="com.example.data.mobile.outbox.OutboxV2DurableStorageTest" time="0.055"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -10,8 +10,9 @@ import androidx.room.Index
  *
  * CRITICAL INVARIANT:
  * Once inserted, this record must NEVER be updated, repriced, rekeyed, or deleted.
- * Stored payload_bytes is the exact captured UTF-8 JSON bytes to guarantee cryptographic
- * digest integrity.
+ * At the DAO boundary payload_bytes is an authenticated encrypted envelope. Repository
+ * outputs contain the exact original decrypted UTF-8 bytes; the digest remains unchanged.
+ * Explicit legacy conversion may replace only the storage representation in one transaction.
  *
  * Composite Primary Key: (company_id, client_event_id).
  * Per contract, clientEventId is unique within a company scope.

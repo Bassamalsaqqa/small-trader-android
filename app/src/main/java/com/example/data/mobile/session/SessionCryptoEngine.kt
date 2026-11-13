@@ -47,6 +47,58 @@ internal interface SessionCryptoEngine {
 }
 
 /**
+ * Internal keystore backend seam allowing production keystore access by default
+ * while enabling test verification of in-process concurrency locking without
+ * relying on platform-specific AndroidKeyStore SPI in unit tests.
+ */
+internal interface KeyStoreBackend {
+    fun containsAlias(alias: String): Boolean = getKey(alias) != null
+    fun getKey(alias: String): SecretKey?
+    fun generateKey(alias: String): SecretKey
+}
+
+internal object DefaultKeyStoreBackend : KeyStoreBackend {
+    override fun containsAlias(alias: String): Boolean {
+        val keyStore = loadKeyStoreSafe()
+        return keyStore.containsAlias(alias)
+    }
+
+    override fun getKey(alias: String): SecretKey? {
+        val keyStore = loadKeyStoreSafe()
+        return if (!keyStore.containsAlias(alias)) {
+            null
+        } else {
+            keyStore.getKey(alias, null) as? SecretKey
+        }
+    }
+
+    override fun generateKey(alias: String): SecretKey {
+        val keyGenerator = KeyGenerator.getInstance(
+            KeyProperties.KEY_ALGORITHM_AES,
+            AndroidKeyStoreCryptoEngine.ANDROID_KEYSTORE_PROVIDER
+        )
+        val spec = KeyGenParameterSpec.Builder(
+            alias,
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+        )
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setKeySize(AndroidKeyStoreCryptoEngine.AES_KEY_SIZE_BITS)
+            .setRandomizedEncryptionRequired(true)
+            .build()
+
+        keyGenerator.init(spec)
+        return keyGenerator.generateKey()
+    }
+
+    private fun loadKeyStoreSafe(): KeyStore {
+        return KeyStore.getInstance(AndroidKeyStoreCryptoEngine.ANDROID_KEYSTORE_PROVIDER).apply {
+            load(null)
+        }
+    }
+}
+
+/**
  * Production AndroidKeyStore AES-256-GCM cryptographic engine for API 24+.
  *
  * Keys are managed within AndroidKeyStore without user secrets or external keytool calls.
@@ -58,7 +110,9 @@ internal interface SessionCryptoEngine {
  * and NEVER silently recreate keys or delete stored records.
  */
 internal class AndroidKeyStoreCryptoEngine(
-    private val keyAlias: String = DEFAULT_KEY_ALIAS
+    private val keyAlias: String = DEFAULT_KEY_ALIAS,
+    private val allowCreationOnEncrypt: Boolean = true,
+    private val backend: KeyStoreBackend = DefaultKeyStoreBackend
 ) : SessionCryptoEngine {
 
     override fun ensureKeyUsable(forExistingRecord: Boolean) {
@@ -74,7 +128,8 @@ internal class AndroidKeyStoreCryptoEngine(
     }
 
     override fun encrypt(plaintext: ByteArray, aad: ByteArray): Pair<ByteArray, ByteArray> {
-        val secretKey = getOrCreateKey()
+        val secretKey = if (allowCreationOnEncrypt) getOrCreateKey() else
+            getKey() ?: throw SessionStorageException(SessionStorageError.Unavailable())
         try {
             val cipher = Cipher.getInstance(GCM_TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, secretKey)
@@ -113,22 +168,7 @@ internal class AndroidKeyStoreCryptoEngine(
             getKey()?.let { return it }
 
             return try {
-                val keyGenerator = KeyGenerator.getInstance(
-                    KeyProperties.KEY_ALGORITHM_AES,
-                    ANDROID_KEYSTORE_PROVIDER
-                )
-                val spec = KeyGenParameterSpec.Builder(
-                    keyAlias,
-                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-                )
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .setKeySize(AES_KEY_SIZE_BITS)
-                    .setRandomizedEncryptionRequired(true)
-                    .build()
-
-                keyGenerator.init(spec)
-                keyGenerator.generateKey()
+                backend.generateKey(keyAlias)
             } catch (e: Exception) {
                 throw translateException(e)
             }
@@ -137,22 +177,7 @@ internal class AndroidKeyStoreCryptoEngine(
 
     private fun getKey(): SecretKey? {
         return try {
-            val keyStore = loadKeyStoreSafe()
-            if (!keyStore.containsAlias(keyAlias)) {
-                null
-            } else {
-                keyStore.getKey(keyAlias, null) as? SecretKey
-            }
-        } catch (e: Exception) {
-            throw translateException(e)
-        }
-    }
-
-    private fun loadKeyStoreSafe(): KeyStore {
-        return try {
-            KeyStore.getInstance(ANDROID_KEYSTORE_PROVIDER).apply {
-                load(null)
-            }
+            backend.getKey(keyAlias)
         } catch (e: Exception) {
             throw translateException(e)
         }

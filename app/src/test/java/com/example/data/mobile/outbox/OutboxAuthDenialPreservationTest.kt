@@ -33,7 +33,7 @@ class OutboxAuthDenialPreservationTest {
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         database = OutboxDatabase.buildInMemory(context)
-        repository = OutboxRepositoryImpl(database)
+        repository = testOutboxRepository(database)
         dbFile = File(context.filesDir, "test_outbox_auth_lock_${System.currentTimeMillis()}.db")
         if (dbFile.exists()) dbFile.delete()
     }
@@ -129,7 +129,7 @@ class OutboxAuthDenialPreservationTest {
 
         // Step 1: Open disk-backed database with zero events in the queue
         val db1 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
-        val repo1 = OutboxRepositoryImpl(db1)
+        val repo1 = testOutboxRepository(db1)
 
         assertEquals("Queue should start empty", 0, repo1.getRecordsByScope(company, actor, device).size)
         assertFalse("Queue should not be locked initially", repo1.isQueueLocked(company, actor, device))
@@ -143,7 +143,7 @@ class OutboxAuthDenialPreservationTest {
         db1.close()
 
         val db2 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
-        val repo2 = OutboxRepositoryImpl(db2)
+        val repo2 = testOutboxRepository(db2)
 
         // Lock must persist across reopen
         assertTrue("Scope lock must persist across disk reopen", repo2.isQueueLocked(company, actor, device))

@@ -58,7 +58,7 @@ class OutboxV2DurableStorageTest {
         dbFile = File(context.filesDir, "test_outbox_v2_${System.currentTimeMillis()}.db")
         if (dbFile.exists()) dbFile.delete()
         database = OutboxDatabase.buildInMemory(context)
-        repository = OutboxRepositoryImpl(database)
+        repository = testOutboxRepository(database)
     }
 
     @After
@@ -76,7 +76,7 @@ class OutboxV2DurableStorageTest {
     @Test
     fun testDiskCloseReopenExactV2BytesVersionAndDigest() {
         val db1 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
-        val repo1 = OutboxRepositoryImpl(db1)
+        val repo1 = testOutboxRepository(db1)
 
         val goldenReq = OutboxTestFixtures.loadGoldenIntakeRequestV2()
         val event = goldenReq.event
@@ -107,7 +107,7 @@ class OutboxV2DurableStorageTest {
 
         // Reopen database from exact same disk file
         val db2 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
-        val repo2 = OutboxRepositoryImpl(db2)
+        val repo2 = testOutboxRepository(db2)
 
         val recoveredRecord = repo2.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId)
         assertNotNull("Record must persist across database connection close and reopen", recoveredRecord)
@@ -471,7 +471,7 @@ class OutboxV2DurableStorageTest {
     @Test
     fun testAuthLockEmptyQueueAtomicallyBlocksNewV2Capture() {
         val db1 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
-        val repo1 = OutboxRepositoryImpl(db1)
+        val repo1 = testOutboxRepository(db1)
 
         val companyId = ServerUlid.parse("01J9Z5K3MN0000000000000001")
         val actorId = ServerUlid.parse("01J9Z5K3MN0000000000000002")
@@ -484,7 +484,7 @@ class OutboxV2DurableStorageTest {
         // 2. Reopen database: persistent lock must survive restart
         db1.close()
         val db2 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
-        val repo2 = OutboxRepositoryImpl(db2)
+        val repo2 = testOutboxRepository(db2)
         assertTrue("Scope lock must persist across disk reopen", repo2.isQueueLocked(companyId, actorId, deviceId))
 
         // 3. Capture v2 event while queue is locked
@@ -951,7 +951,7 @@ class OutboxV2DurableStorageTest {
     @Test
     fun testCanonicalBareEventBytesCaptureAndDiskReopenExact() {
         val db1 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
-        val repo1 = OutboxRepositoryImpl(db1)
+        val repo1 = testOutboxRepository(db1)
 
         val event = OutboxTestFixtures.createSampleEventV2()
         val rawCanonicalBareBytes = CanonicalJsonSerializer.serialize(event).toByteArray(StandardCharsets.UTF_8)
@@ -971,7 +971,7 @@ class OutboxV2DurableStorageTest {
         db1.close()
 
         val db2 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
-        val repo2 = OutboxRepositoryImpl(db2)
+        val repo2 = testOutboxRepository(db2)
 
         val reopened = repo2.getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId)
         assertNotNull(reopened)

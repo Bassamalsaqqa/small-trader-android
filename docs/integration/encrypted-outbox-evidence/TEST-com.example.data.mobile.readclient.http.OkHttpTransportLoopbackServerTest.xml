@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.readclient.http.OkHttpTransportLoopbackServerTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-11-13T14:47:35.513Z" hostname="pasta-hp-worker" time="0.4">
+  <properties/>
+  <testcase name="testRealLoopbackMalformedUtf8Rejected" classname="com.example.data.mobile.readclient.http.OkHttpTransportLoopbackServerTest" time="0.166"/>
+  <testcase name="testRealLoopback401ChallengeNoAutomaticAuthRetry" classname="com.example.data.mobile.readclient.http.OkHttpTransportLoopbackServerTest" time="0.017"/>
+  <testcase name="testCacheMissAcrossScopedRequests" classname="com.example.data.mobile.readclient.http.OkHttpTransportLoopbackServerTest" time="0.06"/>
+  <testcase name="testRealLoopbackGetRoundTrip" classname="com.example.data.mobile.readclient.http.OkHttpTransportLoopbackServerTest" time="0.01"/>
+  <testcase name="testLoopbackAmbientCookieHandlerAuthenticatorAndResponseCacheIsolation" classname="com.example.data.mobile.readclient.http.OkHttpTransportLoopbackServerTest" time="0.018"/>
+  <testcase name="testRealLoopbackPostRoundTripWithBody" classname="com.example.data.mobile.readclient.http.OkHttpTransportLoopbackServerTest" time="0.009"/>
+  <testcase name="testRealLoopbackOversizeStreamRejected" classname="com.example.data.mobile.readclient.http.OkHttpTransportLoopbackServerTest" time="0.035"/>
+  <testcase name="testRealLoopbackEmpty401ResponseReturnsAuthoritativeStatusCode" classname="com.example.data.mobile.readclient.http.OkHttpTransportLoopbackServerTest" time="0.024"/>
+  <testcase name="testRealLoopbackContentLengthOversizeRejected" classname="com.example.data.mobile.readclient.http.OkHttpTransportLoopbackServerTest" time="0.014"/>
+  <testcase name="testRealLoopbackErrorBodyRead" classname="com.example.data.mobile.readclient.http.OkHttpTransportLoopbackServerTest" time="0.012"/>
+  <testcase name="testRealLoopbackIntegrationWithSmallTraderReadClient" classname="com.example.data.mobile.readclient.http.OkHttpTransportLoopbackServerTest" time="0.013"/>
+  <testcase name="testRealLoopbackRedirectNotFollowed" classname="com.example.data.mobile.readclient.http.OkHttpTransportLoopbackServerTest" time="0.02"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

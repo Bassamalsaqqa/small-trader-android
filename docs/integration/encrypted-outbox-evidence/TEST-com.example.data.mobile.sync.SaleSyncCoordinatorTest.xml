@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.sync.SaleSyncCoordinatorTest" tests="19" skipped="0" failures="0" errors="0" timestamp="2026-11-13T14:47:37.908Z" hostname="pasta-hp-worker" time="1.674">
+  <properties/>
+  <testcase name="testFatalErrorsPropagateWithoutHeavyDbCleanup" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.201"/>
+  <testcase name="testNoSecretLeakInDBReasonSummaryOrToString" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.063"/>
+  <testcase name="testInjectedCancellationNoFalseConfirmationNoRekey" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.063"/>
+  <testcase name="testDirectApiInvalidDatesAndValidContractCases" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.05"/>
+  <testcase name="testV1ParkWithoutPost" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.055"/>
+  <testcase name="testAuthRevokedQueueBlockedAndCapturesPreserved" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.064"/>
+  <testcase name="testDefensiveCopyAtSubmissionPreventsStorageCorruption" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.07"/>
+  <testcase name="testStaleLeaseLateAckCannotConfirmNewClaim" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.059"/>
+  <testcase name="testConflictPreservesEventBytes" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.059"/>
+  <testcase name="testNotFoundSubmitOriginalBytes" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.08"/>
+  <testcase name="testLostAckAfterServerPostReopenStatusReplayConfirmsOneCanonicalServerEffect" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.117"/>
+  <testcase name="testTwoCoordinatorsInterleavingsClaimsNoTwoSubmits" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.08"/>
+  <testcase name="testMembershipDeniedFailsClosedWithoutRetryLoop" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.063"/>
+  <testcase name="testCorruptUUIDAndBytesParkNoLoopOrSubmit" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.071"/>
+  <testcase name="testInvalidAckDateNoConfirmationAndRecoverableViaFreshStatus" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.074"/>
+  <testcase name="testBatch3CleanupOnTransientCancel403AndAuth" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.199"/>
+  <testcase name="testDiskPersistCaptureV2ClaimStatusPostedConfirm" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.065"/>
+  <testcase name="testStatusNotFoundDelayedPastLeaseNewClaimNoFirstStaleSubmit" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.083"/>
+  <testcase name="testAlteredServerDigestCompanyEventInvoicePaymentReject" classname="com.example.data.mobile.sync.SaleSyncCoordinatorTest" time="0.141"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

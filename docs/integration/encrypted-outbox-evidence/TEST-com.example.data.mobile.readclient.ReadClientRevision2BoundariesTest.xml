@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest" tests="13" skipped="0" failures="0" errors="0" timestamp="2026-11-13T14:47:34.483Z" hostname="pasta-hp-worker" time="0.019">
+  <properties/>
+  <testcase name="testTruthfulNullablePairedProductTax" classname="com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest" time="0.002"/>
+  <testcase name="testFreshMfaChallengeAcceptedAndParsed" classname="com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest" time="0.003"/>
+  <testcase name="testDirectConstructorAndCopyInvariants" classname="com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest" time="0.002"/>
+  <testcase name="testAuthLoginMfaOneOfMixedBranchesRejected" classname="com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest" time="0.001"/>
+  <testcase name="testOldNonceLessMfaRejected" classname="com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest" time="0.0"/>
+  <testcase name="testForeignAndInvalidIdsRejected" classname="com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest" time="0.001"/>
+  <testcase name="testUnexpectedPropertiesRejectedStrictly" classname="com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest" time="0.001"/>
+  <testcase name="testMalformedMoneyAndFloatRejected" classname="com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest" time="0.001"/>
+  <testcase name="testMissingRequiredNullablePropertiesRejected" classname="com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest" time="0.001"/>
+  <testcase name="testEmptyMatureMastersAcceptedInBootstrap" classname="com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest" time="0.001"/>
+  <testcase name="testMaxWidthBoundariesAcceptanceAndRejection" classname="com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest" time="0.003"/>
+  <testcase name="testDisabledOfflinePolicyWithLeaseRejected" classname="com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest" time="0.002"/>
+  <testcase name="testErrorResponseDetailsTypeConstraints" classname="com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

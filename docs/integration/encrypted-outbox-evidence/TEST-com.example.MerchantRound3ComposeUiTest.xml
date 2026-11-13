@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.MerchantRound3ComposeUiTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-13T14:46:56.011Z" hostname="pasta-hp-worker" time="20.878">
+  <properties/>
+  <testcase name="paySupplierDialog_ui_firstFailureRetainsInputs_and_retrySucceeds" classname="com.example.MerchantRound3ComposeUiTest" time="15.258"/>
+  <testcase name="physicalGoodsReceiptDialog_ui_firstFailureRetainsInputs_and_retrySucceeds" classname="com.example.MerchantRound3ComposeUiTest" time="1.144"/>
+  <testcase name="receivePurchaseBillDialog_ui_multiLineAndFailureRetry" classname="com.example.MerchantRound3ComposeUiTest" time="3.705"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
