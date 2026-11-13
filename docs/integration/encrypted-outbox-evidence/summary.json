@@ -1,7 +1,7 @@
 {
   "suites": 39,
   "totals": {
-    "tests": 409,
+    "tests": 429,
     "failures": 0,
     "errors": 0,
     "skipped": 1
@@ -107,7 +107,7 @@
     },
     {
       "name": "com.example.data.mobile.outbox.EncryptedOutboxTest",
-      "tests": 10,
+      "tests": 30,
       "failures": 0,
       "errors": 0,
       "skipped": 0

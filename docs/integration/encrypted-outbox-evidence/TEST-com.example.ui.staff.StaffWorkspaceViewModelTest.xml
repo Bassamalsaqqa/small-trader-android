@@ -1,30 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.ui.staff.StaffWorkspaceViewModelTest" tests="24" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:36.316Z" hostname="pasta-hp-worker" time="0.467">
+<testsuite name="com.example.ui.staff.StaffWorkspaceViewModelTest" tests="24" skipped="0" failures="0" errors="0" timestamp="2026-11-13T14:47:42.937Z" hostname="pasta-hp-worker" time="0.434">
   <properties/>
-  <testcase name="productList_deduplicatesItemsWithSameId" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.219"/>
-  <testcase name="storageCompositionCanBeRetriedWithoutChangingConfiguration" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.053"/>
+  <testcase name="productList_deduplicatesItemsWithSameId" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.207"/>
+  <testcase name="storageCompositionCanBeRetriedWithoutChangingConfiguration" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.017"/>
   <testcase name="authDenial401_clearsDataImmediately_andLocksSession" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.004"/>
-  <testcase name="realCoordinator_mfaRetry_freshChallengeAcquiredWithExactNonce_badCodeFailsAndCorrectRetrySucceeds" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.046"/>
-  <testcase name="logout_cancelsJobs_wipesListsAndCredentials_handlesRemoteFailureSafely" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.011"/>
-  <testcase name="mfaMode_mutualExclusivity_totpVsRecovery" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.008"/>
-  <testcase name="login_requiresMfa_thenFreshRetrySucceeds_andClearsTransientMemory" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.006"/>
+  <testcase name="realCoordinator_mfaRetry_freshChallengeAcquiredWithExactNonce_badCodeFailsAndCorrectRetrySucceeds" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.044"/>
+  <testcase name="logout_cancelsJobs_wipesListsAndCredentials_handlesRemoteFailureSafely" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.008"/>
+  <testcase name="mfaMode_mutualExclusivity_totpVsRecovery" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.013"/>
+  <testcase name="login_requiresMfa_thenFreshRetrySucceeds_andClearsTransientMemory" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.005"/>
   <testcase name="readListAndPagination_productCatalog_loadsInitialAndNextPage" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.005"/>
-  <testcase name="preferenceToggles_languageAndTheme" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.004"/>
-  <testcase name="companySwitch_delayedResponseFromOldCompany_isDiscardedAndDoesNotRepopulate" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.011"/>
-  <testcase name="restoreSession_success_transitionsToReadReady_andLoadsData" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.008"/>
-  <testcase name="deduplication_submittingDuplicateLoginIgnored" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.004"/>
-  <testcase name="restoreSession_notFound_transitionsToSignIn" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.003"/>
-  <testcase name="realCoordinator_http403Forbidden_locksCoordinator_wipesScopedListsAndResetsSpinners" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.01"/>
-  <testcase name="realCoordinator_trackedLogout_purgesDiskAndDeniesUIReads" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.01"/>
+  <testcase name="preferenceToggles_languageAndTheme" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.007"/>
+  <testcase name="companySwitch_delayedResponseFromOldCompany_isDiscardedAndDoesNotRepopulate" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.015"/>
+  <testcase name="restoreSession_success_transitionsToReadReady_andLoadsData" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.005"/>
+  <testcase name="deduplication_submittingDuplicateLoginIgnored" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.01"/>
+  <testcase name="restoreSession_notFound_transitionsToSignIn" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.002"/>
+  <testcase name="realCoordinator_http403Forbidden_locksCoordinator_wipesScopedListsAndResetsSpinners" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.007"/>
+  <testcase name="realCoordinator_trackedLogout_purgesDiskAndDeniesUIReads" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.012"/>
   <testcase name="unexpectedLoginFailureDoesNotExposeExceptionInEnglishUi" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.005"/>
-  <testcase name="customerDirectory_searchQuery_dispatchesQueryAndUpdatesList" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.005"/>
-  <testcase name="cancelledLogoutClearsBusyFlagAndRemainsLocked" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.005"/>
+  <testcase name="customerDirectory_searchQuery_dispatchesQueryAndUpdatesList" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.004"/>
+  <testcase name="cancelledLogoutClearsBusyFlagAndRemainsLocked" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.007"/>
   <testcase name="companySelection_multipleMemberships_selectingCompanyTransitionsToReadReady" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.014"/>
-  <testcase name="unconfiguredOrigin_setsUnconfiguredPhase" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.003"/>
-  <testcase name="restoredSession_companySwitch_showsHonestReAuth_andCancelReturnsToReadReady" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.008"/>
-  <testcase name="happyLogin_singleCompany_transitionsToReadReady_andClearsTransientMemory" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.004"/>
-  <testcase name="uncertainLogoutLocksInsteadOfClaimingSignedOut" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.004"/>
-  <testcase name="realCoordinator_signIn_wireChallengeToLoginToBootstrapToProductsCustomers_andPersistsSession" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.012"/>
+  <testcase name="unconfiguredOrigin_setsUnconfiguredPhase" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.011"/>
+  <testcase name="restoredSession_companySwitch_showsHonestReAuth_andCancelReturnsToReadReady" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.007"/>
+  <testcase name="happyLogin_singleCompany_transitionsToReadReady_andClearsTransientMemory" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.005"/>
+  <testcase name="uncertainLogoutLocksInsteadOfClaimingSignedOut" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.011"/>
+  <testcase name="realCoordinator_signIn_wireChallengeToLoginToBootstrapToProductsCustomers_andPersistsSession" classname="com.example.ui.staff.StaffWorkspaceViewModelTest" time="0.008"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

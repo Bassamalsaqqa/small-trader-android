@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.ui.staff.StaffWorkspaceComposeTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:31.824Z" hostname="pasta-hp-worker" time="4.474">
+<testsuite name="com.example.ui.staff.StaffWorkspaceComposeTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-11-13T14:47:39.605Z" hostname="pasta-hp-worker" time="3.317">
   <properties/>
-  <testcase name="companySelectScreen_rendersCompanies_andClicksItem" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.25"/>
-  <testcase name="statusScreens_renderTruthfulState" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.176"/>
-  <testcase name="mfaScreen_rendersMutuallyExclusiveChips_andSubmits" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.476"/>
-  <testcase name="signInScreen_rendersInputs_andSubmitsCredentials" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.575"/>
-  <testcase name="companySelectScreen_showsCancelWhenActiveCompanyExists_andLogoutOtherwise" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.151"/>
-  <testcase name="workspaceScreen_unassignedTaxRate_rendersTruthfulCopy" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="2.382"/>
-  <testcase name="workspaceScreen_rendersProductsTab_andHeaders" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.237"/>
+  <testcase name="companySelectScreen_rendersCompanies_andClicksItem" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.544"/>
+  <testcase name="statusScreens_renderTruthfulState" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.207"/>
+  <testcase name="mfaScreen_rendersMutuallyExclusiveChips_andSubmits" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.577"/>
+  <testcase name="signInScreen_rendersInputs_andSubmitsCredentials" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.585"/>
+  <testcase name="companySelectScreen_showsCancelWhenActiveCompanyExists_andLogoutOtherwise" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.21"/>
+  <testcase name="workspaceScreen_unassignedTaxRate_rendersTruthfulCopy" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.605"/>
+  <testcase name="workspaceScreen_rendersProductsTab_andHeaders" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.361"/>
   <testcase name="workspaceScreen_rendersCustomersTab" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.218"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:26.079Z" hostname="pasta-hp-worker" time="0.798">
+<testsuite name="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-11-13T14:47:34.566Z" hostname="pasta-hp-worker" time="0.938">
   <properties/>
-  <testcase name="testMockWebServer401AuthChallengePostAuthBodyNoRetry" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.279"/>
-  <testcase name="testMockWebServer421MisdirectedRequestNoRetry" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.016"/>
-  <testcase name="testMockWebServerOversizedBodyChunkRejected" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.025"/>
-  <testcase name="testMockWebServer301And302RedirectPostAuthBodyNotFollowed" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.015"/>
-  <testcase name="testMockWebServer408RetryAfterZeroPostAuthNoRetry" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.022"/>
-  <testcase name="testMockWebServerSlowTrickleCallTimeout" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.316"/>
-  <testcase name="testMockWebServerExactPostRequestBody" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.018"/>
+  <testcase name="testMockWebServer401AuthChallengePostAuthBodyNoRetry" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.29"/>
+  <testcase name="testMockWebServer421MisdirectedRequestNoRetry" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.032"/>
+  <testcase name="testMockWebServerOversizedBodyChunkRejected" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.033"/>
+  <testcase name="testMockWebServer301And302RedirectPostAuthBodyNotFollowed" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.032"/>
+  <testcase name="testMockWebServer408RetryAfterZeroPostAuthNoRetry" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.02"/>
+  <testcase name="testMockWebServerSlowTrickleCallTimeout" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.341"/>
+  <testcase name="testMockWebServerExactPostRequestBody" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.036"/>
   <testcase name="testMockWebServer408RetryAfterZeroNoRetry" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.016"/>
-  <testcase name="testMockWebServerMidStreamDisconnectionDoesNotSwallowIntoEmptyBody" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.018"/>
-  <testcase name="testMockWebServer503RetryAfterZeroPostAuthBodyNoRetry" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.014"/>
-  <testcase name="testMockWebServerRedirectNotFollowedNoCredentialForward" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.01"/>
-  <testcase name="testMockWebServer401ChallengeNoRetry" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.012"/>
-  <testcase name="testMockWebServer503RetryAfterZeroNoFollowUpWireRequest" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.019"/>
-  <testcase name="testMockWebServerExactGetEnvelopeInspection" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.016"/>
+  <testcase name="testMockWebServerMidStreamDisconnectionDoesNotSwallowIntoEmptyBody" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.019"/>
+  <testcase name="testMockWebServer503RetryAfterZeroPostAuthBodyNoRetry" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.023"/>
+  <testcase name="testMockWebServerRedirectNotFollowedNoCredentialForward" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.011"/>
+  <testcase name="testMockWebServer401ChallengeNoRetry" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.029"/>
+  <testcase name="testMockWebServer503RetryAfterZeroNoFollowUpWireRequest" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.026"/>
+  <testcase name="testMockWebServerExactGetEnvelopeInspection" classname="com.example.data.mobile.readclient.http.OkHttpMockWebServerTest" time="0.028"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

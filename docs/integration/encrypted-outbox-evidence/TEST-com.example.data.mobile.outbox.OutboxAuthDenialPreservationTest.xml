@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.outbox.OutboxAuthDenialPreservationTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:21.661Z" hostname="pasta-hp-worker" time="0.31">
+<testsuite name="com.example.data.mobile.outbox.OutboxAuthDenialPreservationTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-11-13T14:47:31.191Z" hostname="pasta-hp-worker" time="0.195">
   <properties/>
-  <testcase name="testAuthDeniedLocksQueueAndPreservesPendingAndConflictRecords" classname="com.example.data.mobile.outbox.OutboxAuthDenialPreservationTest" time="0.165"/>
-  <testcase name="testPersistedEmptyQueueAuthLockAcrossReopenAndSubsequentCapture" classname="com.example.data.mobile.outbox.OutboxAuthDenialPreservationTest" time="0.14"/>
+  <testcase name="testAuthDeniedLocksQueueAndPreservesPendingAndConflictRecords" classname="com.example.data.mobile.outbox.OutboxAuthDenialPreservationTest" time="0.099"/>
+  <testcase name="testPersistedEmptyQueueAuthLockAcrossReopenAndSubsequentCapture" classname="com.example.data.mobile.outbox.OutboxAuthDenialPreservationTest" time="0.092"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

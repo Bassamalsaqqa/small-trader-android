@@ -3,20 +3,35 @@ package com.example.data.mobile.outbox
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.mobile.contract.CanonicalJsonSerializer
+import com.example.data.mobile.contract.OfflineSaleEvent
 import com.example.data.mobile.contract.PayloadDigest
 import com.example.data.mobile.contract.ServerUlid
+import com.example.data.mobile.contract.StrictJsonParser
+import com.example.data.mobile.contract.v2.OfflineSaleEventV2
+import com.example.data.mobile.session.AndroidKeyStoreCryptoEngine
+import com.example.data.mobile.session.KeyStoreBackend
 import com.example.data.mobile.session.SessionProcessLocks
+import com.example.data.mobile.session.SessionStorageError
+import com.example.data.mobile.session.SessionStorageException
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.CancellationException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -484,7 +499,173 @@ class EncryptedOutboxTest {
         db.close()
     }
 
-    // Case 4: midconversion fault rollback ALL rows not just first incl states + empty queue lock
+    // Case 3b: mixed plaintext + cipher conversion invalidated key (KEY_LOCKED) refuses and preserves entire queue and counter
+    @Test
+    fun mixedPlaintextAndCipherConversionInvalidatedKeyRefusesAndPreservesEntireQueueAndKeyGenCounterOnDisk() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val path = File(context.filesDir, "mixed-invalidated-${UUID.randomUUID()}.db")
+        var db = OutboxDatabase.buildDatabase(context, path.path, true)
+
+        val e1 = OutboxTestFixtures.createSampleEvent(localReceiptNumber = "PLAIN-INV-001")
+        val bytes1 = CanonicalJsonSerializer.serialize(e1).toByteArray()
+        val plainEntity1 = OutboxEventEntity(e1.clientEventId.value, e1.companyId.value, e1.actorId.value,
+            e1.deviceId.value, e1.deviceLeaseId.value, e1.capturedAt, e1.computePayloadDigest().value, bytes1, 1)
+
+        val e2 = OutboxTestFixtures.createSampleEvent(localReceiptNumber = "CIPHER-INV-002")
+        val bytes2 = CanonicalJsonSerializer.serialize(e2).toByteArray()
+        val plainEntity2 = OutboxEventEntity(e2.clientEventId.value, e2.companyId.value, e2.actorId.value,
+            e2.deviceId.value, e2.deviceLeaseId.value, e2.capturedAt, e2.computePayloadDigest().value, bytes2, 1)
+
+        val initialEngine = JvmOutboxCrypto()
+        val initialCipher = OutboxPayloadCipher(initialEngine)
+        val encryptedEntity2 = initialCipher.encrypt(plainEntity2)
+
+        db.outboxDao().insertEvent(plainEntity1)
+        db.outboxDao().insertDeliveryState(
+            OutboxDeliveryStateEntity(
+                clientEventId = plainEntity1.clientEventId, companyId = plainEntity1.companyId,
+                actorId = plainEntity1.actorId, deviceId = plainEntity1.deviceId,
+                status = OutboxStatus.PENDING.wireValue, attemptCount = 0,
+                lastAttemptAt = null, claimToken = null, claimExpiresAt = null,
+                invoiceUlid = null, paymentUlid = null, serverUlid = null,
+                serverAcknowledgedAt = null, errorMessage = null,
+                createdAt = 1000L, updatedAt = 1000L
+            )
+        )
+
+        db.outboxDao().insertEvent(encryptedEntity2)
+        db.outboxDao().insertDeliveryState(
+            OutboxDeliveryStateEntity(
+                clientEventId = encryptedEntity2.clientEventId, companyId = encryptedEntity2.companyId,
+                actorId = encryptedEntity2.actorId, deviceId = encryptedEntity2.deviceId,
+                status = OutboxStatus.PENDING.wireValue, attemptCount = 0,
+                lastAttemptAt = null, claimToken = null, claimExpiresAt = null,
+                invoiceUlid = null, paymentUlid = null, serverUlid = null,
+                serverAcknowledgedAt = null, errorMessage = null,
+                createdAt = 2000L, updatedAt = 2000L
+            )
+        )
+
+        db.outboxDao().insertScopeLock(
+            OutboxScopeLockEntity(
+                companyId = plainEntity1.companyId, actorId = plainEntity1.actorId,
+                deviceId = plainEntity1.deviceId, lockedAt = 3000L,
+                reason = "Scope lock for invalidated key test"
+            )
+        )
+
+        val snapshotBefore = takeSnapshot(db)
+        assertEquals(2, snapshotBefore.events.size)
+        assertEquals(2, snapshotBefore.deliveryStates.size)
+        assertEquals(1, snapshotBefore.scopeLocks.size)
+
+        // Engine with permanently invalidated key (throws SessionStorageError.Locked)
+        val lockedEngine = JvmOutboxCrypto().apply {
+            failure = SessionStorageException(SessionStorageError.Locked("Key permanently invalidated in Keystore"))
+        }
+        val initialKeyGenCount = lockedEngine.keyGenerationCount
+        val repoLockedKey = OutboxRepositoryImpl(db, payloadCipher = OutboxPayloadCipher(lockedEngine))
+
+        val ex = assertThrows(OutboxStorageException::class.java) {
+            repoLockedKey.convertLegacyPayloads()
+        }
+        assertEquals(OutboxStorageError.KEY_LOCKED, ex.error)
+        assertEquals("Key generation counter must not increment on invalidated key with existing encrypted rows",
+            initialKeyGenCount, lockedEngine.keyGenerationCount)
+
+        val snapshotAfter = takeSnapshot(db)
+        assertSnapshotsEqual(snapshotBefore, snapshotAfter)
+
+        db.close()
+        db = OutboxDatabase.buildDatabase(context, path.path, true)
+        val snapshotReopen = takeSnapshot(db)
+        assertSnapshotsEqual(snapshotBefore, snapshotReopen)
+        db.close()
+    }
+
+    // Case 3c: mixed plaintext + cipher conversion present wrong key (auth CORRUPT) refuses and preserves entire queue and counter
+    @Test
+    fun mixedPlaintextAndCipherConversionWrongKeyRefusesAndPreservesEntireQueueAndKeyGenCounterOnDisk() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val path = File(context.filesDir, "mixed-wrong-key-${UUID.randomUUID()}.db")
+        var db = OutboxDatabase.buildDatabase(context, path.path, true)
+
+        val e1 = OutboxTestFixtures.createSampleEvent(localReceiptNumber = "PLAIN-WRONG-001")
+        val bytes1 = CanonicalJsonSerializer.serialize(e1).toByteArray()
+        val plainEntity1 = OutboxEventEntity(e1.clientEventId.value, e1.companyId.value, e1.actorId.value,
+            e1.deviceId.value, e1.deviceLeaseId.value, e1.capturedAt, e1.computePayloadDigest().value, bytes1, 1)
+
+        val e2 = OutboxTestFixtures.createSampleEvent(localReceiptNumber = "CIPHER-WRONG-002")
+        val bytes2 = CanonicalJsonSerializer.serialize(e2).toByteArray()
+        val plainEntity2 = OutboxEventEntity(e2.clientEventId.value, e2.companyId.value, e2.actorId.value,
+            e2.deviceId.value, e2.deviceLeaseId.value, e2.capturedAt, e2.computePayloadDigest().value, bytes2, 1)
+
+        val initialEngine = JvmOutboxCrypto()
+        val initialCipher = OutboxPayloadCipher(initialEngine)
+        val encryptedEntity2 = initialCipher.encrypt(plainEntity2)
+
+        db.outboxDao().insertEvent(plainEntity1)
+        db.outboxDao().insertDeliveryState(
+            OutboxDeliveryStateEntity(
+                clientEventId = plainEntity1.clientEventId, companyId = plainEntity1.companyId,
+                actorId = plainEntity1.actorId, deviceId = plainEntity1.deviceId,
+                status = OutboxStatus.PENDING.wireValue, attemptCount = 0,
+                lastAttemptAt = null, claimToken = null, claimExpiresAt = null,
+                invoiceUlid = null, paymentUlid = null, serverUlid = null,
+                serverAcknowledgedAt = null, errorMessage = null,
+                createdAt = 1000L, updatedAt = 1000L
+            )
+        )
+
+        db.outboxDao().insertEvent(encryptedEntity2)
+        db.outboxDao().insertDeliveryState(
+            OutboxDeliveryStateEntity(
+                clientEventId = encryptedEntity2.clientEventId, companyId = encryptedEntity2.companyId,
+                actorId = encryptedEntity2.actorId, deviceId = encryptedEntity2.deviceId,
+                status = OutboxStatus.PENDING.wireValue, attemptCount = 0,
+                lastAttemptAt = null, claimToken = null, claimExpiresAt = null,
+                invoiceUlid = null, paymentUlid = null, serverUlid = null,
+                serverAcknowledgedAt = null, errorMessage = null,
+                createdAt = 2000L, updatedAt = 2000L
+            )
+        )
+
+        db.outboxDao().insertScopeLock(
+            OutboxScopeLockEntity(
+                companyId = plainEntity1.companyId, actorId = plainEntity1.actorId,
+                deviceId = plainEntity1.deviceId, lockedAt = 3000L,
+                reason = "Scope lock for wrong key test"
+            )
+        )
+
+        val snapshotBefore = takeSnapshot(db)
+        assertEquals(2, snapshotBefore.events.size)
+        assertEquals(2, snapshotBefore.deliveryStates.size)
+        assertEquals(1, snapshotBefore.scopeLocks.size)
+
+        // Engine with a different (wrong) key: pre-authentication of encryptedEntity2 fails AEAD verification
+        val wrongKeyEngine = JvmOutboxCrypto()
+        val initialKeyGenCount = wrongKeyEngine.keyGenerationCount
+        val repoWrongKey = OutboxRepositoryImpl(db, payloadCipher = OutboxPayloadCipher(wrongKeyEngine))
+
+        val ex = assertThrows(OutboxStorageException::class.java) {
+            repoWrongKey.convertLegacyPayloads()
+        }
+        assertEquals(OutboxStorageError.CORRUPT, ex.error)
+        assertEquals("Key generation counter must not increment on wrong key pre-authentication failure",
+            initialKeyGenCount, wrongKeyEngine.keyGenerationCount)
+
+        val snapshotAfter = takeSnapshot(db)
+        assertSnapshotsEqual(snapshotBefore, snapshotAfter)
+
+        db.close()
+        db = OutboxDatabase.buildDatabase(context, path.path, true)
+        val snapshotReopen = takeSnapshot(db)
+        assertSnapshotsEqual(snapshotBefore, snapshotReopen)
+        db.close()
+    }
+
+    // Case 4: midconversion fault rollback ALL rows not just first incl states + populated & empty queue locks
     @Test
     fun midConversionFaultRollbackAllRowsNotJustFirstIncludingStatesAndEmptyQueueLockOnDisk() {
         val context = ApplicationProvider.getApplicationContext<Context>()
@@ -523,18 +704,35 @@ class EncryptedOutboxTest {
             )
         )
 
-        // Insert empty queue lock / scope lock
+        // Insert scope lock belonging to the populated scope (p1/p2)
         db.outboxDao().insertScopeLock(
             OutboxScopeLockEntity(
                 companyId = p1.companyId, actorId = p1.actorId, deviceId = p1.deviceId,
-                lockedAt = 3000L, reason = "Empty queue persistent lock"
+                lockedAt = 3000L, reason = "Populated queue persistent lock"
+            )
+        )
+
+        // Insert separate company/actor/device scope with ZERO events
+        val emptyScopeCompany = "01JCV8X9MBV4W5X6Y7Z8EMPTYC"
+        val emptyScopeActor = "01JCV8X9MBV4W5X6Y7Z8EMPTYA"
+        val emptyScopeDevice = "3fa85f64-5717-4562-b3fc-2c963f66afaa"
+        db.outboxDao().insertScopeLock(
+            OutboxScopeLockEntity(
+                companyId = emptyScopeCompany, actorId = emptyScopeActor, deviceId = emptyScopeDevice,
+                lockedAt = 3500L, reason = "Separate empty queue persistent lock"
             )
         )
 
         val snapshotBefore = takeSnapshot(db)
         assertEquals(2, snapshotBefore.events.size)
         assertEquals(2, snapshotBefore.deliveryStates.size)
-        assertEquals(1, snapshotBefore.scopeLocks.size)
+        assertEquals(2, snapshotBefore.scopeLocks.size)
+        assertTrue("Empty scope must have zero events before fault",
+            snapshotBefore.events.none { it.companyId == emptyScopeCompany && it.actorId == emptyScopeActor && it.deviceId == emptyScopeDevice })
+        assertTrue("Populated scope lock must be present",
+            snapshotBefore.scopeLocks.any { it.companyId == p1.companyId && it.actorId == p1.actorId && it.deviceId == p1.deviceId })
+        assertTrue("Separate empty scope lock must be present",
+            snapshotBefore.scopeLocks.any { it.companyId == emptyScopeCompany && it.actorId == emptyScopeActor && it.deviceId == emptyScopeDevice })
 
         val engine = JvmOutboxCrypto()
         val faultEngine = object : com.example.data.mobile.session.SessionCryptoEngine by engine {
@@ -553,9 +751,15 @@ class EncryptedOutboxTest {
             repoFault.convertLegacyPayloads()
         }
 
-        // Entire transaction rolls back: row 1 is NOT left encrypted, states and scope lock intact
+        // Entire transaction rolls back: row 1 is NOT left encrypted, states and both scope locks intact
         val snapshotAfter = takeSnapshot(db)
         assertSnapshotsEqual(snapshotBefore, snapshotAfter)
+        assertTrue("Empty scope must still have zero events after rollback",
+            snapshotAfter.events.none { it.companyId == emptyScopeCompany && it.actorId == emptyScopeActor && it.deviceId == emptyScopeDevice })
+        assertTrue("Populated scope lock must be intact after rollback",
+            snapshotAfter.scopeLocks.any { it.companyId == p1.companyId && it.actorId == p1.actorId && it.deviceId == p1.deviceId })
+        assertTrue("Separate empty scope lock must be intact after rollback",
+            snapshotAfter.scopeLocks.any { it.companyId == emptyScopeCompany && it.actorId == emptyScopeActor && it.deviceId == emptyScopeDevice })
         assertFalse(OutboxPayloadCipher(engine).isEncrypted(snapshotAfter.events[0].payloadBytes))
         assertFalse(OutboxPayloadCipher(engine).isEncrypted(snapshotAfter.events[1].payloadBytes))
 
@@ -564,124 +768,694 @@ class EncryptedOutboxTest {
         db = OutboxDatabase.buildDatabase(context, path.path, true)
         val snapshotReopen = takeSnapshot(db)
         assertSnapshotsEqual(snapshotBefore, snapshotReopen)
+        assertTrue("Empty scope must have zero events after reopen",
+            snapshotReopen.events.none { it.companyId == emptyScopeCompany && it.actorId == emptyScopeActor && it.deviceId == emptyScopeDevice })
+        assertTrue("Populated scope lock must be intact after reopen",
+            snapshotReopen.scopeLocks.any { it.companyId == p1.companyId && it.actorId == p1.actorId && it.deviceId == p1.deviceId })
+        assertTrue("Separate empty scope lock must be intact after reopen",
+            snapshotReopen.scopeLocks.any { it.companyId == emptyScopeCompany && it.actorId == emptyScopeActor && it.deviceId == emptyScopeDevice })
         db.close()
     }
 
-    // Case 5: supported canonical v1/v2 metadata/canonical byte mismatch and unknown STO/2 matching digest reject before write
-    @Test
-    fun supportedCanonicalV1V2MetadataMismatchAndUnknownStoEnvelopeRejectBeforeWriteOnDisk() {
+    // Helper for isolated format rejection tests on fresh disk databases
+    private fun assertFormatRejectionLeavesDatabaseUntouched(
+        description: String,
+        expectedError: OutboxStorageError = OutboxStorageError.CORRUPT,
+        verifyPrecondition: (OutboxEventEntity, OfflineSaleEvent) -> Unit = { _, _ -> },
+        entityBuilder: (context: Context, validV1: OfflineSaleEvent) -> OutboxEventEntity
+    ) {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val path = File(context.filesDir, "format-rejection-${UUID.randomUUID()}.db")
+        val path = File(context.filesDir, "format-reject-${UUID.randomUUID()}.db")
         var db = OutboxDatabase.buildDatabase(context, path.path, true)
-        val engine = JvmOutboxCrypto()
-        val cipher = OutboxPayloadCipher(engine)
-        val repo = OutboxRepositoryImpl(db, payloadCipher = cipher)
+        try {
+            val engine = JvmOutboxCrypto()
+            val cipher = OutboxPayloadCipher(engine)
+            val repo = OutboxRepositoryImpl(db, payloadCipher = cipher)
 
-        val validSample = OutboxTestFixtures.createSampleEvent(localReceiptNumber = "VALID-FORMAT-001")
+            val validSample = OutboxTestFixtures.createSampleEvent(localReceiptNumber = "V1-FMT-${UUID.randomUUID().toString().take(6)}")
+            val entity = entityBuilder(context, validSample)
+            verifyPrecondition(entity, validSample)
 
-        // Subcase 5a: Unknown STO/2 envelope matching digest
-        run {
-            val sto2Envelope = byteArrayOf(0x53, 0x54, 0x4f, 0x02) + ByteArray(40) { 0x42 }
-            val sto2Digest = PayloadDigest.fromBytes(sto2Envelope).value
-            val entitySto2 = OutboxEventEntity(
-                clientEventId = UUID.randomUUID().toString(), companyId = validSample.companyId.value,
-                actorId = validSample.actorId.value, deviceId = validSample.deviceId.value,
-                deviceLeaseId = validSample.deviceLeaseId.value, capturedAt = validSample.capturedAt,
-                payloadDigest = sto2Digest, payloadBytes = sto2Envelope, eventVersion = 1
+            db.outboxDao().insertEvent(entity)
+            db.outboxDao().insertDeliveryState(
+                OutboxDeliveryStateEntity(
+                    clientEventId = entity.clientEventId, companyId = entity.companyId,
+                    actorId = entity.actorId, deviceId = entity.deviceId,
+                    status = OutboxStatus.PENDING.wireValue, attemptCount = 0,
+                    lastAttemptAt = null, claimToken = null, claimExpiresAt = null,
+                    invoiceUlid = null, paymentUlid = null, serverUlid = null,
+                    serverAcknowledgedAt = null, errorMessage = null,
+                    createdAt = 1000L, updatedAt = 1000L
+                )
             )
-            db.outboxDao().insertEvent(entitySto2)
-            val snapshotBefore = takeSnapshot(db)
+            db.outboxDao().insertScopeLock(
+                OutboxScopeLockEntity(
+                    companyId = entity.companyId, actorId = entity.actorId, deviceId = entity.deviceId,
+                    lockedAt = 2000L, reason = "Pre-conversion lock for $description"
+                )
+            )
 
-            val ex = assertThrows(OutboxStorageException::class.java) { repo.convertLegacyPayloads() }
-            assertEquals(OutboxStorageError.CORRUPT, ex.error)
+            val snapshotBefore = takeSnapshot(db)
+            assertEquals("Exactly one event must be present before conversion: $description", 1, snapshotBefore.events.size)
+            assertEquals("Exactly one delivery state must be present: $description", 1, snapshotBefore.deliveryStates.size)
+            assertEquals("Exactly one scope lock must be present: $description", 1, snapshotBefore.scopeLocks.size)
+
+            val ex = assertThrows("Expected $expectedError for $description", OutboxStorageException::class.java) {
+                repo.convertLegacyPayloads()
+            }
+            assertEquals("Violation must match expected error for $description", expectedError, ex.error)
 
             val snapshotAfter = takeSnapshot(db)
             assertSnapshotsEqual(snapshotBefore, snapshotAfter)
+            assertFalse("Payload must remain unencrypted after rejection: $description", cipher.isEncrypted(snapshotAfter.events[0].payloadBytes))
+
             db.close()
             db = OutboxDatabase.buildDatabase(context, path.path, true)
-            assertSnapshotsEqual(snapshotBefore, takeSnapshot(db))
-        }
-
-        // Subcase 5b: Metadata mismatch (actorId in JSON differs from row, digest matches)
-        run {
-            val eventWithOtherActor = validSample.copy(actorId = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5999"))
-            val bytes = CanonicalJsonSerializer.serialize(eventWithOtherActor).toByteArray()
-            val digest = PayloadDigest.fromBytes(bytes).value
-
-            val entityMismatch = OutboxEventEntity(
-                clientEventId = validSample.clientEventId.value, companyId = validSample.companyId.value,
-                actorId = validSample.actorId.value, // row has validSample.actorId, but payload JSON has other actor
-                deviceId = validSample.deviceId.value, deviceLeaseId = validSample.deviceLeaseId.value,
-                capturedAt = validSample.capturedAt, payloadDigest = digest,
-                payloadBytes = bytes, eventVersion = 1
-            )
-            db.outboxDao().insertEvent(entityMismatch)
-            val snapshotBefore = takeSnapshot(db)
-
-            val ex = assertThrows(OutboxStorageException::class.java) { repo.convertLegacyPayloads() }
-            assertEquals(OutboxStorageError.CORRUPT, ex.error)
-
-            val snapshotAfter = takeSnapshot(db)
-            assertSnapshotsEqual(snapshotBefore, snapshotAfter)
+            val snapshotReopen = takeSnapshot(db)
+            assertSnapshotsEqual(snapshotBefore, snapshotReopen)
+            assertFalse("Payload must remain unencrypted after reopen: $description", cipher.isEncrypted(snapshotReopen.events[0].payloadBytes))
+        } finally {
             db.close()
-            db = OutboxDatabase.buildDatabase(context, path.path, true)
-            assertSnapshotsEqual(snapshotBefore, takeSnapshot(db))
+            path.delete()
         }
-
-        // Subcase 5c: Canonical byte mismatch (extra whitespace in JSON matching digest)
-        run {
-            val canonicalJson = CanonicalJsonSerializer.serialize(validSample)
-            val nonCanonicalJson = canonicalJson.replace("{\"client_event_id\":", "{\n  \"client_event_id\":")
-            val nonCanonicalBytes = nonCanonicalJson.toByteArray(Charsets.UTF_8)
-            val digest = PayloadDigest.fromBytes(nonCanonicalBytes).value
-
-            val entityNonCanonical = OutboxEventEntity(
-                clientEventId = UUID.randomUUID().toString(), companyId = validSample.companyId.value,
-                actorId = validSample.actorId.value, deviceId = validSample.deviceId.value,
-                deviceLeaseId = validSample.deviceLeaseId.value, capturedAt = validSample.capturedAt,
-                payloadDigest = digest, payloadBytes = nonCanonicalBytes, eventVersion = 1
-            )
-            db.outboxDao().insertEvent(entityNonCanonical)
-            val snapshotBefore = takeSnapshot(db)
-
-            val ex = assertThrows(OutboxStorageException::class.java) { repo.convertLegacyPayloads() }
-            assertEquals(OutboxStorageError.CORRUPT, ex.error)
-
-            val snapshotAfter = takeSnapshot(db)
-            assertSnapshotsEqual(snapshotBefore, snapshotAfter)
-            db.close()
-            db = OutboxDatabase.buildDatabase(context, path.path, true)
-            assertSnapshotsEqual(snapshotBefore, takeSnapshot(db))
-        }
-
-        // Subcase 5d: Arbitrary JSON junk / {} matching digest
-        run {
-            val junkBytes = "{}".toByteArray(Charsets.UTF_8)
-            val junkDigest = PayloadDigest.fromBytes(junkBytes).value
-
-            val entityJunk = OutboxEventEntity(
-                clientEventId = UUID.randomUUID().toString(), companyId = validSample.companyId.value,
-                actorId = validSample.actorId.value, deviceId = validSample.deviceId.value,
-                deviceLeaseId = validSample.deviceLeaseId.value, capturedAt = validSample.capturedAt,
-                payloadDigest = junkDigest, payloadBytes = junkBytes, eventVersion = 1
-            )
-            db.outboxDao().insertEvent(entityJunk)
-            val snapshotBefore = takeSnapshot(db)
-
-            val ex = assertThrows(OutboxStorageException::class.java) { repo.convertLegacyPayloads() }
-            assertEquals(OutboxStorageError.CORRUPT, ex.error)
-
-            val snapshotAfter = takeSnapshot(db)
-            assertSnapshotsEqual(snapshotBefore, snapshotAfter)
-            db.close()
-            db = OutboxDatabase.buildDatabase(context, path.path, true)
-            assertSnapshotsEqual(snapshotBefore, takeSnapshot(db))
-        }
-
-        db.close()
     }
 
-    // Case 6: concurrent initial key creation two instances alias locking test with barriers exercises production key coordination seam not just fake Synchronizeit
+    // Positive Control: Valid canonical v1 conversion succeeds on isolated fresh disk DB
+    @Test
+    fun validCanonicalV1PositiveConversionControlOnDisk() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val path = File(context.filesDir, "valid-v1-${UUID.randomUUID()}.db")
+        var db = OutboxDatabase.buildDatabase(context, path.path, true)
+        try {
+            val engine = JvmOutboxCrypto()
+            val cipher = OutboxPayloadCipher(engine)
+            val repo = OutboxRepositoryImpl(db, payloadCipher = cipher)
+
+            val validV1 = OutboxTestFixtures.createSampleEvent(localReceiptNumber = "V1-POS-001")
+            val b1 = CanonicalJsonSerializer.serialize(validV1).toByteArray(StandardCharsets.UTF_8)
+            val digest = validV1.computePayloadDigest().value
+            val entity = OutboxEventEntity(
+                clientEventId = validV1.clientEventId.value, companyId = validV1.companyId.value,
+                actorId = validV1.actorId.value, deviceId = validV1.deviceId.value,
+                deviceLeaseId = validV1.deviceLeaseId.value, capturedAt = validV1.capturedAt,
+                payloadDigest = digest, payloadBytes = b1, eventVersion = 1
+            )
+
+            db.outboxDao().insertEvent(entity)
+            db.outboxDao().insertDeliveryState(
+                OutboxDeliveryStateEntity(
+                    clientEventId = entity.clientEventId, companyId = entity.companyId,
+                    actorId = entity.actorId, deviceId = entity.deviceId,
+                    status = OutboxStatus.PENDING.wireValue, attemptCount = 0,
+                    lastAttemptAt = null, claimToken = null, claimExpiresAt = null,
+                    invoiceUlid = null, paymentUlid = null, serverUlid = null,
+                    serverAcknowledgedAt = null, errorMessage = null,
+                    createdAt = 1000L, updatedAt = 1000L
+                )
+            )
+            db.outboxDao().insertScopeLock(
+                OutboxScopeLockEntity(
+                    companyId = entity.companyId, actorId = entity.actorId, deviceId = entity.deviceId,
+                    lockedAt = 2000L, reason = "Positive control lock v1"
+                )
+            )
+
+            repo.convertLegacyPayloads()
+
+            val snapshotAfter = takeSnapshot(db)
+            assertEquals(1, snapshotAfter.events.size)
+            assertTrue("V1 payload must be encrypted after successful conversion", cipher.isEncrypted(snapshotAfter.events[0].payloadBytes))
+            assertEquals(1, snapshotAfter.deliveryStates.size)
+            assertEquals(1, snapshotAfter.scopeLocks.size)
+
+            db.close()
+            db = OutboxDatabase.buildDatabase(context, path.path, true)
+            val reopenedSnapshot = takeSnapshot(db)
+            assertEquals(1, reopenedSnapshot.events.size)
+            assertTrue("V1 payload must remain encrypted after reopen", cipher.isEncrypted(reopenedSnapshot.events[0].payloadBytes))
+            val decryptedEntity = cipher.decrypt(reopenedSnapshot.events[0])
+            assertArrayEquals("Decrypted v1 payload must match exact original canonical bytes", b1, decryptedEntity.payloadBytes)
+            assertEquals(digest, reopenedSnapshot.events[0].payloadDigest)
+        } finally {
+            db.close()
+            path.delete()
+        }
+    }
+
+    // Positive Control: Valid canonical v2 conversion succeeds on isolated fresh disk DB
+    @Test
+    fun validCanonicalV2PositiveConversionControlOnDisk() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val path = File(context.filesDir, "valid-v2-${UUID.randomUUID()}.db")
+        var db = OutboxDatabase.buildDatabase(context, path.path, true)
+        try {
+            val engine = JvmOutboxCrypto()
+            val cipher = OutboxPayloadCipher(engine)
+            val repo = OutboxRepositoryImpl(db, payloadCipher = cipher)
+
+            val validV2 = OutboxTestFixtures.createSampleEventV2(localReceiptNumber = "V2-POS-001")
+            val b2 = CanonicalJsonSerializer.serialize(validV2).toByteArray(StandardCharsets.UTF_8)
+            val digest = validV2.computePayloadDigest().value
+            val entity = OutboxEventEntity(
+                clientEventId = validV2.clientEventId.value, companyId = validV2.companyId.value,
+                actorId = validV2.actorId.value, deviceId = validV2.deviceId.value,
+                deviceLeaseId = validV2.deviceLeaseId.value, capturedAt = validV2.capturedAt,
+                payloadDigest = digest, payloadBytes = b2, eventVersion = 2
+            )
+
+            db.outboxDao().insertEvent(entity)
+            db.outboxDao().insertDeliveryState(
+                OutboxDeliveryStateEntity(
+                    clientEventId = entity.clientEventId, companyId = entity.companyId,
+                    actorId = entity.actorId, deviceId = entity.deviceId,
+                    status = OutboxStatus.PENDING.wireValue, attemptCount = 0,
+                    lastAttemptAt = null, claimToken = null, claimExpiresAt = null,
+                    invoiceUlid = null, paymentUlid = null, serverUlid = null,
+                    serverAcknowledgedAt = null, errorMessage = null,
+                    createdAt = 1000L, updatedAt = 1000L
+                )
+            )
+            db.outboxDao().insertScopeLock(
+                OutboxScopeLockEntity(
+                    companyId = entity.companyId, actorId = entity.actorId, deviceId = entity.deviceId,
+                    lockedAt = 2000L, reason = "Positive control lock v2"
+                )
+            )
+
+            repo.convertLegacyPayloads()
+
+            val snapshotAfter = takeSnapshot(db)
+            assertEquals(1, snapshotAfter.events.size)
+            assertTrue("V2 payload must be encrypted after successful conversion", cipher.isEncrypted(snapshotAfter.events[0].payloadBytes))
+            assertEquals(1, snapshotAfter.deliveryStates.size)
+            assertEquals(1, snapshotAfter.scopeLocks.size)
+
+            db.close()
+            db = OutboxDatabase.buildDatabase(context, path.path, true)
+            val reopenedSnapshot = takeSnapshot(db)
+            assertEquals(1, reopenedSnapshot.events.size)
+            assertTrue("V2 payload must remain encrypted after reopen", cipher.isEncrypted(reopenedSnapshot.events[0].payloadBytes))
+            val decryptedEntity = cipher.decrypt(reopenedSnapshot.events[0])
+            assertArrayEquals("Decrypted v2 payload must match exact original canonical bytes", b2, decryptedEntity.payloadBytes)
+            assertEquals(digest, reopenedSnapshot.events[0].payloadDigest)
+        } finally {
+            db.close()
+            path.delete()
+        }
+    }
+
+    // Case 5.1: Row metadata mismatch: clientEventId differs from JSON
+    @Test
+    fun formatRejectionClientEventIdMismatchOnDisk() {
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "clientEventId mismatch between row and canonical payload",
+            verifyPrecondition = { entity, sample ->
+                assertNotEquals(entity.clientEventId, sample.clientEventId.value)
+                assertEquals(entity.companyId, sample.companyId.value)
+                assertEquals(entity.actorId, sample.actorId.value)
+                assertEquals(entity.payloadDigest, PayloadDigest.fromBytes(entity.payloadBytes).value)
+            },
+            entityBuilder = { _, validSample ->
+                val bytes = CanonicalJsonSerializer.serialize(validSample).toByteArray(StandardCharsets.UTF_8)
+                OutboxEventEntity(
+                    clientEventId = UUID.randomUUID().toString(), // differs from validSample.clientEventId
+                    companyId = validSample.companyId.value,
+                    actorId = validSample.actorId.value,
+                    deviceId = validSample.deviceId.value,
+                    deviceLeaseId = validSample.deviceLeaseId.value,
+                    capturedAt = validSample.capturedAt,
+                    payloadDigest = PayloadDigest.fromBytes(bytes).value,
+                    payloadBytes = bytes,
+                    eventVersion = 1
+                )
+            }
+        )
+    }
+
+    // Case 5.2: Row metadata mismatch: companyId differs from JSON
+    @Test
+    fun formatRejectionCompanyIdMismatchOnDisk() {
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "companyId mismatch between row and canonical payload",
+            verifyPrecondition = { entity, sample ->
+                assertNotEquals(entity.companyId, sample.companyId.value)
+                assertEquals(entity.clientEventId, sample.clientEventId.value)
+                assertEquals(entity.actorId, sample.actorId.value)
+                assertEquals(entity.payloadDigest, PayloadDigest.fromBytes(entity.payloadBytes).value)
+            },
+            entityBuilder = { _, validSample ->
+                val bytes = CanonicalJsonSerializer.serialize(validSample).toByteArray(StandardCharsets.UTF_8)
+                OutboxEventEntity(
+                    clientEventId = validSample.clientEventId.value,
+                    companyId = "01JCV8X9MBV4W5X6Y7Z8DIFF01", // differs from validSample.companyId
+                    actorId = validSample.actorId.value,
+                    deviceId = validSample.deviceId.value,
+                    deviceLeaseId = validSample.deviceLeaseId.value,
+                    capturedAt = validSample.capturedAt,
+                    payloadDigest = PayloadDigest.fromBytes(bytes).value,
+                    payloadBytes = bytes,
+                    eventVersion = 1
+                )
+            }
+        )
+    }
+
+    // Case 5.3: Row metadata mismatch: actorId differs from JSON
+    @Test
+    fun formatRejectionActorIdMismatchOnDisk() {
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "actorId mismatch between row and canonical payload",
+            verifyPrecondition = { entity, sample ->
+                assertNotEquals(entity.actorId, sample.actorId.value)
+                assertEquals(entity.clientEventId, sample.clientEventId.value)
+                assertEquals(entity.companyId, sample.companyId.value)
+                assertEquals(entity.payloadDigest, PayloadDigest.fromBytes(entity.payloadBytes).value)
+            },
+            entityBuilder = { _, validSample ->
+                val bytes = CanonicalJsonSerializer.serialize(validSample).toByteArray(StandardCharsets.UTF_8)
+                OutboxEventEntity(
+                    clientEventId = validSample.clientEventId.value,
+                    companyId = validSample.companyId.value,
+                    actorId = "01JCV8X9MBV4W5X6Y7Z8DIFF02", // differs from validSample.actorId
+                    deviceId = validSample.deviceId.value,
+                    deviceLeaseId = validSample.deviceLeaseId.value,
+                    capturedAt = validSample.capturedAt,
+                    payloadDigest = PayloadDigest.fromBytes(bytes).value,
+                    payloadBytes = bytes,
+                    eventVersion = 1
+                )
+            }
+        )
+    }
+
+    // Case 5.4: Row metadata mismatch: deviceId differs from JSON
+    @Test
+    fun formatRejectionDeviceIdMismatchOnDisk() {
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "deviceId mismatch between row and canonical payload",
+            verifyPrecondition = { entity, sample ->
+                assertNotEquals(entity.deviceId, sample.deviceId.value)
+                assertEquals(entity.clientEventId, sample.clientEventId.value)
+                assertEquals(entity.payloadDigest, PayloadDigest.fromBytes(entity.payloadBytes).value)
+            },
+            entityBuilder = { _, validSample ->
+                val bytes = CanonicalJsonSerializer.serialize(validSample).toByteArray(StandardCharsets.UTF_8)
+                OutboxEventEntity(
+                    clientEventId = validSample.clientEventId.value,
+                    companyId = validSample.companyId.value,
+                    actorId = validSample.actorId.value,
+                    deviceId = "00000000-0000-0000-0000-000000000001", // differs from validSample.deviceId
+                    deviceLeaseId = validSample.deviceLeaseId.value,
+                    capturedAt = validSample.capturedAt,
+                    payloadDigest = PayloadDigest.fromBytes(bytes).value,
+                    payloadBytes = bytes,
+                    eventVersion = 1
+                )
+            }
+        )
+    }
+
+    // Case 5.5: Row metadata mismatch: deviceLeaseId differs from JSON
+    @Test
+    fun formatRejectionDeviceLeaseIdMismatchOnDisk() {
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "deviceLeaseId mismatch between row and canonical payload",
+            verifyPrecondition = { entity, sample ->
+                assertNotEquals(entity.deviceLeaseId, sample.deviceLeaseId.value)
+                assertEquals(entity.clientEventId, sample.clientEventId.value)
+                assertEquals(entity.payloadDigest, PayloadDigest.fromBytes(entity.payloadBytes).value)
+            },
+            entityBuilder = { _, validSample ->
+                val bytes = CanonicalJsonSerializer.serialize(validSample).toByteArray(StandardCharsets.UTF_8)
+                OutboxEventEntity(
+                    clientEventId = validSample.clientEventId.value,
+                    companyId = validSample.companyId.value,
+                    actorId = validSample.actorId.value,
+                    deviceId = validSample.deviceId.value,
+                    deviceLeaseId = "00000000-0000-0000-0000-000000000002", // differs from validSample.deviceLeaseId
+                    capturedAt = validSample.capturedAt,
+                    payloadDigest = PayloadDigest.fromBytes(bytes).value,
+                    payloadBytes = bytes,
+                    eventVersion = 1
+                )
+            }
+        )
+    }
+
+    // Case 5.6: Row metadata mismatch: capturedAt differs from JSON
+    @Test
+    fun formatRejectionCapturedAtMismatchOnDisk() {
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "capturedAt mismatch between row and canonical payload",
+            verifyPrecondition = { entity, sample ->
+                assertNotEquals(entity.capturedAt, sample.capturedAt)
+                assertEquals(entity.clientEventId, sample.clientEventId.value)
+                assertEquals(entity.payloadDigest, PayloadDigest.fromBytes(entity.payloadBytes).value)
+            },
+            entityBuilder = { _, validSample ->
+                val bytes = CanonicalJsonSerializer.serialize(validSample).toByteArray(StandardCharsets.UTF_8)
+                OutboxEventEntity(
+                    clientEventId = validSample.clientEventId.value,
+                    companyId = validSample.companyId.value,
+                    actorId = validSample.actorId.value,
+                    deviceId = validSample.deviceId.value,
+                    deviceLeaseId = validSample.deviceLeaseId.value,
+                    capturedAt = "2026-11-10T12:01:00Z", // differs from validSample.capturedAt ("2026-11-10T12:00:00Z")
+                    payloadDigest = PayloadDigest.fromBytes(bytes).value,
+                    payloadBytes = bytes,
+                    eventVersion = 1
+                )
+            }
+        )
+    }
+
+    // Case 5.7: Row metadata mismatch: payloadDigest differs from byte digest
+    @Test
+    fun formatRejectionPayloadDigestMismatchOnDisk() {
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "payloadDigest mismatch between row and actual payload bytes",
+            verifyPrecondition = { entity, _ ->
+                assertNotEquals(entity.payloadDigest, PayloadDigest.fromBytes(entity.payloadBytes).value)
+            },
+            entityBuilder = { _, validSample ->
+                val bytes = CanonicalJsonSerializer.serialize(validSample).toByteArray(StandardCharsets.UTF_8)
+                OutboxEventEntity(
+                    clientEventId = validSample.clientEventId.value,
+                    companyId = validSample.companyId.value,
+                    actorId = validSample.actorId.value,
+                    deviceId = validSample.deviceId.value,
+                    deviceLeaseId = validSample.deviceLeaseId.value,
+                    capturedAt = validSample.capturedAt,
+                    payloadDigest = PayloadDigest.fromBytes("corrupt-bytes".toByteArray(StandardCharsets.UTF_8)).value,
+                    payloadBytes = bytes,
+                    eventVersion = 1
+                )
+            }
+        )
+    }
+
+    // Case 5.8: Row metadata mismatch: row eventVersion 2 but payload is canonical v1
+    @Test
+    fun formatRejectionEventVersionMismatchV1PayloadWithRowVersion2OnDisk() {
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "row eventVersion 2 with v1 canonical payload",
+            verifyPrecondition = { entity, sample ->
+                assertEquals(2, entity.eventVersion)
+                assertEquals(1, sample.eventVersion)
+                assertEquals(entity.payloadDigest, PayloadDigest.fromBytes(entity.payloadBytes).value)
+            },
+            entityBuilder = { _, validSample ->
+                val bytes = CanonicalJsonSerializer.serialize(validSample).toByteArray(StandardCharsets.UTF_8)
+                OutboxEventEntity(
+                    clientEventId = validSample.clientEventId.value,
+                    companyId = validSample.companyId.value,
+                    actorId = validSample.actorId.value,
+                    deviceId = validSample.deviceId.value,
+                    deviceLeaseId = validSample.deviceLeaseId.value,
+                    capturedAt = validSample.capturedAt,
+                    payloadDigest = PayloadDigest.fromBytes(bytes).value,
+                    payloadBytes = bytes,
+                    eventVersion = 2 // Row claims version 2 for v1 event
+                )
+            }
+        )
+    }
+
+    // Case 5.9: Row metadata mismatch: row eventVersion 1 but payload is canonical v2
+    @Test
+    fun formatRejectionEventVersionMismatchV2PayloadWithRowVersion1OnDisk() {
+        val validV2 = OutboxTestFixtures.createSampleEventV2(localReceiptNumber = "V2-MISMATCH-001")
+        val bytesV2 = CanonicalJsonSerializer.serialize(validV2).toByteArray(StandardCharsets.UTF_8)
+        val digestV2 = PayloadDigest.fromBytes(bytesV2).value
+
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "row eventVersion 1 with v2 canonical payload",
+            verifyPrecondition = { entity, _ ->
+                assertEquals(1, entity.eventVersion)
+                assertEquals(2, validV2.eventVersion)
+                assertEquals(entity.payloadDigest, digestV2)
+            },
+            entityBuilder = { _, _ ->
+                OutboxEventEntity(
+                    clientEventId = validV2.clientEventId.value,
+                    companyId = validV2.companyId.value,
+                    actorId = validV2.actorId.value,
+                    deviceId = validV2.deviceId.value,
+                    deviceLeaseId = validV2.deviceLeaseId.value,
+                    capturedAt = validV2.capturedAt,
+                    payloadDigest = digestV2,
+                    payloadBytes = bytesV2,
+                    eventVersion = 1 // Row claims version 1 for v2 event
+                )
+            }
+        )
+    }
+
+    // Case 5.10: Unsupported event version 3
+    @Test
+    fun formatRejectionUnsupportedEventVersion3OnDisk() {
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "unsupported eventVersion 3",
+            verifyPrecondition = { entity, _ ->
+                assertEquals(3, entity.eventVersion)
+                assertEquals(entity.payloadDigest, PayloadDigest.fromBytes(entity.payloadBytes).value)
+            },
+            entityBuilder = { _, validSample ->
+                val bytes = CanonicalJsonSerializer.serialize(validSample).toByteArray(StandardCharsets.UTF_8)
+                OutboxEventEntity(
+                    clientEventId = validSample.clientEventId.value,
+                    companyId = validSample.companyId.value,
+                    actorId = validSample.actorId.value,
+                    deviceId = validSample.deviceId.value,
+                    deviceLeaseId = validSample.deviceLeaseId.value,
+                    capturedAt = validSample.capturedAt,
+                    payloadDigest = PayloadDigest.fromBytes(bytes).value,
+                    payloadBytes = bytes,
+                    eventVersion = 3 // Unsupported event version
+                )
+            }
+        )
+    }
+
+    // Case 5.11: Unsupported event version 0
+    @Test
+    fun formatRejectionUnsupportedEventVersion0OnDisk() {
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "unsupported eventVersion 0",
+            verifyPrecondition = { entity, _ ->
+                assertEquals(0, entity.eventVersion)
+                assertEquals(entity.payloadDigest, PayloadDigest.fromBytes(entity.payloadBytes).value)
+            },
+            entityBuilder = { _, validSample ->
+                val bytes = CanonicalJsonSerializer.serialize(validSample).toByteArray(StandardCharsets.UTF_8)
+                OutboxEventEntity(
+                    clientEventId = validSample.clientEventId.value,
+                    companyId = validSample.companyId.value,
+                    actorId = validSample.actorId.value,
+                    deviceId = validSample.deviceId.value,
+                    deviceLeaseId = validSample.deviceLeaseId.value,
+                    capturedAt = validSample.capturedAt,
+                    payloadDigest = PayloadDigest.fromBytes(bytes).value,
+                    payloadBytes = bytes,
+                    eventVersion = 0 // Unsupported event version
+                )
+            }
+        )
+    }
+
+    // Case 5.12: Malformed UTF-8 payload
+    @Test
+    fun formatRejectionMalformedUtf8OnDisk() {
+        val badUtf8 = byteArrayOf(0xC0.toByte(), 0xAF.toByte(), 0xFF.toByte(), 0xFE.toByte())
+        val digest = PayloadDigest.fromBytes(badUtf8).value
+
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "malformed UTF-8 payload bytes",
+            verifyPrecondition = { entity, _ ->
+                assertEquals(digest, entity.payloadDigest)
+                assertThrows(java.nio.charset.CharacterCodingException::class.java) {
+                    val dec = StandardCharsets.UTF_8.newDecoder()
+                        .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    dec.decode(java.nio.ByteBuffer.wrap(badUtf8))
+                }
+            },
+            entityBuilder = { _, validSample ->
+                OutboxEventEntity(
+                    clientEventId = validSample.clientEventId.value,
+                    companyId = validSample.companyId.value,
+                    actorId = validSample.actorId.value,
+                    deviceId = validSample.deviceId.value,
+                    deviceLeaseId = validSample.deviceLeaseId.value,
+                    capturedAt = validSample.capturedAt,
+                    payloadDigest = digest,
+                    payloadBytes = badUtf8,
+                    eventVersion = 1
+                )
+            }
+        )
+    }
+
+    // Case 5.13: Unknown STO/2 envelope matching digest
+    @Test
+    fun formatRejectionUnknownSto2EnvelopeOnDisk() {
+        val sto2Envelope = byteArrayOf(0x53, 0x54, 0x4f, 0x02) + ByteArray(40) { 0x42 }
+        val sto2Digest = PayloadDigest.fromBytes(sto2Envelope).value
+
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "unknown STO/2 envelope with matching digest",
+            verifyPrecondition = { entity, _ ->
+                assertEquals(sto2Digest, entity.payloadDigest)
+                assertEquals(0x53.toByte(), entity.payloadBytes[0])
+                assertEquals(0x54.toByte(), entity.payloadBytes[1])
+                assertEquals(0x4f.toByte(), entity.payloadBytes[2])
+                assertEquals(0x02.toByte(), entity.payloadBytes[3])
+            },
+            entityBuilder = { _, validSample ->
+                OutboxEventEntity(
+                    clientEventId = validSample.clientEventId.value,
+                    companyId = validSample.companyId.value,
+                    actorId = validSample.actorId.value,
+                    deviceId = validSample.deviceId.value,
+                    deviceLeaseId = validSample.deviceLeaseId.value,
+                    capturedAt = validSample.capturedAt,
+                    payloadDigest = sto2Digest,
+                    payloadBytes = sto2Envelope,
+                    eventVersion = 1
+                )
+            }
+        )
+    }
+
+    // Case 5.14: Truncated STO envelope
+    @Test
+    fun formatRejectionTruncatedStoEnvelopeOnDisk() {
+        val truncatedEnvelope = byteArrayOf(0x53, 0x54, 0x4f) // STO prefix but length < 4
+        val digest = PayloadDigest.fromBytes(truncatedEnvelope).value
+
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "truncated STO envelope header",
+            verifyPrecondition = { entity, _ ->
+                assertEquals(digest, entity.payloadDigest)
+                assertTrue(entity.payloadBytes.size < 4)
+            },
+            entityBuilder = { _, validSample ->
+                OutboxEventEntity(
+                    clientEventId = validSample.clientEventId.value,
+                    companyId = validSample.companyId.value,
+                    actorId = validSample.actorId.value,
+                    deviceId = validSample.deviceId.value,
+                    deviceLeaseId = validSample.deviceLeaseId.value,
+                    capturedAt = validSample.capturedAt,
+                    payloadDigest = digest,
+                    payloadBytes = truncatedEnvelope,
+                    eventVersion = 1
+                )
+            }
+        )
+    }
+
+    // Case 5.15: Arbitrary JSON junk / {} matching digest
+    @Test
+    fun formatRejectionJunkEmptyObjectOnDisk() {
+        val junkBytes = "{}".toByteArray(StandardCharsets.UTF_8)
+        val junkDigest = PayloadDigest.fromBytes(junkBytes).value
+
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "arbitrary empty JSON object {} matching digest",
+            verifyPrecondition = { entity, _ ->
+                assertEquals(junkDigest, entity.payloadDigest)
+                assertEquals("{}", String(entity.payloadBytes, StandardCharsets.UTF_8))
+            },
+            entityBuilder = { _, validSample ->
+                OutboxEventEntity(
+                    clientEventId = validSample.clientEventId.value,
+                    companyId = validSample.companyId.value,
+                    actorId = validSample.actorId.value,
+                    deviceId = validSample.deviceId.value,
+                    deviceLeaseId = validSample.deviceLeaseId.value,
+                    capturedAt = validSample.capturedAt,
+                    payloadDigest = junkDigest,
+                    payloadBytes = junkBytes,
+                    eventVersion = 1
+                )
+            }
+        )
+    }
+
+    // Case 5.16: Genuinely noncanonical whitespace with SAME valid identity
+    @Test
+    fun formatRejectionGenuinelyNonCanonicalWhitespaceWithSameValidIdentityOnDisk() {
+        assertFormatRejectionLeavesDatabaseUntouched(
+            description = "genuinely noncanonical whitespace with 100% identical and valid row metadata",
+            verifyPrecondition = { entity, sample ->
+                // Prove all row metadata matches the sample event exactly
+                assertEquals(entity.clientEventId, sample.clientEventId.value)
+                assertEquals(entity.companyId, sample.companyId.value)
+                assertEquals(entity.actorId, sample.actorId.value)
+                assertEquals(entity.deviceId, sample.deviceId.value)
+                assertEquals(entity.deviceLeaseId, sample.deviceLeaseId.value)
+                assertEquals(entity.capturedAt, sample.capturedAt)
+                assertEquals(entity.eventVersion, sample.eventVersion)
+                // Prove row digest matches the non-canonical bytes
+                assertEquals(entity.payloadDigest, PayloadDigest.fromBytes(entity.payloadBytes).value)
+                // Prove the bytes are NOT identical to canonical serialization
+                val canonicalBytes = CanonicalJsonSerializer.serialize(sample).toByteArray(StandardCharsets.UTF_8)
+                assertFalse("Non-canonical bytes must differ from canonical serialization",
+                    entity.payloadBytes.contentEquals(canonicalBytes))
+            },
+            entityBuilder = { _, validSample ->
+                val canonicalJson = CanonicalJsonSerializer.serialize(validSample)
+                val nonCanonicalJson = canonicalJson.replace("{\"", "{\n  \"")
+                assertNotEquals("Whitespace must be introduced into non-canonical JSON", canonicalJson, nonCanonicalJson)
+                val nonCanonicalBytes = nonCanonicalJson.toByteArray(StandardCharsets.UTF_8)
+                val digest = PayloadDigest.fromBytes(nonCanonicalBytes).value
+
+                // The row entity carries the EXACT SAME identity as the JSON payload
+                OutboxEventEntity(
+                    clientEventId = validSample.clientEventId.value,
+                    companyId = validSample.companyId.value,
+                    actorId = validSample.actorId.value,
+                    deviceId = validSample.deviceId.value,
+                    deviceLeaseId = validSample.deviceLeaseId.value,
+                    capturedAt = validSample.capturedAt,
+                    payloadDigest = digest,
+                    payloadBytes = nonCanonicalBytes,
+                    eventVersion = 1
+                )
+            }
+        )
+    }
+
+    // Case 5.17: Logical probe proving validator components catch corruption and would fail if removed
+    @Test
+    fun legacyValidationLogicalProbesProveRemovedValidatorsFail() {
+        val sample = OutboxTestFixtures.createSampleEvent(localReceiptNumber = "PROBE-001")
+        val canonicalJson = CanonicalJsonSerializer.serialize(sample)
+        val nonCanonicalJson = canonicalJson.replace("{\"", "{\n  \"")
+        assertNotEquals("Whitespace must be introduced into non-canonical JSON", canonicalJson, nonCanonicalJson)
+        val nonCanonicalBytes = nonCanonicalJson.toByteArray(StandardCharsets.UTF_8)
+
+        // Probe 1: Strict JSON parser alone parses non-canonical whitespace into a valid model without error.
+        // This proves that model deserialization alone does NOT catch non-canonical whitespace!
+        val parsedJson = StrictJsonParser.parse(nonCanonicalJson).asObject()
+        val parsedModel = OfflineSaleEvent.fromStrictJson(parsedJson)
+        assertEquals(sample.clientEventId, parsedModel.clientEventId)
+
+        // Probe 2: CanonicalJsonSerializer produces canonical bytes that differ from the non-canonical bytes.
+        // This proves the byte-exact parity check `bytes.contentEquals(canonicalBytes)` is strictly active and necessary.
+        val canonicalBytes = CanonicalJsonSerializer.serialize(parsedModel).toByteArray(StandardCharsets.UTF_8)
+        assertFalse("Parity probe: canonical serializer must detect non-canonical whitespace divergence",
+            nonCanonicalBytes.contentEquals(canonicalBytes))
+
+        // Probe 3: Changing any immutable metadata field causes either digest mismatch or equality failure
+        val mutatedActor = sample.copy(actorId = ServerUlid.parse("01JCV8X9MBV4W5X6Y7Z8D1FF99"))
+        val mutatedBytes = CanonicalJsonSerializer.serialize(mutatedActor).toByteArray(StandardCharsets.UTF_8)
+        val mutatedDigest = PayloadDigest.fromBytes(mutatedBytes).value
+        assertNotEquals("Digest must change when actorId changes", sample.computePayloadDigest().value, mutatedDigest)
+    }
+
+    // Case 6: concurrent initial key creation two instances alias locking test with barriers exercises production key coordination seam
     @Test
     fun concurrentInitialKeyCreationTwoInstancesExercisesProductionKeyCoordinationSeamWithBarriers() {
         val keyAlias = "small_trader_economic_outbox_v1"
@@ -692,28 +1466,41 @@ class EncryptedOutboxTest {
         val lock2 = SessionProcessLocks.getKeyLock(keyAlias)
         assertSame("Production key coordination seam must share the exact lock object for alias", lock1, lock2)
 
-        // Exercise key coordination seam with two threads and barriers
-        val barrier = CyclicBarrier(2)
-        val keyGenerationAttempts = AtomicInteger(0)
-        val createdKeys = CopyOnWriteArrayList<javax.crypto.SecretKey>()
-        val errors = CopyOnWriteArrayList<Throwable>()
+        // Fake backend storage that emulates keystore storage without internal synchronization coordination
+        class FakeKeyStoreBackend : KeyStoreBackend {
+            val storage = ConcurrentHashMap<String, SecretKey>()
+            val generationAttempts = AtomicInteger(0)
+            val generationStartedLatch = CountDownLatch(1)
+            val releaseGenerationLatch = CountDownLatch(1)
 
-        // Simulated key cache shared behind the production lock seam
-        var sharedKey: javax.crypto.SecretKey? = null
+            override fun containsAlias(alias: String): Boolean = storage.containsKey(alias)
+
+            override fun getKey(alias: String): SecretKey? = storage[alias]
+
+            override fun generateKey(alias: String): SecretKey {
+                generationAttempts.incrementAndGet()
+                generationStartedLatch.countDown()
+                val released = releaseGenerationLatch.await(5, TimeUnit.SECONDS)
+                if (!released) throw TimeoutException("Key generation wait timed out")
+                val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+                storage[alias] = key
+                return key
+            }
+        }
+
+        val fakeBackend = FakeKeyStoreBackend()
+
+        // Instantiate two real production AndroidKeyStoreCryptoEngine instances sharing the same alias and backend
+        val engine1 = AndroidKeyStoreCryptoEngine(keyAlias = keyAlias, allowCreationOnEncrypt = true, backend = fakeBackend)
+        val engine2 = AndroidKeyStoreCryptoEngine(keyAlias = keyAlias, allowCreationOnEncrypt = true, backend = fakeBackend)
+
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val thread2FinishedBeforeRelease = AtomicBoolean(false)
 
         val t1 = Thread {
             try {
-                barrier.await()
-                // Exercise production key coordination seam
-                val lock = SessionProcessLocks.getKeyLock(keyAlias)
-                synchronized(lock) {
-                    if (sharedKey == null) {
-                        Thread.sleep(20) // simulate key generation work
-                        keyGenerationAttempts.incrementAndGet()
-                        sharedKey = javax.crypto.KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
-                    }
-                    createdKeys.add(sharedKey!!)
-                }
+                // Thread 1 calls production ensureKeyUsable(false), entering getOrCreateKey() and acquiring production keyLock
+                engine1.ensureKeyUsable(false)
             } catch (t: Throwable) {
                 errors.add(t)
             }
@@ -721,15 +1508,13 @@ class EncryptedOutboxTest {
 
         val t2 = Thread {
             try {
-                barrier.await()
-                val lock = SessionProcessLocks.getKeyLock(keyAlias)
-                synchronized(lock) {
-                    if (sharedKey == null) {
-                        Thread.sleep(20)
-                        keyGenerationAttempts.incrementAndGet()
-                        sharedKey = javax.crypto.KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
-                    }
-                    createdKeys.add(sharedKey!!)
+                // Ensure thread 1 has started key generation and holds production keyLock
+                assertTrue("Thread 1 must enter key generation and hold lock",
+                    fakeBackend.generationStartedLatch.await(5, TimeUnit.SECONDS))
+                // Thread 2 calls production ensureKeyUsable(false); must block on production keyLock held by Thread 1
+                engine2.ensureKeyUsable(false)
+                if (fakeBackend.releaseGenerationLatch.count > 0) {
+                    thread2FinishedBeforeRelease.set(true)
                 }
             } catch (t: Throwable) {
                 errors.add(t)
@@ -738,15 +1523,48 @@ class EncryptedOutboxTest {
 
         t1.start()
         t2.start()
-        t1.join()
-        t2.join()
 
+        // Verify thread 1 entered generation
+        assertTrue("Thread 1 must enter key generation within timeout",
+            fakeBackend.generationStartedLatch.await(5, TimeUnit.SECONDS))
+
+        // Give thread 2 time to reach the lock and block
+        Thread.sleep(50)
+        assertFalse("Thread 2 must be blocked by production keyLock while thread 1 holds it",
+            thread2FinishedBeforeRelease.get())
+        assertEquals("Exactly one key generation attempt must occur while thread 1 holds lock",
+            1, fakeBackend.generationAttempts.get())
+
+        // Release thread 1 to complete key generation
+        fakeBackend.releaseGenerationLatch.countDown()
+
+        t1.join(5000)
+        t2.join(5000)
+        assertFalse("Thread 1 must terminate within timeout", t1.isAlive)
+        assertFalse("Thread 2 must terminate within timeout", t2.isAlive)
         assertTrue("No thread execution errors: $errors", errors.isEmpty())
-        assertEquals("Production coordination seam must generate key exactly once", 1, keyGenerationAttempts.get())
-        assertEquals(2, createdKeys.size)
-        assertSame("Both threads must receive the identical coordinated key", createdKeys[0], createdKeys[1])
+
+        assertEquals("Production coordination seam must generate key exactly once across both instances",
+            1, fakeBackend.generationAttempts.get())
+
+        // Verify cross-instance encrypt/decrypt compatibility with the coordinated key
+        val plaintext = "coordinated-production-key-verification".toByteArray(StandardCharsets.UTF_8)
+        val aad = "aad-binding-metadata".toByteArray(StandardCharsets.UTF_8)
+        val (iv, ciphertext) = engine1.encrypt(plaintext, aad)
+        val decrypted = engine2.decrypt(iv, ciphertext, aad)
+        assertArrayEquals("Engine 2 must successfully decrypt payload encrypted by Engine 1 using coordinated key",
+            plaintext, decrypted)
+
+        // Verify concurrent encrypt calls across both instances also succeed with single key
+        val concurrentPlaintext = "concurrent-encrypt-payload".toByteArray(StandardCharsets.UTF_8)
+        val (iv2, ciphertext2) = engine2.encrypt(concurrentPlaintext, aad)
+        val decrypted2 = engine1.decrypt(iv2, ciphertext2, aad)
+        assertArrayEquals("Engine 1 must decrypt payload encrypted by Engine 2", concurrentPlaintext, decrypted2)
+        assertEquals("Total generation count must remain 1 after additional encrypt calls",
+            1, fakeBackend.generationAttempts.get())
 
         // Explicit test boundary documentation:
-        // JVM in-process concurrency coordination only; does NOT claim multiprocess Keystore proof from JVM.
+        // In-process JVM coordination only; does NOT claim native Keystore / multiprocess proof from JVM.
     }
 }
+

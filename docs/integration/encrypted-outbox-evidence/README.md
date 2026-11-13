@@ -15,4 +15,4 @@ assembleDebug was attempted and blocked at validateSigningDebug because the chec
 
 The first broader run exposed a fixture-loader assumption that every exported table has an indices array. The loader was corrected to treat omitted indices as empty. Final XML and summary.json represent the corrected run. The Gradle log also records a KSP AWT service-disposal exception during compiler setup; final task outcome and test/lint XML, rather than that diagnostic, determine the reported result.
 
-Final: 409 tests across 39 suites, 408 passed, 1 retired pilot skipped, 0 failures/errors. lintDebug succeeded: {'Warning': 63}. Both Python modes passed 303 checks. See summary.json for per-suite XML counts.
+Final: 429 tests across 39 suites, 428 passed, 1 retired pilot skipped, 0 failures/errors. lintDebug succeeded: {'Warning': 63}. Both Python modes passed 303 checks. See summary.json for per-suite XML counts.

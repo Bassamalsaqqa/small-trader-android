@@ -1,21 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" tests="15" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:05.758Z" hostname="pasta-hp-worker" time="0.01">
+<testsuite name="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" tests="15" skipped="0" failures="0" errors="0" timestamp="2026-11-13T14:47:17.441Z" hostname="pasta-hp-worker" time="0.015">
   <properties/>
   <testcase name="testCheck33aUnpaidWithPositiveAmountRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.001"/>
-  <testcase name="testCheck33eNegativePaymentAmountRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.0"/>
-  <testcase name="testCheck33mTrailingZerosRepresentingIntegerCurrencyMinorUnitsAccepted" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.001"/>
+  <testcase name="testCheck33eNegativePaymentAmountRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.002"/>
+  <testcase name="testCheck33mTrailingZerosRepresentingIntegerCurrencyMinorUnitsAccepted" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.0"/>
   <testcase name="testCheck33nMalformedNaNInfinityExponentsFailClosed" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.001"/>
-  <testcase name="testCheck33fInvalidDecimalStringLexemesRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.0"/>
-  <testcase name="testCheck33hOfflinePaymentSettledNotEqualToGrandTotalRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.001"/>
-  <testcase name="testCheck33bPartialWithZeroAmountRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.0"/>
-  <testcase name="testCheck33lOverprecisionBeyondCurrencyMinorUnitsRejectedWithoutRounding" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.0"/>
-  <testcase name="testCheck33dFullModeWithAmountNotEqualToGrandTotalRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.001"/>
-  <testcase name="testCheck35aOfflineCashCaptureAdaptationToNetRetainedSettled" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.001"/>
+  <testcase name="testCheck33fInvalidDecimalStringLexemesRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.001"/>
+  <testcase name="testCheck33hOfflinePaymentSettledNotEqualToGrandTotalRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.0"/>
+  <testcase name="testCheck33bPartialWithZeroAmountRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.001"/>
+  <testcase name="testCheck33lOverprecisionBeyondCurrencyMinorUnitsRejectedWithoutRounding" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.001"/>
+  <testcase name="testCheck33dFullModeWithAmountNotEqualToGrandTotalRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.0"/>
+  <testcase name="testCheck35aOfflineCashCaptureAdaptationToNetRetainedSettled" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.002"/>
   <testcase name="testCheck33gOfflinePaymentTenderBalanceMismatchRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.001"/>
   <testcase name="testCheck33jCurrencyMinorUnitsScaleValidation" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.0"/>
-  <testcase name="testCheck33cPartialWithAmountGreaterThanOrEqualToGrandTotalRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.0"/>
+  <testcase name="testCheck33cPartialWithAmountGreaterThanOrEqualToGrandTotalRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.003"/>
   <testcase name="testCheck33kMinimumPositiveAmountAllowedAtCurrencyMinorUnitsScale" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.001"/>
-  <testcase name="testCheck33iZeroOrNegativeGrandTotalRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.001"/>
+  <testcase name="testCheck33iZeroOrNegativeGrandTotalRejected" classname="com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>
