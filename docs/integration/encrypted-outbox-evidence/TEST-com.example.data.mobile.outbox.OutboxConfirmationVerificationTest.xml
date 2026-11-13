@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:55.711Z" hostname="pasta-hp-worker" time="0.814">
+<testsuite name="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:22.517Z" hostname="pasta-hp-worker" time="0.721">
   <properties/>
-  <testcase name="testConfirmationRejectsUnclaimedPendingOrAuthBlockedState" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.081"/>
-  <testcase name="testConfirmationRejectsInvalidServerUlid" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.044"/>
-  <testcase name="testForeignScopeCannotLearnStoredDigestThroughEitherAcknowledgementPath" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.07"/>
-  <testcase name="testConfirmedRecordConflictingMappingRejectedAndPreservesOriginal" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.097"/>
-  <testcase name="testConfirmationRejectsEventInConflictState" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.075"/>
-  <testcase name="testConfirmationRejectsTamperedPayloadDigest" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.078"/>
-  <testcase name="testConfirmationRejectsMismatchedCompanyId" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.068"/>
-  <testcase name="testConfirmedRecordExactMappingReplayPreservesOriginalWithoutMutation" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.076"/>
-  <testcase name="testConfirmedRecordCannotBeDemotedByLateTimeoutConflictOrAlteredCapture" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.068"/>
-  <testcase name="testExplicitReconciliationPathConfirmsInFlightOrUnknownAckWithoutWorkerClaim" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.069"/>
-  <testcase name="testValidServerAcknowledgementSuccessfullyConfirmsRecord" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.077"/>
+  <testcase name="testConfirmationRejectsUnclaimedPendingOrAuthBlockedState" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.069"/>
+  <testcase name="testConfirmationRejectsInvalidServerUlid" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.038"/>
+  <testcase name="testForeignScopeCannotLearnStoredDigestThroughEitherAcknowledgementPath" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.055"/>
+  <testcase name="testConfirmedRecordConflictingMappingRejectedAndPreservesOriginal" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.102"/>
+  <testcase name="testConfirmationRejectsEventInConflictState" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.07"/>
+  <testcase name="testConfirmationRejectsTamperedPayloadDigest" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.063"/>
+  <testcase name="testConfirmationRejectsMismatchedCompanyId" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.056"/>
+  <testcase name="testConfirmedRecordExactMappingReplayPreservesOriginalWithoutMutation" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.084"/>
+  <testcase name="testConfirmedRecordCannotBeDemotedByLateTimeoutConflictOrAlteredCapture" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.058"/>
+  <testcase name="testExplicitReconciliationPathConfirmsInFlightOrUnknownAckWithoutWorkerClaim" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.047"/>
+  <testcase name="testValidServerAcknowledgementSuccessfullyConfirmsRecord" classname="com.example.data.mobile.outbox.OutboxConfirmationVerificationTest" time="0.071"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

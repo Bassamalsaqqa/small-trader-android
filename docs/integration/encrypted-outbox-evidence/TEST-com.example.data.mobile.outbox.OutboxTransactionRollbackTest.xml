@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.outbox.OutboxTransactionRollbackTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:57.226Z" hostname="pasta-hp-worker" time="0.089">
+<testsuite name="com.example.data.mobile.outbox.OutboxTransactionRollbackTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:24.199Z" hostname="pasta-hp-worker" time="0.104">
   <properties/>
-  <testcase name="testForeignKeyConstraintEnforcedOnDeliveryState" classname="com.example.data.mobile.outbox.OutboxTransactionRollbackTest" time="0.041"/>
-  <testcase name="testTransactionAbortsAndRollsBackOnDeliveryStateFailure" classname="com.example.data.mobile.outbox.OutboxTransactionRollbackTest" time="0.045"/>
+  <testcase name="testForeignKeyConstraintEnforcedOnDeliveryState" classname="com.example.data.mobile.outbox.OutboxTransactionRollbackTest" time="0.046"/>
+  <testcase name="testTransactionAbortsAndRollsBackOnDeliveryStateFailure" classname="com.example.data.mobile.outbox.OutboxTransactionRollbackTest" time="0.05"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

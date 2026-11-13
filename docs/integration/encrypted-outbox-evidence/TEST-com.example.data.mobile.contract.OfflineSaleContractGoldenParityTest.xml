@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:53.042Z" hostname="pasta-hp-worker" time="0.043">
+<testsuite name="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:05.497Z" hostname="pasta-hp-worker" time="0.03">
   <properties/>
-  <testcase name="testDeterministicBoundaryChecks" classname="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" time="0.012"/>
-  <testcase name="testGoldenOfflineSaleIntakeParityAndDigest" classname="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" time="0.003"/>
+  <testcase name="testDeterministicBoundaryChecks" classname="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" time="0.007"/>
+  <testcase name="testGoldenOfflineSaleIntakeParityAndDigest" classname="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" time="0.009"/>
   <testcase name="testAlteredPayloadConflictRegression" classname="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" time="0.002"/>
-  <testcase name="testExactDecimalLexemePreservationAndModelRoundtrip" classname="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" time="0.012"/>
-  <testcase name="testEnvelopeTamperDetection" classname="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" time="0.004"/>
-  <testcase name="testUnknownFieldsRejectedAtAllLevels" classname="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" time="0.004"/>
-  <testcase name="testDefensiveCopyPreventsMutableSourceAlias" classname="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" time="0.002"/>
+  <testcase name="testExactDecimalLexemePreservationAndModelRoundtrip" classname="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" time="0.003"/>
+  <testcase name="testEnvelopeTamperDetection" classname="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" time="0.003"/>
+  <testcase name="testUnknownFieldsRejectedAtAllLevels" classname="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" time="0.003"/>
+  <testcase name="testDefensiveCopyPreventsMutableSourceAlias" classname="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" time="0.001"/>
   <testcase name="testLostAckReplayParity" classname="com.example.data.mobile.contract.OfflineSaleContractGoldenParityTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

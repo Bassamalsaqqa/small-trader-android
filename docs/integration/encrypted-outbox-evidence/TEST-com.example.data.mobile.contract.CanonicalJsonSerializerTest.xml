@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.contract.CanonicalJsonSerializerTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:52.881Z" hostname="pasta-hp-worker" time="0.066">
+<testsuite name="com.example.data.mobile.contract.CanonicalJsonSerializerTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:05.387Z" hostname="pasta-hp-worker" time="0.048">
   <properties/>
-  <testcase name="testRecursionDepthAndPayloadBounds" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.023"/>
-  <testcase name="testUtf16SurrogateKeyOrderingSupplementaryVsHighBmp" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.017"/>
+  <testcase name="testRecursionDepthAndPayloadBounds" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.014"/>
+  <testcase name="testUtf16SurrogateKeyOrderingSupplementaryVsHighBmp" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.009"/>
   <testcase name="testRejectFloatsAndDoubles" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.001"/>
-  <testcase name="testDistinguishesEmptyObjectAndArray" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.001"/>
-  <testcase name="testCanonicalIntegerNegativeZeroForbidden" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.004"/>
+  <testcase name="testDistinguishesEmptyObjectAndArray" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.0"/>
+  <testcase name="testCanonicalIntegerNegativeZeroForbidden" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.001"/>
   <testcase name="testArabicUtf8TextPreserved" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.001"/>
   <testcase name="testRejectUnpairedSurrogates" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.001"/>
-  <testcase name="testBoundedCanonicalIntegerDomain" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.002"/>
+  <testcase name="testBoundedCanonicalIntegerDomain" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.003"/>
   <testcase name="testStrictJsonParserRejectsDuplicateKeys" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.001"/>
-  <testcase name="testControlCharacterEscaping" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.002"/>
-  <testcase name="testGoldenCanonicalVectorsParity" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.013"/>
+  <testcase name="testControlCharacterEscaping" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.003"/>
+  <testcase name="testGoldenCanonicalVectorsParity" classname="com.example.data.mobile.contract.CanonicalJsonSerializerTest" time="0.014"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

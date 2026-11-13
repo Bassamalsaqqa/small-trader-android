@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.contract.DecimalPrimitivesAndRoundingTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:53.006Z" hostname="pasta-hp-worker" time="0.015">
+<testsuite name="com.example.data.mobile.contract.DecimalPrimitivesAndRoundingTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:05.475Z" hostname="pasta-hp-worker" time="0.011">
   <properties/>
-  <testcase name="testRejectsOverScaleDecimals" classname="com.example.data.mobile.contract.DecimalPrimitivesAndRoundingTest" time="0.001"/>
-  <testcase name="testRegressionDecimalEdgeCasesFromContractFixture" classname="com.example.data.mobile.contract.DecimalPrimitivesAndRoundingTest" time="0.003"/>
+  <testcase name="testRejectsOverScaleDecimals" classname="com.example.data.mobile.contract.DecimalPrimitivesAndRoundingTest" time="0.002"/>
+  <testcase name="testRegressionDecimalEdgeCasesFromContractFixture" classname="com.example.data.mobile.contract.DecimalPrimitivesAndRoundingTest" time="0.002"/>
   <testcase name="testTaxPercentageBounds0To100" classname="com.example.data.mobile.contract.DecimalPrimitivesAndRoundingTest" time="0.001"/>
-  <testcase name="testConstructorAndCopyEnforceInvariantsOnAllPaths" classname="com.example.data.mobile.contract.DecimalPrimitivesAndRoundingTest" time="0.006"/>
+  <testcase name="testConstructorAndCopyEnforceInvariantsOnAllPaths" classname="com.example.data.mobile.contract.DecimalPrimitivesAndRoundingTest" time="0.003"/>
   <testcase name="testStrictlyPositiveQuantityRejectsZeroAndNegative" classname="com.example.data.mobile.contract.DecimalPrimitivesAndRoundingTest" time="0.001"/>
   <testcase name="testSalesLineCalculatorMinorUnitsValidation" classname="com.example.data.mobile.contract.DecimalPrimitivesAndRoundingTest" time="0.001"/>
   <testcase name="testRejectsOverMagnitude" classname="com.example.data.mobile.contract.DecimalPrimitivesAndRoundingTest" time="0.001"/>

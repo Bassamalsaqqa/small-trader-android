@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:59.834Z" hostname="pasta-hp-worker" time="0.16">
+<testsuite name="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:27.312Z" hostname="pasta-hp-worker" time="0.138">
   <properties/>
-  <testcase name="testDisallowedMethodAndPathCombinationsRejectedBeforeNetwork" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.012"/>
-  <testcase name="testDisallowedHeadersRejectedBeforeNetwork" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.012"/>
-  <testcase name="testDisallowedPathRejectedBeforeNetwork" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.012"/>
-  <testcase name="testTimeoutBoundsEnforcedInConstructor" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.002"/>
-  <testcase name="testPaginationCursorValidation" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.011"/>
-  <testcase name="testOriginConfigurationInvariants" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.033"/>
-  <testcase name="testRequestBodyBoundingAndSurrogateProtection" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.013"/>
-  <testcase name="testZeroSensitiveLeakageInToStringAndExceptions" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.012"/>
-  <testcase name="testGetWithBodyRejectedBeforeNetwork" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.012"/>
-  <testcase name="testControlledHeadersValidation" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.013"/>
-  <testcase name="testAuthorizationTokenValidation" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.015"/>
-  <testcase name="testWrongOriginRejectedBeforeNetwork" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.011"/>
+  <testcase name="testDisallowedMethodAndPathCombinationsRejectedBeforeNetwork" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.026"/>
+  <testcase name="testDisallowedHeadersRejectedBeforeNetwork" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.013"/>
+  <testcase name="testDisallowedPathRejectedBeforeNetwork" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.01"/>
+  <testcase name="testTimeoutBoundsEnforcedInConstructor" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.003"/>
+  <testcase name="testPaginationCursorValidation" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.01"/>
+  <testcase name="testOriginConfigurationInvariants" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.026"/>
+  <testcase name="testRequestBodyBoundingAndSurrogateProtection" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.009"/>
+  <testcase name="testZeroSensitiveLeakageInToStringAndExceptions" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.007"/>
+  <testcase name="testGetWithBodyRejectedBeforeNetwork" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.006"/>
+  <testcase name="testControlledHeadersValidation" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.008"/>
+  <testcase name="testAuthorizationTokenValidation" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.012"/>
+  <testcase name="testWrongOriginRejectedBeforeNetwork" classname="com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest" time="0.006"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

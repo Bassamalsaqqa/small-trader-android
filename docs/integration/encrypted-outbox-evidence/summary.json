@@ -1,7 +1,7 @@
 {
   "suites": 39,
   "totals": {
-    "tests": 403,
+    "tests": 409,
     "failures": 0,
     "errors": 0,
     "skipped": 1
@@ -107,7 +107,7 @@
     },
     {
       "name": "com.example.data.mobile.outbox.EncryptedOutboxTest",
-      "tests": 4,
+      "tests": 10,
       "failures": 0,
       "errors": 0,
       "skipped": 0
@@ -280,10 +280,5 @@
       "errors": 0,
       "skipped": 0
     }
-  ],
-  "lint": {
-    "Warning": 63
-  },
-  "python_checks_each_mode": 303,
-  "apk_build": "BLOCKED: missing checkout debug.keystore"
+  ]
 }

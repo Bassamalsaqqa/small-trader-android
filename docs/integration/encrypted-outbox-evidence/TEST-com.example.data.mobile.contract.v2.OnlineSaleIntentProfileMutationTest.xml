@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:53.240Z" hostname="pasta-hp-worker" time="0.021">
+<testsuite name="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:05.716Z" hostname="pasta-hp-worker" time="0.039">
   <properties/>
-  <testcase name="testCheck26fTaxInclusiveTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.003"/>
-  <testcase name="testCheck26gConversionToBaseTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.002"/>
-  <testcase name="testCheck26hDecimalLexemeTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.001"/>
-  <testcase name="testCheck26eTaxIdentityTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.002"/>
-  <testcase name="testCheck26cDeviceTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.002"/>
-  <testcase name="testCheck26kCurrencyMinorUnitsTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.002"/>
+  <testcase name="testCheck26fTaxInclusiveTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.002"/>
+  <testcase name="testCheck26gConversionToBaseTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.009"/>
+  <testcase name="testCheck26hDecimalLexemeTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.003"/>
+  <testcase name="testCheck26eTaxIdentityTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.005"/>
+  <testcase name="testCheck26cDeviceTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.001"/>
+  <testcase name="testCheck26kCurrencyMinorUnitsTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.003"/>
   <testcase name="testCheck26aActorTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.002"/>
   <testcase name="testCheck26jPaymentTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.002"/>
-  <testcase name="testCheck26dEventTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.001"/>
+  <testcase name="testCheck26dEventTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.002"/>
   <testcase name="testCheck26iLineOrderTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.002"/>
-  <testcase name="testCheck26bCompanyTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.001"/>
+  <testcase name="testCheck26bCompanyTamperingDetected" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest" time="0.003"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

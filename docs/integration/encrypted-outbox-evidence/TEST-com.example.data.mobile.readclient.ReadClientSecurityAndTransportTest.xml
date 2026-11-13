@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:58.666Z" hostname="pasta-hp-worker" time="0.017">
+<testsuite name="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:25.979Z" hostname="pasta-hp-worker" time="0.051">
   <properties/>
   <testcase name="testOriginValidationDoesNotResolveNamesOrExposeCredentials" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.003"/>
-  <testcase name="testNoArbitraryExternalUrlFollowingInCursor" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.001"/>
+  <testcase name="testNoArbitraryExternalUrlFollowingInCursor" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.002"/>
   <testcase name="testErrorResponseToStringRedactionAndUntrustedCode" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.0"/>
-  <testcase name="testSecretRedactionInToString" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.004"/>
+  <testcase name="testSecretRedactionInToString" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.027"/>
   <testcase name="testDefensiveCopiesProtectAgainstExternalMutation" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.001"/>
-  <testcase name="testBearerTokenValidationAndSanctumPipeSupport" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.001"/>
-  <testcase name="testBaseOriginValidation" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.004"/>
-  <testcase name="testEndpointAllowlistEnforcement" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.001"/>
-  <testcase name="testMethodAndPathValidation" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.001"/>
+  <testcase name="testBearerTokenValidationAndSanctumPipeSupport" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.002"/>
+  <testcase name="testBaseOriginValidation" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.006"/>
+  <testcase name="testEndpointAllowlistEnforcement" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.004"/>
+  <testcase name="testMethodAndPathValidation" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.005"/>
   <testcase name="testPaginationLimitBounds" classname="com.example.data.mobile.readclient.ReadClientSecurityAndTransportTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

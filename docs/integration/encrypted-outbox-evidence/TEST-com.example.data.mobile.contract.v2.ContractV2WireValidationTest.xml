@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:53.163Z" hostname="pasta-hp-worker" time="0.033">
+<testsuite name="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:05.613Z" hostname="pasta-hp-worker" time="0.039">
   <properties/>
-  <testcase name="testLineLimitEnforcedOnWireAndCopy" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.017"/>
-  <testcase name="testPaymentPrecisionEnforcedDuringProfileConstruction" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.002"/>
+  <testcase name="testLineLimitEnforcedOnWireAndCopy" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.018"/>
+  <testcase name="testPaymentPrecisionEnforcedDuringProfileConstruction" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.001"/>
   <testcase name="testCheck32bContextCurrencyMinorUnitsBooleanFalseRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.001"/>
-  <testcase name="testCheck31aUnknownRootFieldRejectedBeforeProjection" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.001"/>
-  <testcase name="testCheck32eNonUlidUuidInContextRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.001"/>
-  <testcase name="testContextIdentityTrailingNewlineRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.001"/>
-  <testcase name="testCheck32dContextMissingKeyRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.002"/>
+  <testcase name="testCheck31aUnknownRootFieldRejectedBeforeProjection" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.002"/>
+  <testcase name="testCheck32eNonUlidUuidInContextRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.002"/>
+  <testcase name="testContextIdentityTrailingNewlineRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.002"/>
+  <testcase name="testCheck32dContextMissingKeyRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.001"/>
   <testcase name="testCheck31bUnknownLineFieldRejectedBeforeProjection" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.001"/>
-  <testcase name="testCheck32aContextCurrencyMinorUnitsBooleanTrueRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.001"/>
+  <testcase name="testCheck32aContextCurrencyMinorUnitsBooleanTrueRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.002"/>
   <testcase name="testCheck32cContextWithExtraKeyRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.001"/>
   <testcase name="testCheck31cUnknownPaymentFieldRejectedBeforeProjection" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.002"/>
-  <testcase name="testCheck30aMissingTaxRateIdThrowsNeverImplicitNoTax" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.001"/>
+  <testcase name="testCheck30aMissingTaxRateIdThrowsNeverImplicitNoTax" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.002"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

@@ -1,10 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.outbox.EncryptedOutboxTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:42:56.333Z" hostname="pasta-hp-worker" time="14.338">
+<testsuite name="com.example.data.mobile.outbox.EncryptedOutboxTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:20.354Z" hostname="pasta-hp-worker" time="1.304">
   <properties/>
-  <testcase name="missingInvalidCancellationAndFatalPreserveCiphertext" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="8.065"/>
-  <testcase name="diskReopenAndSidecarsContainNoPayloadSecret" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="5.403"/>
-  <testcase name="exactBytesNonceTamperScopeAndBounds" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="0.095"/>
-  <testcase name="explicitLegacyConversionRollsBackThenReopensWithoutSchemaChange" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="0.171"/>
+  <testcase name="missingInvalidCancellationAndFatalPreserveCiphertext" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="0.068"/>
+  <testcase name="concurrentInitialKeyCreationTwoInstancesExercisesProductionKeyCoordinationSeamWithBarriers" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="0.067"/>
+  <testcase name="mixedPlaintextAndCipherConversionMissingKeyRefusesAndPreservesEntireQueueAndKeyGenCounterOnDisk" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="0.105"/>
+  <testcase name="diskReopenAndSidecarsContainNoPayloadSecret" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="0.091"/>
+  <testcase name="confirmDeliveryAndReconcileCorruptedCipherOrMissingKeyLeavesAllStateUnchangedOnDisk" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="0.183"/>
+  <testcase name="supportedCanonicalV1V2MetadataMismatchAndUnknownStoEnvelopeRejectBeforeWriteOnDisk" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="0.225"/>
+  <testcase name="exactBytesNonceTamperScopeAndBounds" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="0.062"/>
+  <testcase name="explicitLegacyConversionRollsBackThenReopensWithoutSchemaChange" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="0.231"/>
+  <testcase name="claimBatchMultipleRecordsFirstValidLaterAuthFailureRollsBackAllLeasesOnDisk" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="0.138"/>
+  <testcase name="midConversionFaultRollbackAllRowsNotJustFirstIncludingStatesAndEmptyQueueLockOnDisk" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="0.121"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

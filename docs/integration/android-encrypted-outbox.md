@@ -12,11 +12,36 @@ This is **payload encryption, not full database encryption**. Identity, timestam
 
 Room version 1 and identity 6eddfecc8dabbb7ec370b858ec36714a are preserved. This is a payload-format conversion, not a fake schema upgrade. Unknown physical schemas still fail; no destructive migration fallback exists.
 
-## Explicit legacy conversion
+## Explicit legacy conversion and format detection
 
-Normal reads reject plaintext with LEGACY_CONVERSION_REQUIRED. No startup migration, worker activation or capture UI is added. An owner-controlled recovery/integration flow must explicitly invoke convertLegacyPayloads before using a legacy queue. The transaction first verifies legacy digests, requires the existing key if any encrypted row exists, then authenticates encrypted rows and replaces only plaintext BLOBs. Any exception rolls back all row changes. Existing identities, delivery states and empty-queue auth locks are untouched. Retry after a rolled-back conversion is supported; an already-created key may remain after rollback, which is harmless and must not be deleted.
+Normal reads reject plaintext with LEGACY_CONVERSION_REQUIRED. No startup migration, worker activation or capture UI is added. An owner-controlled recovery/integration flow must explicitly invoke convertLegacyPayloads before using a legacy queue.
+
+Legacy payload conversion enforces strict fail-closed format detection and metadata parity:
+- Any payload bearing an STO envelope prefix (`STO`) that is not valid STO/1 (including future envelope versions like STO/2+ or truncated envelopes) is rejected immediately before write; it is never admitted as plaintext.
+- Candidate plaintext is strictly validated as a canonical bare JSON event for supported versions (v1: `OfflineSaleEvent`, v2: `OfflineSaleEventV2`) matching the row's `event_version`.
+- The parsed event is validated against ALL immutable row metadata: `company_id`, `actor_id`, `device_id`, `client_event_id`, `device_lease_id`, `captured_at`, `event_version`, and `payload_digest`.
+- Canonical byte-exact parity is enforced (`bytes.contentEquals(canonicalSerializerBytes)`); formatted whitespace, non-canonical key order, digest-consistent `{}` junk, cross-scope events, and format downgrades are strictly rejected. Zero parse-and-normalize rewriting occurs.
+- Size is bounded to 1 MiB (`ContractConstants.MAX_PAYLOAD_BYTES`) with strict UTF-8 decoding under `CodingErrorAction.REPORT`.
+- Model validation uses pure v1/v2 contracts and does not invent financial policy beyond capture existing currency qualified metadata; no guessing currency scale.
+- Conversion is fully atomic: all events are pre-validated, and all existing encrypted rows are pre-authenticated via test decryption before ANY database writes occur.
+- If existing encrypted rows are present and the key is missing or invalid, conversion fails closed (`KEY_UNAVAILABLE`) without generating a replacement key or incrementing the key generation counter, preserving the entire queue.
+- Any mid-conversion fault (e.g. cancellation) rolls back all rows (not just the first), preserving original plaintext bytes, delivery states, and empty-queue auth locks.
 
 Conversion does **not** securely erase plaintext from historical free pages, WAL, journals, filesystem snapshots or prior backups. No automatic VACUUM/checkpoint/deletion is performed. A pre-existing plaintext installation therefore does not acquire a claim of forensic plaintext absence through conversion. The disk absence test applies to newly encrypted captures. Tests use disk SQLite close/reopen and a schema-1 fixture built from the frozen exported schema; they do not prove power-loss durability.
+
+## Persisted release gates and sync poison handling
+
+The test suite enforces persisted release gates using real disk SQLite databases with before/after and close/reopen snapshots of all involved event rows, delivery claims, and auth locks:
+1. **Batch claim failure rollback**: when claiming multiple records where an earlier record succeeds but a subsequent record encounters an authentication failure / key lock, the entire claim transaction rolls back on disk, leaving zero stranded leases (`status = 'pending'`, null claim tokens and expirations).
+2. **Confirmation and reconciliation preservation**: corrupted ciphertexts or missing keys during `confirmDelivery` or `reconcileDeliveryConfirmation` fail closed immediately, leaving original claims, delivery status, event bytes, server mapping IDs, and auth locks intact across database reopen.
+3. **Mixed queue preservation**: mixed plaintext and ciphertext conversion with a missing key refuses conversion and preserves the entire queue and key generation counter intact without generating replacement keys.
+4. **Mid-conversion fault rollback**: mid-conversion faults roll back all event rows (not just the first row), preserving delivery states and empty-queue scope locks across close and reopen.
+5. **Format rejection**: future STO envelopes (e.g. STO/2), row metadata mismatches, non-canonical byte formatting, and arbitrary `{}` junk matching the digest are rejected before write.
+6. **Production key coordination seam**: concurrent key initialization across instances is coordinated via `SessionProcessLocks.getKeyLock(alias)` with mutual exclusion verified via barriers. In-process JVM coordination only; does NOT claim multiprocess Keystore proof from JVM.
+
+**Sync poison record behavior clarification**: In commit 2d81b21 and subsequent hardening, stored corrupt payload bytes fail closed during in-transaction decryption inside `claimNextBatch`, rolling back the claim transaction to keep the record in `pending` without stranding a worker lease. This replaces the earlier unencrypted behavior where the sync coordinator claimed the corrupt record and parked it in `conflict`. No false historical test coverage is claimed.
+
+The explicit conversion API is intentionally unwired until an owner-controlled recovery flow is qualified; no automatic startup migration exists.
 
 ## Backup and device blockers
 
@@ -30,4 +55,4 @@ Encrypted payloads are not readable by older binaries. Deployment must prevent d
 
 An all-plaintext legacy queue has no cryptographic installation provenance. Explicit conversion cannot distinguish an original legacy database from a copied legacy database; it must not be treated as authorization to restore an economic queue. Qualification of that operator/recovery boundary is still required. The automatic missing-key restore rejection applies to encrypted queues.
 
-Final local validation: 402 passed, 1 retired pilot skipped, zero failures/errors across 39 suites; lintDebug succeeded. Python normal and optimized each passed 303 checks. Exact XML counts, lint and logs are in encrypted-outbox-evidence/. APK assembly is blocked by the missing checkout debug.keystore; application and test compilation passed.
+Final local validation: 409 tests across 39 suites: 408 passed, 1 retired pilot skipped, zero failures/errors; lintDebug succeeded ({'Warning': 63}). Python normal and optimized each passed 303 checks. Exact XML counts, lint and logs are in encrypted-outbox-evidence/. APK assembly is blocked by the missing checkout debug.keystore; application and test compilation passed.

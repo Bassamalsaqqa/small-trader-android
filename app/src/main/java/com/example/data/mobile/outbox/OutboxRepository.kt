@@ -288,14 +288,44 @@ class OutboxRepositoryImpl(
     fun convertLegacyPayloads() {
         database.runInTransaction {
             val events = database.outboxDao().allEventsForConversion()
-            events.filterNot { payloadCipher.isEncrypted(it.payloadBytes) }.forEach { payloadCipher.verifyLegacy(it) }
-            payloadCipher.prepare(events.any { payloadCipher.isEncrypted(it.payloadBytes) })
-            events.forEach { event ->
-                if (payloadCipher.isEncrypted(event.payloadBytes)) payloadCipher.decrypt(event)
-                else {
+            if (events.isEmpty()) return@runInTransaction
+
+            val hasEncrypted = events.any { payloadCipher.isEncrypted(it.payloadBytes) }
+
+            // 1. Pre-validation phase: reject any corrupt/future STO envelopes and validate legacy plaintext
+            for (event in events) {
+                val bytes = event.payloadBytes
+                if (payloadCipher.isEncrypted(bytes)) {
+                    // STO/1 envelope
+                } else if (payloadCipher.hasStoEnvelope(bytes)) {
+                    // Unknown or invalid STO envelope (e.g. STO/2+) -> reject immediately
+                    throw OutboxStorageException(OutboxStorageError.CORRUPT)
+                } else {
+                    // Candidate legacy plaintext -> must strictly validate against immutable row metadata
+                    payloadCipher.verifyLegacy(event)
+                }
+            }
+
+            // 2. Cryptographic engine preparation:
+            // If encrypted rows exist, require existing key (fail closed without generating replacement).
+            payloadCipher.prepare(hasEncrypted)
+
+            // 3. Authenticate all existing encrypted rows BEFORE making any persistent updates.
+            // If any encrypted row cannot be decrypted (missing key, invalid tag, corrupt cipher),
+            // this throws and rolls back the transaction before any replacePayloadForConversion.
+            for (event in events) {
+                if (payloadCipher.isEncrypted(event.payloadBytes)) {
+                    payloadCipher.decrypt(event)
+                }
+            }
+
+            // 4. Conversion phase: encrypt and persist each legacy plaintext row
+            for (event in events) {
+                if (!payloadCipher.isEncrypted(event.payloadBytes)) {
                     val encrypted = payloadCipher.encrypt(event)
                     database.outboxDao().replacePayloadForConversion(
-                        event.companyId, event.clientEventId, encrypted.payloadBytes)
+                        event.companyId, event.clientEventId, encrypted.payloadBytes
+                    )
                 }
             }
         }

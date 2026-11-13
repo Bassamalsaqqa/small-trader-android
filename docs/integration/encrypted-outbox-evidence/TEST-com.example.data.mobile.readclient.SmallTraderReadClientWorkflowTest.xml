@@ -1,27 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" tests="21" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:58.687Z" hostname="pasta-hp-worker" time="0.028">
+<testsuite name="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" tests="21" skipped="0" failures="0" errors="0" timestamp="2026-11-13T13:24:26.036Z" hostname="pasta-hp-worker" time="0.034">
   <properties/>
   <testcase name="testUnexpected201And204NotParsedAsSuccess" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.004"/>
-  <testcase name="testNetworkUnknownOnTransportException" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
+  <testcase name="testNetworkUnknownOnTransportException" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.0"/>
   <testcase name="testGetCustomersHonestEmptyResultsWorkflow" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.003"/>
   <testcase name="testAuthLoginMfaRequiredWorkflow" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
   <testcase name="testAuth401ExplicitOutcomeForCallerLockHandling" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
-  <testcase name="testLoginActorEmailMismatchRejected" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
+  <testcase name="testLoginActorEmailMismatchRejected" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.006"/>
   <testcase name="testAuthLogoutWorkflow" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
   <testcase name="testCompanyIdMismatchRejectedOnCustomers" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
-  <testcase name="testLoginActorEmailCaseInsensitiveMatchAccepted" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
+  <testcase name="testLoginActorEmailCaseInsensitiveMatchAccepted" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.0"/>
   <testcase name="testCompanyIdMismatchRejectedOnProducts" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.002"/>
-  <testcase name="testParseFailureOnSchemaViolation" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.0"/>
+  <testcase name="testParseFailureOnSchemaViolation" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
   <testcase name="testCompanyIdMismatchRejectedOnBootstrap" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
-  <testcase name="testHostileTransportExceptionNoSecretLeak" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
-  <testcase name="testConflict409ExplicitOutcomeWithEvidence" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.002"/>
+  <testcase name="testHostileTransportExceptionNoSecretLeak" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.0"/>
+  <testcase name="testConflict409ExplicitOutcomeWithEvidence" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.003"/>
   <testcase name="testForbidden403ExplicitOutcome" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
-  <testcase name="testAuthLoginSuccessWorkflow" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.002"/>
-  <testcase name="testGetProductsWithBoundedPaginationWorkflow" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.0"/>
+  <testcase name="testAuthLoginSuccessWorkflow" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
+  <testcase name="testGetProductsWithBoundedPaginationWorkflow" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
   <testcase name="testAuthChallengeWorkflow" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
   <testcase name="testDispatchedRequestCarriesOriginAndValidatesMethodPath" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
   <testcase name="testGetBootstrapWorkflow" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
-  <testcase name="testMalformedLoginSecretBodyNoSecretLeak" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.0"/>
+  <testcase name="testMalformedLoginSecretBodyNoSecretLeak" classname="com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>
