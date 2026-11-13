@@ -14,6 +14,9 @@ abstract class OutboxDao {
     @Query("SELECT * FROM outbox_events")
     abstract fun allEventsForConversion(): List<OutboxEventEntity>
 
+    @Query("SELECT * FROM outbox_events ORDER BY captured_at ASC LIMIT :limit")
+    abstract fun sampleEventsForHealthProbe(limit: Int): List<OutboxEventEntity>
+
     @Query("UPDATE outbox_events SET payload_bytes = :bytes WHERE company_id = :companyId AND client_event_id = :eventId")
     abstract fun replacePayloadForConversion(companyId: String, eventId: String, bytes: ByteArray): Int
 

@@ -58,3 +58,29 @@ An all-plaintext legacy queue has no cryptographic installation provenance. Expl
 Final local validation: 429 tests across 39 suites: 428 passed, 1 retired pilot skipped, zero failures/errors; lintDebug succeeded ({'Warning': 63}). Python normal and optimized each passed 303 checks. Exact XML counts, lint and logs are in encrypted-outbox-evidence/. APK assembly is blocked by the missing checkout debug.keystore; application and test compilation passed.
 
 Supervisor test-only follow-up: 30 EncryptedOutboxTest cases passed, zero failures/errors/skips. The concurrency test now observes the second thread BLOCKED on the exact production alias monitor, with the first engine as owner, before generation is released. Mixed-key fixtures populate claims/server mappings and auth locks so clearing them is observable. Evidence: encrypted-outbox-evidence/supervisor-test-followup.json. This does not claim a new full-suite/lint run or native-device proof.
+
+## Startup Legacy Upgrade and Recovery Health Gate (PR 21 Review Follow-up)
+
+Resolves GitHub PR 21 review `5895663783`.
+
+### 1. Scope and Architectural Intent
+- Pre-existing Room v1 plaintext records must not be accessed or converted without an explicit, verified recovery process.
+- Bounded startup health inspection (`OutboxHealthInspector`) runs off the main thread (`ioDispatcher`) before session restoration or normal workspace navigation.
+- If the outbox is operational (`HEALTHY` or `NEW_EMPTY`), normal session restoration continues seamlessly.
+- If the outbox requires recovery (`LEGACY_PLAINTEXT`, `MIXED_QUEUE`, `KEY_UNAVAILABLE`, `ENCRYPTED_LOCKED`, `CORRUPT`), the workspace routes to `StaffWorkspacePhase.OUTBOX_RECOVERY_REQUIRED` (`StaffOutboxRecoveryScreen`).
+
+### 2. Critical Trust Boundary: Plaintext Installation Provenance
+- An all-plaintext legacy Room v1 database has **no cryptographic installation provenance**. Mere local staff login, current installation UUID, or a user checkbox is **not proof** of same-installation or owner recovery authority.
+- Conversion remains **strictly closed**:
+  - No invented server recovery grant.
+  - No "Convert" button that blindly blesses copied plaintext.
+  - No fabricated tokens or automatic calls to `convertLegacyPayloads()`.
+- The user is presented with a non-destructive, truthful guidance screen explaining that unsynced records are preserved on device and reviewed operator recovery is required.
+- Safe retry re-inspects storage without key generation or destructive reset.
+
+### 3. Privacy and Operational Honesty
+- **Scope Privacy**: Foreign company identifiers, foreign company names, foreign queue counts, and client event UUIDs are strictly excluded from UI messages and state models.
+- **Bounded Probing**: For large queues, health inspection samples the earliest records (`sampleEventsForHealthProbe(limit = 10)`). It reports whether the check was an honest sample probe (`isSampleProbe = true`) and never claims whole-queue cryptographic integrity from a sample probe.
+- **Zero Key Generation on Inspection**: Empty databases return `NEW_EMPTY` without generating a Keystore key. Encrypted queues with missing or locked keys fail closed without generating replacement keys.
+- **Off-Main Enforcement**: `DefaultOutboxHealthInspector` asserts `Looper.myLooper() != Looper.getMainLooper()` and executes strictly on the configured I/O dispatcher with coroutine cancellation propagation.
+

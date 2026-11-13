@@ -10,6 +10,9 @@ import com.example.data.mobile.readclient.CustomerDirectoryResponse
 import com.example.data.mobile.readclient.EndpointSecurity
 import com.example.data.mobile.readclient.PaginationQuery
 import com.example.data.mobile.readclient.ProductCatalogResponse
+import com.example.data.mobile.outbox.OutboxHealthInspector
+import com.example.data.mobile.outbox.OutboxHealthResult
+import com.example.data.mobile.outbox.OutboxHealthStatus
 import com.example.data.mobile.session.AuthDenialListener
 import com.example.data.mobile.session.CoordinatorResult
 import com.example.data.mobile.session.LockReason
@@ -51,7 +54,8 @@ class StaffWorkspaceViewModel(
     private val authDenialListener: AuthDenialListener? = null,
     initialPhase: StaffWorkspacePhase? = null,
     initialStorageError: String? = null,
-    private val coordinatorFactory: (() -> StaffSessionCoordinator)? = null
+    private val coordinatorFactory: (() -> StaffSessionCoordinator)? = null,
+    private val outboxHealthInspector: OutboxHealthInspector? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -74,6 +78,7 @@ class StaffWorkspaceViewModel(
     private var authJob: Job? = null
     private var productsJob: Job? = null
     private var customersJob: Job? = null
+    private var outboxHealthJob: Job? = null
 
     // Main-thread UI intent sequence to invalidate stale completion handlers
     private var activeIntentSeq: Long = 0L
@@ -82,7 +87,96 @@ class StaffWorkspaceViewModel(
 
     init {
         if (coordinator != null && configuredOrigin.isNotBlank() && _uiState.value.phase == StaffWorkspacePhase.INITIALIZING) {
+            if (outboxHealthInspector != null) {
+                checkOutboxHealthAndRestore()
+            } else {
+                restoreSession()
+            }
+        }
+    }
+
+    /**
+     * Inspects local outbox health off the main thread before permitting normal workspace session restoration.
+     */
+    fun checkOutboxHealthAndRestore() {
+        val inspector = outboxHealthInspector ?: run {
             restoreSession()
+            return
+        }
+        val intentId = ++activeIntentSeq
+        outboxHealthJob?.cancel()
+        outboxHealthJob = viewModelScope.launch {
+            val health = try {
+                inspector.inspectHealth()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                OutboxHealthResult(
+                    status = OutboxHealthStatus.CORRUPT,
+                    totalEvents = 0,
+                    probedCount = 0,
+                    isSampleProbe = false,
+                    messageEn = "Failed to inspect outbox health.",
+                    messageAr = "تعذر فحص حالة طابور الترحيل.",
+                    canRetry = true
+                )
+            }
+            if (intentId != activeIntentSeq) return@launch
+
+            if (health.isOperational) {
+                _uiState.update { it.copy(outboxHealthResult = health, isOutboxRetrying = false) }
+                restoreSession()
+            } else {
+                _uiState.update {
+                    it.copy(
+                        phase = StaffWorkspacePhase.OUTBOX_RECOVERY_REQUIRED,
+                        outboxHealthResult = health,
+                        isOutboxRetrying = false
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Retries outbox health inspection off the main thread.
+     * Never regenerates key or modifies/destroys outbox records.
+     */
+    fun retryOutboxHealth() {
+        val inspector = outboxHealthInspector ?: return
+        val intentId = ++activeIntentSeq
+        _uiState.update { it.copy(isOutboxRetrying = true) }
+        outboxHealthJob?.cancel()
+        outboxHealthJob = viewModelScope.launch {
+            val health = try {
+                inspector.inspectHealth()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                OutboxHealthResult(
+                    status = OutboxHealthStatus.CORRUPT,
+                    totalEvents = 0,
+                    probedCount = 0,
+                    isSampleProbe = false,
+                    messageEn = "Failed to inspect outbox health.",
+                    messageAr = "تعذر فحص حالة طابور الترحيل.",
+                    canRetry = true
+                )
+            }
+            if (intentId != activeIntentSeq) return@launch
+
+            if (health.isOperational) {
+                _uiState.update { it.copy(outboxHealthResult = health, isOutboxRetrying = false) }
+                restoreSession()
+            } else {
+                _uiState.update {
+                    it.copy(
+                        phase = StaffWorkspacePhase.OUTBOX_RECOVERY_REQUIRED,
+                        outboxHealthResult = health,
+                        isOutboxRetrying = false
+                    )
+                }
+            }
         }
     }
 
@@ -1379,11 +1473,18 @@ class StaffWorkspaceViewModel(
         private val configuredOrigin: String,
         private val allowHttpLoopback: Boolean = false,
         private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-        private val authDenialListener: AuthDenialListener? = null
+        private val authDenialListener: AuthDenialListener? = null,
+        private val outboxHealthInspector: OutboxHealthInspector? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             val effectiveLoopback = BuildConfig.DEBUG && allowHttpLoopback
+            val effectiveInspector = outboxHealthInspector ?: try {
+                val db = com.example.data.mobile.outbox.OutboxDatabase.buildDatabase(context.applicationContext)
+                com.example.data.mobile.outbox.DefaultOutboxHealthInspector(db, ioDispatcher = ioDispatcher)
+            } catch (_: Exception) {
+                null
+            }
 
             // 1. Validate configuredOrigin safely before attempting composition
             if (configuredOrigin.isBlank()) {
@@ -1393,7 +1494,8 @@ class StaffWorkspaceViewModel(
                     allowHttpLoopback = effectiveLoopback,
                     ioDispatcher = ioDispatcher,
                     authDenialListener = authDenialListener,
-                    initialPhase = StaffWorkspacePhase.UNCONFIGURED
+                    initialPhase = StaffWorkspacePhase.UNCONFIGURED,
+                    outboxHealthInspector = effectiveInspector
                 ) as T
             }
 
@@ -1411,7 +1513,8 @@ class StaffWorkspaceViewModel(
                     allowHttpLoopback = effectiveLoopback,
                     ioDispatcher = ioDispatcher,
                     authDenialListener = authDenialListener,
-                    initialPhase = StaffWorkspacePhase.UNCONFIGURED
+                    initialPhase = StaffWorkspacePhase.UNCONFIGURED,
+                    outboxHealthInspector = effectiveInspector
                 ) as T
             }
 
@@ -1439,7 +1542,8 @@ class StaffWorkspaceViewModel(
                     coordinatorFactory = {
                         StaffSessionCoordinator.create(context.applicationContext, configuredOrigin,
                             effectiveLoopback, authDenialListener)
-                    }
+                    },
+                    outboxHealthInspector = effectiveInspector
                 ) as T
             }
 
@@ -1448,7 +1552,8 @@ class StaffWorkspaceViewModel(
                 configuredOrigin = configuredOrigin,
                 allowHttpLoopback = effectiveLoopback,
                 ioDispatcher = ioDispatcher,
-                authDenialListener = authDenialListener
+                authDenialListener = authDenialListener,
+                outboxHealthInspector = effectiveInspector
             ) as T
         }
     }

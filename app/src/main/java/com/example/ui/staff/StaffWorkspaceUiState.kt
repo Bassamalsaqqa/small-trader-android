@@ -1,5 +1,6 @@
 package com.example.ui.staff
 
+import com.example.data.mobile.outbox.OutboxHealthResult
 import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.ProductCatalogItem
 import com.example.model.AppLanguage
@@ -44,6 +45,7 @@ enum class MfaMode {
 enum class StaffWorkspacePhase {
     UNCONFIGURED,
     INITIALIZING,
+    OUTBOX_RECOVERY_REQUIRED,
     SIGN_IN,
     MFA_REQUIRED,
     COMPANY_SELECTION,
@@ -81,6 +83,8 @@ data class StaffWorkspaceUiState(
     val lockedReason: String? = null,
     val storageErrorMessage: String? = null,
     val offlineErrorMessage: String? = null,
+    val outboxHealthResult: OutboxHealthResult? = null,
+    val isOutboxRetrying: Boolean = false,
 
     // Product catalog state
     val products: List<ProductCatalogItem> = emptyList(),
