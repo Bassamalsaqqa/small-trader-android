@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.session.StaffSessionCoordinatorTest" tests="51" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:44:00.529Z" hostname="pasta-hp-worker" time="0.268">
+  <properties/>
+  <testcase name="testDiagnosticToStringRedactsSecretsAcrossAllStatesAndResults" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.013"/>
+  <testcase name="testGenerationBarrierLateLoginAfterLogoutDiscardsTokenAndPreventsResurrection" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.007"/>
+  <testcase name="testConcurrentRestoreSessionInvalidatedByNewGeneration" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.007"/>
+  <testcase name="testSwitchCompanyAdvancesGenerationAndSavesUpdatedSession" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.005"/>
+  <testcase name="testRestoreSessionScopeMismatchOnDeviceUuidFailsClosed" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.005"/>
+  <testcase name="testFatalJvmErrorIsPreservedAndRethrown" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.004"/>
+  <testcase name="testCancellationOnRemoteLogoutLeavesLocalDiskAbsent" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.005"/>
+  <testcase name="testRestoreSessionRevalidatesWithServerBeforeGrantingReadReadiness" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.007"/>
+  <testcase name="standaloneIdentityFailureDoesNotMutateLifecycleState" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.003"/>
+  <testcase name="testStaleCompareAndPersistVsLogoutOrNewLogin" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.005"/>
+  <testcase name="testMultipleCompanySelectionWorkflow" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.017"/>
+  <testcase name="testGetProductsOnHttp403LocksLifecycleWithMembershipDeniedWithoutRetry" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.006"/>
+  <testcase name="testLogoutWithRemoteTimeoutReportsRemoteRevocationUnknownWithoutClaimingServerLogout" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.003"/>
+  <testcase name="testLoginRejectsMutualExclusionOfMfaAndRecoveryCode" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.002"/>
+  <testcase name="testLogoutPreservesStableInstallationIdentity" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.003"/>
+  <testcase name="restorePreservesOriginalCiphertextAndCreationTime" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.005"/>
+  <testcase name="testBootstrapActorUlidMismatchFailsClosedWithLockedScopeMismatch" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.003"/>
+  <testcase name="testCorruptInstallationIdentityFailsClosedWithStorageFailed" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.004"/>
+  <testcase name="testGenerationBarrierStaleReadResultAfterLogoutIsDiscarded" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.007"/>
+  <testcase name="testGenerationBarrierConcurrentCompanySwitchInvalidatesOlderInFlightBootstrap" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.007"/>
+  <testcase name="testGetProductsOnHttp401LocksLifecycleAndEmitsAuthDenialHook" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.006"/>
+  <testcase name="testRestoreSessionWithServer401LocksLifecycleAndEmitsAuthDenialHook" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.007"/>
+  <testcase name="testStale401HookAfterCompanySwitchDoesNotEmitDenialForNewScope" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.008"/>
+  <testcase name="testLogoutImmediatelyDeniesLocalReadsRevokesRemoteTokenAndClearsCredentials" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.005"/>
+  <testcase name="testProductionCompositionFactoryCreatesCoordinator" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.03"/>
+  <testcase name="testRestoreExpiredSessionDeniesReadReadinessAndSetsLoggedOut" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.002"/>
+  <testcase name="testKeyStoreUnavailableSurfacesTypedLockedKeyUnavailable" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.002"/>
+  <testcase name="testBootstrapCompanyMismatchFailsClosedWithLockedScopeMismatch" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.003"/>
+  <testcase name="testKeyStoreLockedSurfacesTypedLockedKeyLocked" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.003"/>
+  <testcase name="testIdentityFailureHonestReportingZeroRandomUuid" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.002"/>
+  <testcase name="testGetProductsAndCustomersSucceedInReadReady" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.004"/>
+  <testcase name="transientSingleCompanyBootstrapRetainsTokenForRevocation" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.007"/>
+  <testcase name="testLoginChallengeAndFreshMfaSequence" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.003"/>
+  <testcase name="testDelayedRemoteLogoutDoesNotClobberNewLogin" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.005"/>
+  <testcase name="localPurgeCancellationKeepsCoordinatorLocked" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.004"/>
+  <testcase name="testHostileStorageExceptionsDoNotLeakSecretsInDiagnostics" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.002"/>
+  <testcase name="testLogoutWithServer401ReportsAlreadyRevokedOrExpired" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.004"/>
+  <testcase name="testRestoreSessionWithTransientNetworkErrorNeverFallsBackToDemo" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.003"/>
+  <testcase name="identityCancellationDuringLogoutHappensAfterCredentialPurge" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.003"/>
+  <testcase name="testGetProductsWhenSessionExpiredDeniesReadAndSetsLoggedOut" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.002"/>
+  <testcase name="testLogoutStorageClearFailureLeavesStateLockedAndNeverReportsSuccess" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.006"/>
+  <testcase name="testRestoreSessionWithServer403LocksLifecycleWithMembershipDenied" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.002"/>
+  <testcase name="denialListenerRunsWithoutCoordinatorMonitorAndOrdinaryFailuresAreSanitized" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.005"/>
+  <testcase name="transientRestoreBootstrapRetainsTokenForRevocation" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.002"/>
+  <testcase name="testLoginCredential401DoesNotEmitQueueHook" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.002"/>
+  <testcase name="testHappyLoginChallengeAndAutoBootstrapSingleCompany" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.003"/>
+  <testcase name="testTokenExpiryAfterBootstrapAndQueryCompletion" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.005"/>
+  <testcase name="testCancellationExceptionIsPreservedAndRethrown" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.002"/>
+  <testcase name="testChallengeRacesDelayedConcurrentAndExpiredTTL" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.003"/>
+  <testcase name="testRequestChallengeWhileReadReadyReturnsErrorWithoutClobbering" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.002"/>
+  <testcase name="testGetProductsWhenNotReadReadyReturnsError" classname="com.example.data.mobile.session.StaffSessionCoordinatorTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.ui.staff.StaffWorkspaceComposeTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:44:02.307Z" hostname="pasta-hp-worker" time="4.278">
+  <properties/>
+  <testcase name="companySelectScreen_rendersCompanies_andClicksItem" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.178"/>
+  <testcase name="statusScreens_renderTruthfulState" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.143"/>
+  <testcase name="mfaScreen_rendersMutuallyExclusiveChips_andSubmits" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="2.757"/>
+  <testcase name="signInScreen_rendersInputs_andSubmitsCredentials" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.505"/>
+  <testcase name="companySelectScreen_showsCancelWhenActiveCompanyExists_andLogoutOtherwise" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.085"/>
+  <testcase name="workspaceScreen_unassignedTaxRate_rendersTruthfulCopy" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.276"/>
+  <testcase name="workspaceScreen_rendersProductsTab_andHeaders" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.191"/>
+  <testcase name="workspaceScreen_rendersCustomersTab" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.138"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

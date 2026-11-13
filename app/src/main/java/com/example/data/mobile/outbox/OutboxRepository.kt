@@ -273,8 +273,33 @@ interface OutboxRepository {
 
 class OutboxRepositoryImpl(
     private val database: OutboxDatabase,
-    private val clock: () -> Long = { System.currentTimeMillis() }
+    private val clock: () -> Long = { System.currentTimeMillis() },
+    private val payloadCipher: OutboxPayloadCipher = OutboxPayloadCipher()
 ) : OutboxRepository {
+
+    private fun decryptRecord(record: OutboxRecord) =
+        OutboxRecord(payloadCipher.decrypt(record.event), record.deliveryState)
+
+    /**
+     * Explicit, atomic logical conversion. Requires retained plaintext bytes and a usable key.
+     * SQLite rollback preserves all rows and locks on failure; old pages/WAL may retain plaintext.
+     * This is NOT secure erasure. No automatic startup conversion or fallback.
+     */
+    fun convertLegacyPayloads() {
+        database.runInTransaction {
+            val events = database.outboxDao().allEventsForConversion()
+            events.filterNot { payloadCipher.isEncrypted(it.payloadBytes) }.forEach { payloadCipher.verifyLegacy(it) }
+            payloadCipher.prepare(events.any { payloadCipher.isEncrypted(it.payloadBytes) })
+            events.forEach { event ->
+                if (payloadCipher.isEncrypted(event.payloadBytes)) payloadCipher.decrypt(event)
+                else {
+                    val encrypted = payloadCipher.encrypt(event)
+                    database.outboxDao().replacePayloadForConversion(
+                        event.companyId, event.clientEventId, encrypted.payloadBytes)
+                }
+            }
+        }
+    }
 
     override fun captureSale(
         event: OfflineSaleEvent,
@@ -558,7 +583,7 @@ class OutboxRepositoryImpl(
     ): CaptureResult {
         val now = clock()
         return database.runInTransaction<CaptureResult> {
-            val existingEvent = database.outboxDao().getEvent(companyIdStr, clientEventIdStr)
+            var existingEvent = database.outboxDao().getEvent(companyIdStr, clientEventIdStr)
             if (existingEvent != null) {
                 // Check scope isolation: actor and device MUST match!
                 if (existingEvent.actorId != actorIdStr || existingEvent.deviceId != deviceIdStr) {
@@ -571,6 +596,7 @@ class OutboxRepositoryImpl(
                     )
                 }
 
+                existingEvent = payloadCipher.decrypt(existingEvent)
                 val existingState = database.outboxDao().getDeliveryState(companyIdStr, clientEventIdStr)
                     ?: throw IllegalStateException("Missing delivery state for existing event: $clientEventIdStr")
 
@@ -644,7 +670,8 @@ class OutboxRepositoryImpl(
                     createdAt = now,
                     updatedAt = now
                 )
-                database.outboxDao().insertEvent(eventEntity)
+                payloadCipher.prepare(database.outboxDao().eventCount() > 0)
+                database.outboxDao().insertEvent(payloadCipher.encrypt(eventEntity))
                 database.outboxDao().insertDeliveryState(stateEntity)
                 CaptureResult.Created(OutboxRecord(eventEntity, stateEntity))
             }
@@ -700,7 +727,7 @@ class OutboxRepositoryImpl(
                 if (updated == 1) {
                     val record = database.outboxDao().getRecord(companyId.value, actorId.value, deviceId.value, candidateId)
                     if (record != null) {
-                        claimedRecords.add(record)
+                        claimedRecords.add(decryptRecord(record))
                     }
                 }
             }
@@ -839,6 +866,7 @@ class OutboxRepositoryImpl(
         return database.runInTransaction<Boolean> {
             val event = database.outboxDao().getEvent(companyId.value, clientEventId.value)
                 ?.takeIf { it.actorId == actorId.value && it.deviceId == deviceId.value }
+                ?.let { payloadCipher.decrypt(it) }
                 ?: throw InvalidAcknowledgementException("No event found for requested scope")
 
             if (event.companyId != companyId.value) {
@@ -939,6 +967,7 @@ class OutboxRepositoryImpl(
         return database.runInTransaction<Boolean> {
             val event = database.outboxDao().getEvent(companyId.value, clientEventId.value)
                 ?.takeIf { it.actorId == actorId.value && it.deviceId == deviceId.value }
+                ?.let { payloadCipher.decrypt(it) }
                 ?: throw InvalidAcknowledgementException("No event found for requested scope")
 
             if (event.companyId != companyId.value) {
@@ -1062,7 +1091,7 @@ class OutboxRepositoryImpl(
             actorId = actorId.value,
             deviceId = deviceId.value,
             clientEventId = clientEventId.value
-        )
+        )?.let { decryptRecord(it) }
     }
 
     override fun getRecordsByScope(
@@ -1074,7 +1103,7 @@ class OutboxRepositoryImpl(
             companyId = companyId.value,
             actorId = actorId.value,
             deviceId = deviceId.value
-        )
+        ).map { decryptRecord(it) }
     }
 
     override fun getRecordsByStatus(
@@ -1088,6 +1117,6 @@ class OutboxRepositoryImpl(
             actorId = actorId.value,
             deviceId = deviceId.value,
             status = status.wireValue
-        )
+        ).map { decryptRecord(it) }
     }
 }

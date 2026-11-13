@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" tests="19" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:44:00.090Z" hostname="pasta-hp-worker" time="0.046">
+  <properties/>
+  <testcase name="testTlsErrorVsNetworkIoClassification" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.001"/>
+  <testcase name="testMissingIndependentShaWhenRequiredThrows" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.011"/>
+  <testcase name="testSimulateDenialEvaluationNetworkVsExactStatus" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.0"/>
+  <testcase name="independentShaIsRequiredWithoutOptInParameter" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testExpiredTtlFailsClosed" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.008"/>
+  <testcase name="testUnknownKeysRejectedInHandoff" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.0"/>
+  <testcase name="testInlineStaffPasswordRejected" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.001"/>
+  <testcase name="testInvalidMethodPreflightIsNotTlsError" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.0"/>
+  <testcase name="testBoundedStreamingReaderEnforcesMaxSize" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testInsecureUrlOriginRejections" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.0"/>
+  <testcase name="scalarManifestCannotBypassPrimaryRevisionPin" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testDualManifestTamperedPinFailsClosed" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testIndependentBackendShaMismatchThrows" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testValidHandoffWithNestedCredentialsAndDualManifest" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testMissingManifestDigestThrows" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.001"/>
+  <testcase name="testFinancialFlagsTrueFailsClosed" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testEvidenceSanitizationRemovesEmailsAndPaths" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.003"/>
+  <testcase name="testToStringRedactsSecretsAndPaths" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testMobileV2TrueFailsClosed" classname="com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

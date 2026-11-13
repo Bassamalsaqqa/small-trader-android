@@ -1,0 +1,208 @@
+======================================================================
+Small Trader Mobile V1 Contract Validation Suite (Revision 3 Draft)
+======================================================================
+
+[Step 1] Validating JSON Schemas with Draft 2020-12...
+  OK: archived-v1-bootstrap-response.json (Draft 2020-12 verified)
+  OK: archived-v1-offline-sale-intake-request.json (Draft 2020-12 verified)
+  OK: archived-v1-sale-preview-request.json (Draft 2020-12 verified)
+  OK: archived-v1-sale-preview-response.json (Draft 2020-12 verified)
+  OK: auth-challenge-request.json (Draft 2020-12 verified)
+  OK: auth-challenge-response.json (Draft 2020-12 verified)
+  OK: auth-login-request.json (Draft 2020-12 verified)
+  OK: auth-login-response.json (Draft 2020-12 verified)
+  OK: auth-logout-request.json (Draft 2020-12 verified)
+  OK: auth-logout-response.json (Draft 2020-12 verified)
+  OK: bootstrap-response.json (Draft 2020-12 verified)
+  OK: customer-directory-response.json (Draft 2020-12 verified)
+  OK: device-revoke-request.json (Draft 2020-12 verified)
+  OK: device-revoke-response.json (Draft 2020-12 verified)
+  OK: error-response.json (Draft 2020-12 verified)
+  OK: offline-sale-intake-request.json (Draft 2020-12 verified)
+  OK: offline-sale-intake-response.json (Draft 2020-12 verified)
+  OK: online-sale-intent-profile.json (Draft 2020-12 verified)
+  OK: product-catalog-response.json (Draft 2020-12 verified)
+  OK: sale-commit-request.json (Draft 2020-12 verified)
+  OK: sale-commit-response.json (Draft 2020-12 verified)
+  OK: sale-event-status-response.json (Draft 2020-12 verified)
+  OK: sale-preview-request.json (Draft 2020-12 verified)
+  OK: sale-preview-response.json (Draft 2020-12 verified)
+  Total schemas validated: 24
+
+[Step 2] Validating OpenAPI 3.1 Specification...
+  OK: OpenAPI 3.1 meta-schema validation passed
+  OK: Endpoint semantically verified: /api/mobile/v1/auth/challenge
+  OK: Endpoint semantically verified: /api/mobile/v1/auth/login
+  OK: Endpoint semantically verified: /api/mobile/v1/auth/logout
+  OK: Endpoint semantically verified: /api/mobile/v1/devices/{deviceId}/revoke
+  OK: Endpoint semantically verified: /api/mobile/v1/companies/{companyId}/bootstrap
+  OK: Endpoint semantically verified: /api/mobile/v1/companies/{companyId}/products
+  OK: Endpoint semantically verified: /api/mobile/v1/companies/{companyId}/customers
+  OK: Endpoint semantically verified: /api/mobile/v1/companies/{companyId}/sales/preview
+  OK: Endpoint semantically verified: /api/mobile/v1/companies/{companyId}/sales/commit
+  OK: Endpoint semantically verified: /api/mobile/v1/companies/{companyId}/offline-events
+  OK: Endpoint semantically verified: /api/mobile/v1/companies/{companyId}/offline-events/{clientEventId}/status
+  OK: Endpoint semantically verified: /api/mobile/v2/companies/{companyId}/bootstrap
+  OK: Endpoint semantically verified: /api/mobile/v2/companies/{companyId}/sales/preview
+  OK: Endpoint semantically verified: /api/mobile/v2/companies/{companyId}/sales/commit
+  OK: Endpoint semantically verified: /api/mobile/v2/companies/{companyId}/offline-events
+  OK: Endpoint semantically verified: /api/mobile/v2/companies/{companyId}/offline-events/{clientEventId}/status
+
+[Step 3] Validating Golden Fixtures...
+  OK: golden-auth-challenge.json [request] conforms to auth-challenge-request.json
+  OK: golden-auth-challenge.json [response] conforms to auth-challenge-response.json
+  OK: golden-auth-login.json [request] conforms to auth-login-request.json
+  OK: golden-auth-login.json [response] conforms to auth-login-response.json
+  OK: golden-auth-logout.json [request] conforms to auth-logout-request.json
+  OK: golden-auth-logout.json [response] conforms to auth-logout-response.json
+  OK: golden-device-revoke.json [request] conforms to device-revoke-request.json
+  OK: golden-device-revoke.json [response] conforms to device-revoke-response.json
+  OK: golden-bootstrap.json [root] conforms to archived-v1-bootstrap-response.json
+  OK: golden-product-catalog.json [root] conforms to product-catalog-response.json
+  OK: golden-customer-directory.json [root] conforms to customer-directory-response.json
+  OK: golden-sale-preview.json [request] conforms to archived-v1-sale-preview-request.json
+  OK: golden-sale-preview.json [response] conforms to archived-v1-sale-preview-response.json
+  OK: golden-sale-commit.json [request] conforms to sale-commit-request.json
+  OK: golden-sale-commit.json [response] conforms to sale-commit-response.json
+  OK: golden-offline-sale-intake.json [request] conforms to archived-v1-offline-sale-intake-request.json
+  OK: golden-offline-sale-intake.json [response] conforms to offline-sale-intake-response.json
+  OK: golden-sale-event-status.json [root] conforms to sale-event-status-response.json
+  OK: golden-bootstrap-v2.json [root] conforms to bootstrap-response.json
+  OK: golden-offline-sale-intake-v2.json [request] conforms to offline-sale-intake-request.json
+  OK: golden-offline-sale-intake-v2.json [response] conforms to offline-sale-intake-response.json
+  OK: golden-sale-preview-v2.json [request] conforms to sale-preview-request.json
+  OK: golden-sale-preview-v2.json [response] conforms to sale-preview-response.json
+  OK: golden-online-sale-intent-profile.json [intent_profile] conforms to online-sale-intent-profile.json
+  OK: Historical v1 offline intake golden matches payload_digest: sha256:d442ce49a7609a9a42bb5165990d481d1c7c563cb8030403487099a9919728d9
+  OK: Event v2 offline intake golden matches payload_digest: sha256:18f0403bbda6e05eab2805eb20c9c9f9e22d86fb922eda1482db85d24dba30a3
+  OK: Online sale preview v2 intent profile verified with deterministic digest: sha256:93b9aa677275388defe694390ab756d4b08f122087ec084b8dbd8b421ffc45fd
+  OK: Sample opaque preview_token placeholder bound to canonical digest verified
+
+[Step 4] Validating Golden Canonical JSON and SHA-256 Digest Vectors...
+  OK: Vector 'primitive_sorting' verified: sha256:e81412a748b809981b56c60308332c03ce554771f754178efccce2081209f131
+  OK: Vector 'currency_total' verified: sha256:3ed9a38a923c28c5152850bdc48db9ee942a2b634220fe5d4ee1370498aa7a3c
+  OK: Vector 'arabic_fractions' verified: sha256:0c96a975675ae6c6b393837e4df5f01a7221abffbac9d12287019a4b552de487
+  OK: Vector 'utf16_surrogate_key_ordering' verified: sha256:0f6e2a5ec50588eebe12034a62dba2dea312e7419a3b4b35b07642405cc2fb06
+  OK: Vector 'control_char_escaping' verified: sha256:0468796dc39483b190fca87ef8328eec7fea550efcdd53ac9aaaf117fd041244
+
+[Step 5] Validating Regression Fixtures (Contract Schema & Policy Parity)...
+  OK: Altered payload conflict fixture verified (digest mismatch -> 409 Conflict schema)
+  OK: Decimal exact arithmetic regression verified (invoking genuine SalesLineCalculator helper)
+  OK: Lost-ACK replay fixture verified (identical digest -> canonical outcome schema)
+  OK: Tenant mismatch fixture verified (cross-tenant access -> 403 error schema)
+  OK: Offline staff revocation verified (revoked token -> 401 error schema, queue locked)
+  OK: Legacy v1 unsupported intake verified (event_version 1 -> 409 Conflict schema, local CONFLICT without byte mutation)
+
+[Step 6] Running Meaningful Negative & Contract Validation Tests...
+  OK: Negative 1 passed (unresolvable $ref properly rejected)
+  OK: Negative 2 passed (undeclared path parameter caught)
+  OK: Negative 3 passed (undefined security scheme caught)
+  OK: Negative 4 passed (negative quantity rejected by schema)
+  OK: Negative 5 passed (negative unit price rejected by schema)
+  OK: Negative 6 passed (float unit price rejected by schema type constraint)
+  OK: Negative 7 passed (additional unauthorized property rejected)
+  OK: Negative 8 passed [Contract Shape / Pre-Ingestion Invariant] (envelope vs event client_event_id mismatch caught by verifier)
+  OK: Negative 9 passed [Contract Shape / Pre-Ingestion Invariant] (tampered payload digest caught by verifier)
+  OK: Negative 10a passed (canonical serializer rejected float)
+  OK: Negative 10b passed (duplicate JSON key rejected)
+  OK: Negative 11 passed (401 error response shape conforms to error-response.json)
+  OK: Check 12a passed (strict Crockford ULID accepted for server entity public IDs)
+  OK: Check 12b passed (UUID rejected for server company_id by ULID schema constraint)
+  OK: Check 12c passed (malformed Crockford ULID character strictly rejected)
+  OK: Check 13 passed (Tax percentage > 100 strictly rejected by schema)
+  OK: Check 14a passed (six-place trailing zero quantity '0.100000' accepted)
+  OK: Check 14b passed (all-zero quantity '0.000000' rejected by positive quantity schema)
+  OK: Check 14c passed (over-scale quantity > 6 decimals rejected)
+  OK: Check 15 passed (product packaging unit id required on line items)
+  OK: Check 16 passed [Contract Shape / Pre-Ingestion Invariant] (preview token digest binding mismatch caught by verifier)
+  OK: Check 17 passed (mfa_code and recovery_code mutually exclusive constraint enforced)
+  OK: Check 18a passed (ExplicitNoTax null+0+false accepted)
+  OK: Check 18b passed (null tax_rate_id with non-zero tax_rate rejected)
+  OK: Check 18c passed (null tax_rate_id with tax_inclusive true rejected)
+  OK: Check 19a passed (valid Crockford ULID accepted for tax_rate_id)
+  OK: Check 19b passed (tax_rate_id Crockford character I strictly rejected)
+  OK: Check 19c passed (UUID rejected for tax_rate_id by ULID schema constraint)
+  OK: Check 20a passed (tax_inclusive boolean accepted)
+  OK: Check 20b passed (non-boolean tax_inclusive string strictly rejected)
+  OK: Check 21a passed (conversion_to_base positive decimal accepted)
+  OK: Check 21b passed (zero conversion_to_base rejected by positive regex)
+  OK: Check 21c passed (negative conversion_to_base rejected)
+  OK: Check 21d passed (float conversion_to_base rejected)
+  OK: Check 21e passed (overscale conversion_to_base > 6 decimals rejected)
+  OK: Check 22a passed (event_version 1 strictly rejected by v2 intake schema)
+  OK: Check 22b passed (event_version 2 accepted by v2 intake schema)
+  OK: Check 23 passed [Contract Shape / Pre-Ingestion Invariant] (tampered v2 payload digest caught by verifier)
+  OK: Check 24a passed (missing base_currency_minor_units rejected)
+  OK: Check 24b passed (base_currency_minor_units > 6 rejected)
+  OK: Check 24c passed (base_currency_minor_units 3 JOD accepted)
+  OK: Check 25 passed [Contract Shape / Pre-Ingestion Invariant] (canonical tax arithmetic and payment balance verified)
+  OK: Check 26a passed (actor tampering caught by intent profile verifier)
+  OK: Check 26b passed (company tampering caught by intent profile verifier)
+  OK: Check 26c passed (device tampering caught by intent profile verifier)
+  OK: Check 26d passed (event tampering caught by intent profile verifier)
+  OK: Check 26e passed (tax identity tampering caught by intent profile verifier)
+  OK: Check 26f passed (tax inclusive mode tampering caught by intent profile verifier)
+  OK: Check 26g passed (conversion to base tampering caught by intent profile verifier)
+  OK: Check 26h passed (decimal lexeme tampering caught by intent profile verifier)
+  OK: Check 26i passed (line order tampering caught by intent profile verifier)
+  OK: Check 26j passed (payment tampering caught by intent profile verifier)
+  OK: Check 26k passed (currency minor units tampering caught by intent profile verifier)
+  OK: Check 27a passed (real filesystem mutation test: untracked file caught and cleanly restored)
+  OK: Check 27b passed (extra manifest entry detected and rejected)
+  OK: Check 27c passed (duplicate manifest entry detected and rejected)
+  OK: Check 27d passed (malformed manifest entry detected and rejected)
+  OK: Check 27e passed (checksum mismatch detected and rejected)
+  OK: Check 28 passed (all historical compatibility goldens match parent PR4 exact bytes)
+  OK: Check 29a passed (unpaid mode with omitted cash fields accepted, normalized null, digest verified, tampering rejected)
+  OK: Check 29b passed (unpaid mode with explicit null cash fields accepted, digest verified, tampering rejected)
+  OK: Check 29c passed (partial mode with valid cash fields accepted, digest verified, tampering rejected)
+  OK: Check 29d passed (full mode with exact grand total accepted, golden digest verified, tampering rejected)
+  OK: Check 30a passed (missing tax_rate_id throws IntentProfileValidationError, never implicit NoTax)
+  OK: Check 30b passed (raw request missing tax_rate_id rejected by sale-preview-request.json)
+  OK: Check 31a passed (unknown root field rejected before projection)
+  OK: Check 31b passed (unknown line field rejected before projection)
+  OK: Check 31c passed (unknown payment field rejected before projection)
+  OK: Check 32a passed (context currency_minor_units boolean True rejected)
+  OK: Check 32b passed (context currency_minor_units boolean False rejected)
+  OK: Check 32c passed (context with extra unknown key rejected)
+  OK: Check 32d passed (context missing required key rejected)
+  OK: Check 32e passed (non-ULID UUID actor_id in context rejected)
+  OK: Check 33a passed (unpaid mode with positive amount rejected)
+  OK: Check 33b passed (partial mode with zero amount rejected)
+  OK: Check 33c passed (partial mode with amount >= grand total rejected)
+  OK: Check 33d passed (full mode with amount != grand total rejected: under and overpayment)
+  OK: Check 33e passed (negative payment amount rejected)
+  OK: Check 33f passed (malformed decimal string lexeme rejected)
+  OK: Check 33g passed (offline payment tender balance mismatch rejected)
+  OK: Check 33h passed (offline payment settled != grand total rejected)
+  OK: Check 33i passed (zero/negative grand total rejected for full, unpaid, and offline)
+  OK: Check 33j passed (invalid currency minor units boolean/out-of-range/missing strictly rejected)
+  OK: Check 33k passed (minimum positive allowed at currency minor unit scale)
+  OK: Check 33l passed (overprecision beyond currency minor units rejected without rounding)
+  OK: Check 33m passed (trailing zeros representing integer currency minor units accepted)
+  OK: Check 33n passed (malformed/NaN/Infinity/float/exponent lexemes fail closed with return False)
+  OK: Check 34a passed (full mode with omitted payment_method rejected)
+  OK: Check 34b passed (full mode with null payment_method rejected)
+  OK: Check 34c passed (full mode with omitted cash_account_id rejected)
+  OK: Check 34d passed (full mode with null cash_account_id rejected)
+  OK: Check 34e passed (partial mode with null cash_account_id rejected)
+  OK: Check 34f passed (unpaid mode with non-null payment method rejected)
+  OK: Check 35a passed (offline cash capture adapted to net retained settled amount, tender 60/total 50/change 10 -> receipt 50, audit preserved separately)
+  OK: Check 35b passed (unpaid wire profile maps exactly to {'mode': 'unpaid'} without resolver/date, wire profile/digest unaltered, line tax_rate_id: null preserved)
+  OK: Check 35c passed (partial base currency cash maps wire amount to received_amount and invoice_amount allocation, FX 1, resolved internal int account, reviewed date)
+  OK: Check 35d passed (online full first-release policy enforces exact total, resolved internal int account, over/under payment strictly rejected)
+  OK: Check 35e passed (missing cash account resolver or payment date strictly fails closed with no invented defaults)
+  OK: Check 35f passed (foreign company cash account resolver fails closed without secrets leak)
+  OK: 89 revision 2 positive/negative fixture validations
+  OK: 31 revision 3 positive/negative fixture validations
+
+  [Contract Isolation Notice] These validation checks verify contract schemas, OpenAPI invariants,
+  exact decimal arithmetic, and JCS digests. Database row locks, tenant middlewares, and ledger
+  postings are authoritative in Laravel account PHPUnit suites.
+
+[Step 7] Verifying Reproducible SHA-256 Manifest...
+  OK: All 50 contract files match manifest.sha256 exactly
+
+======================================================================
+SUCCESS: All 303 contract, schema, fixture, regression, and negative tests passed!
+======================================================================

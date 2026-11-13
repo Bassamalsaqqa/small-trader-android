@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.session.SecureStaffSessionStoreTest" tests="37" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:44:00.171Z" hostname="pasta-hp-worker" time="0.341">
+  <properties/>
+  <testcase name="finding 1 - RFC 3339 strictly rejects invalid calendar, offset, and trailing newline" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.008"/>
+  <testcase name="finding 5 - rename failure fails closed and preserves prior record without truncation" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.01"/>
+  <testcase name="tamper IV nonce in envelope fails closed with Corrupt and preserves file" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.005"/>
+  <testcase name="atomic write failure strictly preserves previous valid record" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.003"/>
+  <testcase name="read preserves cancellation and stored ciphertext" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.003"/>
+  <testcase name="in flight save completes before waiting logout without resurrection" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.155"/>
+  <testcase name="key permanently invalidated fails closed with Locked and preserves file" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.002"/>
+  <testcase name="scope mismatch on actor ULID conceals token" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.003"/>
+  <testcase name="concurrent threads accessing same store maintain consistency" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.051"/>
+  <testcase name="finding 8 - missing key subsequent save preserves bytes and does not create new key" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.001"/>
+  <testcase name="meaningful encrypt and read roundtrip preserves all fields with test key" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.003"/>
+  <testcase name="oversized file exceeding 1 MiB fails closed with Oversized without allocating memory" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.004"/>
+  <testcase name="clearSession removes session file only and strictly preserves installation UUID and external queues" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.003"/>
+  <testcase name="finding 4 - saveSession uses unique sibling temporary file and does not collide" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.002"/>
+  <testcase name="noBackup path factory proven verifies storage resolves inside noBackupFilesDir" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.006"/>
+  <testcase name="truncated file fails closed with Corrupt and preserves file" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.002"/>
+  <testcase name="plaintext disk secret absence verifies file contains no raw credentials or personal data" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.002"/>
+  <testcase name="tamper IV length byte fails closed with Corrupt and preserves file" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.002"/>
+  <testcase name="finding 2 - simultaneously constructed InstallationIdentityStores share canonical path lock and produce stable UUID" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.005"/>
+  <testcase name="toString and error representations strictly redact tokens and personal secrets" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.003"/>
+  <testcase name="finding 2 - multiple store instances coordinate under shared process lock" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.002"/>
+  <testcase name="identity IO failure preserves original filesystem entry" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.001"/>
+  <testcase name="scope mismatch on device UUID conceals token" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.002"/>
+  <testcase name="tamper ciphertext byte fails closed with Corrupt and preserves file" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.002"/>
+  <testcase name="tamper AAD package or version fails closed with Corrupt and preserves file" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.004"/>
+  <testcase name="finding 8 - invalidated key subsequent save preserves bytes and refuses recreation" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.002"/>
+  <testcase name="finding 6 - bounded reader detects stream growth exceeding 1 MiB via probe" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.002"/>
+  <testcase name="tamper magic header bytes fails closed with Corrupt and preserves file" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.002"/>
+  <testcase name="existing invalid identity records fail closed without byte changes" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.029"/>
+  <testcase name="scope mismatch on company ULID conceals token" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.003"/>
+  <testcase name="expired session is never returned and record is preserved on disk" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.004"/>
+  <testcase name="finding 7 - corrupted payload and scope mismatch error messages do not leak secrets" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.002"/>
+  <testcase name="logout deletion failure is reported instead of claiming success" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.001"/>
+  <testcase name="cached identity does not conceal corruption or missing persisted identity" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.001"/>
+  <testcase name="finding 1 - RFC 3339 parses millisecond fraction and nonzero seconds correctly" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.001"/>
+  <testcase name="finding 1 - exact expiry boundary evaluation" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.002"/>
+  <testcase name="key unavailable fails closed with Unavailable and does not delete file or recreate key" classname="com.example.data.mobile.session.SecureStaffSessionStoreTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

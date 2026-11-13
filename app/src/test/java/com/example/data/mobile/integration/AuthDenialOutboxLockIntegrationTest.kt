@@ -1,5 +1,6 @@
 package com.example.data.mobile.integration
 
+import com.example.data.mobile.outbox.testOutboxRepository
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.mobile.contract.ClientUuid
@@ -148,7 +149,7 @@ class AuthDenialOutboxLockIntegrationTest {
 
         // Real Room database built on disk file
         database = OutboxDatabase.buildDatabase(context, name = dbFile.absolutePath, allowMainThreadQueries = true)
-        outboxRepository = OutboxRepositoryImpl(database)
+        outboxRepository = testOutboxRepository(database)
         bridge = OutboxAuthDenialBridge(outboxRepository)
 
         sessionFile = File(tempDir, SecureStaffSessionStore.SESSION_FILE_NAME)

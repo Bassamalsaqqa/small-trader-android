@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.outbox.EncryptedOutboxTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:42:56.333Z" hostname="pasta-hp-worker" time="14.338">
+  <properties/>
+  <testcase name="missingInvalidCancellationAndFatalPreserveCiphertext" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="8.065"/>
+  <testcase name="diskReopenAndSidecarsContainNoPayloadSecret" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="5.403"/>
+  <testcase name="exactBytesNonceTamperScopeAndBounds" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="0.095"/>
+  <testcase name="explicitLegacyConversionRollsBackThenReopensWithoutSchemaChange" classname="com.example.data.mobile.outbox.EncryptedOutboxTest" time="0.171"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

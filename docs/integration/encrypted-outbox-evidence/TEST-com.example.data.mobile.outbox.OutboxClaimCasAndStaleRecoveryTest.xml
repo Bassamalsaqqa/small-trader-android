@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.outbox.OutboxClaimCasAndStaleRecoveryTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:55.309Z" hostname="pasta-hp-worker" time="0.373">
+  <properties/>
+  <testcase name="testStaleClaimRecoveryReclaimsAbandonedInFlightRecord" classname="com.example.data.mobile.outbox.OutboxClaimCasAndStaleRecoveryTest" time="0.062"/>
+  <testcase name="testTimeoutTransitionsToUnknownAckWithoutConfirming" classname="com.example.data.mobile.outbox.OutboxClaimCasAndStaleRecoveryTest" time="0.074"/>
+  <testcase name="testBatchAndLeaseDurationBoundariesAndOverflowSafety" classname="com.example.data.mobile.outbox.OutboxClaimCasAndStaleRecoveryTest" time="0.061"/>
+  <testcase name="testClaimCasPreventsParallelDrainsAcrossConcurrentWorkers" classname="com.example.data.mobile.outbox.OutboxClaimCasAndStaleRecoveryTest" time="0.078"/>
+  <testcase name="testLateConfirmationWithStaleClaimTokenOrExpiredLeaseIsRejected" classname="com.example.data.mobile.outbox.OutboxClaimCasAndStaleRecoveryTest" time="0.092"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

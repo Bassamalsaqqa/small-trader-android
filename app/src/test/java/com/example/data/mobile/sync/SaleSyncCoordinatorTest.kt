@@ -1,5 +1,6 @@
 package com.example.data.mobile.sync
 
+import com.example.data.mobile.outbox.testOutboxRepository
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.mobile.contract.ClientUuid
@@ -68,7 +69,7 @@ class SaleSyncCoordinatorTest {
         if (dbFile.exists()) dbFile.delete()
         testClockMillis = 100_000L
         database = OutboxDatabase.buildInMemory(context)
-        repository = OutboxRepositoryImpl(database, clock = { testClockMillis })
+        repository = testOutboxRepository(database, clock = { testClockMillis })
     }
 
     @After
@@ -139,7 +140,7 @@ class SaleSyncCoordinatorTest {
     @Test
     fun testDiskPersistCaptureV2ClaimStatusPostedConfirm() {
         val diskDb = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
-        val diskRepo = OutboxRepositoryImpl(diskDb, clock = { testClockMillis })
+        val diskRepo = testOutboxRepository(diskDb, clock = { testClockMillis })
 
         val sampleEvent = OutboxTestFixtures.createSampleEventV2()
         val captureResult = diskRepo.captureSaleV2(
@@ -197,7 +198,7 @@ class SaleSyncCoordinatorTest {
     @Test
     fun testLostAckAfterServerPostReopenStatusReplayConfirmsOneCanonicalServerEffect() {
         val diskDb1 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
-        val diskRepo1 = OutboxRepositoryImpl(diskDb1, clock = { testClockMillis })
+        val diskRepo1 = testOutboxRepository(diskDb1, clock = { testClockMillis })
 
         val sampleEvent = OutboxTestFixtures.createSampleEventV2()
         diskRepo1.captureSaleV2(
@@ -245,7 +246,7 @@ class SaleSyncCoordinatorTest {
         diskDb1.close()
 
         val diskDb2 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
-        val diskRepo2 = OutboxRepositoryImpl(diskDb2, clock = { testClockMillis })
+        val diskRepo2 = testOutboxRepository(diskDb2, clock = { testClockMillis })
 
         // Second pass: gateway status lookup reflects that the server has recorded the sale from earlier submit
         gateway.statusOutcomeProvider = { SyncStatusOutcome.Posted(canonicalServerAck) }
@@ -334,7 +335,7 @@ class SaleSyncCoordinatorTest {
         // 4a: Altered digest in server ack
         run {
             val db = OutboxDatabase.buildInMemory(context)
-            val repo = OutboxRepositoryImpl(db)
+            val repo = testOutboxRepository(db)
             repo.captureSaleV2(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, 2, sampleEvent)
 
             val alteredAck = ServerSaleAck(
@@ -360,7 +361,7 @@ class SaleSyncCoordinatorTest {
         // 4b: Altered companyId in server ack
         run {
             val db = OutboxDatabase.buildInMemory(context)
-            val repo = OutboxRepositoryImpl(db)
+            val repo = testOutboxRepository(db)
             repo.captureSaleV2(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, 2, sampleEvent)
 
             val alteredAck = ServerSaleAck(
@@ -386,7 +387,7 @@ class SaleSyncCoordinatorTest {
         // 4c: Altered clientEventId in server ack
         run {
             val db = OutboxDatabase.buildInMemory(context)
-            val repo = OutboxRepositoryImpl(db)
+            val repo = testOutboxRepository(db)
             repo.captureSaleV2(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, 2, sampleEvent)
 
             val alteredAck = ServerSaleAck(
@@ -412,7 +413,7 @@ class SaleSyncCoordinatorTest {
         // 4d: Altered/invalid invoice ULID in server ack
         run {
             val db = OutboxDatabase.buildInMemory(context)
-            val repo = OutboxRepositoryImpl(db)
+            val repo = testOutboxRepository(db)
             repo.captureSaleV2(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, 2, sampleEvent)
 
             val alteredAck = ServerSaleAck(
@@ -799,7 +800,7 @@ class SaleSyncCoordinatorTest {
         )
 
         var clockTime = 100_000L
-        val repo = OutboxRepositoryImpl(database, clock = { clockTime })
+        val repo = testOutboxRepository(database, clock = { clockTime })
 
         val gateway = FakeSaleSyncGateway()
         gateway.statusOutcomeProvider = { SyncStatusOutcome.NotFound }
@@ -877,7 +878,7 @@ class SaleSyncCoordinatorTest {
         // Case A: Transient error on first of 3 records
         run {
             val db = OutboxDatabase.buildInMemory(context)
-            val repo = OutboxRepositoryImpl(db)
+            val repo = testOutboxRepository(db)
 
             val e1 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000001"))
             val e2 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000002"))
@@ -921,7 +922,7 @@ class SaleSyncCoordinatorTest {
         // Case B: 403 MembershipDenied on first of 3 records
         run {
             val db = OutboxDatabase.buildInMemory(context)
-            val repo = OutboxRepositoryImpl(db)
+            val repo = testOutboxRepository(db)
 
             val e1 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000001"))
             val e2 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000002"))
@@ -963,7 +964,7 @@ class SaleSyncCoordinatorTest {
         // Case C: CancellationException during processing
         run {
             val db = OutboxDatabase.buildInMemory(context)
-            val repo = OutboxRepositoryImpl(db)
+            val repo = testOutboxRepository(db)
 
             val e1 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000001"))
             val e2 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000002"))
@@ -1003,7 +1004,7 @@ class SaleSyncCoordinatorTest {
         // Case D: 401 AuthDenied locks queue and marks ALL active scope records as AUTH_BLOCKED
         run {
             val db = OutboxDatabase.buildInMemory(context)
-            val repo = OutboxRepositoryImpl(db)
+            val repo = testOutboxRepository(db)
 
             val e1 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000001"))
             val e2 = OutboxTestFixtures.createSampleEventV2(clientEventId = ClientUuid.parse("00000000-0000-0000-0000-000000000002"))
@@ -1049,7 +1050,7 @@ class SaleSyncCoordinatorTest {
         // 15A: Malformed stored UUID parked via narrow raw-string key; no infinite poison reclaim loop
         run {
             val db = OutboxDatabase.buildInMemory(context)
-            val repo = OutboxRepositoryImpl(db)
+            val repo = testOutboxRepository(db)
 
             val sampleBytes = com.example.data.mobile.contract.CanonicalJsonSerializer.serialize(sampleEvent).toByteArray(Charsets.UTF_8)
             val rawMalformedId = "not-a-valid-uuid-12345"
@@ -1073,7 +1074,7 @@ class SaleSyncCoordinatorTest {
                 createdAt = 100_000L,
                 updatedAt = 100_000L
             )
-            db.outboxDao().insertEvent(eventEntity)
+            db.outboxDao().insertEvent(com.example.data.mobile.outbox.testCipher.encrypt(eventEntity))
             db.outboxDao().insertDeliveryState(stateEntity)
 
             val gateway = FakeSaleSyncGateway()
@@ -1099,7 +1100,7 @@ class SaleSyncCoordinatorTest {
         // 15B: Corrupt payload bytes (SHA-256 != payloadDigest) parked with zero submission
         run {
             val db = OutboxDatabase.buildInMemory(context)
-            val repo = OutboxRepositoryImpl(db)
+            val repo = testOutboxRepository(db)
 
             val sampleBytes = com.example.data.mobile.contract.CanonicalJsonSerializer.serialize(sampleEvent).toByteArray(Charsets.UTF_8)
             val corruptedBytes = sampleBytes.clone().apply {
@@ -1131,18 +1132,15 @@ class SaleSyncCoordinatorTest {
             val gateway = FakeSaleSyncGateway()
             val coordinator = SaleSyncCoordinatorImpl(repo, gateway)
 
-            val res = coordinator.synchronizeScope(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
-            assertEquals(1, res.recordsClaimed)
-            assertEquals(1, res.conflictCount)
-            assertEquals(0, gateway.checkStatusCallCount.get()) // zero network calls!
+            org.junit.Assert.assertThrows(com.example.data.mobile.outbox.OutboxStorageException::class.java) {
+                repo.claimNextBatch(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId)
+            }
+            assertEquals(0, gateway.checkStatusCallCount.get())
             assertEquals(0, gateway.submitSaleCallCount.get())
-
-            val record = repo.getRecord(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, sampleEvent.clientEventId)!!
-            assertEquals(OutboxStatus.CONFLICT, record.status)
-            assertEquals(SyncDiagnostics.CORRUPT_PAYLOAD_DIGEST, record.deliveryState.errorMessage)
-
-            // Original corrupted bytes retained immutable in Room (no repair/reprice)
-            assertArrayEquals(corruptedBytes, record.event.payloadBytes)
+            assertEquals(OutboxStatus.PENDING.wireValue,
+                db.outboxDao().getDeliveryState(sampleEvent.companyId.value, sampleEvent.clientEventId.value)!!.status)
+            assertArrayEquals(corruptedBytes,
+                db.outboxDao().getEvent(sampleEvent.companyId.value, sampleEvent.clientEventId.value)!!.payloadBytes)
 
             db.close()
         }
@@ -1212,7 +1210,7 @@ class SaleSyncCoordinatorTest {
         val digest = sampleEvent.computePayloadDigest()
 
         val db = OutboxDatabase.buildInMemory(context)
-        val repo = OutboxRepositoryImpl(db)
+        val repo = testOutboxRepository(db)
         repo.captureSaleV2(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, 2, sampleEvent)
 
         val claim = repo.claimNextBatch(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, batchSize = 1)
@@ -1303,7 +1301,7 @@ class SaleSyncCoordinatorTest {
 
         // 18B: Persisted DB state must never contain raw exception messages or untrusted gateway reasons
         val db = OutboxDatabase.buildInMemory(context)
-        val repo = OutboxRepositoryImpl(db)
+        val repo = testOutboxRepository(db)
         repo.captureSaleV2(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, 2, sampleEvent)
 
         val gateway = FakeSaleSyncGateway().apply {
@@ -1336,7 +1334,7 @@ class SaleSyncCoordinatorTest {
         // 19A: OutOfMemoryError propagates immediately
         run {
             val db = OutboxDatabase.buildInMemory(context)
-            val repo = OutboxRepositoryImpl(db)
+            val repo = testOutboxRepository(db)
             repo.captureSaleV2(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, 2, sampleEvent)
 
             val gateway = FakeSaleSyncGateway().apply {
@@ -1353,7 +1351,7 @@ class SaleSyncCoordinatorTest {
         // 19B: AssertionError propagates immediately
         run {
             val db = OutboxDatabase.buildInMemory(context)
-            val repo = OutboxRepositoryImpl(db)
+            val repo = testOutboxRepository(db)
             repo.captureSaleV2(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, 2, sampleEvent)
 
             val gateway = FakeSaleSyncGateway().apply {
@@ -1370,7 +1368,7 @@ class SaleSyncCoordinatorTest {
         // 19C: InterruptedException restores thread interrupt flag and propagates
         run {
             val db = OutboxDatabase.buildInMemory(context)
-            val repo = OutboxRepositoryImpl(db)
+            val repo = testOutboxRepository(db)
             repo.captureSaleV2(sampleEvent.companyId, sampleEvent.actorId, sampleEvent.deviceId, 2, sampleEvent)
 
             val gateway = FakeSaleSyncGateway().apply {

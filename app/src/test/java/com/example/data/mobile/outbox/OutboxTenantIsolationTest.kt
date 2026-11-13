@@ -32,7 +32,7 @@ class OutboxTenantIsolationTest {
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         database = OutboxDatabase.buildInMemory(context)
-        repository = OutboxRepositoryImpl(database)
+        repository = testOutboxRepository(database)
     }
 
     @After

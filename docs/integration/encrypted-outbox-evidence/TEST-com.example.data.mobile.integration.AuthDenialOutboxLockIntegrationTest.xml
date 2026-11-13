@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.integration.AuthDenialOutboxLockIntegrationTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:53.307Z" hostname="pasta-hp-worker" time="1.704">
+  <properties/>
+  <testcase name="testAccepted401CompositionThroughListenerLocksEmptyRoomQueueThenV2CaptureProducesAuthBlocked" classname="com.example.data.mobile.integration.AuthDenialOutboxLockIntegrationTest" time="1.56"/>
+  <testcase name="testCallbackFailureSurfacesTypedLockedBehaviorWithoutLeakingTokens" classname="com.example.data.mobile.integration.AuthDenialOutboxLockIntegrationTest" time="0.056"/>
+  <testcase name="testMainThreadMisuseRejectsBeforeRepositoryInitialization" classname="com.example.data.mobile.integration.AuthDenialOutboxLockIntegrationTest" time="0.057"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

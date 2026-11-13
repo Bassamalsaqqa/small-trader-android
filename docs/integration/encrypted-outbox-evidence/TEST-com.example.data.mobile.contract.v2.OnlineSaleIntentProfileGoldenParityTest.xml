@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:53.230Z" hostname="pasta-hp-worker" time="0.007">
+  <properties/>
+  <testcase name="testGoldenOnlineSaleIntentProfileParityAndDigest" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" time="0.003"/>
+  <testcase name="testUnpaidModeNormalizesCashFieldsToNullAndPreservesZeroAmountLexeme" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" time="0.002"/>
+  <testcase name="testPartialModeWithValidCashFields" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" time="0.001"/>
+  <testcase name="testDefensiveCopyOfLinesInIntentProfile" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

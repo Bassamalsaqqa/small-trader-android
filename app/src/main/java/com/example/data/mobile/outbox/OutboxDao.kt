@@ -8,6 +8,15 @@ import androidx.room.Transaction
 
 @Dao
 abstract class OutboxDao {
+    @Query("SELECT COUNT(*) FROM outbox_events")
+    abstract fun eventCount(): Int
+
+    @Query("SELECT * FROM outbox_events")
+    abstract fun allEventsForConversion(): List<OutboxEventEntity>
+
+    @Query("UPDATE outbox_events SET payload_bytes = :bytes WHERE company_id = :companyId AND client_event_id = :eventId")
+    abstract fun replacePayloadForConversion(companyId: String, eventId: String, bytes: ByteArray): Int
+
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     abstract fun insertEvent(event: OutboxEventEntity)

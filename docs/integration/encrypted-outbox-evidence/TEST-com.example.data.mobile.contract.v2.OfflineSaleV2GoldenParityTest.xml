@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:53.203Z" hostname="pasta-hp-worker" time="0.024">
+  <properties/>
+  <testcase name="testDefensiveCopyPreventsExternalListMutation" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.013"/>
+  <testcase name="testGoldenOfflineSaleV2IntakeParityAndDigest" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.004"/>
+  <testcase name="testRejectEventVersion1InV2" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.001"/>
+  <testcase name="testTamperedEnvelopeDigestDetected" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.002"/>
+  <testcase name="testCopyMethodPreservesInvariants" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.003"/>
+  <testcase name="testExplicitNoTaxInLineItem" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

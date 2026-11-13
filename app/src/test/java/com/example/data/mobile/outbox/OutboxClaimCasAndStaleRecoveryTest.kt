@@ -33,7 +33,7 @@ class OutboxClaimCasAndStaleRecoveryTest {
         context = ApplicationProvider.getApplicationContext()
         database = OutboxDatabase.buildInMemory(context)
         testClockTime = 100_000L
-        repository = OutboxRepositoryImpl(database, clock = { testClockTime })
+        repository = testOutboxRepository(database, clock = { testClockTime })
     }
 
     @After

@@ -58,7 +58,8 @@ internal interface SessionCryptoEngine {
  * and NEVER silently recreate keys or delete stored records.
  */
 internal class AndroidKeyStoreCryptoEngine(
-    private val keyAlias: String = DEFAULT_KEY_ALIAS
+    private val keyAlias: String = DEFAULT_KEY_ALIAS,
+    private val allowCreationOnEncrypt: Boolean = true
 ) : SessionCryptoEngine {
 
     override fun ensureKeyUsable(forExistingRecord: Boolean) {
@@ -74,7 +75,8 @@ internal class AndroidKeyStoreCryptoEngine(
     }
 
     override fun encrypt(plaintext: ByteArray, aad: ByteArray): Pair<ByteArray, ByteArray> {
-        val secretKey = getOrCreateKey()
+        val secretKey = if (allowCreationOnEncrypt) getOrCreateKey() else
+            getKey() ?: throw SessionStorageException(SessionStorageError.Unavailable())
         try {
             val cipher = Cipher.getInstance(GCM_TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, secretKey)

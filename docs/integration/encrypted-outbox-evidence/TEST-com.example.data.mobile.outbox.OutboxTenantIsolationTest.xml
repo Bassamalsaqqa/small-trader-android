@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.outbox.OutboxTenantIsolationTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:56.955Z" hostname="pasta-hp-worker" time="0.268">
+  <properties/>
+  <testcase name="testCrossActorIsolationPreventsUserLogoutLeakage" classname="com.example.data.mobile.outbox.OutboxTenantIsolationTest" time="0.063"/>
+  <testcase name="testDeviceIsolationPreventsForeignDeviceClaims" classname="com.example.data.mobile.outbox.OutboxTenantIsolationTest" time="0.046"/>
+  <testcase name="testCrossTenantIsolationPreventsForeignCompanyReadsAndClaims" classname="com.example.data.mobile.outbox.OutboxTenantIsolationTest" time="0.05"/>
+  <testcase name="testSameTenantOtherActorOrDeviceRejectionWithZeroDataLeakage" classname="com.example.data.mobile.outbox.OutboxTenantIsolationTest" time="0.053"/>
+  <testcase name="testCrossTenantSameUuidCollisionSucceedsIndependentlyWithoutInterference" classname="com.example.data.mobile.outbox.OutboxTenantIsolationTest" time="0.05"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

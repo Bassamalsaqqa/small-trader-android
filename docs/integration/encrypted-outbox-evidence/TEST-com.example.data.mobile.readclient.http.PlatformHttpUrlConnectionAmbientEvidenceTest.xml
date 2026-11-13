@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.readclient.http.PlatformHttpUrlConnectionAmbientEvidenceTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-11-13T12:43:59.997Z" hostname="pasta-hp-worker" time="0.088">
+  <properties/>
+  <testcase name="testPlatformHttpUrlConnectionCouplesToAmbientCookieHandler" classname="com.example.data.mobile.readclient.http.PlatformHttpUrlConnectionAmbientEvidenceTest" time="0.024"/>
+  <testcase name="testPlatformHttpUrlConnectionCouplesToAmbientAuthenticator" classname="com.example.data.mobile.readclient.http.PlatformHttpUrlConnectionAmbientEvidenceTest" time="0.064"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
