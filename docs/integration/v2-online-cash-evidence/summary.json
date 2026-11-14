@@ -5,19 +5,19 @@
     "basicSmoke": "PASS (MockWebServer hermetic fixtures)",
     "fullPilot": "NOT_RUN (lost-ACK fault injection, stock rollback, and paired live backend integration pending)"
   },
-  "qualificationNote": "Hermetic client implementation unit qualification under PR #23. Status recovery economic reconciliation, payment completeness, pilot acceptance enforcement, and exact base MIME validation verified. Source attested at clean commit 753fb51.",
+  "qualificationNote": "Hermetic client implementation unit qualification under PR #23. Independent publication HEAD (SMALL_TRADER_EXPECTED_CLIENT_SHA) and executable HEAD (SMALL_TRADER_EXPECTED_CLIENT_EXECUTABLE_SHA) pin separation verified with 6 new regression tests. Status recovery economic reconciliation, payment completeness, pilot acceptance enforcement, and exact base MIME validation verified. Source attested at clean commit 78ac443.",
   "contractEndpointClarification": "Authoritative mobile contract offline-events status endpoint remains /api/mobile/v2/companies/{companyId}/offline-events/{clientEventId}/status. Reviewer suggestion of /v2/sales/events is non-contract and not implemented. No mTLS or TLS client certificate auth required on mobile client.",
   "pr": 23,
   "branch": "t3/android-v2-online-cash-client",
-  "sourceCommit": "753fb5133e28acb1284370dd7a84e3929e7b1a7d",
-  "previousExecutionCommit": "9f7de1478c27b68055e56dc169e90394486af5a7",
+  "sourceCommit": "78ac4437e4010b68408278788dc82eb826fe8014",
+  "previousExecutionCommit": "753fb5133e28acb1284370dd7a84e3929e7b1a7d",
   "totalSuites": 18,
-  "totalTests": 285,
-  "passed": 283,
+  "totalTests": 291,
+  "passed": 289,
   "skipped": 2,
   "failures": 0,
   "errors": 0,
-  "executionDuration": "14.47s",
+  "executionDuration": "66.37s",
   "resourceLimits": {
     "maxWorkers": 1,
     "activeProcessorCount": 2,
@@ -28,18 +28,21 @@
   },
   "lintReport": {
     "task": ":app:lintDebug",
+    "status": "QUALIFIED_BASELINE_UNCHANGED",
+    "sourceCommit": "753fb5133e28acb1284370dd7a84e3929e7b1a7d",
+    "mainSourceState": "app/src/main/ untouched between 753fb51 and 78ac443",
     "exitCode": 0,
-    "duration": "68.17s",
     "errors": 0,
     "warnings": 63,
     "baselineWarnings": 63,
-    "note": "0 errors, 63 warnings observed (baseline historical 63 known launcher icon silhouette warnings on legacy mipmap resources)"
+    "note": "0 errors, 63 warnings observed on qualified source 753fb51 (app/src/main/ untouched in 78ac443)"
   },
   "externalHttpExecution": {
     "status": "NOT_RUN",
     "reason": "Hermetic QA lease only; backend readiness worker completed and closed ports; runtime handoff files absent; paired financial smoke skipped"
   },
   "remediatedFindings": [
+    "P1: Separated independent client publication HEAD pin (SMALL_TRADER_EXPECTED_CLIENT_SHA) and executable HEAD pin (SMALL_TRADER_EXPECTED_CLIENT_EXECUTABLE_SHA), eliminating client admission failure during coordinated TLS window where publication SHA was checked against executable pin.",
     "P1: Eliminated false-green in SmallTraderOnlineCashPilotSmokeTest; fresh commit and replay strictly require ConfirmedFinancialSuccess and non-null payment identity.",
     "P1: Reconciled officialInvoice.grandTotal on status recovery in OnlineCashSaleOrchestrator against prepared online payment amount; wrong total fails closed with FINANCIAL_CONSISTENCY_MISMATCH.",
     "P1/P2: Aligned full-cash payment reference completeness requiring non-null paymentId and non-blank paymentReceiptNumber across both direct commit and status recovery.",
@@ -66,5 +69,14 @@
       "directory": "historical-238-ad10"
     }
   },
-  "previousDocProvenanceCommit": "fed3bdf048a4ec9ed942a23905f39f9e18ec823f"
+  "previousDocProvenanceCommit": "824cb7dac1f17a3530f178134f9d9168e7e50b94",
+  "historicalFailedWindow": {
+    "description": "First coordinated TLS window client admission failure before HTTP (wrong pin comparison)",
+    "xmlSha256": "dc2340af6bfabddcef4fd1793a334de2ca5d47686e26b62d9fed1beaaa702e9d",
+    "tests": 2,
+    "passed": 1,
+    "failed": 1,
+    "skipped": 0,
+    "preservationNote": "Preserved historical without modification; failed on local client pin check before network/credentials"
+  }
 }

@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-14T17:57:01.949Z" hostname="pasta-hp-worker" time="0.009">
+<testsuite name="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-14T19:00:56.714Z" hostname="pasta-hp-worker" time="0.012">
   <properties/>
-  <testcase name="testGoldenOnlineSaleIntentProfileParityAndDigest" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" time="0.003"/>
-  <testcase name="testUnpaidModeNormalizesCashFieldsToNullAndPreservesZeroAmountLexeme" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" time="0.001"/>
-  <testcase name="testRootValidatedIntegrationManifestAuthoritativeSyntheticTemplateParity" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" time="0.002"/>
+  <testcase name="testGoldenOnlineSaleIntentProfileParityAndDigest" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" time="0.004"/>
+  <testcase name="testUnpaidModeNormalizesCashFieldsToNullAndPreservesZeroAmountLexeme" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" time="0.002"/>
+  <testcase name="testRootValidatedIntegrationManifestAuthoritativeSyntheticTemplateParity" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" time="0.003"/>
   <testcase name="testPartialModeWithValidCashFields" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" time="0.001"/>
-  <testcase name="testDefensiveCopyOfLinesInIntentProfile" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" time="0.002"/>
+  <testcase name="testDefensiveCopyOfLinesInIntentProfile" classname="com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

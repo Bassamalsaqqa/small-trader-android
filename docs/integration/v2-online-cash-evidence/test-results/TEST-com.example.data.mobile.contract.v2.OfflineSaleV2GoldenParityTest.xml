@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-11-14T17:57:01.891Z" hostname="pasta-hp-worker" time="0.055">
+<testsuite name="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-11-14T19:00:56.655Z" hostname="pasta-hp-worker" time="0.056">
   <properties/>
-  <testcase name="testDefensiveCopyPreventsExternalListMutation" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.029"/>
-  <testcase name="testGoldenOfflineSaleV2IntakeParityAndDigest" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.013"/>
-  <testcase name="testRejectEventVersion1InV2" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.002"/>
-  <testcase name="testTamperedEnvelopeDigestDetected" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.003"/>
-  <testcase name="testCopyMethodPreservesInvariants" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.005"/>
-  <testcase name="testExplicitNoTaxInLineItem" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.002"/>
+  <testcase name="testDefensiveCopyPreventsExternalListMutation" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.034"/>
+  <testcase name="testGoldenOfflineSaleV2IntakeParityAndDigest" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.011"/>
+  <testcase name="testRejectEventVersion1InV2" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.001"/>
+  <testcase name="testTamperedEnvelopeDigestDetected" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.002"/>
+  <testcase name="testCopyMethodPreservesInvariants" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.004"/>
+  <testcase name="testExplicitNoTaxInLineItem" classname="com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>
