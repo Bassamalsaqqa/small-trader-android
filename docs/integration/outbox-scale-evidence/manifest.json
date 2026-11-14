@@ -1,0 +1,63 @@
+{
+  "executableSource": "fc5725c7175b5d402972e38e4dfc6970099c6f3b",
+  "productionSourceUnchangedSince": "85d8c4e9d9f1e125f00d720a6a38831507da1550",
+  "executor": "root Codex supervisor",
+  "testSourceSha256": "5b0f52c863f6f0ccdd2f64be1f0a3a680bacc2cfb5d6d4bec1afccd5cfc18f9c",
+  "firstRun": {
+    "source": "c6c980b931ef6dcd127aef86e7505f86ae0403bd",
+    "tests": 4,
+    "passed": 3,
+    "failed": 1,
+    "cause": "Future selected Runnable overload; capture result was null, fixed explicit Callable<CaptureResult>"
+  },
+  "correctedRun": {
+    "tests": 4,
+    "passed": 4,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "environment": "JVM Robolectric SDK34/OpenJDK21, not a physical Android device",
+  "command": "OUTBOX_BENCHMARK_ENABLED=true JAVA_TOOL_OPTIONS=\"-XX:ActiveProcessorCount=2 -XX:+UseSerialGC\" ./gradlew :app:testDebugUnitTest --tests com.example.data.mobile.outbox.OutboxScaleBenchmarkHarnessTest --max-workers=1 --no-daemon -Dorg.gradle.jvmargs=\"-Xmx1536m -XX:ActiveProcessorCount=2 -XX:+UseSerialGC\" -Pkotlin.compiler.execution.strategy=in-process",
+  "metrics": {
+    "actualReceipts": 1000,
+    "pageSize": 10,
+    "pages": 100,
+    "warmups": 3,
+    "samples": 10,
+    "scanMs": {
+      "min": 80.78,
+      "p50": 117.15,
+      "p95": 167.6,
+      "p99": 167.6,
+      "max": 167.6
+    },
+    "cancelMs": 355.34,
+    "captureWaitMsIncludingInduced100msHold": 180.56
+  },
+  "limitations": [
+    "Ten random-ID JVM samples are not stable p95/p99 estimates or low-end device proof",
+    "Capture wait includes intentional 100ms hold plus test/SQLite overhead; not natural production capture latency",
+    "Background inspection roundtrip is not actual UI-frame/catalog responsiveness",
+    "No native Keystore, physical signed upgrade, transfer, financial or production acceptance",
+    "Prior 168 focused suite not rerun for this test-only change"
+  ],
+  "artifacts": {
+    "first-failed.xml": {
+      "rawSha256": "fd5ecd78749c2a3061d720e1226c409b955f7e02c1016f51efe0df5635aac75d",
+      "publishedSha256": "fd5ecd78749c2a3061d720e1226c409b955f7e02c1016f51efe0df5635aac75d"
+    },
+    "corrected.xml": {
+      "rawSha256": "6b7de2dfd9fb462b4db3760d5e82ef24c13e87a83ed6098c7647af0df1c98134",
+      "publishedSha256": "6b7de2dfd9fb462b4db3760d5e82ef24c13e87a83ed6098c7647af0df1c98134"
+    },
+    "first-gradle.log": {
+      "rawSha256": "5b6cac940e3f978a4d838d88bc06cc9ce12acfb96b2c5bcdaeffbfc5ca442387",
+      "publishedSha256": "e90dbfc5f85d0bfffc9dd76f214e55f5b4f199d386977dc5a2347785ab86efba"
+    },
+    "corrected-gradle.log": {
+      "rawSha256": "dc78535c325a71c644e643337742d866fb88147c17d8a4f6d6064672a539e3e2",
+      "publishedSha256": "96dc04b5e5f901c8f533e3a57ebc9071b498bef22eda3a64998bb51204a1dbfa"
+    }
+  }
+}

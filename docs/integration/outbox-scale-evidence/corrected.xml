@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.outbox.OutboxScaleBenchmarkHarnessTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-11-14T05:56:31.970Z" hostname="pasta-hp-worker" time="22.905">
+  <properties/>
+  <testcase name="benchmark1k_cancellation_boundedTermination_andDataPreservation" classname="com.example.data.mobile.outbox.OutboxScaleBenchmarkHarnessTest" time="17.788"/>
+  <testcase name="benchmark1k_pagedVerification_distribution_and_responsiveness" classname="com.example.data.mobile.outbox.OutboxScaleBenchmarkHarnessTest" time="2.842"/>
+  <testcase name="benchmark1k_concurrentCaptureSale_waitsDuringInspectionAndSucceeds" classname="com.example.data.mobile.outbox.OutboxScaleBenchmarkHarnessTest" time="1.036"/>
+  <testcase name="benchmark1k_readWorkspaceResponsiveness_qualifiedAsDbReadLatency" classname="com.example.data.mobile.outbox.OutboxScaleBenchmarkHarnessTest" time="0.751"/>
+  <system-out><![CDATA[[CANCELLATION] Prompt termination in 355.34 ms at page 20 (visited 21 pages)
+================================================================================
+=== OUTBOX 1,000+ ENCRYPTED QUEUE SCALE QUALIFICATION REPORT ===
+================================================================================
+Scenario Digest (SHA-256): c7819b302feafa441d213d34af04d49cc53f148cb2fea8e794f3503d0a6facc9
+Database Path: /tmp/robolectric-OutboxScaleBenchmarkHarnessTest_benchmark1k_pagedVerification_distribution_and_responsiveness1513821793334260281/com.aistudio.smalltrader.psdukx-dataDir/files/outbox-scale-bench-4eb2c1d7-6f8d-4a50-8924-8b8df45b5423.db
+Total Valid Encrypted Receipts: 1000
+Seeding Time (1,000 captures): 1113.78 ms
+Page Size: 10 records / page (bounded memory)
+Total Keyset Pages Traversed: 100 pages
+Warm-up Iterations: 3
+Measured Samples: 10
+Raw samples ms: [128.54527, 134.959867, 167.595313, 133.302152, 96.027047, 92.004432, 80.775522, 104.491054, 117.154084, 80.917456]
+p95/p99 are empirical order statistics from 10 samples, not stable device-tail estimates.
+--------------------------------------------------------------------------------
+Latency Distribution (DB Read & Decrypt):
+  Min:       80.78 ms
+  p50:      117.15 ms
+  p95:      167.60 ms
+  p99:      167.60 ms
+  Max:      167.60 ms
+  Mean:     113.58 ms
+--------------------------------------------------------------------------------
+[QUALIFICATION DISCLAIMER]
+Commands/runtime/device: JVM (Robolectric / OpenJDK 21) only.
+Latency represents background SQLite transaction read & AES-GCM verification.
+Does NOT represent physical device UI rendering or native Android Keystore performance.
+Low-end physical hardware gate remains UNVERIFIED / HOLD.
+================================================================================
+[CONCURRENT CAPTURE] Write lock hold wait: 180.56 ms
+[WORKSPACE RESPONSIVENESS] Background inspection roundtrip: 82.31 ms across 1000 records
+[QUALIFICATION NOTE] This measurement represents JVM background I/O / SQLite read latency.
+It does NOT measure Android Compose UI main-thread frame delivery or physical hardware display.
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
