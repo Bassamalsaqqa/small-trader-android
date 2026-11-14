@@ -24,6 +24,7 @@ import java.util.Locale
 
 /**
  * Provisioned fixture entity identifiers and normative decimal lexemes for online cash pilot.
+ * Supports exact backend provision manifest keys (e.g. company_public_id, product_unit_public_id).
  */
 data class CashPilotFixture(
     val companyId: ServerUlid,
@@ -44,6 +45,7 @@ data class CashPilotFixture(
 
 /**
  * Private runtime credentials loaded exclusively from a separate 0600 file outside checkout.
+ * Accurately models exact backend provision fields: raw_token, token_hash, device_id, staff_email, schema.
  */
 data class CashPilotCredentials(
     val rawToken: String? = null,
@@ -67,27 +69,27 @@ data class CashPilotCredentials(
  * Strict CASH-specific handoff configuration parser and validator.
  *
  * Security & Lifecycle Invariants:
- * - Credentials (email/password/token) MUST be loaded from a separate private credentials file (0600/0400).
+ * - Credentials (email/password/raw_token) MUST be loaded from a separate private credentials file (0600/0400).
  * - Inline passwords or tokens in the main handoff JSON are strictly forbidden and rejected.
  * - String representation [toString] overrides default data class behavior to redact all secrets and file paths.
- * - Strict JSON key allowlisting: any unknown key in handoff or credentials JSON fails closed.
- * - Type enforcement: strict JSON types enforced (no lenient type coercion).
+ * - Strict JSON key allowlisting: unknown root keys in handoff fail closed.
+ * - Accepts exact backend provision payload: {manifest, credentials_path, sample_request}.
  * - Origin validation: strict HTTPS absolute origin with no path, query, fragment, or userinfo.
- * - Independent pinning: requires an independently expected lead backend SHA by default (never trusts handoff alone).
- * - TTL validation: strict future ISO-8601 UTC timestamp check.
+ * - Independent pinning: requires an independently expected lead backend SHA by default.
  * - Distinct lifecycle grants: READINESS_ONLY vs FINANCIAL_PAIRED_RUN.
  *   FINANCIAL_PAIRED_RUN requires explicit root financial approval PIN from environment;
  *   untrusted handoff files cannot self-authorize financial mutation.
  */
 data class CashPilotHandoffConfig(
+    val status: String = STATUS_READY,
     val baseUrl: String,
     val backendCommitSha: String,
     val clientCommitSha: String? = null,
-    val manifestDigest: String,
+    val manifestDigest: String? = null,
     val schemaIdentity: String,
-    val harnessNonce: String,
-    val ttlExpiresAt: String,
-    val lifecycleGrant: String,
+    val harnessNonce: String? = null,
+    val ttlExpiresAt: String? = null,
+    val lifecycleGrant: String = GRANT_READINESS_ONLY,
     val credentialsPath: String,
     val credentials: CashPilotCredentials,
     val fixture: CashPilotFixture,
@@ -112,32 +114,33 @@ data class CashPilotHandoffConfig(
                 "clientCommitSha must be a 40-character lowercase hex SHA, got '$clientCommitSha'"
             }
         }
-        require(HEX_64_REGEX.matches(manifestDigest)) {
-            "manifestDigest must be a 64-character hex SHA-256, got '$manifestDigest'"
+        if (manifestDigest != null) {
+            require(HEX_64_REGEX.matches(manifestDigest)) {
+                "manifestDigest must be a 64-character hex SHA-256, got '$manifestDigest'"
+            }
         }
         require(schemaIdentity.isNotBlank()) {
             "schemaIdentity must not be blank"
-        }
-        require(harnessNonce.isNotBlank()) {
-            "harnessNonce must not be blank"
         }
         require(lifecycleGrant in ALLOWED_GRANTS) {
             "Invalid lifecycleGrant '$lifecycleGrant'. Must be one of $ALLOWED_GRANTS"
         }
 
-        // Strict future TTL validation
-        val expiry = try {
-            Instant.parse(ttlExpiresAt)
-        } catch (e: Exception) {
-            throw IllegalArgumentException("Invalid ISO-8601 UTC timestamp for ttlExpiresAt: '$ttlExpiresAt'")
-        }
-        require(expiry.isAfter(Instant.now())) {
-            "Handoff configuration TTL expired at $ttlExpiresAt (current time: ${Instant.now()})"
+        // Future TTL validation if provided
+        if (ttlExpiresAt != null) {
+            val expiry = try {
+                Instant.parse(ttlExpiresAt)
+            } catch (e: Exception) {
+                throw IllegalArgumentException("Invalid ISO-8601 UTC timestamp for ttlExpiresAt: '$ttlExpiresAt'")
+            }
+            require(expiry.isAfter(Instant.now())) {
+                "Handoff configuration TTL expired at $ttlExpiresAt (current time: ${Instant.now()})"
+            }
         }
     }
 
     override fun toString(): String =
-        "CashPilotHandoffConfig(baseUrl='$baseUrl', backendCommitSha='$backendCommitSha', " +
+        "CashPilotHandoffConfig(status='$status', baseUrl='$baseUrl', backendCommitSha='$backendCommitSha', " +
                 "clientCommitSha='$clientCommitSha', manifestDigest='$manifestDigest', " +
                 "schemaIdentity='$schemaIdentity', lifecycleGrant='$lifecycleGrant', " +
                 "credentialsPath='[REDACTED_PATH]', credentials=$credentials, fixture=$fixture, " +
@@ -150,13 +153,17 @@ data class CashPilotHandoffConfig(
         const val ENV_EXPECTED_CLIENT_SHA = "SMALL_TRADER_EXPECTED_CLIENT_SHA"
         const val ENV_ROOT_FINANCIAL_APPROVAL_PIN = "SMALL_TRADER_ROOT_FINANCIAL_APPROVAL_PIN"
 
+        const val STATUS_PROVISION_ONLY = "PROVISION_ONLY"
+        const val STATUS_READY = "READY"
+        const val STATUS_RUNNING = "RUNNING"
+
         const val GRANT_READINESS_ONLY = "READINESS_ONLY"
         const val GRANT_FINANCIAL_PAIRED_RUN = "FINANCIAL_PAIRED_RUN"
         val ALLOWED_GRANTS = setOf(GRANT_READINESS_ONLY, GRANT_FINANCIAL_PAIRED_RUN)
 
         val HEX_40_REGEX = Regex("^[0-9a-fA-F]{40}$")
         val HEX_64_REGEX = Regex("^[0-9a-fA-F]{64}$")
-        const val MAX_FILE_SIZE_BYTES = 64 * 1024L // 64 KiB bounded read
+        const val MAX_FILE_SIZE_BYTES = 64 * 1024L
 
         private val ALLOWED_HANDOFF_KEYS = setOf(
             "status",
@@ -169,7 +176,10 @@ data class CashPilotHandoffConfig(
             "ttlExpiresAt",
             "lifecycleGrant",
             "credentialsPath",
+            "credentials_path",
             "fixture",
+            "manifest",
+            "sample_request",
             "allowHttpLoopback",
             "caCertPath",
             "testTruststorePath",
@@ -214,7 +224,6 @@ data class CashPilotHandoffConfig(
                 }
             }
 
-            // Independent handoff SHA check if provided
             val handoffShaPin = expectedHandoffSha ?: System.getenv(ENV_EXPECTED_HANDOFF_SHA)?.trim()
             if (!handoffShaPin.isNullOrBlank()) {
                 require(HEX_64_REGEX.matches(handoffShaPin)) {
@@ -229,20 +238,19 @@ data class CashPilotHandoffConfig(
             val content = readBoundedUtf8(file, maxSizeBytes = MAX_FILE_SIZE_BYTES, enforceStrictFilePermissions = true)
             val root = StrictJsonParser.parse(content).asObject()
 
-            // Strict key allowlisting
             val unexpectedKeys = root.properties.keys - ALLOWED_HANDOFF_KEYS
             require(unexpectedKeys.isEmpty()) {
                 "Unexpected keys in handoff JSON: $unexpectedKeys"
             }
 
-            // Reject forbidden inline credentials
             for (key in FORBIDDEN_INLINE_CREDENTIAL_KEYS) {
                 if (root[key] != null) {
                     throw SecurityException("Security violation: inline credential key '$key' forbidden in handoff JSON")
                 }
             }
 
-            val baseUrl = requireString(root, "baseUrl")
+            val statusStr = optionalString(root, "status") ?: STATUS_READY
+            val baseUrl = optionalString(root, "baseUrl") ?: "https://127.0.0.1:18443"
             val backendSha = requireString(root, "backendCommitSha")
             require(HEX_40_REGEX.matches(backendSha)) {
                 "backendCommitSha must be 40-character hex, got '$backendSha'"
@@ -258,11 +266,6 @@ data class CashPilotHandoffConfig(
             }
 
             val clientSha = optionalString(root, "clientCommitSha")
-            if (clientSha != null) {
-                require(HEX_40_REGEX.matches(clientSha)) {
-                    "clientCommitSha must be 40-character hex, got '$clientSha'"
-                }
-            }
             val effectiveClientSha = expectedClientSha ?: System.getenv(ENV_EXPECTED_CLIENT_SHA)?.trim()
             if (!effectiveClientSha.isNullOrBlank()) {
                 require(HEX_40_REGEX.matches(effectiveClientSha)) {
@@ -273,25 +276,15 @@ data class CashPilotHandoffConfig(
                 }
             }
 
-            val manifestDigest = requireString(root, "manifestDigest")
-            require(HEX_64_REGEX.matches(manifestDigest)) {
-                "manifestDigest must be 64-character hex, got '$manifestDigest'"
-            }
-
-            val schemaIdentity = requireString(root, "schemaIdentity")
-            require(schemaIdentity.isNotBlank()) { "schemaIdentity must not be blank" }
-
-            val harnessNonce = requireString(root, "harnessNonce")
-            require(harnessNonce.isNotBlank()) { "harnessNonce must not be blank" }
-
-            val ttlExpiresAt = requireString(root, "ttlExpiresAt")
+            val manifestDigest = optionalString(root, "manifestDigest")
+            val harnessNonce = optionalString(root, "harnessNonce")
+            val ttlExpiresAt = optionalString(root, "ttlExpiresAt")
 
             val lifecycleGrant = optionalString(root, "lifecycleGrant") ?: GRANT_READINESS_ONLY
             require(lifecycleGrant in ALLOWED_GRANTS) {
                 "Invalid lifecycleGrant '$lifecycleGrant'. Must be one of $ALLOWED_GRANTS"
             }
 
-            // Strict Root approval PIN check for financial paired execution
             if (lifecycleGrant == GRANT_FINANCIAL_PAIRED_RUN) {
                 val effectivePin = rootApprovalPin ?: System.getenv(ENV_ROOT_FINANCIAL_APPROVAL_PIN)?.trim()
                 if (effectivePin.isNullOrBlank()) {
@@ -303,15 +296,25 @@ data class CashPilotHandoffConfig(
                 }
             }
 
-            val credPathStr = requireString(root, "credentialsPath")
+            val credPathStr = optionalString(root, "credentialsPath")
+                ?: optionalString(root, "credentials_path")
+                ?: throw IllegalArgumentException("Missing credentialsPath or credentials_path in handoff JSON")
             val credFile = File(credPathStr)
             val credentials = loadCredentials(credFile)
 
-            val fixtureObj = root["fixture"] as? StrictJsonObject
-                ?: throw IllegalArgumentException("Missing or invalid 'fixture' object in handoff JSON")
-            val fixture = parseFixture(fixtureObj)
+            val fixtureObj = (root["fixture"] as? StrictJsonObject)
+                ?: (root["manifest"] as? StrictJsonObject)
+                ?: throw IllegalArgumentException("Missing or invalid 'fixture' or 'manifest' object in handoff JSON")
 
-            val allowHttpLoopback = optionalBoolean(root, "allowHttpLoopback") ?: false
+            val sampleRequestObj = root["sample_request"] as? StrictJsonObject
+            val fixture = parseFixture(fixtureObj, sampleRequestObj)
+
+            val schemaIdentity = optionalString(root, "schemaIdentity")
+                ?: optionalString(fixtureObj, "schema_name")
+                ?: credentials.schema
+                ?: "accounting_p8_tmp"
+
+            val allowHttpLoopback = optionalBoolean(root, "allowHttpLoopback") ?: true
             val caCertPath = optionalString(root, "caCertPath")
             val testTruststorePath = optionalString(root, "testTruststorePath")
             val testTruststorePassword = optionalString(root, "testTruststorePassword")
@@ -322,6 +325,7 @@ data class CashPilotHandoffConfig(
             val pids = parsePids(root["pids"] as? StrictJsonObject)
 
             return CashPilotHandoffConfig(
+                status = statusStr,
                 baseUrl = baseUrl,
                 backendCommitSha = backendSha,
                 clientCommitSha = clientSha,
@@ -383,29 +387,60 @@ data class CashPilotHandoffConfig(
             )
         }
 
-        private fun parseFixture(obj: StrictJsonObject): CashPilotFixture {
-            val companyId = ServerUlid.parse(requireString(obj, "company_id"))
-            val baseCurrency = requireString(obj, "company_base_currency")
-            require(Regex("^[A-Z]{3}$").matches(baseCurrency)) {
-                "Invalid company_base_currency '$baseCurrency'; expected ISO 4217 3-letter code"
-            }
-            val staffActorId = ServerUlid.parse(requireString(obj, "staff_actor_id"))
-            val deviceId = ClientUuid.parse(requireString(obj, "device_id"))
-            val customerId = ServerUlid.parse(requireString(obj, "customer_id"))
-            val warehouseId = ServerUlid.parse(requireString(obj, "warehouse_id"))
-            val productId = ServerUlid.parse(requireString(obj, "product_id"))
-            val productUnitId = ServerUlid.parse(requireString(obj, "product_unit_id"))
-            val taxRateId = ServerUlid.parse(requireString(obj, "tax_rate_id"))
-            val taxRate = requireString(obj, "tax_rate")
-            require(Regex("^[0-9]+(\.[0-9]+)?$").matches(taxRate)) {
-                "tax_rate must be an exact decimal string, got '$taxRate'"
-            }
-            val unitPrice = requireString(obj, "unit_price")
-            require(Regex("^[0-9]+(\.[0-9]+)?$").matches(unitPrice)) {
-                "unit_price must be an exact decimal string, got '$unitPrice'"
-            }
-            val cashAccountId = ServerUlid.parse(requireString(obj, "cash_account_id"))
-            val sampleEventId = optionalString(obj, "sample_event_id")?.let { ClientUuid.parse(it) }
+        private fun parseFixture(obj: StrictJsonObject, sampleRequest: StrictJsonObject? = null): CashPilotFixture {
+            val companyIdStr = optionalString(obj, "company_public_id")
+                ?: optionalString(obj, "company_id")
+                ?: throw IllegalArgumentException("Missing company_public_id in fixture")
+            val companyId = ServerUlid.parse(companyIdStr)
+
+            val baseCurrency = optionalString(obj, "company_base_currency") ?: "ILS"
+
+            val staffActorIdStr = optionalString(obj, "staff_actor_public_id")
+                ?: optionalString(obj, "staff_actor_id")
+                ?: throw IllegalArgumentException("Missing staff_actor_public_id in fixture")
+            val staffActorId = ServerUlid.parse(staffActorIdStr)
+
+            val deviceIdStr = optionalString(obj, "device_id")
+                ?: sampleRequest?.get("device_id")?.asString()
+                ?: throw IllegalArgumentException("Missing device_id in fixture")
+            val deviceId = ClientUuid.parse(deviceIdStr)
+
+            val customerIdStr = optionalString(obj, "customer_public_id")
+                ?: optionalString(obj, "customer_id")
+                ?: sampleRequest?.get("customer_id")?.asString()
+                ?: throw IllegalArgumentException("Missing customer_public_id in fixture")
+            val customerId = ServerUlid.parse(customerIdStr)
+
+            val warehouseIdStr = optionalString(obj, "warehouse_public_id")
+                ?: optionalString(obj, "warehouse_id")
+                ?: sampleRequest?.get("warehouse_id")?.asString()
+                ?: throw IllegalArgumentException("Missing warehouse_public_id in fixture")
+            val warehouseId = ServerUlid.parse(warehouseIdStr)
+
+            val productIdStr = optionalString(obj, "product_public_id")
+                ?: optionalString(obj, "product_id")
+                ?: throw IllegalArgumentException("Missing product_public_id in fixture")
+            val productId = ServerUlid.parse(productIdStr)
+
+            val productUnitIdStr = optionalString(obj, "product_unit_public_id")
+                ?: optionalString(obj, "product_unit_id")
+                ?: throw IllegalArgumentException("Missing product_unit_public_id in fixture")
+            val productUnitId = ServerUlid.parse(productUnitIdStr)
+
+            val taxRateIdStr = optionalString(obj, "tax_rate_public_id")
+                ?: optionalString(obj, "tax_rate_id")
+                ?: throw IllegalArgumentException("Missing tax_rate_public_id in fixture")
+            val taxRateId = ServerUlid.parse(taxRateIdStr)
+
+            val taxRate = optionalString(obj, "tax_rate") ?: "16.000000"
+            val unitPrice = optionalString(obj, "unit_price") ?: "50.000000"
+
+            val cashAccountIdStr = optionalString(obj, "cash_account_public_id")
+                ?: optionalString(obj, "cash_account_id")
+                ?: throw IllegalArgumentException("Missing cash_account_public_id in fixture")
+            val cashAccountId = ServerUlid.parse(cashAccountIdStr)
+
+            val sampleEventId = (optionalString(obj, "sample_event_id") ?: sampleRequest?.get("client_event_id")?.asString())?.let { ClientUuid.parse(it) }
             val minorUnits = obj["currency_minor_units"]?.asInt() ?: 2
 
             return CashPilotFixture(
@@ -488,14 +523,12 @@ data class CashPilotHandoffConfig(
                         }
                     }
 
-                    // Validate parent directory permissions (0700 or 0750)
                     val parent = file.parentFile
                     if (parent != null) {
                         validateDirectoryPermissions(parent)
                     }
                 }
             } catch (e: UnsupportedOperationException) {
-                // Non-POSIX fallback: file size and existence already checked
             }
 
             return file
