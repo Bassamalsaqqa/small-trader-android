@@ -3,7 +3,8 @@
   "leadCoordinatedPR": 23,
   "backendSyntheticFixture": {
     "tag": "syntheticca5a",
-    "backendQualifiedCommit": 698,
+    "backendQualifiedCommit": "6981511405d7bcd04cd8f8a09e64443ce0aaf47e",
+    "exactSyntheticFixtureCommit": "ca5a58c207dd4594302b7e7cae1d7cd4fd733fc0",
     "manifestSha256": "3248b9721c3e2a09e84ae478ddb0171c3ea576fd0cbdd70b3606e4cdda4ff3e7",
     "normativeProfileDigest": "sha256:0847e10d89777e103252ebfa2d27f89a95832a5d70e01af57afe6423f703c630"
   },
@@ -19,15 +20,37 @@
   "firstCompilerFailure": {
     "logPath": "first-compiler-failure.log",
     "sha256": "3cb8da03f50248025170ffaa8b18f069d2ee10efc0cdb089965889ae2278490f",
-    "description": "Compilation syntax error caused by unescaped Kotlin string quotes in prior commit f697451"
+    "description": "Compilation syntax error caused by unescaped Kotlin string quotes in prior commit f697451",
+    "correctionNote": "Earlier review handoff incorrectly cited an ab62... hash; actual verified raw committed log SHA-256 is 3cb8da03f50248025170ffaa8b18f069d2ee10efc0cdb089965889ae2278490f and is preserved unchanged."
+  },
+  "historical76Evidence": {
+    "suiteCount": 8,
+    "testCount": 76,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "note": "Historical reference evidence restored from git f697451 (39fea / recorded references); not current pass",
+    "files": {
+      "TEST-com.example.data.mobile.contract.v2.ContractV2WireValidationTest.xml": "dfcb0453c88ba26eddc8466f783aa3554d1c50072286de1f751f20403261ff72",
+      "TEST-com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest.xml": "c0bbb7ff94537268d4f2cbbe8979e11c7302c6acacd8a3972624230e6eb9b912",
+      "TEST-com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest.xml": "f2c76b82bf0f9a867f22e8aecba94b426dcb9df485c5ee2709d78bbfd9822938",
+      "TEST-com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest.xml": "a469283b8cfac31a38f6686690d8a08ef687e1c06a2bf11a49eb51a9cfa8097b",
+      "TEST-com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest.xml": "945e49f07ea4297acf952ee05b3b374d09c4a077041644dc228dc5cdce834851",
+      "TEST-com.example.data.mobile.contract.v2.SaleCommitResponseTest.xml": "13116670861321ebd0542752667c97dd0263e067f4bb631338325186c8b72f22",
+      "TEST-com.example.data.mobile.contract.v2.SaleEventStatusResponseTest.xml": "a23aa9ab96f6c12a5a4b36fa431da0362d7a89e83535584c9ac0ca94a49973bb",
+      "TEST-com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest.xml": "4dd15ac2388c39aaa7ce2f854406c2c65c51c4a51329896f6c867b53fdbd0c91"
+    }
   },
   "actualExecutionEvidence": {
+    "executionSourceCommit": "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+    "provenanceGap": "Code final commit before evidence and evidence commit were committed together in ddfc75536e647c65a6a7e8868c9336cee93769ec (preceding commit f697451719d2940bde89a8aab5b6770d93c7b823 had compiler error). Contemporaneous before/after pins were not separately captured; source file hashes verified against ddfc75536e647c65a6a7e8868c9336cee93769ec source files.",
     "suiteCount": 12,
     "testCount": 171,
     "passedCount": 170,
     "skippedCount": 1,
     "failures": 0,
     "errors": 0,
+    "skippedTestDetails": "SmallTraderOnlineCashPilotSmokeTest is a dormant pilot requiring opt-in custody handoff SMALL_TRADER_CASH_PILOT_HANDOFF and independent backend pin, not an E2E failure",
     "jvmSettings": "-XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xmx1536m --max-workers=1",
     "files": {
       "TEST-com.example.data.mobile.contract.v2.ContractV2WireValidationTest.xml": "08648df3c9b313c54bae169f411e0bde74cd6750ad7816395817cc5a9f7d1689",
@@ -44,9 +67,15 @@
       "TEST-com.example.data.mobile.session.StaffSessionCoordinatorTest.xml": "95098dbdee13a8b9ef347273f5d05eb6412508bc1213bd95e5d25feac133a1a9"
     }
   },
+  "reviewCorrections": {
+    "backendCommitPrefixNotPort": "Reference 9935 is a backend commit prefix in git history, not a network/TCP port. No made-up network endpoint was introduced.",
+    "compilerFailureLogSha": "Committed first-compiler-failure.log actual sha256 is 3cb8da03f50248025170ffaa8b18f069d2ee10efc0cdb089965889ae2278490f (manifest correct; prior handoff ab62 wrong). Historical raw log is preserved unedited."
+  },
   "limits": [
     "Isolated Gradle execution with max-workers=1, ActiveProcessorCount=2, SerialGC, Xmx=1536m",
-    "Historical 76 unverified evidence completely replaced with verified 171-test actual suite execution",
+    "Status QUALIFIED is strictly bounded to Android client implementation and local mock/unit verification under PR #23, NOT all financial backend systems",
+    "Historical 76 execution results preserved in historical-76/ as historical reference, separate from current 171-test actual suite execution in test-results/",
+    "Single skipped test in 171-test suite is dormant pilot smoke test awaiting custody handoff, not an E2E failure",
     "No network pilot or production credentials admitted",
     "Strict source-pinned fail-closed smoke harness active"
   ]

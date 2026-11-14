@@ -1,13 +1,18 @@
 {
   "status": "QUALIFIED",
+  "scope": "client_implementation_only",
+  "qualificationNote": "Qualified for Android client implementation under PR #23 only; not all financial backend systems",
   "pr": 23,
   "branch": "t3/android-v2-online-cash-client",
+  "executionSourceCommit": "ddfc75536e647c65a6a7e8868c9336cee93769ec",
   "totalSuites": 12,
   "totalTests": 171,
   "passed": 170,
   "skipped": 1,
   "failures": 0,
   "errors": 0,
+  "historical76Suites": 8,
+  "historical76Tests": 76,
   "fixesApplied": [
     "Fixed invalid Kotlin string quotes in PreparedOnlineSaleIntent and OnlineCashSaleReceipt",
     "Guarded ALL result branches against post-network stale scope generation in OnlineCashSaleOrchestrator",
@@ -16,6 +21,9 @@
     "Sanitized error categories removing raw exception messages and untrusted IDs",
     "Verified full cash financial consistency (amountPaid == payment.amount, amountPaid - change == grandTotal, non-null paymentId)",
     "Added new tests: new generation during 201, status replay 401, malformed canonical byte rejection, financial consistency check",
-    "Enforced fail-closed source-pinned required pins in smoke test"
+    "Enforced fail-closed source-pinned required pins in smoke test",
+    "Restored historical-76 test suite XML artifacts from git f697451 with recorded hashes",
+    "Corrected manifest provenance: backendQualifiedCommit string '6981511405d7bcd04cd8f8a09e64443ce0aaf47e', exactSyntheticFixtureCommit 'ca5a58c207dd4594302b7e7cae1d7cd4fd733fc0', and explicit execution source commit",
+    "Noted review correction: 9935 is backend commit prefix NOT port; compiler log actual sha256 3cb8da03... verified"
   ]
 }

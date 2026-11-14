@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.contract.v2.SaleCommitResponseTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-11-14T12:40:55.622Z" hostname="pasta-hp-worker" time="0.018">
+  <properties/>
+  <testcase name="testRejectExtraKeys" classname="com.example.data.mobile.contract.v2.SaleCommitResponseTest" time="0.006"/>
+  <testcase name="testRejectInvalidStatusEnum" classname="com.example.data.mobile.contract.v2.SaleCommitResponseTest" time="0.008"/>
+  <testcase name="testGoldenSaleCommitResponseParity" classname="com.example.data.mobile.contract.v2.SaleCommitResponseTest" time="0.002"/>
+  <testcase name="testNullablePaymentFieldsAllowed" classname="com.example.data.mobile.contract.v2.SaleCommitResponseTest" time="0.001"/>
+  <testcase name="testRejectInvalidDecimalLexeme" classname="com.example.data.mobile.contract.v2.SaleCommitResponseTest" time="0.001"/>
+  <testcase name="testRejectMissingRequiredKeys" classname="com.example.data.mobile.contract.v2.SaleCommitResponseTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
