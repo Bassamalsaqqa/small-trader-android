@@ -215,9 +215,10 @@ class CashPilotHandoffConfig private constructor(
             try {
                 conn.connect()
                 responseCode = conn.responseCode
-                val contentType = conn.contentType ?: ""
-                require(contentType.startsWith("application/json")) {
-                    "Expected application/json Content-Type, got '$contentType'"
+                val rawContentType = conn.contentType ?: ""
+                val baseMime = rawContentType.split(";")[0].trim().lowercase()
+                require(baseMime == "application/json") {
+                    "Expected application/json Content-Type, got '$rawContentType'"
                 }
                 val stream: InputStream = if (responseCode in 200..299) conn.inputStream else (conn.errorStream ?: ByteArrayInputStream(ByteArray(0)))
                 val bytes = stream.use { s ->

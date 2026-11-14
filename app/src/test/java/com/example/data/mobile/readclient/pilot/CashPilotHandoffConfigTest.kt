@@ -1051,6 +1051,53 @@ class CashPilotHandoffConfigTest {
     }
 
     @Test
+    fun readinessProbe_prefixedNonJsonContentType_throwsException() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json-evil; charset=utf-8")
+                    .setBody("""{"status":"ready","nonce":"matching-nonce-3333"}""")
+            )
+            val url = server.url(CashPilotHandoffConfig.READINESS_PROBE_PATH).toString()
+            val ex = assertThrows(IllegalArgumentException::class.java) {
+                CashPilotHandoffConfig.executeReadinessProbe(
+                    readinessUrl = url,
+                    expectedNonce = "matching-nonce-3333"
+                )
+            }
+            assertTrue("Expected MIME rejection, got: " + ex.message, ex.message!!.contains("Expected application/json Content-Type"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun readinessProbe_caseInsensitiveApplicationJson_succeeds() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "APPLICATION/JSON; CHARSET=UTF-8")
+                    .setBody("""{"status":"ready","nonce":"matching-nonce-4444"}""")
+            )
+            val url = server.url(CashPilotHandoffConfig.READINESS_PROBE_PATH).toString()
+            val result = CashPilotHandoffConfig.executeReadinessProbe(
+                readinessUrl = url,
+                expectedNonce = "matching-nonce-4444"
+            )
+            assertEquals(200, result.statusCode)
+            assertEquals("matching-nonce-4444", result.nonce)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
     fun readinessProbe_non200StatusCode_throwsException() {
         val server = MockWebServer()
         server.start()
