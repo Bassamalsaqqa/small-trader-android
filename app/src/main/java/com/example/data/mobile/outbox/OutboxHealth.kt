@@ -158,18 +158,16 @@ class DefaultOutboxHealthInspector(
         val maxEnvelopeBytes = ContractConstants.MAX_PAYLOAD_BYTES + 32
         val maxEnvelopeBytesPlusOne = maxEnvelopeBytes + 1
 
-        // Gather ALL scoped count, classifications, auth lock, bounded initial page under ONE Room transaction
+        // Gather scoped count, classifications, auth lock, and bounded initial page
         val snapshot = try {
-            database.runInTransaction<OutboxHealthScopeSnapshot> {
-                database.outboxDao().getScopedHealthSnapshot(
-                    companyId = companyId,
-                    actorId = actorId,
-                    deviceId = deviceId,
-                    maxEnvelopeBytesPlusOne = maxEnvelopeBytesPlusOne,
-                    limit = pageSize,
-                    onBetweenCountAndSample = onSnapshotReadHook
-                )
-            }
+            database.outboxDao().getScopedHealthSnapshot(
+                companyId = companyId,
+                actorId = actorId,
+                deviceId = deviceId,
+                maxEnvelopeBytesPlusOne = maxEnvelopeBytesPlusOne,
+                limit = pageSize,
+                onBetweenCountAndSample = onSnapshotReadHook
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

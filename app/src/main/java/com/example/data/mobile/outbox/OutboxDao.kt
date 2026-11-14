@@ -69,7 +69,6 @@ data class OutboxHealthScopeSnapshot(
 
 @Dao
 abstract class OutboxDao {
-    @Transaction
     open fun getScopedHealthSnapshot(
         companyId: String,
         actorId: String,
@@ -84,10 +83,12 @@ abstract class OutboxDao {
         onBetweenCountAndSample?.invoke()
         val nonEncrypted = if (total > 0) scopedNonEncryptedEventCount(companyId, actorId, deviceId) else 0
         val sample = if (total > 0) {
-            scopedSampleEventsForHealthProbe(
+            scopedEventsPageForHealthProbe(
                 companyId = companyId,
                 actorId = actorId,
                 deviceId = deviceId,
+                afterCapturedAt = null,
+                afterClientEventId = null,
                 maxEnvelopeBytesPlusOne = maxEnvelopeBytesPlusOne,
                 limit = limit
             )
@@ -134,7 +135,7 @@ abstract class OutboxDao {
         WHERE company_id = :companyId
           AND actor_id = :actorId
           AND device_id = :deviceId
-        ORDER BY captured_at ASC
+        ORDER BY captured_at ASC, client_event_id ASC
         LIMIT :limit
     """)
     abstract fun scopedSampleEventsForHealthProbe(
