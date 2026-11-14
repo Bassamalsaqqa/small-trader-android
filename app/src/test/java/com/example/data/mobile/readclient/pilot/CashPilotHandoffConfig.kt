@@ -217,7 +217,7 @@ class CashPilotHandoffConfig private constructor(
                 responseCode = conn.responseCode
                 val contentType = conn.contentType ?: ""
                 require(contentType.startsWith("application/json")) {
-                    "Expected application/json Content-Type, got ''"
+                    "Expected application/json Content-Type, got '$contentType'"
                 }
                 val stream: InputStream = if (responseCode in 200..299) conn.inputStream else (conn.errorStream ?: ByteArrayInputStream(ByteArray(0)))
                 val bytes = stream.use { s ->
@@ -229,7 +229,7 @@ class CashPilotHandoffConfig private constructor(
                         total += r
                     }
                     if (s.read() != -1) {
-                        throw IllegalArgumentException("Readiness response exceeded bounded limit of  bytes")
+                        throw IllegalArgumentException("Readiness response exceeded bounded limit of $maxSizeBytes bytes")
                     }
                     buf.copyOf(total)
                 }
@@ -240,7 +240,7 @@ class CashPilotHandoffConfig private constructor(
             val latency = System.currentTimeMillis() - tStart
 
             require(responseCode == 200) {
-                "Readiness probe returned HTTP  (expected 200)"
+                "Readiness probe returned HTTP $responseCode (expected 200)"
             }
             val readinessObj = StrictJsonParser.parse(responseBody).asObject()
             val statusVal = readinessObj["status"]?.asStringOrNull()
@@ -248,10 +248,10 @@ class CashPilotHandoffConfig private constructor(
             val nonceVal = readinessObj["nonce"]?.asStringOrNull()
                 ?: throw IllegalArgumentException("Readiness response missing 'nonce'")
             require(statusVal == "ready") {
-                "Readiness response status expected 'ready', got ''"
+                "Readiness response status expected 'ready', got '$statusVal'"
             }
             require(nonceVal == expectedNonce) {
-                "Readiness response nonce mismatch: expected , got "
+                "Readiness response nonce mismatch: expected $expectedNonce, got $nonceVal"
             }
 
             return ReadinessProbeResult(
