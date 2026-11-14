@@ -1465,4 +1465,69 @@ class AndroidV2OnlineCashClientMockWebServerTest {
             result is OnlineCashOrchestrationResult.ParseFailure)
         assertEquals("FINANCIAL_CONSISTENCY_MISMATCH", (result as OnlineCashOrchestrationResult.ParseFailure).category)
     }
+
+    @Test
+    fun testOnlineOrchestrationLostAckStatusPostedNullPaymentReceiptNumberReturnsPostedWithoutPaymentReference() {
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        // Matching tenant, matching event, matching normative digest, matching grand_total,
+        // valid non-null payment_id, BUT NULL payment_receipt_number (incomplete payment reference)
+        val statusIncompletePaymentJson = """{
+            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+            "company_id": "01M7CZPF6TP283F3ZRXF5P8GT2",
+            "status": "posted",
+            "payload_digest": "sha256:0847e10d89777e103252ebfa2d27f89a95832a5d70e01af57afe6423f703c630",
+            "official_invoice": {
+                "invoice_id": "01M7CZPF6TP283F3ZRXF5P8GT9",
+                "invoice_number": "INV-2026-00099",
+                "payment_id": "01M7CZPF6TP283F3ZRXF5P8GTA",
+                "payment_receipt_number": null,
+                "grand_total": "58.000000",
+                "posted_at": "2026-11-14T12:00:00Z"
+            },
+            "conflict": null,
+            "queried_at": "2026-11-14T12:05:00Z"
+        }"""
+
+        // 1. Initial POST drops with socket disconnect
+        server!!.enqueue(
+            MockResponse()
+                .setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
+        )
+        // 2. Recovery GET status returns 200 posted with null payment_receipt_number
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(statusIncompletePaymentJson)
+        )
+
+        val client = createClient(connectTimeoutMs = 1000, readTimeoutMs = 1000)
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = { 1L }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        // Completeness validation: null payment_receipt_number must NOT be promoted to ConfirmedFinancialSuccess
+        assertTrue("Status recovery with null payment_receipt_number must return PostedWithoutPaymentReference, got: $result",
+            result is OnlineCashOrchestrationResult.PostedWithoutPaymentReference)
+        val receipt = (result as OnlineCashOrchestrationResult.PostedWithoutPaymentReference).receipt
+        assertEquals("01M7CZPF6TP283F3ZRXF5P8GTA", receipt.paymentId?.value)
+        assertNull("paymentReceiptNumber must be null", receipt.paymentReceiptNumber)
+        assertTrue(receipt.wasReplay)
+        assertEquals("01M7CZPF6TP283F3ZRXF5P8GT9", receipt.invoiceId.value)
+    }
 }

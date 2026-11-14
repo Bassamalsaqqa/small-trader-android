@@ -276,29 +276,14 @@ class SmallTraderOnlineCashPilotSmokeTest {
             )
             val commitLatency = System.currentTimeMillis() - tCommitStart
 
-            val freshReceipt = when (freshResult) {
-                is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess -> freshResult.receipt
-                is OnlineCashOrchestrationResult.PostedWithoutPaymentReference -> {
-                    throw AssertionError("Fresh commit returned PostedWithoutPaymentReference: cash pilot strictly requires ConfirmedFinancialSuccess with non-null payment reference")
-                }
-                else -> throw AssertionError("Fresh commit failed: $freshResult")
-            }
+            val freshReceipt = assertCashPilotFinancialSuccess(
+                result = freshResult,
+                expectedCompanyId = config.serverContext.companyId,
+                expectedClientEventId = preparedIntent.clientEventId,
+                expectedDigest = preparedIntent.expectedNormativeProfileDigest,
+                expectedGrandTotal = preparedIntent.profile.payment.amount
+            )
             require(!freshReceipt.wasReplay) { "Fresh commit must not report replay" }
-            require(freshReceipt.paymentId != null) {
-                "Fresh commit must return non-null canonical payment reference for full cash sale"
-            }
-            require(freshReceipt.companyId == config.serverContext.companyId) {
-                "Fresh commit companyId mismatch: expected ${config.serverContext.companyId}, got ${freshReceipt.companyId}"
-            }
-            require(freshReceipt.clientEventId == preparedIntent.clientEventId) {
-                "Fresh commit clientEventId mismatch: expected ${preparedIntent.clientEventId}, got ${freshReceipt.clientEventId}"
-            }
-            require(freshReceipt.payloadDigest == preparedIntent.expectedNormativeProfileDigest) {
-                "Fresh commit payloadDigest mismatch: expected ${preparedIntent.expectedNormativeProfileDigest}, got ${freshReceipt.payloadDigest}"
-            }
-            require(freshReceipt.grandTotal.toPlainString() == preparedIntent.profile.payment.amount.toPlainString()) {
-                "Fresh commit grandTotal mismatch: expected ${preparedIntent.profile.payment.amount.toPlainString()}, got ${freshReceipt.grandTotal.toPlainString()}"
-            }
 
             scenarios.add(
                 ScenarioEvidence(
@@ -320,40 +305,25 @@ class SmallTraderOnlineCashPilotSmokeTest {
             )
             val replayLatency = System.currentTimeMillis() - tReplayStart
 
-            val replayReceipt = when (replayResult) {
-                is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess -> replayResult.receipt
-                is OnlineCashOrchestrationResult.PostedWithoutPaymentReference -> {
-                    throw AssertionError("Idempotent replay returned PostedWithoutPaymentReference: cash pilot strictly requires ConfirmedFinancialSuccess")
-                }
-                else -> throw AssertionError("Idempotent replay failed: $replayResult")
-            }
+            val replayReceipt = assertCashPilotFinancialSuccess(
+                result = replayResult,
+                expectedCompanyId = config.serverContext.companyId,
+                expectedClientEventId = preparedIntent.clientEventId,
+                expectedDigest = preparedIntent.expectedNormativeProfileDigest,
+                expectedGrandTotal = preparedIntent.profile.payment.amount
+            )
             require(replayReceipt.wasReplay) { "Replay must report wasReplay == true" }
-            require(replayReceipt.companyId == freshReceipt.companyId) {
-                "Replay companyId mismatch: expected ${freshReceipt.companyId}, got ${replayReceipt.companyId}"
-            }
-            require(replayReceipt.clientEventId == freshReceipt.clientEventId) {
-                "Replay clientEventId mismatch: expected ${freshReceipt.clientEventId}, got ${replayReceipt.clientEventId}"
-            }
-            require(replayReceipt.payloadDigest == freshReceipt.payloadDigest) {
-                "Replay payloadDigest mismatch: expected ${freshReceipt.payloadDigest}, got ${replayReceipt.payloadDigest}"
-            }
             require(replayReceipt.invoiceId == freshReceipt.invoiceId) {
                 "Replay invoice ID mismatch: expected ${freshReceipt.invoiceId}, got ${replayReceipt.invoiceId}"
             }
             require(replayReceipt.invoiceNumber == freshReceipt.invoiceNumber) {
                 "Replay invoice number mismatch: expected ${freshReceipt.invoiceNumber}, got ${replayReceipt.invoiceNumber}"
             }
-            require(replayReceipt.paymentId != null) {
-                "Replay must return non-null payment reference"
-            }
             require(replayReceipt.paymentId == freshReceipt.paymentId) {
                 "Replay payment ID mismatch: expected ${freshReceipt.paymentId}, got ${replayReceipt.paymentId}"
             }
             require(replayReceipt.paymentReceiptNumber == freshReceipt.paymentReceiptNumber) {
                 "Replay payment receipt number mismatch: expected ${freshReceipt.paymentReceiptNumber}, got ${replayReceipt.paymentReceiptNumber}"
-            }
-            require(replayReceipt.grandTotal.toPlainString() == freshReceipt.grandTotal.toPlainString()) {
-                "Replay grandTotal mismatch: expected ${freshReceipt.grandTotal.toPlainString()}, got ${replayReceipt.grandTotal.toPlainString()}"
             }
 
             scenarios.add(
@@ -549,7 +519,7 @@ class SmallTraderOnlineCashPilotSmokeTest {
     }
 
     @Test
-    fun testNullPaymentReferenceNeverAcceptedAsPilotFinancialSuccess() {
+    fun testCashPilotFinancialAcceptanceEnforcement() {
         val syntheticReceipt = OnlineCashSaleReceipt(
             companyId = ServerUlid.parse("01M7CZPF6TP283F3ZRXF5P8GT2"),
             clientEventId = ClientUuid.parse("c0686be5-888f-4890-90bf-1f05f416a19a"),
@@ -563,20 +533,103 @@ class SmallTraderOnlineCashPilotSmokeTest {
             wasReplay = false
         )
 
-        val unconfirmedResult: OnlineCashOrchestrationResult =
-            OnlineCashOrchestrationResult.PostedWithoutPaymentReference(syntheticReceipt)
-
-        // Pilot acceptance invariant: ONLY ConfirmedFinancialSuccess is acceptable as PASS.
-        // PostedWithoutPaymentReference must fail closed and never pass pilot acceptance.
-        val acceptedAsPilotPass = when (unconfirmedResult) {
-            is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess -> true
-            is OnlineCashOrchestrationResult.PostedWithoutPaymentReference -> false
-            else -> false
+        // 1. Invoking actual acceptance function with PostedWithoutPaymentReference => throws AssertionError
+        org.junit.Assert.assertThrows(AssertionError::class.java) {
+            assertCashPilotFinancialSuccess(
+                result = OnlineCashOrchestrationResult.PostedWithoutPaymentReference(syntheticReceipt),
+                expectedCompanyId = syntheticReceipt.companyId,
+                expectedClientEventId = syntheticReceipt.clientEventId,
+                expectedDigest = syntheticReceipt.payloadDigest,
+                expectedGrandTotal = syntheticReceipt.grandTotal
+            )
         }
 
-        assertFalse(
-            "PostedWithoutPaymentReference must NEVER pass pilot financial acceptance",
-            acceptedAsPilotPass
+        // 2. Invoking actual acceptance function with ConfirmedFinancialSuccess with null paymentId => throws IllegalArgumentException
+        val invalidConfirmedWithNullPayment = OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(syntheticReceipt)
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            assertCashPilotFinancialSuccess(
+                result = invalidConfirmedWithNullPayment,
+                expectedCompanyId = syntheticReceipt.companyId,
+                expectedClientEventId = syntheticReceipt.clientEventId,
+                expectedDigest = syntheticReceipt.payloadDigest,
+                expectedGrandTotal = syntheticReceipt.grandTotal
+            )
+        }
+
+        // 3. Invoking actual acceptance function with ConfirmedFinancialSuccess with null paymentReceiptNumber => throws IllegalArgumentException
+        val receiptWithNullNumber = syntheticReceipt.copy(
+            paymentId = ServerUlid.parse("01M7CZPF6TP283F3ZRXF5P8GTA"),
+            paymentReceiptNumber = null
         )
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            assertCashPilotFinancialSuccess(
+                result = OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(receiptWithNullNumber),
+                expectedCompanyId = syntheticReceipt.companyId,
+                expectedClientEventId = syntheticReceipt.clientEventId,
+                expectedDigest = syntheticReceipt.payloadDigest,
+                expectedGrandTotal = syntheticReceipt.grandTotal
+            )
+        }
+
+        // 4. Positive case: genuine valid receipt with full canonical references => accepted and returned
+        val validReceipt = syntheticReceipt.copy(
+            paymentId = ServerUlid.parse("01M7CZPF6TP283F3ZRXF5P8GTA"),
+            paymentReceiptNumber = "RCT-2026-00099"
+        )
+        val accepted = assertCashPilotFinancialSuccess(
+            result = OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(validReceipt),
+            expectedCompanyId = validReceipt.companyId,
+            expectedClientEventId = validReceipt.clientEventId,
+            expectedDigest = validReceipt.payloadDigest,
+            expectedGrandTotal = validReceipt.grandTotal
+        )
+        assertEquals(validReceipt.paymentId, accepted.paymentId)
+        assertEquals(validReceipt.paymentReceiptNumber, accepted.paymentReceiptNumber)
+        assertEquals(validReceipt.invoiceId, accepted.invoiceId)
     }
+}
+
+/**
+ * Authoritative cash pilot financial acceptance function.
+ * Strictly enforces that online cash pilot execution achieves ConfirmedFinancialSuccess
+ * with complete, canonical, non-null payment identity and matching context/digest/totals.
+ * Shared between fresh commit, replay verification, and negative acceptance unit tests.
+ */
+internal fun assertCashPilotFinancialSuccess(
+    result: OnlineCashOrchestrationResult,
+    expectedCompanyId: ServerUlid,
+    expectedClientEventId: ClientUuid,
+    expectedDigest: PayloadDigest,
+    expectedGrandTotal: MoneyAmount
+): OnlineCashSaleReceipt {
+    val receipt = when (result) {
+        is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess -> result.receipt
+        is OnlineCashOrchestrationResult.PostedWithoutPaymentReference -> {
+            throw AssertionError(
+                "Cash pilot strictly requires ConfirmedFinancialSuccess with complete payment references, " +
+                    "got PostedWithoutPaymentReference (unconfirmed ledger state)"
+            )
+        }
+        else -> throw AssertionError("Online cash execution failed: $result")
+    }
+
+    require(receipt.paymentId != null) {
+        "Cash pilot acceptance requires non-null canonical paymentId"
+    }
+    require(!receipt.paymentReceiptNumber.isNullOrBlank()) {
+        "Cash pilot acceptance requires non-null canonical paymentReceiptNumber"
+    }
+    require(receipt.companyId == expectedCompanyId) {
+        "CompanyId mismatch: expected $expectedCompanyId, got ${receipt.companyId}"
+    }
+    require(receipt.clientEventId == expectedClientEventId) {
+        "ClientEventId mismatch: expected $expectedClientEventId, got ${receipt.clientEventId}"
+    }
+    require(receipt.payloadDigest == expectedDigest) {
+        "PayloadDigest mismatch: expected $expectedDigest, got ${receipt.payloadDigest}"
+    }
+    require(receipt.grandTotal.toPlainString() == expectedGrandTotal.toPlainString()) {
+        "GrandTotal mismatch: expected ${expectedGrandTotal.toPlainString()}, got ${receipt.grandTotal.toPlainString()}"
+    }
+    return receipt
 }

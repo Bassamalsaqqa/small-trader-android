@@ -223,23 +223,24 @@ class OnlineCashSaleOrchestrator(
                         return OnlineCashOrchestrationResult.ParseFailure("EVENT_PARITY_MISMATCH")
                     }
 
-                    // Authoritative financial verification with prepared profile
+                    // Single shared receipt construction
+                    val receipt = OnlineCashSaleReceipt(
+                        companyId = intent.context.companyId,
+                        clientEventId = commit.clientEventId,
+                        payloadDigest = intent.expectedNormativeProfileDigest,
+                        invoiceId = commit.invoiceId,
+                        invoiceNumber = commit.invoiceNumber,
+                        paymentId = commit.paymentId,
+                        paymentReceiptNumber = commit.paymentReceiptNumber,
+                        grandTotal = commit.grandTotal,
+                        postedAt = commit.postedAt,
+                        wasReplay = executionResult.wasReplay
+                    )
+
                     val isFullCash = intent.profile.payment.settlementMode == "full"
                     if (isFullCash) {
-                        // Must have non-null payment reference
-                        if (commit.paymentId == null) {
-                            val receipt = OnlineCashSaleReceipt(
-                                companyId = intent.context.companyId,
-                                clientEventId = commit.clientEventId,
-                                payloadDigest = intent.expectedNormativeProfileDigest,
-                                invoiceId = commit.invoiceId,
-                                invoiceNumber = commit.invoiceNumber,
-                                paymentId = null,
-                                paymentReceiptNumber = commit.paymentReceiptNumber,
-                                grandTotal = commit.grandTotal,
-                                postedAt = commit.postedAt,
-                                wasReplay = executionResult.wasReplay
-                            )
+                        // Aligned receipt-completeness validation: must have non-null paymentId AND paymentReceiptNumber
+                        if (receipt.paymentId == null || receipt.paymentReceiptNumber.isNullOrBlank()) {
                             return OnlineCashOrchestrationResult.PostedWithoutPaymentReference(receipt)
                         }
 
@@ -259,33 +260,9 @@ class OnlineCashSaleOrchestrator(
                             return OnlineCashOrchestrationResult.ParseFailure("FINANCIAL_CONSISTENCY_MISMATCH")
                         }
 
-                        val receipt = OnlineCashSaleReceipt(
-                            companyId = intent.context.companyId,
-                            clientEventId = commit.clientEventId,
-                            payloadDigest = intent.expectedNormativeProfileDigest,
-                            invoiceId = commit.invoiceId,
-                            invoiceNumber = commit.invoiceNumber,
-                            paymentId = commit.paymentId,
-                            paymentReceiptNumber = commit.paymentReceiptNumber,
-                            grandTotal = commit.grandTotal,
-                            postedAt = commit.postedAt,
-                            wasReplay = executionResult.wasReplay
-                        )
                         OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(receipt)
                     } else {
-                        val receipt = OnlineCashSaleReceipt(
-                            companyId = intent.context.companyId,
-                            clientEventId = commit.clientEventId,
-                            payloadDigest = intent.expectedNormativeProfileDigest,
-                            invoiceId = commit.invoiceId,
-                            invoiceNumber = commit.invoiceNumber,
-                            paymentId = commit.paymentId,
-                            paymentReceiptNumber = commit.paymentReceiptNumber,
-                            grandTotal = commit.grandTotal,
-                            postedAt = commit.postedAt,
-                            wasReplay = executionResult.wasReplay
-                        )
-                        if (receipt.paymentId != null) {
+                        if (receipt.paymentId != null && !receipt.paymentReceiptNumber.isNullOrBlank()) {
                             OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(receipt)
                         } else {
                             OnlineCashOrchestrationResult.PostedWithoutPaymentReference(receipt)
@@ -311,59 +288,36 @@ class OnlineCashSaleOrchestrator(
                         )
                     }
 
+                    // Single shared receipt construction
+                    val receipt = OnlineCashSaleReceipt(
+                        companyId = status.companyId,
+                        clientEventId = status.clientEventId,
+                        payloadDigest = status.payloadDigest,
+                        invoiceId = official.invoiceId,
+                        invoiceNumber = official.invoiceNumber,
+                        paymentId = official.paymentId,
+                        paymentReceiptNumber = official.paymentReceiptNumber,
+                        grandTotal = official.grandTotal,
+                        postedAt = official.postedAt,
+                        wasReplay = executionResult.wasReplay
+                    )
+
                     val isFullCash = intent.profile.payment.settlementMode == "full"
                     if (isFullCash) {
-                        // 1. Full cash settlement requires non-null payment reference
-                        if (official.paymentId == null) {
-                            val receipt = OnlineCashSaleReceipt(
-                                companyId = status.companyId,
-                                clientEventId = status.clientEventId,
-                                payloadDigest = status.payloadDigest,
-                                invoiceId = official.invoiceId,
-                                invoiceNumber = official.invoiceNumber,
-                                paymentId = null,
-                                paymentReceiptNumber = official.paymentReceiptNumber,
-                                grandTotal = official.grandTotal,
-                                postedAt = official.postedAt,
-                                wasReplay = executionResult.wasReplay
-                            )
+                        // Aligned receipt-completeness validation: must have non-null paymentId AND paymentReceiptNumber
+                        if (receipt.paymentId == null || receipt.paymentReceiptNumber.isNullOrBlank()) {
                             return OnlineCashOrchestrationResult.PostedWithoutPaymentReference(receipt)
                         }
 
-                        // 2. Authoritative financial reconciliation: official grand total must equal prepared online payment amount
+                        // Authoritative financial reconciliation: official grand total must equal prepared online payment amount
                         // Qualified online cash slice specifies exact settlement with change 0 (payment.amount == grand_total)
                         if (official.grandTotal.value.compareTo(intent.profile.payment.amount.value) != 0) {
                             return OnlineCashOrchestrationResult.ParseFailure("FINANCIAL_CONSISTENCY_MISMATCH")
                         }
 
-                        val receipt = OnlineCashSaleReceipt(
-                            companyId = status.companyId,
-                            clientEventId = status.clientEventId,
-                            payloadDigest = status.payloadDigest,
-                            invoiceId = official.invoiceId,
-                            invoiceNumber = official.invoiceNumber,
-                            paymentId = official.paymentId,
-                            paymentReceiptNumber = official.paymentReceiptNumber,
-                            grandTotal = official.grandTotal,
-                            postedAt = official.postedAt,
-                            wasReplay = executionResult.wasReplay
-                        )
                         OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(receipt)
                     } else {
-                        val receipt = OnlineCashSaleReceipt(
-                            companyId = status.companyId,
-                            clientEventId = status.clientEventId,
-                            payloadDigest = status.payloadDigest,
-                            invoiceId = official.invoiceId,
-                            invoiceNumber = official.invoiceNumber,
-                            paymentId = official.paymentId,
-                            paymentReceiptNumber = official.paymentReceiptNumber,
-                            grandTotal = official.grandTotal,
-                            postedAt = official.postedAt,
-                            wasReplay = executionResult.wasReplay
-                        )
-
-                        if (receipt.paymentId != null) {
+                        if (receipt.paymentId != null && !receipt.paymentReceiptNumber.isNullOrBlank()) {
                             OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(receipt)
                         } else {
                             OnlineCashOrchestrationResult.PostedWithoutPaymentReference(receipt)
