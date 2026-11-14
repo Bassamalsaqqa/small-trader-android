@@ -23,7 +23,9 @@ import java.time.temporal.ChronoUnit
  * - Zero real network or background daemons.
  * - Strict schema, TTL, permissions, origin, and key allowlisting fail-closed behavior.
  * - Matches exact authoritative backend provision schema (mobile-v2-client-handoff-schema.json).
+ * - Pins client_handoff_schema_sha256 to edaef0309765e10d6462b36b5c660eb02f65c057c810ab72f756f7664e3ca275.
  * - Distinct lifecycle grant: READINESS_ONLY vs FINANCIAL_PAIRED_RUN.
+ * - Distinct loopback host readiness URL (127.0.0.1) vs Android emulator URL (10.0.2.2).
  * - Strict tri-state overall status: PASS, FAIL, NOT_RUN (no PASS zero executed).
  */
 class CashPilotHandoffConfigTest {
@@ -45,7 +47,12 @@ class CashPilotHandoffConfigTest {
         return file
     }
 
-    private fun createValidFixtures(tempDir: File, isReady: Boolean = true): Triple<File, File, File> {
+    private fun createValidFixtures(
+        tempDir: File,
+        isReady: Boolean = true,
+        handoffScope: String = CashPilotHandoffConfig.SCOPE_READINESS_ONLY,
+        lifecyclePhaseOverride: String? = null
+    ): Triple<File, File, File> {
         val credFile = createPrivateFile(
             tempDir,
             "runtime_credentials.json",
@@ -76,13 +83,15 @@ class CashPilotHandoffConfigTest {
         val futureTtl = Instant.now().plus(2, ChronoUnit.DAYS).toString()
 
         val sampleReqJson = """{"client_event_id":"c0686be5-888f-4890-90bf-1f05f416a19a","currency":"ILS","customer_id":"01M7CZPF6TP283F3ZRXF5P8GT3","device_id":"c0686be5-888f-4890-90bf-1f05f416a19a","lines":[{"conversion_to_base":"1.000000","product_id":"01M7CZPF6TP283F3ZRXF5P8GT5","product_unit_id":"01M7CZPF6TP283F3ZRXF5P8GT6","quantity":"1.000000","tax_inclusive":false,"tax_rate":"16.000000","tax_rate_id":"01M7CZPF6TP283F3ZRXF5P8GT7","unit_price":"50.000000"}],"payment":{"amount":"58.000000","cash_account_id":"01M7CZPF6TP283F3ZRXF5P8GT8","payment_method":"cash","settlement_mode":"full"},"warehouse_id":"01M7CZPF6TP283F3ZRXF5P8GT4"}"""
-        val sampleReqSha = CashPilotHandoffConfig.computeSha256(sampleReqJson.toByteArray(Charsets.UTF_8))
+        val sampleReqSha = "1a269431c6960e53c1371485548a3ac8db0d29a328f74a7200055c37c9c452f0"
+        val freshProfileDigest = "sha256:9b94a269189f947b0128af4ccf660b6d9d5f36caf4a6adb033c1a8229bd15797"
 
-        val lifecyclePhase = if (isReady) "ACTIVE_TLS_READY" else "PROVISIONED_AWAITING_TLS_START"
+        val lifecyclePhase = lifecyclePhaseOverride ?: if (isReady) "ACTIVE_TLS_READY" else "PROVISIONED_AWAITING_TLS_START"
         val tlsStatus = if (isReady) "ACTIVE_TLS_READY" else "UNAVAILABLE_AWAITING_TLS_START"
         val caPathStr = if (isReady) "\"${caCertFile.absolutePath}\"" else "null"
         val caShaStr = if (isReady) "\"$caSha\"" else "null"
         val readinessUrlStr = if (isReady) "\"https://127.0.0.1:18443/_harness/readiness\"" else "null"
+        val androidReadinessUrlStr = if (isReady) "\"https://10.0.2.2:18443/_harness/readiness\"" else "null"
         val readinessNonceStr = if (isReady) "\"harness-nonce-0123456789abcdef\"" else "null"
 
         val handoffFile = createPrivateFile(
@@ -91,7 +100,7 @@ class CashPilotHandoffConfigTest {
             """
             {
               "schema_version": "1.0.0",
-              "handoff_scope": "ROOT_AUTHORIZED_READINESS_ONLY",
+              "handoff_scope": "$handoffScope",
               "lifecycle_phase": "$lifecyclePhase",
               "created_at": "2026-11-14T12:00:00Z",
               "expires_at": "$futureTtl",
@@ -105,7 +114,8 @@ class CashPilotHandoffConfigTest {
                 "guard_test_sha256": "f5ce3974cd8edfb3aa4bf4fd9826a4c397b21dce611ecf5058026a0d8703d9f0",
                 "cli_command_sha256": "0b51e19e94ef9892f82c8f7d471d186f9f75c0fd9a08eb57f4fd7d08e58e8e99",
                 "cli_runner_sha256": "34b9176af6c4cb183cce8f1b8b41cd27f9fb934f47917d4b752df0b6694e503d",
-                "pairing_manifest_sha256": "5bfb4b06ae33ddf0084a3d2d99a41e714f0c64d97fa810b4ecdddf6f8e5f16c1"
+                "pairing_manifest_sha256": "5bfb4b06ae33ddf0084a3d2d99a41e714f0c64d97fa810b4ecdddf6f8e5f16c1",
+                "client_handoff_schema_sha256": "edaef0309765e10d6462b36b5c660eb02f65c057c810ab72f756f7664e3ca275"
               },
               "endpoints": {
                 "base_url": "https://10.0.2.2:18443/api/mobile/v2",
@@ -142,7 +152,7 @@ class CashPilotHandoffConfigTest {
                 "actor_id": "01M7CZPF6TP283F3ZRXF5P8GT1",
                 "currency_minor_units": 2
               },
-              "canonical_intent_profile_digest": "sha256:7c7526dd284b3e414c22fb0971b569bf17f0aa86d4e130a1130dcf2b9cb0c2ee",
+              "canonical_intent_profile_digest": "$freshProfileDigest",
               "historical_ca5a_reference": {
                 "ca5a_manifest_sha256": "3248b9721c3e2a09e84ae478ddb0171c3ea576fd0cbdd70b3606e4cdda4ff3e7",
                 "ca5a_canonical_digest": "0847e10d89777e103252ebfa2d27f89a95832a5d70e01af57afe6423f703c630"
@@ -152,6 +162,7 @@ class CashPilotHandoffConfigTest {
                 "ca_cert_path": $caPathStr,
                 "ca_cert_sha256": $caShaStr,
                 "readiness_url": $readinessUrlStr,
+                "android_readiness_url": $androidReadinessUrlStr,
                 "readiness_nonce": $readinessNonceStr
               }
             }
@@ -187,6 +198,45 @@ class CashPilotHandoffConfigTest {
             assertTrue(config.isReadinessOnly)
             assertFalse(config.isFinancialApproved)
             assertEquals("c0686be5-888f-4890-90bf-1f05f416a19a", config.credentials.deviceId.value)
+            assertEquals("https://127.0.0.1:18443/_harness/readiness", config.startupTls.readinessUrl)
+            assertEquals("https://10.0.2.2:18443/_harness/readiness", config.startupTls.androidReadinessUrl)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testClientHandoffSchemaHashPinned() {
+        assertEquals(
+            "edaef0309765e10d6462b36b5c660eb02f65c057c810ab72f756f7664e3ca275",
+            CashPilotHandoffConfig.EXPECTED_CLIENT_HANDOFF_SCHEMA_SHA256
+        )
+    }
+
+    @Test
+    fun testClientHandoffSchemaHashMismatchThrows() {
+        val tempDir = createPrivateDir()
+        try {
+            val (goodHandoff, _, _) = createValidFixtures(tempDir)
+            val badContent = goodHandoff.readText(Charsets.UTF_8).replace(
+                CashPilotHandoffConfig.EXPECTED_CLIENT_HANDOFF_SCHEMA_SHA256,
+                "0000000000000000000000000000000000000000000000000000000000000000"
+            )
+            val badFile = createPrivateFile(tempDir, "bad_schema_pin.json", badContent)
+            val sha = CashPilotHandoffConfig.computeSha256(badFile.readBytes())
+
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = badFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedHandoffSha = sha,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have thrown for client_handoff_schema_sha256 mismatch")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message?.contains("client_handoff_schema_sha256 mismatch") == true)
+            }
         } finally {
             tempDir.deleteRecursively()
         }
@@ -267,16 +317,15 @@ class CashPilotHandoffConfigTest {
     }
 
     @Test
-    fun testActiveTlsReadyMissingNonceOrCaThrows() {
+    fun testUnexpectedTopLevelSchemaFieldThrows() {
         val tempDir = createPrivateDir()
         try {
-            val (goodHandoff, _, _) = createValidFixtures(tempDir, isReady = true)
-            val goodContent = goodHandoff.readText(Charsets.UTF_8)
-            val missingNonceContent = goodContent.replace(
-                ""readiness_nonce": "harness-nonce-0123456789abcdef"",
-                ""readiness_nonce": null"
+            val (goodHandoff, _, _) = createValidFixtures(tempDir)
+            val badContent = goodHandoff.readText(Charsets.UTF_8).replace(
+                "\"schema_version\": \"1.0.0\",",
+                "\"schema_version\": \"1.0.0\", \"invented_field\": true,"
             )
-            val badFile = createPrivateFile(tempDir, "missing_nonce.json", missingNonceContent)
+            val badFile = createPrivateFile(tempDir, "extra_top_key.json", badContent)
             val sha = CashPilotHandoffConfig.computeSha256(badFile.readBytes())
 
             try {
@@ -287,9 +336,9 @@ class CashPilotHandoffConfigTest {
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
-                fail("Should have thrown for missing readiness nonce in READY state")
-            } catch (e: IllegalArgumentException) {
-                assertTrue(e.message?.contains("readiness_nonce is required when ready") == true)
+                fail("Should have thrown for unexpected top-level field (additionalProperties: false)")
+            } catch (e: RuntimeException) {
+                assertTrue(e.message?.contains("unexpected top-level field") == true)
             }
         } finally {
             tempDir.deleteRecursively()
@@ -297,29 +346,28 @@ class CashPilotHandoffConfigTest {
     }
 
     @Test
-    fun testStaleTtlThrows() {
+    fun testMissingRequiredFixtureFieldThrows() {
         val tempDir = createPrivateDir()
         try {
             val (goodHandoff, _, _) = createValidFixtures(tempDir)
-            val pastTtl = Instant.now().minus(2, ChronoUnit.DAYS).toString()
-            val expiredContent = goodHandoff.readText(Charsets.UTF_8).replace(
-                Regex(""expires_at": "[^"]+""),
-                ""expires_at": "$pastTtl""
-            )
-            val expiredFile = createPrivateFile(tempDir, "expired.json", expiredContent)
-            val sha = CashPilotHandoffConfig.computeSha256(expiredFile.readBytes())
+            val badContent = goodHandoff.readText(Charsets.UTF_8).replace(
+                "\"sample_event_id\": \"f81d4fae-7dec-11d0-a765-00a0c91e6bf6\"",
+                ""
+            ).replace(",\n              }", "\n              }")
+            val badFile = createPrivateFile(tempDir, "missing_fixture_key.json", badContent)
+            val sha = CashPilotHandoffConfig.computeSha256(badFile.readBytes())
 
             try {
                 CashPilotHandoffConfig.fromFile(
-                    file = expiredFile,
+                    file = badFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
                     expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
-                fail("Should have thrown for expired TTL")
-            } catch (e: IllegalArgumentException) {
-                assertTrue(e.message?.contains("TTL expired") == true)
+                fail("Should have thrown for missing fixture key")
+            } catch (e: RuntimeException) {
+                assertTrue(e.message?.contains("Missing fixture field") == true)
             }
         } finally {
             tempDir.deleteRecursively()
@@ -327,7 +375,418 @@ class CashPilotHandoffConfigTest {
     }
 
     @Test
-    fun testStrictLoopbackHttpsOnly() {
+    fun testUnexpectedFixtureFieldThrows() {
+        val tempDir = createPrivateDir()
+        try {
+            val (goodHandoff, _, _) = createValidFixtures(tempDir)
+            val badContent = goodHandoff.readText(Charsets.UTF_8).replace(
+                "\"schema_name\": \"accounting_p8_tmp_cash_test\",",
+                "\"schema_name\": \"accounting_p8_tmp_cash_test\", \"unknown_fixture_field\": 123,"
+            )
+            val badFile = createPrivateFile(tempDir, "extra_fixture_key.json", badContent)
+            val sha = CashPilotHandoffConfig.computeSha256(badFile.readBytes())
+
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = badFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedHandoffSha = sha,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have thrown for unexpected fixture field")
+            } catch (e: RuntimeException) {
+                assertTrue(e.message?.contains("Unexpected fixture field") == true)
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testMissingOrInvalidMinorUnitsThrowsNoDefault() {
+        val tempDir = createPrivateDir()
+        try {
+            val (goodHandoff, _, _) = createValidFixtures(tempDir)
+
+            // Missing minor units in fixture
+            val missingContent = goodHandoff.readText(Charsets.UTF_8).replace(
+                "\"currency_minor_units\": 2,\n",
+                ""
+            )
+            val missingFile = createPrivateFile(tempDir, "missing_minor_units.json", missingContent)
+            val shaMissing = CashPilotHandoffConfig.computeSha256(missingFile.readBytes())
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = missingFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedHandoffSha = shaMissing,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have thrown for missing currency_minor_units (NO default 2 allowed)")
+            } catch (e: RuntimeException) {
+                assertTrue(e.message?.contains("currency_minor_units") == true)
+            }
+
+            // Out-of-bounds minor units (> 6)
+            val oobContent = goodHandoff.readText(Charsets.UTF_8).replace(
+                "\"currency_minor_units\": 2",
+                "\"currency_minor_units\": 7"
+            )
+            val oobFile = createPrivateFile(tempDir, "oob_minor_units.json", oobContent)
+            val shaOob = CashPilotHandoffConfig.computeSha256(oobFile.readBytes())
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = oobFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedHandoffSha = shaOob,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have thrown for currency_minor_units out of range (0..6)")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message?.contains("currency_minor_units") == true)
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testMissingRequiredRuntimePinThrows() {
+        val tempDir = createPrivateDir()
+        try {
+            val (goodHandoff, _, _) = createValidFixtures(tempDir)
+            val badContent = goodHandoff.readText(Charsets.UTF_8).replace(
+                "\"client_handoff_schema_sha256\": \"edaef0309765e10d6462b36b5c660eb02f65c057c810ab72f756f7664e3ca275\"\n",
+                ""
+            ).replace(",\n              },", "\n              },")
+            val badFile = createPrivateFile(tempDir, "missing_pin.json", badContent)
+            val sha = CashPilotHandoffConfig.computeSha256(badFile.readBytes())
+
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = badFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedHandoffSha = sha,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have thrown for missing runtime pin")
+            } catch (e: RuntimeException) {
+                assertTrue(e.message?.contains("Missing backend_runtime_pins") == true)
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testUnexpectedRuntimePinThrows() {
+        val tempDir = createPrivateDir()
+        try {
+            val (goodHandoff, _, _) = createValidFixtures(tempDir)
+            val badContent = goodHandoff.readText(Charsets.UTF_8).replace(
+                "\"qualified_core_head_sha\": \"6981511405d7bcd04cd8f8a09e64443ce0aaf47e\",",
+                "\"qualified_core_head_sha\": \"6981511405d7bcd04cd8f8a09e64443ce0aaf47e\", \"invented_pin\": \"123\","
+            )
+            val badFile = createPrivateFile(tempDir, "extra_pin.json", badContent)
+            val sha = CashPilotHandoffConfig.computeSha256(badFile.readBytes())
+
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = badFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedHandoffSha = sha,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have thrown for unexpected runtime pin")
+            } catch (e: RuntimeException) {
+                assertTrue(e.message?.contains("Unexpected backend_runtime_pins") == true)
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testStartupTlsMandatoryHostAndAndroidReadinessUrls() {
+        val tempDir = createPrivateDir()
+        try {
+            val (goodHandoff, _, _) = createValidFixtures(tempDir, isReady = true)
+            val config = CashPilotHandoffConfig.fromFile(
+                file = goodHandoff,
+                expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                expectedHandoffSha = CashPilotHandoffConfig.computeSha256(goodHandoff.readBytes()),
+                allowNonPosixForTesting = true
+            )
+
+            // Both host loopback (127.0.0.1) and Android emulator loopback (10.0.2.2) must be preserved distinctly
+            assertEquals("https://127.0.0.1:18443/_harness/readiness", config.startupTls.readinessUrl)
+            assertEquals("https://10.0.2.2:18443/_harness/readiness", config.startupTls.androidReadinessUrl)
+            assertTrue("readinessUrl must point to host 127.0.0.1", config.startupTls.readinessUrl!!.contains("127.0.0.1"))
+            assertTrue("androidReadinessUrl must point to emulator 10.0.2.2", config.startupTls.androidReadinessUrl!!.contains("10.0.2.2"))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testReadyStateIncompleteThrowsNoDowngrade() {
+        val tempDir = createPrivateDir()
+        try {
+            val (goodHandoff, _, _) = createValidFixtures(tempDir, isReady = true)
+            val goodContent = goodHandoff.readText(Charsets.UTF_8)
+
+            // Missing android_readiness_url in READY state
+            val missingAndroidUrlContent = goodContent.replace(
+                "\"android_readiness_url\": \"https://10.0.2.2:18443/_harness/readiness\",",
+                "\"android_readiness_url\": null,"
+            )
+            val badFile = createPrivateFile(tempDir, "missing_android_url.json", missingAndroidUrlContent)
+            val sha = CashPilotHandoffConfig.computeSha256(badFile.readBytes())
+
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = badFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedHandoffSha = sha,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have thrown for missing android_readiness_url in ready state")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message?.contains("android_readiness_url is required when ready") == true)
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testZeroExecutedYieldsNotRunTriState() {
+        val tempDir = createPrivateDir()
+        try {
+            val (handoffFile, _, _) = createValidFixtures(tempDir, isReady = false)
+            val handoffSha = CashPilotHandoffConfig.computeSha256(handoffFile.readBytes())
+
+            val config = CashPilotHandoffConfig.fromFile(
+                file = handoffFile,
+                expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                expectedHandoffSha = handoffSha,
+                allowNonPosixForTesting = true
+            )
+
+            assertTrue("Expected isProvisionOnly == true for PROVISIONED_AWAITING_TLS_START", config.isProvisionOnly)
+            assertFalse("isFinancialApproved must be false when provision only", config.isFinancialApproved)
+            assertEquals(CashPilotHandoffConfig.TLS_STATUS_UNAVAILABLE, config.startupTls.status)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testInvalidRawWirePayloadShaThrows() {
+        val tempDir = createPrivateDir()
+        try {
+            val (goodHandoff, _, _) = createValidFixtures(tempDir)
+            val tamperedShaContent = goodHandoff.readText(Charsets.UTF_8).replace(
+                "\"raw_wire_payload_sha256\": \"1a269431c6960e53c1371485548a3ac8db0d29a328f74a7200055c37c9c452f0\",",
+                "\"raw_wire_payload_sha256\": \"0000000000000000000000000000000000000000000000000000000000000000\","
+            )
+            val badFile = createPrivateFile(tempDir, "tampered_raw_sha.json", tamperedShaContent)
+            val sha = CashPilotHandoffConfig.computeSha256(badFile.readBytes())
+
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = badFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedHandoffSha = sha,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have thrown for raw wire payload SHA-256 integrity mismatch")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message?.contains("Raw wire payload SHA-256 integrity mismatch") == true)
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testRawWirePayloadShaVsCanonicalProfileDigestDistinct() {
+        val tempDir = createPrivateDir()
+        try {
+            val (goodHandoff, _, _) = createValidFixtures(tempDir)
+            val handoffSha = CashPilotHandoffConfig.computeSha256(goodHandoff.readBytes())
+
+            val config = CashPilotHandoffConfig.fromFile(
+                file = goodHandoff,
+                expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                expectedHandoffSha = handoffSha,
+                allowNonPosixForTesting = true
+            )
+
+            val rawWireSha = config.rawWireSample.rawWirePayloadSha256
+            val profileDigest = config.canonicalIntentProfileDigest.value
+
+            // Assert they are structurally and mathematically distinct
+            assertFalse(
+                "Profile digest must not equal raw wire payload sha256",
+                profileDigest == rawWireSha || profileDigest == "sha256:$rawWireSha"
+            )
+            assertTrue("Profile digest must carry sha256: prefix", profileDigest.startsWith("sha256:"))
+            assertEquals(64, rawWireSha.length)
+            assertEquals(71, profileDigest.length)
+
+            // Assert fresh runtime IDs yield fresh digest distinct from historical CA5A digest
+            val historicalDigest = config.historicalCa5aReference?.get("ca5a_canonical_digest")
+            assertNotNull(historicalDigest)
+            assertFalse(
+                "Fresh runtime digest must not duplicate historical CA5A digest",
+                profileDigest == "sha256:$historicalDigest"
+            )
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testCanonicalByteEqualityViolationThrows() {
+        val tempDir = createPrivateDir()
+        try {
+            val (goodHandoff, _, _) = createValidFixtures(tempDir)
+            // Non-canonical wire representation with extra spaces
+            val badContent = goodHandoff.readText(Charsets.UTF_8).replace(
+                "\"raw_wire_payload_json\": \"{\\\"client_event_id",
+                "\"raw_wire_payload_json\": \"{  \\\"client_event_id"
+            )
+            val badFile = createPrivateFile(tempDir, "non_canonical_bytes.json", badContent)
+            val sha = CashPilotHandoffConfig.computeSha256(badFile.readBytes())
+
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = badFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedHandoffSha = sha,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have thrown for canonical byte equality violation")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(
+                    e.message?.contains("integrity mismatch") == true ||
+                    e.message?.contains("canonically match") == true
+                )
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testLegacyHandoffScopeRejected() {
+        val tempDir = createPrivateDir()
+        try {
+            val (goodHandoff, _, _) = createValidFixtures(tempDir)
+            val legacyContent = goodHandoff.readText(Charsets.UTF_8).replace(
+                "\"handoff_scope\": \"ROOT_AUTHORIZED_READINESS_ONLY\",",
+                "\"handoff_scope\": \"mobile_v2_online_cash_sale\","
+            )
+            val legacyFile = createPrivateFile(tempDir, "legacy_scope.json", legacyContent)
+            val sha = CashPilotHandoffConfig.computeSha256(legacyFile.readBytes())
+
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = legacyFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedHandoffSha = sha,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have rejected legacy handoff_scope 'mobile_v2_online_cash_sale'")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message?.contains("Invalid handoff_scope") == true)
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testPaymentCashAccountMustBeValidUlidMatchingFixture() {
+        val tempDir = createPrivateDir()
+        try {
+            val (goodHandoff, _, _) = createValidFixtures(tempDir)
+            // Mismatched cash account ID in payment
+            val badContent = goodHandoff.readText(Charsets.UTF_8).replace(
+                "\"cash_account_id\":\"01M7CZPF6TP283F3ZRXF5P8GT8\"",
+                "\"cash_account_id\":\"01M7CZPF6TP283F3ZRXF5P8GT9\""
+            )
+            val badFile = createPrivateFile(tempDir, "mismatched_cash_account.json", badContent)
+            val sha = CashPilotHandoffConfig.computeSha256(badFile.readBytes())
+
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = badFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedHandoffSha = sha,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have thrown for cash_account_id mismatch vs fixture")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(
+                    e.message?.contains("mismatch vs fixture") == true ||
+                    e.message?.contains("integrity mismatch") == true ||
+                    e.message?.contains("canonically match") == true
+                )
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testPaymentMustBeFullCashSettlement() {
+        val tempDir = createPrivateDir()
+        try {
+            val (goodHandoff, _, _) = createValidFixtures(tempDir)
+            val nonCashContent = goodHandoff.readText(Charsets.UTF_8).replace(
+                "\"payment_method\":\"cash\"",
+                "\"payment_method\":\"credit_card\""
+            )
+            val badFile = createPrivateFile(tempDir, "non_cash_payment.json", nonCashContent)
+            val sha = CashPilotHandoffConfig.computeSha256(badFile.readBytes())
+
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = badFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedHandoffSha = sha,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have rejected non-cash payment method")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(
+                    e.message?.contains("payment_method") == true ||
+                    e.message?.contains("integrity mismatch") == true
+                )
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testStrictLoopbackHttpsOnlyAndGetCap() {
         try {
             CashPilotHandoffConfig.validateHttpsOrigin("http://127.0.0.1:18443")
             fail("Should have rejected http")
@@ -358,13 +817,43 @@ class CashPilotHandoffConfigTest {
     }
 
     @Test
+    fun testStaleTtlThrows() {
+        val tempDir = createPrivateDir()
+        try {
+            val (goodHandoff, _, _) = createValidFixtures(tempDir)
+            val pastTtl = Instant.now().minus(2, ChronoUnit.DAYS).toString()
+            val expiredContent = goodHandoff.readText(Charsets.UTF_8).replace(
+                Regex("\"expires_at\": \"[^\"]+\""),
+                "\"expires_at\": \"$pastTtl\""
+            )
+            val expiredFile = createPrivateFile(tempDir, "expired.json", expiredContent)
+            val sha = CashPilotHandoffConfig.computeSha256(expiredFile.readBytes())
+
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = expiredFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedHandoffSha = sha,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have thrown for expired TTL")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message?.contains("TTL expired") == true)
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun testInlineCredentialsForbidden() {
         val tempDir = createPrivateDir()
         try {
             val (goodHandoff, _, _) = createValidFixtures(tempDir)
             val inlineCredContent = goodHandoff.readText(Charsets.UTF_8).replace(
-                ""schema_version": "1.0.0",",
-                ""schema_version": "1.0.0", "raw_token": "st_m_forbidden_inline","
+                "\"schema_version\": \"1.0.0\",",
+                "\"schema_version\": \"1.0.0\", \"raw_token\": \"st_m_forbidden_inline\","
             )
             val inlineFile = createPrivateFile(tempDir, "inline_cred.json", inlineCredContent)
             val sha = CashPilotHandoffConfig.computeSha256(inlineFile.readBytes())
@@ -387,42 +876,19 @@ class CashPilotHandoffConfigTest {
     }
 
     @Test
-    fun testProvisionOnlyStateProperties() {
-        val tempDir = createPrivateDir()
-        try {
-            val (handoffFile, _, _) = createValidFixtures(tempDir, isReady = false)
-            val handoffSha = CashPilotHandoffConfig.computeSha256(handoffFile.readBytes())
-
-            val config = CashPilotHandoffConfig.fromFile(
-                file = handoffFile,
-                expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
-                expectedHandoffSha = handoffSha,
-                allowNonPosixForTesting = true
-            )
-
-            assertTrue("Expected isProvisionOnly == true", config.isProvisionOnly)
-            assertEquals("UNAVAILABLE_AWAITING_TLS_START", config.startupTls.status)
-        } finally {
-            tempDir.deleteRecursively()
-        }
-    }
-
-    @Test
     fun testFinancialGrantRequiresRootApprovalSha() {
         val tempDir = createPrivateDir()
         try {
-            val (goodHandoff, _, _) = createValidFixtures(tempDir, isReady = true)
-            val financialContent = goodHandoff.readText(Charsets.UTF_8).replace(
-                ""handoff_scope": "ROOT_AUTHORIZED_READINESS_ONLY"",
-                ""handoff_scope": "ROOT_AUTHORIZED_PAIRED_EXECUTION""
+            val (goodHandoff, _, _) = createValidFixtures(
+                tempDir,
+                isReady = true,
+                handoffScope = CashPilotHandoffConfig.SCOPE_PAIRED_EXECUTION
             )
-            val finFile = createPrivateFile(tempDir, "fin_handoff.json", financialContent)
-            val sha = CashPilotHandoffConfig.computeSha256(finFile.readBytes())
+            val sha = CashPilotHandoffConfig.computeSha256(goodHandoff.readBytes())
 
             // Without root approval SHA
             val configWithoutApproval = CashPilotHandoffConfig.fromFile(
-                file = finFile,
+                file = goodHandoff,
                 expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
                 expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
                 expectedHandoffSha = sha,
@@ -432,9 +898,9 @@ class CashPilotHandoffConfigTest {
             )
             assertFalse(configWithoutApproval.isFinancialApproved)
 
-            // With matching root approval SHA
+            // With matching whole-file root approval SHA
             val configWithApproval = CashPilotHandoffConfig.fromFile(
-                file = finFile,
+                file = goodHandoff,
                 expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
                 expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
                 expectedHandoffSha = sha,
@@ -479,7 +945,7 @@ class CashPilotHandoffConfigTest {
 
         val json = evidence.toJsonString()
         assertFalse("Evidence JSON must not contain literal NUL byte", json.contains("\u0000"))
-        assertTrue(json.contains(""overallStatus": "NOT_RUN""))
+        assertTrue(json.contains("\"overallStatus\": \"NOT_RUN\""))
         assertTrue(json.contains("[REDACTED_EMAIL]"))
         assertTrue(json.contains("[REDACTED_PATH]"))
     }
