@@ -61,6 +61,14 @@ fun StaffWorkspaceApp(
                         CircularProgressIndicator()
                     }
                 }
+                StaffWorkspacePhase.OUTBOX_RECOVERY_REQUIRED -> {
+                    StaffOutboxRecoveryScreen(
+                        healthResult = uiState.outboxHealthResult,
+                        lang = uiState.language,
+                        onRetry = { viewModel.retryOutboxHealth() },
+                        isRetrying = uiState.isOutboxRetrying
+                    )
+                }
                 StaffWorkspacePhase.SIGN_IN -> {
                     StaffSignInScreen(
                         uiState = uiState,
@@ -103,7 +111,8 @@ fun StaffWorkspaceApp(
                         onSwitchCompany = { viewModel.openCompanySelection() },
                         onLogout = { viewModel.logout() },
                         onToggleLanguage = { viewModel.toggleLanguage() },
-                        onToggleTheme = { viewModel.toggleTheme() }
+                        onToggleTheme = { viewModel.toggleTheme() },
+                        onRetryOutboxHealth = { viewModel.retryOutboxHealth() }
                     )
                 }
                 StaffWorkspacePhase.LOCKED -> {

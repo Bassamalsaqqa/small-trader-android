@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Warning
+import com.example.data.mobile.outbox.OutboxHealthResult
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -83,6 +85,7 @@ fun StaffWorkspaceScreen(
     onLogout: () -> Unit,
     onToggleLanguage: () -> Unit,
     onToggleTheme: () -> Unit,
+    onRetryOutboxHealth: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val lang = uiState.language
@@ -105,6 +108,16 @@ fun StaffWorkspaceScreen(
             onToggleLanguage = onToggleLanguage,
             onToggleTheme = onToggleTheme
         )
+
+        // Outbox recovery warning banner (integrated within workspace preserving catalog)
+        if (uiState.outboxHealthResult != null && !uiState.outboxHealthResult.isOperational) {
+            StaffOutboxRecoveryBanner(
+                healthResult = uiState.outboxHealthResult,
+                lang = lang,
+                onRetry = onRetryOutboxHealth,
+                isRetrying = uiState.isOutboxRetrying
+            )
+        }
 
         // Navigation Tabs: Products / Customers
         TabRow(
@@ -938,3 +951,101 @@ private fun CustomerDirectoryItemCard(
         }
     }
 }
+
+/**
+ * Minimal visible recovery warning banner integrated within the read workspace.
+ * Preserves the full product catalog and customer directory while surfacing
+ * truthful outbox recovery status and safe non-destructive retry.
+ */
+@Composable
+fun StaffOutboxRecoveryBanner(
+    healthResult: OutboxHealthResult,
+    lang: AppLanguage,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+    isRetrying: Boolean = false
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .testTag("outbox_recovery_banner"),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.onErrorContainer
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = lang.tr(
+                        "تنبيه وحدة التخزين المحلية",
+                        "Local Outbox Storage Notice"
+                    ),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = lang.tr(
+                    "لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                    "We have not changed stored sales. Some records need help before syncing."
+                ),
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = lang.tr("يرجى التواصل مع الدعم الفني.", "Contact support"),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Button(
+                onClick = onRetry,
+                enabled = !isRetrying,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 44.dp)
+                    .testTag("outbox_health_retry_button"),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError
+                )
+            ) {
+                if (isRetrying) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = MaterialTheme.colorScheme.onError,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text(
+                        text = lang.tr("إعادة المحاولة", "Retry"),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+}
+

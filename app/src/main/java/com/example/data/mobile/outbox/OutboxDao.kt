@@ -1,18 +1,178 @@
 package com.example.data.mobile.outbox
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 
+data class OutboxHealthProbeEntity(
+    @ColumnInfo(name = "client_event_id")
+    val clientEventId: String,
+    @ColumnInfo(name = "company_id")
+    val companyId: String,
+    @ColumnInfo(name = "actor_id")
+    val actorId: String,
+    @ColumnInfo(name = "device_id")
+    val deviceId: String,
+    @ColumnInfo(name = "device_lease_id")
+    val deviceLeaseId: String,
+    @ColumnInfo(name = "captured_at")
+    val capturedAt: String,
+    @ColumnInfo(name = "payload_digest")
+    val payloadDigest: String,
+    @ColumnInfo(name = "event_version")
+    val eventVersion: Int,
+    @ColumnInfo(name = "payload_length")
+    val payloadLength: Int,
+    @ColumnInfo(name = "bounded_payload_bytes", typeAffinity = ColumnInfo.BLOB)
+    val boundedPayloadBytes: ByteArray
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is OutboxHealthProbeEntity) return false
+        return clientEventId == other.clientEventId &&
+                companyId == other.companyId &&
+                actorId == other.actorId &&
+                deviceId == other.deviceId &&
+                deviceLeaseId == other.deviceLeaseId &&
+                capturedAt == other.capturedAt &&
+                payloadDigest == other.payloadDigest &&
+                eventVersion == other.eventVersion &&
+                payloadLength == other.payloadLength &&
+                boundedPayloadBytes.contentEquals(other.boundedPayloadBytes)
+    }
+
+    override fun hashCode(): Int {
+        var result = clientEventId.hashCode()
+        result = 31 * result + companyId.hashCode()
+        result = 31 * result + actorId.hashCode()
+        result = 31 * result + deviceId.hashCode()
+        result = 31 * result + deviceLeaseId.hashCode()
+        result = 31 * result + capturedAt.hashCode()
+        result = 31 * result + payloadDigest.hashCode()
+        result = 31 * result + eventVersion
+        result = 31 * result + payloadLength
+        result = 31 * result + boundedPayloadBytes.contentHashCode()
+        return result
+    }
+}
+
+data class OutboxHealthScopeSnapshot(
+    val totalScopedEvents: Int,
+    val isScopeLocked: Boolean,
+    val nonEncryptedCount: Int,
+    val totalGlobalEvents: Int,
+    val sampleRows: List<OutboxHealthProbeEntity>
+)
+
 @Dao
 abstract class OutboxDao {
+    @Transaction
+    open fun getScopedHealthSnapshot(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        maxEnvelopeBytesPlusOne: Int,
+        limit: Int,
+        onBetweenCountAndSample: (() -> Unit)? = null
+    ): OutboxHealthScopeSnapshot {
+        val isLocked = isScopeLocked(companyId, actorId, deviceId)
+        val total = scopedEventCount(companyId, actorId, deviceId)
+        val globalTotal = eventCount()
+        onBetweenCountAndSample?.invoke()
+        val nonEncrypted = if (total > 0) scopedNonEncryptedEventCount(companyId, actorId, deviceId) else 0
+        val sample = if (total > 0) {
+            scopedEventsPageForHealthProbe(
+                companyId = companyId,
+                actorId = actorId,
+                deviceId = deviceId,
+                afterCapturedAt = null,
+                afterClientEventId = null,
+                maxEnvelopeBytesPlusOne = maxEnvelopeBytesPlusOne,
+                limit = limit
+            )
+        } else {
+            emptyList()
+        }
+        return OutboxHealthScopeSnapshot(
+            totalScopedEvents = total,
+            isScopeLocked = isLocked,
+            nonEncryptedCount = nonEncrypted,
+            totalGlobalEvents = globalTotal,
+            sampleRows = sample
+        )
+    }
     @Query("SELECT COUNT(*) FROM outbox_events")
     abstract fun eventCount(): Int
 
+    @Query("""
+        SELECT COUNT(*) FROM outbox_events
+        WHERE company_id = :companyId
+          AND actor_id = :actorId
+          AND device_id = :deviceId
+    """)
+    abstract fun scopedEventCount(companyId: String, actorId: String, deviceId: String): Int
+
+    @Query("""
+        SELECT COUNT(*) FROM outbox_events
+        WHERE company_id = :companyId
+          AND actor_id = :actorId
+          AND device_id = :deviceId
+          AND substr(payload_bytes, 1, 4) != x'53544f01'
+    """)
+    abstract fun scopedNonEncryptedEventCount(companyId: String, actorId: String, deviceId: String): Int
+
     @Query("SELECT * FROM outbox_events")
     abstract fun allEventsForConversion(): List<OutboxEventEntity>
+
+    @Query("""
+        SELECT client_event_id, company_id, actor_id, device_id, device_lease_id,
+               captured_at, payload_digest, event_version,
+               length(payload_bytes) AS payload_length,
+               substr(payload_bytes, 1, :maxEnvelopeBytesPlusOne) AS bounded_payload_bytes
+        FROM outbox_events
+        WHERE company_id = :companyId
+          AND actor_id = :actorId
+          AND device_id = :deviceId
+        ORDER BY captured_at ASC, client_event_id ASC
+        LIMIT :limit
+    """)
+    abstract fun scopedSampleEventsForHealthProbe(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        maxEnvelopeBytesPlusOne: Int,
+        limit: Int
+    ): List<OutboxHealthProbeEntity>
+
+    @Query("""
+        SELECT client_event_id, company_id, actor_id, device_id, device_lease_id,
+               captured_at, payload_digest, event_version,
+               length(payload_bytes) AS payload_length,
+               substr(payload_bytes, 1, :maxEnvelopeBytesPlusOne) AS bounded_payload_bytes
+        FROM outbox_events
+        WHERE company_id = :companyId
+          AND actor_id = :actorId
+          AND device_id = :deviceId
+          AND (
+            :afterCapturedAt IS NULL 
+            OR captured_at > :afterCapturedAt 
+            OR (captured_at = :afterCapturedAt AND client_event_id > :afterClientEventId)
+          )
+        ORDER BY captured_at ASC, client_event_id ASC
+        LIMIT :limit
+    """)
+    abstract fun scopedEventsPageForHealthProbe(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        afterCapturedAt: String?,
+        afterClientEventId: String?,
+        maxEnvelopeBytesPlusOne: Int,
+        limit: Int
+    ): List<OutboxHealthProbeEntity>
 
     @Query("UPDATE outbox_events SET payload_bytes = :bytes WHERE company_id = :companyId AND client_event_id = :eventId")
     abstract fun replacePayloadForConversion(companyId: String, eventId: String, bytes: ByteArray): Int

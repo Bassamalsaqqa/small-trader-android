@@ -1,0 +1,32 @@
+{
+  "testedHead": "9e9d21796dd94f9041beb1c76501a3ac237be39c",
+  "executableSource": "85d8c4e9d9f1e125f00d720a6a38831507da1550",
+  "executor": "root Codex supervisor",
+  "lint": {
+    "Error": 0,
+    "Warning": 63,
+    "Fatal": 0
+  },
+  "contracts": {
+    "normal": 303,
+    "optimized": 303
+  },
+  "logs": {
+    "pr22-current-lint": {
+      "rawSha256": "8e7e319391a96bc916093021d9903a783c739ad94255131fb5c7473ab2856673",
+      "publishedSha256": "6a70de2d8b65a810b1447e636a5c50fc1a0e91a1a22de21c70bc34d35d0026dd"
+    },
+    "pr22-current-contract": {
+      "rawSha256": "1f75e0698a8daf82d47765d6fc8def6b9a1a3e3ad0a1fdd16125e08f8cc2e35c",
+      "publishedSha256": "1f75e0698a8daf82d47765d6fc8def6b9a1a3e3ad0a1fdd16125e08f8cc2e35c"
+    },
+    "pr22-current-contract-O": {
+      "rawSha256": "1f75e0698a8daf82d47765d6fc8def6b9a1a3e3ad0a1fdd16125e08f8cc2e35c",
+      "publishedSha256": "1f75e0698a8daf82d47765d6fc8def6b9a1a3e3ad0a1fdd16125e08f8cc2e35c"
+    }
+  },
+  "limits": [
+    "No new APK assembly/signature verification",
+    "No real device, native Keystore, upgrade or financial acceptance"
+  ]
+}

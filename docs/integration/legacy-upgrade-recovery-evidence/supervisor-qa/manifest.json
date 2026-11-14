@@ -1,0 +1,78 @@
+{
+  "executableSource": "85d8c4e9d9f1e125f00d720a6a38831507da1550",
+  "executor": "root Codex supervisor",
+  "sourceSha256": {
+    "app/src/main/java/com/example/data/mobile/outbox/OutboxHealth.kt": "3605781d0e372f3fca751d70930ee8dddf76e85b997aa216100f55aabeef8606",
+    "app/src/main/java/com/example/data/mobile/outbox/OutboxDao.kt": "17a29db3480a5b4cc52af1aaf0ae72093e7c8dc193ee52e064ca64d1b13f3134",
+    "app/src/test/java/com/example/data/mobile/outbox/OutboxHealthGateTest.kt": "cd1b2a8e029d9e68709caa89073c29b6c54729bdb6bf38b99013317bc184d8e9"
+  },
+  "historicalFailures": {
+    "01aec8fInfrastructureAttempts": 2,
+    "01aec8fHealth": {
+      "tests": 31,
+      "failures": 2,
+      "causes": [
+        "STO/2 incorrectly classified legacy",
+        "missing-key inspection permitted key generation"
+      ]
+    }
+  },
+  "correctedHealth": {
+    "tests": 31,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "correctedFocused": {
+    "suites": 15,
+    "tests": 168,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "mutationProbe": {
+    "onlyChange": "Replace outer runInTransaction callable with run; DAO snapshot transaction retained",
+    "tests": 1,
+    "failures": 1,
+    "message": "Writer committed while inspection still held its snapshot transaction",
+    "restoredSourceByteExact": true
+  },
+  "resourceSettings": {
+    "maxWorkers": 1,
+    "activeProcessors": 2,
+    "gc": "SerialGC",
+    "gradleHeap": "1536m",
+    "kotlinCompiler": "in-process"
+  },
+  "limits": [
+    "No fresh lint, APK assembly or device execution",
+    "No network pilot, native Keystore, OEM transfer or financial acceptance",
+    "Corrected source needs independent review"
+  ],
+  "logs": {
+    "pr22-health-01aec8f": {
+      "rawSha256": "0092df825ef4db1918eeb8833886a7c030fcf54a922438e53ef453271539ad4c",
+      "publishedSha256": "0092df825ef4db1918eeb8833886a7c030fcf54a922438e53ef453271539ad4c"
+    },
+    "pr22-health-lowthreads": {
+      "rawSha256": "f8030e616dd37b89ef5b7a734d00a6600d960fee6f4b697787fd5f856a5fadf3",
+      "publishedSha256": "f8030e616dd37b89ef5b7a734d00a6600d960fee6f4b697787fd5f856a5fadf3"
+    },
+    "pr22-health-headroom": {
+      "rawSha256": "18347f651356cdf5927f10a33d0471bcf6adb7b34d75776afe9af08c8ac6d5dd",
+      "publishedSha256": "545ceeb47d1ff56d200358861dcc309252e489a535917f3a279f383c420d3a6c"
+    },
+    "pr22-health-corrected": {
+      "rawSha256": "7771c916e4e80f3ee16c5fa2214b241996c34b02de0fe749b6ab0bf12e582dde",
+      "publishedSha256": "a7566e04d27b1b90ef994588cff5b8be300c2c62da9fe98f17084f2ebddbfb9e"
+    },
+    "pr22-focused-corrected": {
+      "rawSha256": "6d58ed5547b47f65cb682b1d82bf1a9c16d456f2c2dd7e783510a1e442adc9bc",
+      "publishedSha256": "6d58ed5547b47f65cb682b1d82bf1a9c16d456f2c2dd7e783510a1e442adc9bc"
+    },
+    "pr22-transaction-mutation": {
+      "rawSha256": "cf80a197f7fae3c501e9c23e6452abe8bf41a8532d205ec4940f73f796eb87e1",
+      "publishedSha256": "5eefe7723c8098c744dbf606612255232cb04725fc6e0d58e87427382e9c9ad9"
+    }
+  }
+}

@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.outbox.OutboxScaleBenchmarkHarnessTest" tests="4" skipped="0" failures="1" errors="0" timestamp="2026-11-14T05:54:46.505Z" hostname="pasta-hp-worker" time="27.505">
+  <properties/>
+  <testcase name="benchmark1k_cancellation_boundedTermination_andDataPreservation" classname="com.example.data.mobile.outbox.OutboxScaleBenchmarkHarnessTest" time="20.774"/>
+  <testcase name="benchmark1k_pagedVerification_distribution_and_responsiveness" classname="com.example.data.mobile.outbox.OutboxScaleBenchmarkHarnessTest" time="4.087"/>
+  <testcase name="benchmark1k_concurrentCaptureSale_waitsDuringInspectionAndSucceeds" classname="com.example.data.mobile.outbox.OutboxScaleBenchmarkHarnessTest" time="1.239">
+    <failure message="java.lang.AssertionError: Concurrent capture must succeed as Created" type="java.lang.AssertionError">java.lang.AssertionError: Concurrent capture must succeed as Created
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.example.data.mobile.outbox.OutboxScaleBenchmarkHarnessTest$benchmark1k_concurrentCaptureSale_waitsDuringInspectionAndSucceeds$1.invokeSuspend(OutboxScaleBenchmarkHarnessTest.kt:344)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:94)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:70)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:48)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at com.example.data.mobile.outbox.OutboxScaleBenchmarkHarnessTest.benchmark1k_concurrentCaptureSale_waitsDuringInspectionAndSucceeds(OutboxScaleBenchmarkHarnessTest.kt:276)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.robolectric.internal.TimeLimitedStatement.evaluate(TimeLimitedStatement.java:38)
+	at org.junit.internal.runners.statements.RunBefores.evaluate(RunBefores.java:26)
+	at org.junit.internal.runners.statements.RunAfters.evaluate(RunAfters.java:27)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.robolectric.RobolectricTestRunner$HelperTestRunner$1.evaluate(RobolectricTestRunner.java:524)
+	at org.robolectric.internal.SandboxTestRunner.executeInSandbox(SandboxTestRunner.java:494)
+	at org.robolectric.internal.SandboxTestRunner.access$900(SandboxTestRunner.java:67)
+	at org.robolectric.internal.SandboxTestRunner$7.evaluate(SandboxTestRunner.java:442)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.robolectric.internal.SandboxTestRunner.access$600(SandboxTestRunner.java:67)
+	at org.robolectric.internal.SandboxTestRunner$6.evaluate(SandboxTestRunner.java:333)
+	at org.robolectric.internal.SandboxTestRunner$3.evaluate(SandboxTestRunner.java:233)
+	at org.robolectric.internal.SandboxTestRunner$5.lambda$evaluate$0(SandboxTestRunner.java:317)
+	at org.robolectric.internal.bytecode.Sandbox.lambda$runOnMainThread$0(Sandbox.java:101)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+</failure>
+  </testcase>
+  <testcase name="benchmark1k_readWorkspaceResponsiveness_qualifiedAsDbReadLatency" classname="com.example.data.mobile.outbox.OutboxScaleBenchmarkHarnessTest" time="1.006"/>
+  <system-out><![CDATA[[CANCELLATION] Prompt termination in 460.59 ms at page 20 (visited 21 pages)
+================================================================================
+=== OUTBOX 1,000+ ENCRYPTED QUEUE SCALE QUALIFICATION REPORT ===
+================================================================================
+Scenario Digest (SHA-256): 74d1bbfe61f9d763a1aedd3b087c3adb975a5a20eacb52799a3ca406584fee32
+Database Path: /tmp/robolectric-OutboxScaleBenchmarkHarnessTest_benchmark1k_pagedVerification_distribution_and_responsiveness17956779541819784647/com.aistudio.smalltrader.psdukx-dataDir/files/outbox-scale-bench-82f95c73-0e83-42af-a4f6-75598d026a6d.db
+Total Valid Encrypted Receipts: 1000
+Seeding Time (1,000 captures): 2342.08 ms
+Page Size: 10 records / page (bounded memory)
+Total Keyset Pages Traversed: 100 pages
+Warm-up Iterations: 3
+Measured Samples: 10
+Raw samples ms: [117.46849, 106.951696, 112.25089, 113.038614, 112.791609, 132.923868, 101.690368, 94.292456, 103.788618, 93.645485]
+p95/p99 are empirical order statistics from 10 samples, not stable device-tail estimates.
+--------------------------------------------------------------------------------
+Latency Distribution (DB Read & Decrypt):
+  Min:       93.65 ms
+  p50:      112.25 ms
+  p95:      132.92 ms
+  p99:      132.92 ms
+  Max:      132.92 ms
+  Mean:     108.88 ms
+--------------------------------------------------------------------------------
+[QUALIFICATION DISCLAIMER]
+Commands/runtime/device: JVM (Robolectric / OpenJDK 21) only.
+Latency represents background SQLite transaction read & AES-GCM verification.
+Does NOT represent physical device UI rendering or native Android Keystore performance.
+Low-end physical hardware gate remains UNVERIFIED / HOLD.
+================================================================================
+[WORKSPACE RESPONSIVENESS] Background inspection roundtrip: 145.99 ms across 1000 records
+[QUALIFICATION NOTE] This measurement represents JVM background I/O / SQLite read latency.
+It does NOT measure Android Compose UI main-thread frame delivery or physical hardware display.
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
