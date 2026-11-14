@@ -1,21 +1,18 @@
 package com.example.data.mobile.readclient.pilot
 
 import com.example.data.mobile.contract.ClientUuid
+import com.example.data.mobile.contract.PayloadDigest
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.StrictJsonArray
-import com.example.data.mobile.contract.StrictJsonBoolean
-import com.example.data.mobile.contract.StrictJsonNull
 import com.example.data.mobile.contract.StrictJsonObject
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.contract.StrictJsonString
-import com.example.data.mobile.readclient.EndpointSecurity
-import java.io.ByteArrayOutputStream
+import com.example.data.mobile.contract.v2.OnlineSaleContext
+import com.example.data.mobile.contract.v2.OnlineSaleIntentProfile
 import java.io.File
 import java.net.URI
-import java.nio.ByteBuffer
-import java.nio.charset.CodingErrorAction
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.attribute.PosixFileAttributeView
 import java.nio.file.attribute.PosixFilePermission
 import java.security.MessageDigest
@@ -24,11 +21,13 @@ import java.util.Locale
 
 /**
  * Provisioned fixture entity identifiers and normative decimal lexemes for online cash pilot.
- * Supports exact backend provision manifest keys (e.g. company_public_id, product_unit_public_id).
+ * Authoritatively mirrors the backend provision fixture schema.
  */
 data class CashPilotFixture(
+    val schemaName: String,
     val companyId: ServerUlid,
     val companyBaseCurrency: String,
+    val currencyMinorUnits: Int,
     val staffActorId: ServerUlid,
     val deviceId: ClientUuid,
     val customerId: ServerUlid,
@@ -36,11 +35,8 @@ data class CashPilotFixture(
     val productId: ServerUlid,
     val productUnitId: ServerUlid,
     val taxRateId: ServerUlid,
-    val taxRate: String,
-    val unitPrice: String,
     val cashAccountId: ServerUlid,
-    val sampleEventId: ClientUuid? = null,
-    val currencyMinorUnits: Int = 2
+    val sampleEventId: ClientUuid
 )
 
 /**
@@ -48,200 +44,289 @@ data class CashPilotFixture(
  * Accurately models exact backend provision fields: raw_token, token_hash, device_id, staff_email, schema.
  */
 data class CashPilotCredentials(
-    val rawToken: String? = null,
-    val tokenHash: String? = null,
+    val rawToken: String,
+    val tokenHash: String,
+    val deviceId: ClientUuid,
     val staffEmail: String? = null,
-    val staffPassword: String? = null,
-    val deviceId: ClientUuid? = null,
-    val deviceName: String? = null,
-    val schema: String? = null,
-    val companyId: ServerUlid? = null,
-    val appVersion: String? = null,
-    val platform: String? = null
+    val schema: String? = null
 ) {
     override fun toString(): String =
-        "CashPilotCredentials(rawToken=[REDACTED], tokenHash=${if (tokenHash != null) "[REDACTED]" else "null"}, " +
-                "staffEmail=${if (staffEmail != null) "[REDACTED_EMAIL]" else "null"}, staffPassword=[REDACTED], " +
-                "deviceId=$deviceId, deviceName='$deviceName', schema='$schema', appVersion='$appVersion', platform='$platform')"
+        "CashPilotCredentials(rawToken=[REDACTED], tokenHash=[REDACTED], deviceId=$deviceId, staffEmail=[REDACTED_EMAIL], schema='$schema')"
 }
 
 /**
- * Strict CASH-specific handoff configuration parser and validator.
- *
- * Security & Lifecycle Invariants:
- * - Credentials (email/password/raw_token) MUST be loaded from a separate private credentials file (0600/0400).
- * - Inline passwords or tokens in the main handoff JSON are strictly forbidden and rejected.
- * - String representation [toString] overrides default data class behavior to redact all secrets and file paths.
- * - Strict JSON key allowlisting: unknown root keys in handoff fail closed.
- * - Accepts exact backend provision payload: {manifest, credentials_path, sample_request}.
- * - Origin validation: strict HTTPS absolute origin with no path, query, fragment, or userinfo.
- * - Independent pinning: requires an independently expected lead backend SHA by default.
- * - Distinct lifecycle grants: READINESS_ONLY vs FINANCIAL_PAIRED_RUN.
- *   FINANCIAL_PAIRED_RUN requires explicit root financial approval PIN from environment;
- *   untrusted handoff files cannot self-authorize financial mutation.
+ * Authoritative endpoints and routes structure from backend handoff artifact.
  */
-data class CashPilotHandoffConfig(
-    val status: String = STATUS_READY,
+data class CashPilotEndpoints(
     val baseUrl: String,
-    val backendCommitSha: String,
-    val clientCommitSha: String? = null,
-    val manifestDigest: String? = null,
-    val schemaIdentity: String,
-    val harnessNonce: String? = null,
-    val ttlExpiresAt: String? = null,
-    val lifecycleGrant: String = GRANT_READINESS_ONLY,
+    val loopbackBaseUrl: String,
+    val onlineCashSaleRoute: String,
+    val offlineEventStatusRoute: String,
+    val readinessProbeRoute: String
+)
+
+/**
+ * Exact retained raw wire sample and integrity hash.
+ */
+data class CashPilotRawWireSample(
+    val rawWirePayloadJson: String,
+    val rawWirePayloadSha256: String,
+    val parsedRequest: StrictJsonObject
+)
+
+/**
+ * Supervised startup TLS transport parameters.
+ */
+data class CashPilotStartupTls(
+    val status: String,
+    val caCertPath: String? = null,
+    val caCertSha256: String? = null,
+    val readinessUrl: String? = null,
+    val readinessNonce: String? = null
+)
+
+/**
+ * Strict CASH-specific handoff configuration parser and validator adhering to mobile-v2-client-handoff-schema.json.
+ *
+ * Invariants:
+ * - Private constructor prevents arbitrary public dataclass bypass.
+ * - Single bounded read (<= 64 KiB), hashed once on opened bytes.
+ * - Strict 0600/0400 file and 0700 directory permissions with symlink ancestor rejection.
+ * - Strict loopback HTTPS only (no plain HTTP, no off-host, no query/userinfo).
+ * - Mandatory independent external environment variables: backend SHA, client SHA, handoff SHA.
+ * - Financial execution strictly requires external lifecycle expected FINANCIAL_PAIRED_RUN and matching root approval SHA.
+ * - All fixture IDs verified for parity with parsed_request and server_synthesized_context.
+ * - Normative profile digest verified using fresh OnlineSaleIntentProfile computation.
+ */
+class CashPilotHandoffConfig private constructor(
+    val schemaVersion: String,
+    val handoffScope: String,
+    val lifecyclePhase: String,
+    val createdAt: String,
+    val expiresAt: String,
+    val backendPins: Map<String, String>,
+    val backendExecutionHeadSha: String,
+    val peerAndroidHeadSha: String,
+    val endpoints: CashPilotEndpoints,
+    val fixture: CashPilotFixture,
     val credentialsPath: String,
     val credentials: CashPilotCredentials,
-    val fixture: CashPilotFixture,
-    val allowHttpLoopback: Boolean = false,
-    val caCertPath: String? = null,
-    val testTruststorePath: String? = null,
-    val testTruststorePassword: String? = null,
-    val coordinatedFaultAvailable: Boolean = false,
-    val stockProbesAvailable: Boolean = false,
-    val ports: Map<String, Int> = emptyMap(),
-    val pids: Map<String, Int> = emptyMap()
+    val rawWireSample: CashPilotRawWireSample,
+    val serverContext: OnlineSaleContext,
+    val canonicalIntentProfileDigest: PayloadDigest,
+    val historicalCa5aReference: Map<String, String>?,
+    val startupTls: CashPilotStartupTls,
+    val handoffFileSha256: String,
+    val isProvisionOnly: Boolean,
+    val isReadinessOnly: Boolean,
+    val isFinancialApproved: Boolean,
+    val baseUrl: String
 ) {
-    init {
-        require(baseUrl.isNotBlank()) { "baseUrl must not be blank" }
-        validateHttpsOrigin(baseUrl, allowHttpLoopback)
-
-        require(HEX_40_REGEX.matches(backendCommitSha)) {
-            "backendCommitSha must be a 40-character lowercase hex SHA, got '$backendCommitSha'"
-        }
-        if (clientCommitSha != null) {
-            require(HEX_40_REGEX.matches(clientCommitSha)) {
-                "clientCommitSha must be a 40-character lowercase hex SHA, got '$clientCommitSha'"
-            }
-        }
-        if (manifestDigest != null) {
-            require(HEX_64_REGEX.matches(manifestDigest)) {
-                "manifestDigest must be a 64-character hex SHA-256, got '$manifestDigest'"
-            }
-        }
-        require(schemaIdentity.isNotBlank()) {
-            "schemaIdentity must not be blank"
-        }
-        require(lifecycleGrant in ALLOWED_GRANTS) {
-            "Invalid lifecycleGrant '$lifecycleGrant'. Must be one of $ALLOWED_GRANTS"
-        }
-
-        // Future TTL validation if provided
-        if (ttlExpiresAt != null) {
-            val expiry = try {
-                Instant.parse(ttlExpiresAt)
-            } catch (e: Exception) {
-                throw IllegalArgumentException("Invalid ISO-8601 UTC timestamp for ttlExpiresAt: '$ttlExpiresAt'")
-            }
-            require(expiry.isAfter(Instant.now())) {
-                "Handoff configuration TTL expired at $ttlExpiresAt (current time: ${Instant.now()})"
-            }
-        }
-    }
-
     override fun toString(): String =
-        "CashPilotHandoffConfig(status='$status', baseUrl='$baseUrl', backendCommitSha='$backendCommitSha', " +
-                "clientCommitSha='$clientCommitSha', manifestDigest='$manifestDigest', " +
-                "schemaIdentity='$schemaIdentity', lifecycleGrant='$lifecycleGrant', " +
-                "credentialsPath='[REDACTED_PATH]', credentials=$credentials, fixture=$fixture, " +
-                "ttlExpiresAt='$ttlExpiresAt', allowHttpLoopback=$allowHttpLoopback)"
+        "CashPilotHandoffConfig(schemaVersion='$schemaVersion', scope='$handoffScope', " +
+                "lifecyclePhase='$lifecyclePhase', baseUrl='$baseUrl', " +
+                "backendExecutionHead='$backendExecutionHeadSha', peerAndroidHead='$peerAndroidHeadSha', " +
+                "credentialsPath='[REDACTED_PATH]', credentials=$credentials, " +
+                "isProvisionOnly=$isProvisionOnly, isReadinessOnly=$isReadinessOnly, isFinancialApproved=$isFinancialApproved)"
 
     companion object {
         const val ENV_CASH_PILOT_HANDOFF = "SMALL_TRADER_CASH_PILOT_HANDOFF"
         const val ENV_EXPECTED_BACKEND_SHA = "SMALL_TRADER_EXPECTED_BACKEND_SHA"
-        const val ENV_EXPECTED_HANDOFF_SHA = "SMALL_TRADER_EXPECTED_HANDOFF_SHA"
         const val ENV_EXPECTED_CLIENT_SHA = "SMALL_TRADER_EXPECTED_CLIENT_SHA"
-        const val ENV_ROOT_FINANCIAL_APPROVAL_PIN = "SMALL_TRADER_ROOT_FINANCIAL_APPROVAL_PIN"
+        const val ENV_EXPECTED_HANDOFF_SHA = "SMALL_TRADER_EXPECTED_HANDOFF_SHA"
+        const val ENV_EXPECTED_LIFECYCLE = "SMALL_TRADER_EXPECTED_LIFECYCLE"
+        const val ENV_ROOT_APPROVED_HANDOFF_SHA = "SMALL_TRADER_ROOT_APPROVED_HANDOFF_SHA"
 
-        const val STATUS_PROVISION_ONLY = "PROVISION_ONLY"
-        const val STATUS_READY = "READY"
-        const val STATUS_RUNNING = "RUNNING"
+        const val PHASE_PROVISIONED_AWAITING_TLS = "PROVISIONED_AWAITING_TLS_START"
+        const val PHASE_ACTIVE_TLS_READY = "ACTIVE_TLS_READY"
+        const val PHASE_READINESS_ONLY_VERIFIED = "READINESS_ONLY_VERIFIED"
 
-        const val GRANT_READINESS_ONLY = "READINESS_ONLY"
-        const val GRANT_FINANCIAL_PAIRED_RUN = "FINANCIAL_PAIRED_RUN"
-        val ALLOWED_GRANTS = setOf(GRANT_READINESS_ONLY, GRANT_FINANCIAL_PAIRED_RUN)
+        const val SCOPE_READINESS_ONLY = "ROOT_AUTHORIZED_READINESS_ONLY"
+        const val SCOPE_PAIRED_EXECUTION = "ROOT_AUTHORIZED_PAIRED_EXECUTION"
+        const val SCOPE_ONLINE_CASH_SALE = "mobile_v2_online_cash_sale"
 
-        val HEX_40_REGEX = Regex("^[0-9a-fA-F]{40}$")
-        val HEX_64_REGEX = Regex("^[0-9a-fA-F]{64}$")
+        const val LIFECYCLE_FINANCIAL_PAIRED_RUN = "FINANCIAL_PAIRED_RUN"
+        const val LIFECYCLE_READINESS_ONLY = "READINESS_ONLY"
+
+        val HEX_40_REGEX = Regex("^[0-9a-f]{40}$", RegexOption.IGNORE_CASE)
+        val HEX_64_REGEX = Regex("^[0-9a-f]{64}$", RegexOption.IGNORE_CASE)
         const val MAX_FILE_SIZE_BYTES = 64 * 1024L
 
-        private val ALLOWED_HANDOFF_KEYS = setOf(
-            "status",
-            "baseUrl",
-            "backendCommitSha",
-            "clientCommitSha",
-            "manifestDigest",
-            "schemaIdentity",
-            "harnessNonce",
-            "ttlExpiresAt",
-            "lifecycleGrant",
-            "credentialsPath",
-            "credentials_path",
-            "fixture",
-            "manifest",
-            "sample_request",
-            "allowHttpLoopback",
-            "caCertPath",
-            "testTruststorePath",
-            "testTruststorePassword",
-            "coordinatedFaultAvailable",
-            "stockProbesAvailable",
-            "ports",
-            "pids"
+        private val REQUIRED_TOP_LEVEL_KEYS = setOf(
+            "schema_version", "handoff_scope", "lifecycle_phase", "created_at", "expires_at",
+            "backend_runtime_pins", "endpoints", "fixture", "credentials_path", "raw_wire_sample",
+            "server_synthesized_context", "canonical_intent_profile_digest", "historical_ca5a_reference", "startup_tls"
         )
 
         private val FORBIDDEN_INLINE_CREDENTIAL_KEYS = listOf(
-            "raw_token", "token", "password", "staff_password",
-            "secret", "totp_secret", "bearer", "staffEmail"
+            "raw_token", "token", "password", "staff_password", "secret", "bearer"
         )
 
-        private val ALLOWED_CREDENTIALS_KEYS = setOf(
-            "raw_token",
-            "token_hash",
-            "staff_email",
-            "staff_password",
-            "device_id",
-            "device_name",
-            "schema",
-            "company_id",
-            "app_version",
-            "platform"
+        private val REQUIRED_RUNTIME_PINS = setOf(
+            "qualified_core_head_sha", "backend_execution_head_sha", "qualified_app_tree_sha",
+            "peer_android_approved_head_sha", "peer_android_executable_head_sha",
+            "source_fixture_sha256", "guard_test_sha256", "cli_command_sha256",
+            "cli_runner_sha256", "pairing_manifest_sha256"
         )
+
+        fun computeSha256(bytes: ByteArray): String {
+            val md = MessageDigest.getInstance("SHA-256")
+            val digest = md.digest(bytes)
+            return digest.joinToString("") { String.format(Locale.ROOT, "%02x", it) }
+        }
+
+        fun validatePrivateFile(
+            file: File,
+            maxSizeBytes: Long = MAX_FILE_SIZE_BYTES,
+            allowNonPosixForTesting: Boolean = false
+        ) {
+            require(file.exists()) { "File does not exist: [REDACTED_FILE]" }
+            require(file.isFile) { "Expected regular file: [REDACTED_FILE]" }
+            require(file.length() <= maxSizeBytes) {
+                "File size (${file.length()} bytes) exceeds maximum bounded limit of $maxSizeBytes bytes"
+            }
+
+            var cur: File? = file
+            while (cur != null) {
+                if (Files.isSymbolicLink(cur.toPath())) {
+                    throw SecurityException("Security violation: symlinks prohibited in private path: [REDACTED_PATH]")
+                }
+                cur = cur.parentFile
+            }
+
+            val posixView = Files.getFileAttributeView(file.toPath(), PosixFileAttributeView::class.java)
+            if (posixView == null) {
+                if (!allowNonPosixForTesting) {
+                    throw SecurityException("Security violation: non-POSIX filesystem rejected without explicit test seam")
+                }
+                return
+            }
+
+            val perms = posixView.readAttributes().permissions()
+            val groupOrOther = setOf(
+                PosixFilePermission.GROUP_READ, PosixFilePermission.GROUP_WRITE, PosixFilePermission.GROUP_EXECUTE,
+                PosixFilePermission.OTHERS_READ, PosixFilePermission.OTHERS_WRITE, PosixFilePermission.OTHERS_EXECUTE
+            )
+            val badPerms = perms.intersect(groupOrOther)
+            if (badPerms.isNotEmpty()) {
+                throw SecurityException("Security violation: file must be 0600 or 0400 (group/others denied), got $badPerms")
+            }
+            if (!perms.contains(PosixFilePermission.OWNER_READ)) {
+                throw SecurityException("Security violation: file must be owner-readable")
+            }
+
+            val parent = file.parentFile
+            if (parent != null) {
+                val parentView = Files.getFileAttributeView(parent.toPath(), PosixFileAttributeView::class.java)
+                if (parentView != null) {
+                    val parentPerms = parentView.readAttributes().permissions()
+                    val badParentPerms = parentPerms.intersect(groupOrOther)
+                    if (badParentPerms.isNotEmpty()) {
+                        throw SecurityException("Security violation: parent directory must be 0700 (group/others denied), got $badParentPerms")
+                    }
+                }
+            }
+        }
+
+        fun readBoundedBytesOnce(
+            file: File,
+            maxSizeBytes: Long = MAX_FILE_SIZE_BYTES,
+            allowNonPosixForTesting: Boolean = false
+        ): ByteArray {
+            validatePrivateFile(file, maxSizeBytes, allowNonPosixForTesting)
+            return Files.newInputStream(file.toPath(), LinkOption.NOFOLLOW_LINKS).use { stream ->
+                val buf = ByteArray(maxSizeBytes.toInt() + 1)
+                var total = 0
+                while (true) {
+                    val r = stream.read(buf, total, buf.size - total)
+                    if (r == -1) break
+                    total += r
+                    if (total > maxSizeBytes) {
+                        throw IllegalArgumentException("File content exceeds bounded limit of $maxSizeBytes bytes")
+                    }
+                }
+                buf.copyOf(total)
+            }
+        }
+
+        fun validateHttpsOrigin(rawUrl: String) {
+            val uri = try {
+                URI(rawUrl)
+            } catch (e: Exception) {
+                throw IllegalArgumentException("Malformed URL: '$rawUrl'", e)
+            }
+            require(uri.scheme.equals("https", ignoreCase = true)) {
+                "Strict loopback HTTPS only; plain HTTP prohibited: '$rawUrl'"
+            }
+            val host = uri.host ?: throw IllegalArgumentException("Missing host in URL: '$rawUrl'")
+            val approvedHosts = setOf("127.0.0.1", "localhost", "10.0.2.2")
+            require(host in approvedHosts) {
+                "Prohibited off-host URL origin: host '$host' is not in approved loopback set $approvedHosts"
+            }
+            require(uri.userInfo == null) {
+                "Prohibited userinfo in URL: '$rawUrl'"
+            }
+            require(uri.query == null) {
+                "Prohibited query in URL: '$rawUrl'"
+            }
+            val path = uri.path ?: ""
+            require(path.isEmpty() || path == "/" || path == "/api/mobile/v2") {
+                "Prohibited unexpected path in base URL: '$path'"
+            }
+        }
 
         fun fromFile(
             file: File,
             expectedBackendSha: String? = null,
-            requireIndependentSha: Boolean = true,
-            expectedHandoffSha: String? = null,
             expectedClientSha: String? = null,
-            rootApprovalPin: String? = null
+            expectedHandoffSha: String? = null,
+            expectedLifecycle: String? = null,
+            rootApprovedHandoffSha: String? = null,
+            allowNonPosixForTesting: Boolean = false
         ): CashPilotHandoffConfig {
-            validatePrivateFile(file, maxSizeBytes = MAX_FILE_SIZE_BYTES, enforceStrictFilePermissions = true)
-
-            if (requireIndependentSha) {
-                require(!expectedBackendSha.isNullOrBlank()) {
-                    "Safety invariant violation: $ENV_EXPECTED_BACKEND_SHA is required; never trust handoff alone"
-                }
+            val backendShaEnv = expectedBackendSha ?: System.getenv(ENV_EXPECTED_BACKEND_SHA)?.trim()
+            require(!backendShaEnv.isNullOrBlank() && HEX_40_REGEX.matches(backendShaEnv)) {
+                "Safety invariant violation: $ENV_EXPECTED_BACKEND_SHA is mandatory (40 hex lowercase); never trust handoff alone"
             }
 
-            val handoffShaPin = expectedHandoffSha ?: System.getenv(ENV_EXPECTED_HANDOFF_SHA)?.trim()
-            if (!handoffShaPin.isNullOrBlank()) {
-                require(HEX_64_REGEX.matches(handoffShaPin)) {
-                    "Expected handoff SHA pin must be 64-character hex, got '$handoffShaPin'"
-                }
-                val actualSha = computeSha256(file)
-                require(actualSha.equals(handoffShaPin, ignoreCase = true)) {
-                    "Handoff file SHA-256 mismatch with independent lead expectation: expected $handoffShaPin, got $actualSha"
-                }
+            val clientShaEnv = expectedClientSha ?: System.getenv(ENV_EXPECTED_CLIENT_SHA)?.trim()
+            require(!clientShaEnv.isNullOrBlank() && HEX_40_REGEX.matches(clientShaEnv)) {
+                "Safety invariant violation: $ENV_EXPECTED_CLIENT_SHA is mandatory (40 hex lowercase); never trust handoff alone"
             }
 
-            val content = readBoundedUtf8(file, maxSizeBytes = MAX_FILE_SIZE_BYTES, enforceStrictFilePermissions = true)
-            val root = StrictJsonParser.parse(content).asObject()
-
-            val unexpectedKeys = root.properties.keys - ALLOWED_HANDOFF_KEYS
-            require(unexpectedKeys.isEmpty()) {
-                "Unexpected keys in handoff JSON: $unexpectedKeys"
+            val handoffShaEnv = expectedHandoffSha ?: System.getenv(ENV_EXPECTED_HANDOFF_SHA)?.trim()
+            require(!handoffShaEnv.isNullOrBlank() && HEX_64_REGEX.matches(handoffShaEnv)) {
+                "Safety invariant violation: $ENV_EXPECTED_HANDOFF_SHA is mandatory (64 hex lowercase); never trust handoff alone"
             }
+
+            val handoffBytes = readBoundedBytesOnce(file, allowNonPosixForTesting = allowNonPosixForTesting)
+            val actualHandoffSha = computeSha256(handoffBytes)
+            require(actualHandoffSha.equals(handoffShaEnv, ignoreCase = true)) {
+                "Handoff file SHA-256 mismatch with independent expectation: expected $handoffShaEnv, got $actualHandoffSha"
+            }
+
+            return parseBytes(
+                bytes = handoffBytes,
+                actualHandoffSha = actualHandoffSha,
+                expectedBackendSha = backendShaEnv,
+                expectedClientSha = clientShaEnv,
+                expectedLifecycle = expectedLifecycle ?: System.getenv(ENV_EXPECTED_LIFECYCLE)?.trim(),
+                rootApprovedHandoffSha = rootApprovedHandoffSha ?: System.getenv(ENV_ROOT_APPROVED_HANDOFF_SHA)?.trim(),
+                allowNonPosixForTesting = allowNonPosixForTesting
+            )
+        }
+
+        fun parseBytes(
+            bytes: ByteArray,
+            actualHandoffSha: String,
+            expectedBackendSha: String,
+            expectedClientSha: String,
+            expectedLifecycle: String? = null,
+            rootApprovedHandoffSha: String? = null,
+            allowNonPosixForTesting: Boolean = false
+        ): CashPilotHandoffConfig {
+            val jsonStr = String(bytes, Charsets.UTF_8)
+            val root = StrictJsonParser.parse(jsonStr).asObject()
 
             for (key in FORBIDDEN_INLINE_CREDENTIAL_KEYS) {
                 if (root[key] != null) {
@@ -249,412 +334,249 @@ data class CashPilotHandoffConfig(
                 }
             }
 
-            val statusStr = optionalString(root, "status") ?: STATUS_READY
-            val baseUrl = optionalString(root, "baseUrl") ?: "https://127.0.0.1:18443"
-            val backendSha = requireString(root, "backendCommitSha")
-            require(HEX_40_REGEX.matches(backendSha)) {
-                "backendCommitSha must be 40-character hex, got '$backendSha'"
+            val missingKeys = REQUIRED_TOP_LEVEL_KEYS - root.properties.keys
+            if (missingKeys.isNotEmpty()) {
+                throw RuntimeException("Malformed client handoff artifact: missing top-level field(s): $missingKeys")
             }
 
-            if (expectedBackendSha != null) {
-                require(HEX_40_REGEX.matches(expectedBackendSha)) {
-                    "Independent expected backend SHA must be 40-character hex, got '$expectedBackendSha'"
-                }
-                require(backendSha.equals(expectedBackendSha, ignoreCase = true)) {
-                    "Backend commit SHA mismatch with independent expectation: expected $expectedBackendSha, got $backendSha"
-                }
+            val schemaVersion = root["schema_version"]?.asString()?.value ?: ""
+            require(schemaVersion == "1.0.0") {
+                "Unsupported schema_version '$schemaVersion'; expected '1.0.0'"
             }
 
-            val clientSha = optionalString(root, "clientCommitSha")
-            val effectiveClientSha = expectedClientSha ?: System.getenv(ENV_EXPECTED_CLIENT_SHA)?.trim()
-            if (!effectiveClientSha.isNullOrBlank()) {
-                require(HEX_40_REGEX.matches(effectiveClientSha)) {
-                    "Independent expected client SHA must be 40-character hex, got '$effectiveClientSha'"
-                }
-                require(clientSha != null && clientSha.equals(effectiveClientSha, ignoreCase = true)) {
-                    "Client commit SHA mismatch with independent expectation: expected $effectiveClientSha, got $clientSha"
-                }
+            val handoffScope = root["handoff_scope"]?.asString()?.value ?: ""
+            val allowedScopes = setOf(SCOPE_READINESS_ONLY, SCOPE_PAIRED_EXECUTION, SCOPE_ONLINE_CASH_SALE)
+            require(handoffScope in allowedScopes) {
+                "Invalid handoff_scope '$handoffScope'; must be one of $allowedScopes"
             }
 
-            val manifestDigest = optionalString(root, "manifestDigest")
-            val harnessNonce = optionalString(root, "harnessNonce")
-            val ttlExpiresAt = optionalString(root, "ttlExpiresAt")
-
-            val lifecycleGrant = optionalString(root, "lifecycleGrant") ?: GRANT_READINESS_ONLY
-            require(lifecycleGrant in ALLOWED_GRANTS) {
-                "Invalid lifecycleGrant '$lifecycleGrant'. Must be one of $ALLOWED_GRANTS"
+            val lifecyclePhase = root["lifecycle_phase"]?.asString()?.value ?: ""
+            val allowedPhases = setOf(PHASE_PROVISIONED_AWAITING_TLS, PHASE_ACTIVE_TLS_READY, PHASE_READINESS_ONLY_VERIFIED)
+            require(lifecyclePhase in allowedPhases) {
+                "Invalid lifecycle_phase '$lifecyclePhase'; must be one of $allowedPhases"
             }
 
-            if (lifecycleGrant == GRANT_FINANCIAL_PAIRED_RUN) {
-                val effectivePin = rootApprovalPin ?: System.getenv(ENV_ROOT_FINANCIAL_APPROVAL_PIN)?.trim()
-                if (effectivePin.isNullOrBlank()) {
-                    throw SecurityException(
-                        "Self-authorization refused: handoff requested '$GRANT_FINANCIAL_PAIRED_RUN' " +
-                        "but independent environment variable '$ENV_ROOT_FINANCIAL_APPROVAL_PIN' is missing or blank. " +
-                        "Untrusted handoff files cannot self-authorize financial execution."
-                    )
+            val createdAt = root["created_at"]?.asString()?.value ?: ""
+            val expiresAt = root["expires_at"]?.asString()?.value ?: ""
+            val expiry = try {
+                Instant.parse(expiresAt)
+            } catch (e: Exception) {
+                throw IllegalArgumentException("Invalid ISO-8601 UTC timestamp for expires_at: '$expiresAt'", e)
+            }
+            require(expiry.isAfter(Instant.now())) {
+                "Handoff configuration TTL expired at $expiresAt (current time: ${Instant.now()})"
+            }
+
+            // Validate pins
+            val pinsObj = root["backend_runtime_pins"]?.asObject()
+                ?: throw RuntimeException("backend_runtime_pins must be an object")
+            val missingPins = REQUIRED_RUNTIME_PINS - pinsObj.properties.keys
+            if (missingPins.isNotEmpty()) {
+                throw RuntimeException("Malformed client handoff artifact: missing pin(s): $missingPins")
+            }
+            val pinsMap = mutableMapOf<String, String>()
+            for ((k, v) in pinsObj.properties) {
+                val str = v.asString()?.value ?: throw RuntimeException("Pin '$k' must be a non-empty string")
+                pinsMap[k] = str
+            }
+
+            val backendExecutionHeadSha = pinsMap["backend_execution_head_sha"] ?: ""
+            val peerAndroidHeadSha = pinsMap["peer_android_executable_head_sha"] ?: ""
+            require(backendExecutionHeadSha.equals(expectedBackendSha, ignoreCase = true)) {
+                "Backend execution HEAD pin mismatch: expected $expectedBackendSha, got $backendExecutionHeadSha"
+            }
+            require(peerAndroidHeadSha.equals(expectedClientSha, ignoreCase = true)) {
+                "Peer Android executable HEAD pin mismatch: expected $expectedClientSha, got $peerAndroidHeadSha"
+            }
+
+            // Endpoints
+            val endpointsObj = root["endpoints"]?.asObject() ?: throw RuntimeException("endpoints must be an object")
+            val baseUrl = endpointsObj["base_url"]?.asString()?.value ?: ""
+            val loopbackBaseUrl = endpointsObj["loopback_base_url"]?.asString()?.value ?: ""
+            validateHttpsOrigin(baseUrl)
+            validateHttpsOrigin(loopbackBaseUrl)
+
+            val routesObj = endpointsObj["routes"]?.asObject() ?: throw RuntimeException("endpoints.routes must be an object")
+            val onlineCashRoute = routesObj["online_cash_sale"]?.asString()?.value ?: ""
+            val offlineStatusRoute = routesObj["offline_event_status"]?.asString()?.value ?: ""
+            val readinessRoute = routesObj["readiness_probe"]?.asString()?.value ?: ""
+            val endpoints = CashPilotEndpoints(
+                baseUrl = baseUrl,
+                loopbackBaseUrl = loopbackBaseUrl,
+                onlineCashSaleRoute = onlineCashRoute,
+                offlineEventStatusRoute = offlineStatusRoute,
+                readinessProbeRoute = readinessRoute
+            )
+
+            // Fixture
+            val fixtureObj = root["fixture"]?.asObject() ?: throw RuntimeException("fixture must be an object")
+            val fixture = CashPilotFixture(
+                schemaName = fixtureObj["schema_name"]?.asString()?.value ?: "",
+                companyId = ServerUlid.parse(fixtureObj["company_public_id"]?.asString()?.value ?: ""),
+                companyBaseCurrency = fixtureObj["company_base_currency"]?.asString()?.value ?: "",
+                currencyMinorUnits = fixtureObj["currency_minor_units"]?.asNumber()?.value?.toInt() ?: 2,
+                staffActorId = ServerUlid.parse(fixtureObj["staff_actor_public_id"]?.asString()?.value ?: ""),
+                deviceId = ClientUuid.parse(fixtureObj["device_id"]?.asString()?.value ?: ""),
+                customerId = ServerUlid.parse(fixtureObj["customer_public_id"]?.asString()?.value ?: ""),
+                warehouseId = ServerUlid.parse(fixtureObj["warehouse_public_id"]?.asString()?.value ?: ""),
+                productId = ServerUlid.parse(fixtureObj["product_public_id"]?.asString()?.value ?: ""),
+                productUnitId = ServerUlid.parse(fixtureObj["product_unit_public_id"]?.asString()?.value ?: ""),
+                taxRateId = ServerUlid.parse(fixtureObj["tax_rate_public_id"]?.asString()?.value ?: ""),
+                cashAccountId = ServerUlid.parse(fixtureObj["cash_account_public_id"]?.asString()?.value ?: ""),
+                sampleEventId = ClientUuid.parse(fixtureObj["sample_event_id"]?.asString()?.value ?: "")
+            )
+
+            // Raw wire sample
+            val rawWireObj = root["raw_wire_sample"]?.asObject() ?: throw RuntimeException("raw_wire_sample must be an object")
+            val rawPayloadJson = rawWireObj["raw_wire_payload_json"]?.asString()?.value ?: ""
+            val rawPayloadSha = rawWireObj["raw_wire_payload_sha256"]?.asString()?.value ?: ""
+            val calcPayloadSha = computeSha256(rawPayloadJson.toByteArray(Charsets.UTF_8))
+            require(calcPayloadSha.equals(rawPayloadSha, ignoreCase = true)) {
+                "Raw wire payload SHA-256 integrity mismatch: expected $rawPayloadSha, computed $calcPayloadSha"
+            }
+            val parsedReq = rawWireObj["parsed_request"]?.asObject() ?: throw RuntimeException("raw_wire_sample.parsed_request must be an object")
+            val rawWireSample = CashPilotRawWireSample(
+                rawWirePayloadJson = rawPayloadJson,
+                rawWirePayloadSha256 = rawPayloadSha,
+                parsedRequest = parsedReq
+            )
+
+            // Parity checks between parsed request and fixture
+            require(parsedReq["customer_id"]?.asString()?.value == fixture.customerId.value) { "Customer ID parity mismatch" }
+            require(parsedReq["warehouse_id"]?.asString()?.value == fixture.warehouseId.value) { "Warehouse ID parity mismatch" }
+            require(parsedReq["device_id"]?.asString()?.value == fixture.deviceId.value) { "Device ID parity mismatch" }
+            require(parsedReq["currency"]?.asString()?.value == fixture.companyBaseCurrency) { "Currency parity mismatch" }
+
+            // Server context
+            val ctxObj = root["server_synthesized_context"]?.asObject()
+                ?: throw RuntimeException("server_synthesized_context must be an object")
+            val ctxCompanyId = ServerUlid.parse(ctxObj["company_id"]?.asString()?.value ?: "")
+            val ctxActorId = ServerUlid.parse(ctxObj["actor_id"]?.asString()?.value ?: "")
+            val ctxMinorUnits = ctxObj["currency_minor_units"]?.asNumber()?.value?.toInt() ?: 2
+            require(ctxCompanyId == fixture.companyId) { "Context company ID mismatch with fixture" }
+            require(ctxActorId == fixture.staffActorId) { "Context actor ID mismatch with fixture" }
+            require(ctxMinorUnits == fixture.currencyMinorUnits) { "Context minor units mismatch with fixture" }
+            val serverContext = OnlineSaleContext(
+                companyId = ctxCompanyId,
+                actorId = ctxActorId,
+                currencyMinorUnits = ctxMinorUnits
+            )
+
+            // Canonical profile digest computation & check
+            val declaredDigestStr = root["canonical_intent_profile_digest"]?.asString()?.value ?: ""
+            val profile = OnlineSaleIntentProfile.fromContextAndRequest(serverContext, parsedReq)
+            val computedDigest = profile.computePayloadDigest()
+            require(computedDigest.value == declaredDigestStr) {
+                "Canonical intent profile digest mismatch: declared '$declaredDigestStr', computed '${computedDigest.value}'"
+            }
+
+            // Credentials path & loading
+            val credentialsPath = root["credentials_path"]?.asString()?.value ?: ""
+            require(credentialsPath.isNotBlank() && credentialsPath.startsWith("/")) {
+                "credentials_path must be an absolute path starting with /"
+            }
+            val credentials = loadCredentials(File(credentialsPath), allowNonPosixForTesting)
+            require(credentials.deviceId == fixture.deviceId) {
+                "Credentials device_id (${credentials.deviceId}) does not match fixture device_id (${fixture.deviceId})"
+            }
+
+            // Historical ca5a reference (optional metadata)
+            val historicalObj = root["historical_ca5a_reference"]?.asObject()
+            val historicalMap = historicalObj?.properties?.mapValues { it.value.asString()?.value ?: "" }
+
+            // Startup TLS
+            val tlsObj = root["startup_tls"]?.asObject() ?: throw RuntimeException("startup_tls must be an object")
+            val tlsStatus = tlsObj["status"]?.asString()?.value ?: ""
+            val caCertPath = tlsObj["ca_cert_path"]?.asString()?.value
+            val caCertSha256 = tlsObj["ca_cert_sha256"]?.asString()?.value
+            val readinessUrl = tlsObj["readiness_url"]?.asString()?.value
+            val readinessNonce = tlsObj["readiness_nonce"]?.asString()?.value
+
+            val isProvisionOnly = lifecyclePhase == PHASE_PROVISIONED_AWAITING_TLS ||
+                    tlsStatus == "UNAVAILABLE_AWAITING_TLS_START"
+
+            if (!isProvisionOnly) {
+                require(!caCertPath.isNullOrBlank()) { "startup_tls.ca_cert_path is required when ready" }
+                val caFile = File(caCertPath)
+                require(caFile.exists() && caFile.isFile) { "CA cert file not found: [REDACTED_FILE]" }
+                if (!caCertSha256.isNullOrBlank()) {
+                    val caBytes = readBoundedBytesOnce(caFile, allowNonPosixForTesting = allowNonPosixForTesting)
+                    val actualCaSha = computeSha256(caBytes)
+                    require(actualCaSha.equals(caCertSha256, ignoreCase = true)) {
+                        "CA cert SHA-256 integrity mismatch: expected $caCertSha256, computed $actualCaSha"
+                    }
                 }
+                require(!readinessUrl.isNullOrBlank()) { "startup_tls.readiness_url is required when ready" }
+                validateHttpsOrigin(readinessUrl)
+                require(!readinessNonce.isNullOrBlank()) { "startup_tls.readiness_nonce is required when ready" }
             }
 
-            val credPathStr = optionalString(root, "credentialsPath")
-                ?: optionalString(root, "credentials_path")
-                ?: throw IllegalArgumentException("Missing credentialsPath or credentials_path in handoff JSON")
-            val credFile = File(credPathStr)
-            val credentials = loadCredentials(credFile)
+            val startupTls = CashPilotStartupTls(
+                status = tlsStatus,
+                caCertPath = caCertPath,
+                caCertSha256 = caCertSha256,
+                readinessUrl = readinessUrl,
+                readinessNonce = readinessNonce
+            )
 
-            val fixtureObj = (root["fixture"] as? StrictJsonObject)
-                ?: (root["manifest"] as? StrictJsonObject)
-                ?: throw IllegalArgumentException("Missing or invalid 'fixture' or 'manifest' object in handoff JSON")
+            val isReadinessOnly = handoffScope == SCOPE_READINESS_ONLY
 
-            val sampleRequestObj = root["sample_request"] as? StrictJsonObject
-            val fixture = parseFixture(fixtureObj, sampleRequestObj)
+            val isFinancialApproved = !isReadinessOnly &&
+                    expectedLifecycle == LIFECYCLE_FINANCIAL_PAIRED_RUN &&
+                    !rootApprovedHandoffSha.isNullOrBlank() &&
+                    actualHandoffSha.equals(rootApprovedHandoffSha, ignoreCase = true)
 
-            val schemaIdentity = optionalString(root, "schemaIdentity")
-                ?: optionalString(fixtureObj, "schema_name")
-                ?: credentials.schema
-                ?: "accounting_p8_tmp"
-
-            val allowHttpLoopback = optionalBoolean(root, "allowHttpLoopback") ?: true
-            val caCertPath = optionalString(root, "caCertPath")
-            val testTruststorePath = optionalString(root, "testTruststorePath")
-            val testTruststorePassword = optionalString(root, "testTruststorePassword")
-            val coordinatedFault = optionalBoolean(root, "coordinatedFaultAvailable") ?: false
-            val stockProbes = optionalBoolean(root, "stockProbesAvailable") ?: false
-
-            val ports = parsePorts(root["ports"] as? StrictJsonObject)
-            val pids = parsePids(root["pids"] as? StrictJsonObject)
+            val activeBaseUrl = loopbackBaseUrl.ifBlank { baseUrl }
 
             return CashPilotHandoffConfig(
-                status = statusStr,
-                baseUrl = baseUrl,
-                backendCommitSha = backendSha,
-                clientCommitSha = clientSha,
-                manifestDigest = manifestDigest,
-                schemaIdentity = schemaIdentity,
-                harnessNonce = harnessNonce,
-                ttlExpiresAt = ttlExpiresAt,
-                lifecycleGrant = lifecycleGrant,
-                credentialsPath = credFile.absolutePath,
-                credentials = credentials,
+                schemaVersion = schemaVersion,
+                handoffScope = handoffScope,
+                lifecyclePhase = lifecyclePhase,
+                createdAt = createdAt,
+                expiresAt = expiresAt,
+                backendPins = pinsMap,
+                backendExecutionHeadSha = backendExecutionHeadSha,
+                peerAndroidHeadSha = peerAndroidHeadSha,
+                endpoints = endpoints,
                 fixture = fixture,
-                allowHttpLoopback = allowHttpLoopback,
-                caCertPath = caCertPath,
-                testTruststorePath = testTruststorePath,
-                testTruststorePassword = testTruststorePassword,
-                coordinatedFaultAvailable = coordinatedFault,
-                stockProbesAvailable = stockProbes,
-                ports = ports,
-                pids = pids
+                credentialsPath = credentialsPath,
+                credentials = credentials,
+                rawWireSample = rawWireSample,
+                serverContext = serverContext,
+                canonicalIntentProfileDigest = computedDigest,
+                historicalCa5aReference = historicalMap,
+                startupTls = startupTls,
+                handoffFileSha256 = actualHandoffSha,
+                isProvisionOnly = isProvisionOnly,
+                isReadinessOnly = isReadinessOnly,
+                isFinancialApproved = isFinancialApproved,
+                baseUrl = activeBaseUrl
             )
         }
 
-        private fun loadCredentials(credFile: File): CashPilotCredentials {
-            validatePrivateFile(credFile, maxSizeBytes = MAX_FILE_SIZE_BYTES, enforceStrictFilePermissions = true)
-            val content = readBoundedUtf8(credFile, maxSizeBytes = MAX_FILE_SIZE_BYTES, enforceStrictFilePermissions = true)
-            val root = StrictJsonParser.parse(content).asObject()
+        private fun loadCredentials(credFile: File, allowNonPosixForTesting: Boolean): CashPilotCredentials {
+            val bytes = readBoundedBytesOnce(credFile, allowNonPosixForTesting = allowNonPosixForTesting)
+            val root = StrictJsonParser.parse(String(bytes, Charsets.UTF_8)).asObject()
 
-            val unexpected = root.properties.keys - ALLOWED_CREDENTIALS_KEYS
-            require(unexpected.isEmpty()) {
-                "Unexpected keys in credentials JSON: $unexpected"
-            }
+            val rawToken = root["raw_token"]?.asString()?.value
+                ?: throw RuntimeException("Credentials missing 'raw_token'")
+            val tokenHash = root["token_hash"]?.asString()?.value
+                ?: throw RuntimeException("Credentials missing 'token_hash'")
+            val devIdStr = root["device_id"]?.asString()?.value
+                ?: throw RuntimeException("Credentials missing 'device_id'")
 
-            val rawToken = optionalString(root, "raw_token")
-            val tokenHash = optionalString(root, "token_hash")
-            val email = optionalString(root, "staff_email")
-            val password = optionalString(root, "staff_password")
-            val deviceIdStr = optionalString(root, "device_id")
-            val deviceName = optionalString(root, "device_name")
-            val schema = optionalString(root, "schema")
-            val companyIdStr = optionalString(root, "company_id")
-            val appVersion = optionalString(root, "app_version")
-            val platform = optionalString(root, "platform")
-
-            require(!rawToken.isNullOrBlank() || (!email.isNullOrBlank() && !password.isNullOrBlank())) {
-                "Credentials file must provide either 'raw_token' or both 'staff_email' and 'staff_password'"
+            val computedTokenHash = computeSha256(rawToken.toByteArray(Charsets.UTF_8))
+            require(computedTokenHash.equals(tokenHash, ignoreCase = true)) {
+                "Runtime credentials token hash verification failed"
             }
 
             return CashPilotCredentials(
                 rawToken = rawToken,
                 tokenHash = tokenHash,
-                staffEmail = email,
-                staffPassword = password,
-                deviceId = deviceIdStr?.let { ClientUuid.parse(it) },
-                deviceName = deviceName,
-                schema = schema,
-                companyId = companyIdStr?.let { ServerUlid.parse(it) },
-                appVersion = appVersion,
-                platform = platform
+                deviceId = ClientUuid.parse(devIdStr),
+                staffEmail = root["staff_email"]?.asString()?.value,
+                schema = root["schema"]?.asString()?.value
             )
-        }
-
-        private fun parseFixture(obj: StrictJsonObject, sampleRequest: StrictJsonObject? = null): CashPilotFixture {
-            val companyIdStr = optionalString(obj, "company_public_id")
-                ?: optionalString(obj, "company_id")
-                ?: throw IllegalArgumentException("Missing company_public_id in fixture")
-            val companyId = ServerUlid.parse(companyIdStr)
-
-            val baseCurrency = optionalString(obj, "company_base_currency") ?: "ILS"
-
-            val staffActorIdStr = optionalString(obj, "staff_actor_public_id")
-                ?: optionalString(obj, "staff_actor_id")
-                ?: throw IllegalArgumentException("Missing staff_actor_public_id in fixture")
-            val staffActorId = ServerUlid.parse(staffActorIdStr)
-
-            val deviceIdStr = optionalString(obj, "device_id")
-                ?: sampleRequest?.get("device_id")?.asString()
-                ?: throw IllegalArgumentException("Missing device_id in fixture")
-            val deviceId = ClientUuid.parse(deviceIdStr)
-
-            val customerIdStr = optionalString(obj, "customer_public_id")
-                ?: optionalString(obj, "customer_id")
-                ?: sampleRequest?.get("customer_id")?.asString()
-                ?: throw IllegalArgumentException("Missing customer_public_id in fixture")
-            val customerId = ServerUlid.parse(customerIdStr)
-
-            val warehouseIdStr = optionalString(obj, "warehouse_public_id")
-                ?: optionalString(obj, "warehouse_id")
-                ?: sampleRequest?.get("warehouse_id")?.asString()
-                ?: throw IllegalArgumentException("Missing warehouse_public_id in fixture")
-            val warehouseId = ServerUlid.parse(warehouseIdStr)
-
-            val productIdStr = optionalString(obj, "product_public_id")
-                ?: optionalString(obj, "product_id")
-                ?: throw IllegalArgumentException("Missing product_public_id in fixture")
-            val productId = ServerUlid.parse(productIdStr)
-
-            val productUnitIdStr = optionalString(obj, "product_unit_public_id")
-                ?: optionalString(obj, "product_unit_id")
-                ?: throw IllegalArgumentException("Missing product_unit_public_id in fixture")
-            val productUnitId = ServerUlid.parse(productUnitIdStr)
-
-            val taxRateIdStr = optionalString(obj, "tax_rate_public_id")
-                ?: optionalString(obj, "tax_rate_id")
-                ?: throw IllegalArgumentException("Missing tax_rate_public_id in fixture")
-            val taxRateId = ServerUlid.parse(taxRateIdStr)
-
-            val taxRate = optionalString(obj, "tax_rate") ?: "16.000000"
-            val unitPrice = optionalString(obj, "unit_price") ?: "50.000000"
-
-            val cashAccountIdStr = optionalString(obj, "cash_account_public_id")
-                ?: optionalString(obj, "cash_account_id")
-                ?: throw IllegalArgumentException("Missing cash_account_public_id in fixture")
-            val cashAccountId = ServerUlid.parse(cashAccountIdStr)
-
-            val sampleEventId = (optionalString(obj, "sample_event_id") ?: sampleRequest?.get("client_event_id")?.asString())?.let { ClientUuid.parse(it) }
-            val minorUnits = obj["currency_minor_units"]?.asInt() ?: 2
-
-            return CashPilotFixture(
-                companyId = companyId,
-                companyBaseCurrency = baseCurrency,
-                staffActorId = staffActorId,
-                deviceId = deviceId,
-                customerId = customerId,
-                warehouseId = warehouseId,
-                productId = productId,
-                productUnitId = productUnitId,
-                taxRateId = taxRateId,
-                taxRate = taxRate,
-                unitPrice = unitPrice,
-                cashAccountId = cashAccountId,
-                sampleEventId = sampleEventId,
-                currencyMinorUnits = minorUnits
-            )
-        }
-
-        private fun parsePorts(obj: StrictJsonObject?): Map<String, Int> {
-            if (obj == null) return emptyMap()
-            val map = mutableMapOf<String, Int>()
-            for ((k, v) in obj.properties) {
-                val p = v.asInt()
-                require(p in 1..65535) { "Invalid port $p for $k" }
-                map[k] = p
-            }
-            return map
-        }
-
-        private fun parsePids(obj: StrictJsonObject?): Map<String, Int> {
-            if (obj == null) return emptyMap()
-            val map = mutableMapOf<String, Int>()
-            for ((k, v) in obj.properties) {
-                val pid = v.asInt()
-                require(pid > 0) { "Invalid PID $pid for $k" }
-                map[k] = pid
-            }
-            return map
-        }
-
-        fun validatePrivateFile(
-            file: File,
-            maxSizeBytes: Long = MAX_FILE_SIZE_BYTES,
-            enforceStrictFilePermissions: Boolean = false
-        ): File {
-            require(file.exists()) { "File does not exist: [REDACTED_FILE]" }
-            val path = file.toPath()
-            require(file.isFile && !Files.isSymbolicLink(path)) {
-                "File must be a regular non-symlink file: [REDACTED_FILE]"
-            }
-            val length = file.length()
-            require(length in 1..maxSizeBytes) {
-                "File size ($length bytes) must be between 1 and $maxSizeBytes bytes: [REDACTED_FILE]"
-            }
-
-            try {
-                val posixView = Files.getFileAttributeView(path, PosixFileAttributeView::class.java)
-                if (posixView != null) {
-                    val attrs = posixView.readAttributes()
-                    val perms = attrs.permissions()
-                    val owner = attrs.owner()
-                    val currentUserName = System.getProperty("user.name")
-                    if (currentUserName != null && owner.name != currentUserName) {
-                        throw SecurityException("File owner '${owner.name}' does not match current process owner '$currentUserName'")
-                    }
-                    val disallowed = setOf(
-                        PosixFilePermission.GROUP_READ,
-                        PosixFilePermission.GROUP_WRITE,
-                        PosixFilePermission.GROUP_EXECUTE,
-                        PosixFilePermission.OTHERS_READ,
-                        PosixFilePermission.OTHERS_WRITE,
-                        PosixFilePermission.OTHERS_EXECUTE
-                    )
-                    val violations = perms.intersect(disallowed)
-                    if (violations.isNotEmpty()) {
-                        if (enforceStrictFilePermissions) {
-                            throw SecurityException("Insecure permissions on ${file.name}: permissions must be 0600 or 0400, got $perms")
-                        }
-                    }
-
-                    val parent = file.parentFile
-                    if (parent != null) {
-                        validateDirectoryPermissions(parent)
-                    }
-                }
-            } catch (e: UnsupportedOperationException) {
-            }
-
-            return file
-        }
-
-        fun validateDirectoryPermissions(dir: File) {
-            val parentPath = dir.toPath()
-            val parentPosix = Files.getFileAttributeView(parentPath, PosixFileAttributeView::class.java)
-            if (parentPosix != null) {
-                val parentAttrs = parentPosix.readAttributes()
-                val parentPerms = parentAttrs.permissions()
-                val parentOwner = parentAttrs.owner()
-                val currentUserName = System.getProperty("user.name")
-                if (currentUserName != null && parentOwner.name != currentUserName) {
-                    throw SecurityException("Directory owner '${parentOwner.name}' does not match current process owner '$currentUserName'")
-                }
-                val parentDisallowed = setOf(
-                    PosixFilePermission.OTHERS_READ,
-                    PosixFilePermission.OTHERS_WRITE,
-                    PosixFilePermission.OTHERS_EXECUTE
-                )
-                if (parentPerms.intersect(parentDisallowed).isNotEmpty()) {
-                    throw SecurityException("Parent directory of private file has world permissions: $parentPerms")
-                }
-            }
-        }
-
-        fun readBoundedUtf8(
-            file: File,
-            maxSizeBytes: Long = MAX_FILE_SIZE_BYTES,
-            enforceStrictFilePermissions: Boolean = false
-        ): String {
-            validatePrivateFile(file, maxSizeBytes, enforceStrictFilePermissions)
-            file.inputStream().use { input ->
-                val out = ByteArrayOutputStream()
-                val buffer = ByteArray(4096)
-                var total = 0L
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read == -1) break
-                    total += read
-                    if (total > maxSizeBytes) {
-                        throw IllegalArgumentException("File exceeds maximum allowed size of $maxSizeBytes bytes: [REDACTED]")
-                    }
-                    out.write(buffer, 0, read)
-                }
-                val bytes = out.toByteArray()
-                require(bytes.isNotEmpty()) { "File must not be empty: [REDACTED]" }
-                val decoder = StandardCharsets.UTF_8.newDecoder()
-                    .onMalformedInput(CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(CodingErrorAction.REPORT)
-                return decoder.decode(ByteBuffer.wrap(bytes)).toString()
-            }
-        }
-
-        fun validateHttpsOrigin(urlStr: String, allowHttpLoopback: Boolean): String {
-            require(urlStr.isNotBlank()) { "URL must not be blank" }
-            val uri = try {
-                URI(urlStr)
-            } catch (e: Exception) {
-                throw IllegalArgumentException("Malformed URL: [REDACTED]")
-            }
-            val scheme = uri.scheme?.lowercase(Locale.ROOT)
-            require(scheme != null) { "URL must specify a scheme: [REDACTED]" }
-            require(uri.isAbsolute) { "URL must be absolute: [REDACTED]" }
-
-            val host = uri.host
-            require(!host.isNullOrBlank()) { "URL host must not be empty: [REDACTED]" }
-
-            val isLoopback = host.lowercase(Locale.ROOT) in setOf("localhost", "127.0.0.1", "10.0.2.2", "::1", "[::1]")
-            if (scheme == "http") {
-                require(allowHttpLoopback && isLoopback) {
-                    "Insecure HTTP origin [REDACTED] is prohibited. HTTPS is required by default."
-                }
-            } else if (scheme != "https") {
-                throw IllegalArgumentException("Unsupported scheme '$scheme'. Only HTTPS is allowed (or HTTP loopback with explicit opt-in).")
-            }
-
-            require(uri.rawUserInfo == null) { "URL must not contain userinfo: [REDACTED]" }
-            require(uri.rawPath.isNullOrEmpty() || uri.rawPath == "/") { "URL must not contain path: [REDACTED]" }
-            require(uri.rawQuery == null) { "URL must not contain query: [REDACTED]" }
-            require(uri.rawFragment == null) { "URL must not contain fragment: [REDACTED]" }
-
-            val port = uri.port
-            if (port != -1) {
-                require(port in 1..65535) { "Invalid port $port in URL" }
-            }
-
-            return if (port != -1) "$scheme://$host:$port" else "$scheme://$host"
-        }
-
-        fun computeSha256(file: File): String {
-            val md = MessageDigest.getInstance("SHA-256")
-            file.inputStream().use { input ->
-                val buf = ByteArray(4096)
-                while (true) {
-                    val r = input.read(buf)
-                    if (r == -1) break
-                    md.update(buf, 0, r)
-                }
-            }
-            return md.digest().joinToString("") { "%02x".format(it) }
-        }
-
-        private fun requireString(obj: StrictJsonObject, key: String): String {
-            val element = obj[key] ?: throw IllegalArgumentException("Missing required key '$key'")
-            if (element !is StrictJsonString) {
-                throw IllegalArgumentException("Invalid type for key '$key': expected string, got ${element.javaClass.simpleName}")
-            }
-            return element.value
-        }
-
-        private fun optionalString(obj: StrictJsonObject, key: String): String? {
-            val element = obj[key] ?: return null
-            if (element !is StrictJsonString) {
-                throw IllegalArgumentException("Invalid type for key '$key': expected string, got ${element.javaClass.simpleName}")
-            }
-            return element.value
-        }
-
-        private fun optionalBoolean(obj: StrictJsonObject, key: String): Boolean? {
-            val element = obj[key] ?: return null
-            if (element !is StrictJsonBoolean) {
-                throw IllegalArgumentException("Invalid type for key '$key': expected boolean, got ${element.javaClass.simpleName}")
-            }
-            return element.value
         }
     }
 }
