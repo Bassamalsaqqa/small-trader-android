@@ -1,6 +1,7 @@
 package com.example.data.mobile.readclient.pilot
 import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.ServerUlid
+import com.example.data.mobile.contract.StrictJsonParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -875,6 +876,78 @@ class CashPilotHandoffConfigTest {
             tempDir.deleteRecursively()
         }
     }
+
+    @Test
+    fun testCashPilotEvidenceDistinctPublicationAndExecutablePinsSerialization() {
+        val pubSha = "653327243b2f5a4541c5fcf8cbe9520769e6be50"
+        val exeSha = "78ac4437e4010b68408278788dc82eb826fe8014"
+        val backendSha = "d7c7324535b1e6586140ab1e3561966342d625d6"
+
+        val evidence = CashPilotEvidence(
+            backendHead = backendSha,
+            clientHead = exeSha,
+            clientPublicationHead = pubSha,
+            clientExecutableHead = exeSha,
+            manifestDigest = "8e48f3692a88f5ac3f333f81536d70eb3541228959968697fda03f68df44befc",
+            baseUrl = "https://127.0.0.1:18443",
+            lifecycleGrant = "READINESS_ONLY",
+            overallStatus = "PASS",
+            scenarios = listOf(
+                ScenarioEvidence(
+                    name = "readiness_probe",
+                    status = "PASS",
+                    httpStatusCode = 200,
+                    latencyMs = 15L,
+                    details = "Verified loopback probe"
+                )
+            )
+        )
+        val json = evidence.toJsonString()
+
+        // 1. Strict parse using project's canonical parser
+        val parsed = StrictJsonParser.parse(json).asObject()
+        assertEquals(pubSha, parsed["clientPublicationHead"]?.asString())
+        assertEquals(exeSha, parsed["clientExecutableHead"]?.asString())
+        assertEquals(exeSha, parsed["clientHead"]?.asString())
+        assertEquals(backendSha, parsed["backendHead"]?.asString())
+        assertEquals("PASS", parsed["overallStatus"]?.asString())
+
+        // 2. Exact distinct check
+        assertTrue(parsed["clientPublicationHead"]?.asString() != parsed["clientExecutableHead"]?.asString())
+
+        // 3. Null handling: when publication pin is null, it is omitted
+        val evidenceWithoutPub = CashPilotEvidence(
+            backendHead = backendSha,
+            clientHead = exeSha,
+            clientPublicationHead = null,
+            clientExecutableHead = exeSha,
+            manifestDigest = "8e48f3692a88f5ac3f333f81536d70eb3541228959968697fda03f68df44befc",
+            baseUrl = "https://127.0.0.1:18443",
+            lifecycleGrant = "READINESS_ONLY",
+            overallStatus = "PASS",
+            scenarios = emptyList()
+        )
+        val parsedWithoutPub = StrictJsonParser.parse(evidenceWithoutPub.toJsonString()).asObject()
+        assertNull(parsedWithoutPub["clientPublicationHead"])
+        assertEquals(exeSha, parsedWithoutPub["clientExecutableHead"]?.asString())
+        assertEquals(exeSha, parsedWithoutPub["clientHead"]?.asString())
+
+        // 4. Proper escaping: pins with quotes or special chars are escaped
+        val escapedEvidence = CashPilotEvidence(
+            backendHead = backendSha,
+            clientPublicationHead = "pin\"with\\quotes",
+            clientExecutableHead = "pin\nwith\ttab",
+            manifestDigest = "digest",
+            baseUrl = "https://127.0.0.1",
+            lifecycleGrant = "READINESS_ONLY",
+            overallStatus = "PASS",
+            scenarios = emptyList()
+        )
+        val parsedEscaped = StrictJsonParser.parse(escapedEvidence.toJsonString()).asObject()
+        assertEquals("pin\"with\\quotes", parsedEscaped["clientPublicationHead"]?.asString())
+        assertEquals("pin\nwith\ttab", parsedEscaped["clientExecutableHead"]?.asString())
+    }
+
     @Test
     fun testCashPilotEvidenceSerializationZeroLiteralNul() {
         val scenarios = listOf(
@@ -896,6 +969,8 @@ class CashPilotHandoffConfigTest {
         val evidence = CashPilotEvidence(
             backendHead = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
             clientHead = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+            clientPublicationHead = "019ea39af09558c2622356cb22235572747e3ddc",
+            clientExecutableHead = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
             manifestDigest = "5bfb4b06ae33ddf0084a3d2d99a41e714f0c64d97fa810b4ecdddf6f8e5f16c1",
             baseUrl = "https://127.0.0.1:18443",
             lifecycleGrant = "READINESS_ONLY",
@@ -905,6 +980,9 @@ class CashPilotHandoffConfigTest {
         val json = evidence.toJsonString()
         assertFalse("Evidence JSON must not contain literal NUL byte", json.contains("\u0000"))
         assertTrue(json.contains("\"overallStatus\": \"NOT_RUN\""))
+        assertTrue(json.contains("\"clientHead\": \"ddfc75536e647c65a6a7e8868c9336cee93769ec\""))
+        assertTrue(json.contains("\"clientPublicationHead\": \"019ea39af09558c2622356cb22235572747e3ddc\""))
+        assertTrue(json.contains("\"clientExecutableHead\": \"ddfc75536e647c65a6a7e8868c9336cee93769ec\""))
         assertTrue(json.contains("[REDACTED_EMAIL]"))
         assertTrue(json.contains("[REDACTED_PATH]"))
     }

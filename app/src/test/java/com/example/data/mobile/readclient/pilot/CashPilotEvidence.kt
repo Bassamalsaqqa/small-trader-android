@@ -44,8 +44,16 @@ data class CashPilotEvidence(
         sb.append("  \"runId\": \"").append(escapeJson(runId)).append("\",\n")
         sb.append("  \"timestamp\": \"").append(escapeJson(timestamp)).append("\",\n")
         sb.append("  \"backendHead\": \"").append(escapeJson(backendHead)).append("\",\n")
-        if (clientHead != null) {
-            sb.append("  \"clientHead\": \"").append(escapeJson(clientHead)).append("\",\n")
+        val legacyClientHead = clientHead ?: clientExecutableHead
+        if (legacyClientHead != null) {
+            sb.append("  \"clientHead\": \"").append(escapeJson(legacyClientHead)).append("\",\n")
+        }
+        if (clientPublicationHead != null) {
+            sb.append("  \"clientPublicationHead\": \"").append(escapeJson(clientPublicationHead)).append("\",\n")
+        }
+        val execClientHead = clientExecutableHead ?: clientHead
+        if (execClientHead != null) {
+            sb.append("  \"clientExecutableHead\": \"").append(escapeJson(execClientHead)).append("\",\n")
         }
         sb.append("  \"manifestDigest\": \"").append(escapeJson(manifestDigest)).append("\",\n")
         sb.append("  \"baseUrl\": \"").append(escapeJson(baseUrl)).append("\",\n")
