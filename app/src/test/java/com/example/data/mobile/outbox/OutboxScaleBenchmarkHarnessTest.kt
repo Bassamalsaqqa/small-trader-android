@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -50,7 +51,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *    - Validates that [DefaultOutboxHealthInspector] traverses all records in bounded 10-item pages
  *      ([OutboxHealthInspector.DEFAULT_PAGE_SIZE]), avoiding whole-queue memory materialization.
  * 4. Latency Distribution & Measurements:
- *    - Measures warmups and reproducible sample distributions: reports min, p50 (median), p95, p99, max, mean.
+ *    - Measures warmups and sample distributions (random event IDs are hashed per run): reports min, p50 (median), p95, p99, max, mean.
  *    - Clearly qualifies latency as JVM database read / background worker execution, NOT physical UI frame hardware.
  * 5. Concurrent Capture Under Write Lock:
  *    - Measures background writer wait time when [repository.captureSale] executes concurrently during
@@ -95,7 +96,7 @@ class OutboxScaleBenchmarkHarnessTest {
     private lateinit var dbFile: File
     private var database: OutboxDatabase? = null
     private var writerDatabase: OutboxDatabase? = null
-    private val executor = Executors.newCachedThreadPool()
+    private val executor = Executors.newFixedThreadPool(2)
 
     @Before
     fun setUp() {
@@ -105,16 +106,10 @@ class OutboxScaleBenchmarkHarnessTest {
 
     @After
     fun tearDown() {
-        try {
-            database?.close()
-        } catch (_: Exception) {}
-        try {
-            writerDatabase?.close()
-        } catch (_: Exception) {}
         executor.shutdownNow()
-        try {
-            executor.awaitTermination(3, TimeUnit.SECONDS)
-        } catch (_: Exception) {}
+        assertTrue("Harness threads must terminate", executor.awaitTermination(5, TimeUnit.SECONDS))
+        writerDatabase?.close()
+        database?.close()
         if (dbFile.exists()) {
             dbFile.delete()
         }
@@ -132,6 +127,18 @@ class OutboxScaleBenchmarkHarnessTest {
             md.update(event.computePayloadDigest().value.toByteArray(StandardCharsets.UTF_8))
         }
         return md.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun storedRecordsDigest(db: OutboxDatabase, events: List<OfflineSaleEvent>): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        for (event in events) {
+            val row = requireNotNull(db.outboxDao().getEvent(event.companyId.value, event.clientEventId.value))
+            digest.update(row.payloadBytes)
+            digest.update(row.payloadDigest.toByteArray(StandardCharsets.UTF_8))
+            val state = requireNotNull(db.outboxDao().getDeliveryState(event.companyId.value, event.clientEventId.value))
+            digest.update(state.toString().toByteArray(StandardCharsets.UTF_8))
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun seedCanonicalEncryptedQueue(
@@ -165,7 +172,7 @@ class OutboxScaleBenchmarkHarnessTest {
         return events
     }
 
-    @Test
+    @Test(timeout = 120_000)
     fun benchmark1k_pagedVerification_distribution_and_responsiveness() = runBlocking {
         Assume.assumeTrue(
             "Scale benchmark is opt-in. Set -D$PROPERTY_BENCHMARK_ENABLED=true or $ENV_BENCHMARK_ENABLED=true to run.",
@@ -244,6 +251,8 @@ class OutboxScaleBenchmarkHarnessTest {
         println("Total Keyset Pages Traversed: $expectedPages pages")
         println("Warm-up Iterations: $DEFAULT_WARMUP_ROUNDS")
         println("Measured Samples: $DEFAULT_SAMPLE_ROUNDS")
+        println("Raw samples ms: $samplesMs")
+        println("p95/p99 are empirical order statistics from 10 samples, not stable device-tail estimates.")
         println("--------------------------------------------------------------------------------")
         println(String.format(Locale.US, "Latency Distribution (DB Read & Decrypt):"))
         println(String.format(Locale.US, "  Min:    %8.2f ms", minMs))
@@ -260,11 +269,10 @@ class OutboxScaleBenchmarkHarnessTest {
         println("Low-end physical hardware gate remains UNVERIFIED / HOLD.")
         println("================================================================================")
 
-        // Bounded sanity assertions (no flaky artificial SLO thresholds)
-        assertTrue("Mean latency must complete within reasonable bound (10s)", meanMs < 10_000.0)
+        // Measurements are observations, not an invented device/UI performance SLO.
     }
 
-    @Test
+    @Test(timeout = 120_000)
     fun benchmark1k_concurrentCaptureSale_waitsDuringInspectionAndSucceeds() = runBlocking {
         Assume.assumeTrue(
             "Scale benchmark is opt-in. Set -D$PROPERTY_BENCHMARK_ENABLED=true or $ENV_BENCHMARK_ENABLED=true to run.",
@@ -281,6 +289,7 @@ class OutboxScaleBenchmarkHarnessTest {
 
         val repoReader = OutboxRepositoryImpl(readerDb, payloadCipher = cipher)
         val repoWriter = OutboxRepositoryImpl(writerDb, payloadCipher = cipher)
+        executor.submit<Int> { writerDb.outboxDao().eventCount() }.get(5, TimeUnit.SECONDS)
 
         seedCanonicalEncryptedQueue(repoReader, totalRecords)
         assertEquals(totalRecords, readerDb.outboxDao().eventCount())
@@ -306,8 +315,8 @@ class OutboxScaleBenchmarkHarnessTest {
             ioDispatcher = Dispatchers.IO,
             onPageReadHook = { pageIndex ->
                 if (pageIndex == halfwayPage) {
-                    captureWaitStartNs = System.nanoTime()
                     pendingWriteFuture = executor.submit {
+                        captureWaitStartNs = System.nanoTime()
                         writeAttemptStarted.countDown()
                         val result = repoWriter.captureSale(concurrentEvent)
                         val finishNs = System.nanoTime()
@@ -345,7 +354,7 @@ class OutboxScaleBenchmarkHarnessTest {
         println(String.format(Locale.US, "[CONCURRENT CAPTURE] Write lock hold wait: %.2f ms", captureWaitDurationMs))
     }
 
-    @Test
+    @Test(timeout = 120_000)
     fun benchmark1k_cancellation_boundedTermination_andDataPreservation() = runBlocking {
         Assume.assumeTrue(
             "Scale benchmark is opt-in. Set -D$PROPERTY_BENCHMARK_ENABLED=true or $ENV_BENCHMARK_ENABLED=true to run.",
@@ -360,12 +369,13 @@ class OutboxScaleBenchmarkHarnessTest {
         val repo = OutboxRepositoryImpl(db, payloadCipher = cipher)
 
         val seededEvents = seedCanonicalEncryptedQueue(repo, totalRecords)
-        val initialScenarioHash = computeScenarioDigest(seededEvents)
+        val originalStoredDigest = storedRecordsDigest(db, seededEvents)
         assertEquals(totalRecords, db.outboxDao().eventCount())
 
         val cancelAtPage = 20 // 200 items in
         val pageReached = CountDownLatch(1)
         val pagesVisited = AtomicInteger(0)
+        val cancellationRequested = CountDownLatch(1)
 
         val inspector = DefaultOutboxHealthInspector(
             database = db,
@@ -375,11 +385,12 @@ class OutboxScaleBenchmarkHarnessTest {
                 pagesVisited.incrementAndGet()
                 if (pageIndex == cancelAtPage) {
                     pageReached.countDown()
+                    assertTrue(cancellationRequested.await(5, TimeUnit.SECONDS))
                 }
             }
         )
 
-        val cancelStartNs = System.nanoTime()
+        var cancelStartNs = 0L
         var cancellationCaught = false
         val job = launch(Dispatchers.IO) {
             try {
@@ -390,11 +401,17 @@ class OutboxScaleBenchmarkHarnessTest {
             }
         }
 
-        assertTrue("Must reach cancellation page", pageReached.await(5, TimeUnit.SECONDS))
-        job.cancel()
         try {
-            job.join()
-        } catch (_: Exception) {}
+            assertTrue("Must reach cancellation page", pageReached.await(10, TimeUnit.SECONDS))
+            cancelStartNs = System.nanoTime()
+            job.cancel()
+        } finally {
+            cancellationRequested.countDown()
+        }
+        withTimeout(5_000) { job.join() }
+        assertTrue("Inspection must observe cancellation", cancellationCaught)
+        assertEquals("Stored ciphertext, identities and delivery state must remain byte-exact",
+            originalStoredDigest, storedRecordsDigest(db, seededEvents))
 
         val cancelDurationMs = (System.nanoTime() - cancelStartNs) / 1_000_000.0
 
@@ -430,7 +447,7 @@ class OutboxScaleBenchmarkHarnessTest {
             cancelDurationMs, cancelAtPage, visited))
     }
 
-    @Test
+    @Test(timeout = 120_000)
     fun benchmark1k_readWorkspaceResponsiveness_qualifiedAsDbReadLatency() = runBlocking {
         Assume.assumeTrue(
             "Scale benchmark is opt-in. Set -D$PROPERTY_BENCHMARK_ENABLED=true or $ENV_BENCHMARK_ENABLED=true to run.",
