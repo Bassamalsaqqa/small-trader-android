@@ -61,7 +61,7 @@
       "tests": 24
     }
   ],
-  "note": "Current inventory is unexecuted, not a pass claim. Historical XML entered PR22 at 3f04edb; it is not PR21 health-gate evidence.",
+  "note": "Current source inventory was executed by the root supervisor at executable 85d8c4e9d9f1e125f00d720a6a38831507da1550: 168 tests across 15 suites passed. Historical 140-test artifacts entered PR22 at 3f04edb and remain separately attributed.",
   "historical_saved_passes": {
     "suites": 15,
     "tests": 140,
@@ -72,8 +72,7 @@
   "current_inventory": {
     "suites": 15,
     "tests": 168,
-    "current_execution_claimed": 0,
-    "status": "focused_execution_passed_independent_source_review_pending"
+    "status": "focused_execution_passed_bounded_independent_source_review_no_material_findings"
   },
   "current_execution": {
     "source": "85d8c4e9d9f1e125f00d720a6a38831507da1550",
