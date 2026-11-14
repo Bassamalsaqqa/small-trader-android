@@ -279,6 +279,40 @@ class DefaultOutboxHealthInspector(
 
                 // If non-encrypted rows exist in this scope
                 if (nonEncryptedCount > 0) {
+                    // A non-STO/1 prefix is not proof of valid legacy data. Validate
+                    // every plaintext candidate without modifying or blessing its provenance.
+                    var legacyPage = snapshot.sampleRows
+                    while (legacyPage.isNotEmpty()) {
+                        for (row in legacyPage) {
+                            inspectionContext.ensureActive()
+                            if (!payloadCipher.isEncrypted(row.boundedPayloadBytes)) {
+                                try {
+                                    payloadCipher.verifyLegacy(OutboxEventEntity(
+                                        clientEventId = row.clientEventId, companyId = row.companyId,
+                                        actorId = row.actorId, deviceId = row.deviceId,
+                                        deviceLeaseId = row.deviceLeaseId, capturedAt = row.capturedAt,
+                                        payloadDigest = row.payloadDigest, payloadBytes = row.boundedPayloadBytes,
+                                        eventVersion = row.eventVersion
+                                    ))
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (_: OutboxStorageException) {
+                                    return@runInTransaction OutboxHealthResult(
+                                        status = OutboxHealthStatus.CORRUPT, totalEvents = scopedTotal,
+                                        probedCount = 0, isSampleProbe = false, isScopeLocked = isScopeLocked,
+                                        messageEn = "Some stored sales need help before syncing.",
+                                        messageAr = "بعض المبيعات المحفوظة تحتاج إلى مساعدة قبل المزامنة.",
+                                        canRetry = true
+                                    )
+                                }
+                            }
+                        }
+                        val last = legacyPage.last()
+                        legacyPage = database.outboxDao().scopedEventsPageForHealthProbe(
+                            companyId, actorId, deviceId, last.capturedAt, last.clientEventId,
+                            maxEnvelopeBytesPlusOne, pageSize
+                        )
+                    }
                     val status = if (nonEncryptedCount == scopedTotal) {
                         OutboxHealthStatus.LEGACY_PLAINTEXT
                     } else {
@@ -327,7 +361,7 @@ class DefaultOutboxHealthInspector(
 
                 // Prepare cipher for reading encrypted payloads
                 try {
-                    payloadCipher.prepare(false)
+                    payloadCipher.prepare(true)
                 } catch (e: OutboxStorageException) {
                     return@runInTransaction when (e.error) {
                         OutboxStorageError.KEY_LOCKED -> OutboxHealthResult(
