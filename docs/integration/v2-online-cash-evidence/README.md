@@ -25,8 +25,8 @@ This directory contains hermetic unit test evidence, Android lint reports, execu
 - **Task**: `:app:lintDebug`
 - **Duration**: 68.17s
 - **Exit Code**: 0
-- **Reported Issues**: **0 errors, 63 baseline warnings**
-- **Issue Category**: `IconLauncherShape` (pre-existing launcher icons in legacy `res/mipmap-*/ic_launcher.png` filling square silhouette; zero new errors or warnings introduced in PR #23).
+- **Reported Issues**: **0 errors, 63 warnings observed**
+- **Issue Category**: `IconLauncherShape` (baseline historical 63 known launcher icon silhouette warnings on legacy `res/mipmap-*/ic_launcher.png` resources).
 
 ### 3. Source Attestation & Pre/Post Git Pins
 - `source-attestation-753f.json` records actual git HEAD (`753fb5133e28acb1284370dd7a84e3929e7b1a7d`), working tree status, and cryptographic SHA256 hashes of all 30 relevant source and test files both **before** and **after** test execution and lint execution.
@@ -40,7 +40,7 @@ Contemporaneous git commit pins from intermediate conversational iterations were
 The timestamp in the prior manifest was recorded as `2026-11-14T19:46:00Z` due to the local system clock (UTC+2 / EET) being formatted with a trailing 'Z' instead of the '+02:00' timezone offset. The actual UTC time was `17:46Z`, consistent with git commit timestamps at `17:48Z` and XML generation at `17:45Z`. The current manifest records the authoritative UTC timestamp `2026-11-14T17:58:37Z` (local `19:58:37+02:00`).
 
 ### Mobile Contract Endpoint Clarification
-A reviewer note referenced an example path `GET /v2/sales/events`. In the authoritative Mobile Sales Contract v2, event status queries are handled via `/v2/sales/offline-events` and dedicated status recovery endpoints. No non-contract `/v2/sales/events` path has been added, and no client TLS certificate / mTLS requirements have been invented.
+A reviewer note referenced an example path `GET /v2/sales/events`. In the authoritative Mobile Sales Contract v2, event status queries are handled via `/api/mobile/v2/companies/{companyId}/offline-events/{clientEventId}/status` (as implemented in `AndroidV2OnlineCashClient` and `Transport`). No non-contract `/v2/sales/events` path has been added, and no client TLS certificate / mTLS requirements have been invented.
 
 ## Suite Breakdown (18 Suites, 285 Tests)
 1. `com.example.data.mobile.contract.v2.ContractV2WireValidationTest` (12 tests - PASS)
@@ -81,4 +81,4 @@ A reviewer note referenced an example path `GET /v2/sales/events`. In the author
 - `historical-76/`: 8 suites (76 tests) from initial baseline `f697451`.
 - `historical-171-ddfc/`: 12 suites (171 tests) from model foundation `ddfc75536e647c65a6a7e8868c9336cee93769ec`.
 - `historical-238-ad10/`: 14 suites (238 tests) from readiness helper refactor `ad10a4ceaa301f7d272cdf4702414f63a69a20c7`.
-- `test-results/`: 18 suites (285 tests) current head `753fb5133e28acb1284370dd7a84e3929e7b1a7d`.
+- `test-results/`: 18 suites (285 tests) from execution head `753fb5133e28acb1284370dd7a84e3929e7b1a7d` (provenance commit `fed3bdf048a4ec9ed942a23905f39f9e18ec823f`).

@@ -6,7 +6,7 @@
     "fullPilot": "NOT_RUN (lost-ACK fault injection, stock rollback, and paired live backend integration pending)"
   },
   "qualificationNote": "Hermetic client implementation unit qualification under PR #23. Status recovery economic reconciliation, payment completeness, pilot acceptance enforcement, and exact base MIME validation verified. Source attested at clean commit 753fb51.",
-  "contractEndpointClarification": "Authoritative mobile contract offline-events status endpoint remains /v2/sales/offline-events. Reviewer suggestion of /v2/sales/events is non-contract and not implemented. No mTLS or TLS client certificate auth required on mobile client.",
+  "contractEndpointClarification": "Authoritative mobile contract offline-events status endpoint remains /api/mobile/v2/companies/{companyId}/offline-events/{clientEventId}/status. Reviewer suggestion of /v2/sales/events is non-contract and not implemented. No mTLS or TLS client certificate auth required on mobile client.",
   "pr": 23,
   "branch": "t3/android-v2-online-cash-client",
   "sourceCommit": "753fb5133e28acb1284370dd7a84e3929e7b1a7d",
@@ -33,7 +33,7 @@
     "errors": 0,
     "warnings": 63,
     "baselineWarnings": 63,
-    "note": "0 errors, 63 warnings (factual baseline launcher icon silhouette warnings on legacy mipmap resources; zero new errors or warnings introduced in PR #23)"
+    "note": "0 errors, 63 warnings observed (baseline historical 63 known launcher icon silhouette warnings on legacy mipmap resources)"
   },
   "externalHttpExecution": {
     "status": "NOT_RUN",
@@ -65,5 +65,6 @@
       "tests": 238,
       "directory": "historical-238-ad10"
     }
-  }
+  },
+  "previousDocProvenanceCommit": "fed3bdf048a4ec9ed942a23905f39f9e18ec823f"
 }
