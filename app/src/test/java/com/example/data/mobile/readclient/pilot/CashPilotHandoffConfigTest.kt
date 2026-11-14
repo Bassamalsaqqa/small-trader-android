@@ -2,6 +2,7 @@ package com.example.data.mobile.readclient.pilot
 import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.StrictJsonParser
+import com.example.data.mobile.contract.StrictJsonNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -1387,6 +1388,159 @@ class CashPilotHandoffConfigTest {
             assertEquals("753fb5133e28acb1284370dd7a84e3929e7b1a7d", config.peerAndroidHeadSha)
         } finally {
             tempDir.deleteRecursively()
+        }
+    }
+    @Test
+    fun testCashPilotEvidenceDeterministicSyntheticFinancialGolden() {
+        val evidence = CashPilotEvidence(
+            runId = "019ea456-0000-7000-8000-000000000001",
+            timestamp = "2026-11-14T22:15:00Z",
+            backendHead = "cfc28baaaaf52521ecbc88f1ba4c621afee17221",
+            clientHead = "b7e61eb4ed0aed2f5040d9fc44f9764b310be530",
+            clientPublicationHead = "c00aedb70ea06f28ae42282149c030df76dc300d",
+            clientExecutableHead = "b7e61eb4ed0aed2f5040d9fc44f9764b310be530",
+            manifestDigest = "8e48f3692a88f5ac3f333f81536d70eb3541228959968697fda03f68df44befc",
+            baseUrl = "https://127.0.0.1:18443/api/mobile/v2",
+            lifecycleGrant = "FINANCIAL_PAIRED_RUN",
+            ttlExpiresAt = "2026-11-14T23:15:00Z",
+            overallStatus = "PASS",
+            scenarios = listOf(
+                ScenarioEvidence(
+                    name = "readiness_probe",
+                    status = "PASS",
+                    httpStatusCode = 200,
+                    latencyMs = 15L,
+                    details = "Host loopback HTTPS GET probe verified HTTP 200 with matching nonce (JVM runner avoided emulator alias)"
+                ),
+                ScenarioEvidence(
+                    name = "financial_cash_fresh_commit_201",
+                    status = "PASS",
+                    httpStatusCode = 201,
+                    latencyMs = 42L,
+                    details = "Fresh online cash sale committed atomically with invoice INV-2026-00001"
+                ),
+                ScenarioEvidence(
+                    name = "financial_cash_idempotent_replay_200",
+                    status = "PASS",
+                    httpStatusCode = 200,
+                    latencyMs = 25L,
+                    details = "Idempotent replay returned byte-identical response with matching invoice number"
+                ),
+                ScenarioEvidence(
+                    name = "financial_cash_event_status_posted",
+                    status = "PASS",
+                    httpStatusCode = 200,
+                    latencyMs = 18L,
+                    details = "Offline event status query confirmed 'posted' status with authoritative invoice and matching payment reference"
+                ),
+                ScenarioEvidence(
+                    name = "financial_cash_tamper_409",
+                    status = "PASS",
+                    httpStatusCode = 409,
+                    latencyMs = 12L,
+                    details = "Duplicate clientEventId with balanced tampered payload strictly rejected with HTTP 409 Conflict"
+                ),
+                ScenarioEvidence(
+                    name = "transport_lost_ack_recovery",
+                    status = "NOT_RUN",
+                    httpStatusCode = null,
+                    latencyMs = 0L,
+                    details = "Backend coordinated fault injection scenario absent; keeping explicit NOT_RUN without overclaim"
+                ),
+                ScenarioEvidence(
+                    name = "stock_permission_rollback_probes",
+                    status = "NOT_RUN",
+                    httpStatusCode = null,
+                    latencyMs = 0L,
+                    details = "Backend stock/rollback probe scenario absent; keeping explicit NOT_RUN without overclaim"
+                )
+            )
+        )
+        val json = evidence.toJsonString()
+
+        // 1. Strict parse using project canonical parser and assert all fields
+        val parsed = StrictJsonParser.parse(json).asObject()
+        assertEquals("019ea456-0000-7000-8000-000000000001", parsed["runId"]?.asString())
+        assertEquals("2026-11-14T22:15:00Z", parsed["timestamp"]?.asString())
+        assertEquals("cfc28baaaaf52521ecbc88f1ba4c621afee17221", parsed["backendHead"]?.asString())
+        assertEquals("c00aedb70ea06f28ae42282149c030df76dc300d", parsed["clientPublicationHead"]?.asString())
+        assertEquals("b7e61eb4ed0aed2f5040d9fc44f9764b310be530", parsed["clientExecutableHead"]?.asString())
+        assertEquals("b7e61eb4ed0aed2f5040d9fc44f9764b310be530", parsed["clientHead"]?.asString())
+        assertEquals("8e48f3692a88f5ac3f333f81536d70eb3541228959968697fda03f68df44befc", parsed["manifestDigest"]?.asString())
+        assertEquals("https://127.0.0.1:18443/api/mobile/v2", parsed["baseUrl"]?.asString())
+        assertEquals("FINANCIAL_PAIRED_RUN", parsed["lifecycleGrant"]?.asString())
+        assertEquals("2026-11-14T23:15:00Z", parsed["ttlExpiresAt"]?.asString())
+        assertEquals("PASS", parsed["overallStatus"]?.asString())
+
+        val scenariosArray = parsed["scenarios"]?.asArray()?.elements ?: emptyList()
+        assertEquals(7, scenariosArray.size)
+
+        // Basic 5 scenarios: all PASS with exact HTTP codes
+        val basic0 = scenariosArray[0].asObject()
+        assertEquals("readiness_probe", basic0["name"]?.asString())
+        assertEquals("PASS", basic0["status"]?.asString())
+        assertEquals(200, basic0["httpStatusCode"]?.asInt())
+
+        val basic1 = scenariosArray[1].asObject()
+        assertEquals("financial_cash_fresh_commit_201", basic1["name"]?.asString())
+        assertEquals("PASS", basic1["status"]?.asString())
+        assertEquals(201, basic1["httpStatusCode"]?.asInt())
+
+        val basic2 = scenariosArray[2].asObject()
+        assertEquals("financial_cash_idempotent_replay_200", basic2["name"]?.asString())
+        assertEquals("PASS", basic2["status"]?.asString())
+        assertEquals(200, basic2["httpStatusCode"]?.asInt())
+
+        val basic3 = scenariosArray[3].asObject()
+        assertEquals("financial_cash_event_status_posted", basic3["name"]?.asString())
+        assertEquals("PASS", basic3["status"]?.asString())
+        assertEquals(200, basic3["httpStatusCode"]?.asInt())
+
+        val basic4 = scenariosArray[4].asObject()
+        assertEquals("financial_cash_tamper_409", basic4["name"]?.asString())
+        assertEquals("PASS", basic4["status"]?.asString())
+        assertEquals(409, basic4["httpStatusCode"]?.asInt())
+
+        // Advanced 2 scenarios: explicit NOT_RUN with null HTTP code
+        val adv0 = scenariosArray[5].asObject()
+        assertEquals("transport_lost_ack_recovery", adv0["name"]?.asString())
+        assertEquals("NOT_RUN", adv0["status"]?.asString())
+        assertEquals(StrictJsonNull, adv0["httpStatusCode"])
+
+        val adv1 = scenariosArray[6].asObject()
+        assertEquals("stock_permission_rollback_probes", adv1["name"]?.asString())
+        assertEquals("NOT_RUN", adv1["status"]?.asString())
+        assertEquals(StrictJsonNull, adv1["httpStatusCode"])
+
+        // 2. Export fixture ONLY if SMALL_TRADER_GOLDEN_EXPORT_PATH is present
+        val exportPath = System.getenv("SMALL_TRADER_GOLDEN_EXPORT_PATH")
+        if (!exportPath.isNullOrBlank()) {
+            val file = File(exportPath)
+            file.parentFile?.mkdirs()
+            file.writeText(json, Charsets.UTF_8)
+        }
+
+        // 3. Export provenance wrapper ONLY if SMALL_TRADER_GOLDEN_WRAPPER_EXPORT_PATH is present
+        val wrapperPath = System.getenv("SMALL_TRADER_GOLDEN_WRAPPER_EXPORT_PATH")
+        if (!wrapperPath.isNullOrBlank()) {
+            val goldenSha = CashPilotHandoffConfig.computeSha256(json.toByteArray(Charsets.UTF_8))
+            val wrapperContent = "{\n" +
+                "  \"synthetic\": true,\n" +
+                "  \"purpose\": \"PHP outer validator cross-repo parity fixture\",\n" +
+                "  \"wireEvidence\": " + json + ",\n" +
+                "  \"provenance\": {\n" +
+                "    \"sourceCommit\": \"c00aedb70ea06f28ae42282149c030df76dc300d\",\n" +
+                "    \"clientPublicationHead\": \"c00aedb70ea06f28ae42282149c030df76dc300d\",\n" +
+                "    \"clientExecutableHead\": \"b7e61eb4ed0aed2f5040d9fc44f9764b310be530\",\n" +
+                "    \"backendHead\": \"cfc28baaaaf52521ecbc88f1ba4c621afee17221\",\n" +
+                "    \"serializerBlobSha\": \"edfba4bc03372131a245b1cf1826811fc9066d5a\",\n" +
+                "    \"goldenEvidenceSha256\": \"" + goldenSha + "\",\n" +
+                "    \"goldenSizeBytes\": " + json.toByteArray(Charsets.UTF_8).size + "\n" +
+                "  }\n" +
+                "}\n"
+            val wrapperFile = File(wrapperPath)
+            wrapperFile.parentFile?.mkdirs()
+            wrapperFile.writeText(wrapperContent, Charsets.UTF_8)
         }
     }
 }
