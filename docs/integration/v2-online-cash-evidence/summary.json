@@ -1,29 +1,156 @@
 {
   "status": "QUALIFIED",
   "scope": "client_implementation_only",
-  "qualificationNote": "Qualified for Android client implementation under PR #23 only; not all financial backend systems",
+  "qualificationNote": "Hermetic client implementation qualification under PR #23 with MockWebServer unit fixtures; no active backend pairing or external HTTP",
   "pr": 23,
   "branch": "t3/android-v2-online-cash-client",
-  "executionSourceCommit": "ddfc75536e647c65a6a7e8868c9336cee93769ec",
-  "totalSuites": 12,
-  "totalTests": 171,
-  "passed": 170,
-  "skipped": 1,
+  "executionSourceCommit": "ad10a4ceaa301f7d272cdf4702414f63a69a20c7",
+  "initialFailureCommit": "0c0b1bb40947130eadf7d57081cf68acbe273b39",
+  "baselineCommit": "98fb3b8ab2920b95879fc7bf92a01e9ecdc1657b",
+  "appMainQualificationBaseline": "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+  "totalSuites": 14,
+  "totalTests": 238,
+  "passed": 236,
+  "skipped": 2,
   "failures": 0,
   "errors": 0,
-  "historical76Suites": 8,
-  "historical76Tests": 76,
+  "executionDuration": "2m 19s",
+  "resourceLimits": {
+    "maxWorkers": 1,
+    "activeProcessorCount": 2,
+    "garbageCollector": "SerialGC",
+    "maxHeap": "1536m",
+    "inProcess": true,
+    "noDaemon": true
+  },
+  "externalHttpExecution": {
+    "status": "NOT_RUN",
+    "reason": "Hermetic QA lease only; backend readiness worker 6e8c completed and closed ports 18080/18443; runtime handoff files absent"
+  },
+  "appMainStatus": "UNCHANGED",
+  "historicalSuites": {
+    "historical76": {
+      "commit": "f697451",
+      "suites": 8,
+      "tests": 76,
+      "directory": "historical-76"
+    },
+    "historical171": {
+      "commit": "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+      "suites": 12,
+      "tests": 171,
+      "directory": "historical-171-ddfc"
+    }
+  },
+  "suiteBreakdown": [
+    {
+      "suite": "com.example.data.mobile.contract.v2.ContractV2WireValidationTest",
+      "tests": 12,
+      "passed": 12,
+      "skipped": 0,
+      "failures": 0
+    },
+    {
+      "suite": "com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest",
+      "tests": 6,
+      "passed": 6,
+      "skipped": 0,
+      "failures": 0
+    },
+    {
+      "suite": "com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest",
+      "tests": 5,
+      "passed": 5,
+      "skipped": 0,
+      "failures": 0
+    },
+    {
+      "suite": "com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest",
+      "tests": 11,
+      "passed": 11,
+      "skipped": 0,
+      "failures": 0
+    },
+    {
+      "suite": "com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest",
+      "tests": 15,
+      "passed": 15,
+      "skipped": 0,
+      "failures": 0
+    },
+    {
+      "suite": "com.example.data.mobile.contract.v2.SaleCommitResponseTest",
+      "tests": 6,
+      "passed": 6,
+      "skipped": 0,
+      "failures": 0
+    },
+    {
+      "suite": "com.example.data.mobile.contract.v2.SaleEventStatusResponseTest",
+      "tests": 5,
+      "passed": 5,
+      "skipped": 0,
+      "failures": 0
+    },
+    {
+      "suite": "com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest",
+      "tests": 34,
+      "passed": 34,
+      "skipped": 0,
+      "failures": 0
+    },
+    {
+      "suite": "com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest",
+      "tests": 35,
+      "passed": 35,
+      "skipped": 0,
+      "failures": 0
+    },
+    {
+      "suite": "com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest",
+      "tests": 19,
+      "passed": 19,
+      "skipped": 0,
+      "failures": 0
+    },
+    {
+      "suite": "com.example.data.mobile.readclient.pilot.SmallTraderOnlineCashPilotSmokeTest",
+      "tests": 1,
+      "passed": 0,
+      "skipped": 1,
+      "failures": 0
+    },
+    {
+      "suite": "com.example.data.mobile.readclient.pilot.SmallTraderReadPilotSmokeTest",
+      "tests": 1,
+      "passed": 0,
+      "skipped": 1,
+      "failures": 0
+    },
+    {
+      "suite": "com.example.data.mobile.session.SecureStaffSessionStoreTest",
+      "tests": 37,
+      "passed": 37,
+      "skipped": 0,
+      "failures": 0
+    },
+    {
+      "suite": "com.example.data.mobile.session.StaffSessionCoordinatorTest",
+      "tests": 51,
+      "passed": 51,
+      "skipped": 0,
+      "failures": 0
+    }
+  ],
   "fixesApplied": [
-    "Fixed invalid Kotlin string quotes in PreparedOnlineSaleIntent and OnlineCashSaleReceipt",
-    "Guarded ALL result branches against post-network stale scope generation in OnlineCashSaleOrchestrator",
-    "Added OnlineSaleScope and activeScopeSupplier supporting actor/device/company/generation verification",
-    "Restricted submitSale to internal; economic dispatch can only use PreparedOnlineSaleIntent",
-    "Sanitized error categories removing raw exception messages and untrusted IDs",
-    "Verified full cash financial consistency (amountPaid == payment.amount, amountPaid - change == grandTotal, non-null paymentId)",
-    "Added new tests: new generation during 201, status replay 401, malformed canonical byte rejection, financial consistency check",
-    "Enforced fail-closed source-pinned required pins in smoke test",
-    "Restored historical-76 test suite XML artifacts from git f697451 with recorded hashes",
-    "Corrected manifest provenance: backendQualifiedCommit string '6981511405d7bcd04cd8f8a09e64443ce0aaf47e', exactSyntheticFixtureCommit 'ca5a58c207dd4594302b7e7cae1d7cd4fd733fc0', and explicit execution source commit",
-    "Noted review correction: 9935 is backend commit prefix NOT port; compiler log actual sha256 3cb8da03... verified"
+    "Removed Kotlin fake backend route helper handleChildReadinessRoute and ReadinessRouteResult",
+    "Removed 4 fake mirror cases from CashPilotHandoffConfigTest",
+    "Extracted authoritative client readiness probe CashPilotHandoffConfig.executeReadinessProbe(...) returning ReadinessProbeResult",
+    "Unified SmallTraderOnlineCashPilotSmokeTest Step 3 to execute identical client probe routine",
+    "Added 9 hermetic MockWebServer client response validation tests covering 200 MIME nonce matching, redirect rejection (302), oversized payload rejection (>64 KiB), invalid JSON rejection, nonce mismatch, non-ready status, non-JSON MIME, non-200 HTTP status, and runtime constants",
+    "Preserved raw task failure log for initial commit 0c0b1bb where string interpolation was momentarily missing in exception messages",
+    "Committed exact string interpolation restoration under commit ad10a4ceaa301f7d272cdf4702414f63a69a20c7",
+    "Reran 14 suites (238 tests: 236 passed, 2 skipped via Assume.assumeTrue, 0 failures, 0 errors) under strict resource bounds",
+    "Separated historical test suites into historical-76 (76 tests from f697451) and historical-171-ddfc (171 tests from ddfc755)"
   ]
 }
