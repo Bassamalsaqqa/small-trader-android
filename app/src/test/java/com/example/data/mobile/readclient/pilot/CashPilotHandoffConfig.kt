@@ -14,6 +14,11 @@ import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.contract.StrictJsonString
 import com.example.data.mobile.contract.v2.OnlineSaleContext
 import com.example.data.mobile.contract.v2.OnlineSaleIntentProfile
+import java.io.ByteArrayInputStream
+import java.io.InputStream
+import java.net.HttpURLConnection
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLSocketFactory
 import java.io.File
 import java.net.URI
 import java.nio.file.Files
@@ -119,12 +124,14 @@ data class CashPilotStartupTls(
 private fun StrictJsonElement?.asStringOrNull(): String? = (this as? StrictJsonString)?.value
 
 /**
- * Result of evaluating readiness probe router.
+ * Outcome of executing the authoritative client readiness probe.
  */
-data class ReadinessRouteResult(
+data class ReadinessProbeResult(
     val statusCode: Int,
-    val headers: Map<String, String>,
-    val body: Map<String, String>
+    val latencyMs: Long,
+    val body: String,
+    val status: String,
+    val nonce: String
 )
 
 class CashPilotHandoffConfig private constructor(
@@ -172,48 +179,87 @@ class CashPilotHandoffConfig private constructor(
         const val EXPECTED_RUNTIME_HANDOFF_FILENAME = "runtime_client_handoff.json"
         const val EXPECTED_RUNTIME_CREDENTIALS_FILENAME = "runtime_credentials.json"
         const val READINESS_PROBE_PATH = "/_harness/readiness"
-        const val HTTP_STATUS_METHOD_NOT_ALLOWED = 405
-        const val HTTP_STATUS_FORBIDDEN = 403
 
         /**
-         * Authoritative handler mirroring backend DisposableMobileV2BackendHarness::handleChildReadinessRoute.
-         * Enforces GET-only access (returning 405 for all other HTTP methods).
-         * Enforces readiness-only boundary pre-framework (returning 403 for non-readiness routes).
+         * Executes authoritative client readiness probe against the specified endpoint.
+         * Enforces:
+         * - GET request method with redirect following strictly disabled.
+         * - Response status HTTP 200 (rejects redirects and error codes).
+         * - Content-Type application/json (supports charset parameter).
+         * - Bounded payload consumption (<= maxSizeBytes, default 64 KiB).
+         * - Strict JSON parsing with valid object structure.
+         * - Status field equals "ready".
+         * - Nonce matches expected nonce verbatim.
          */
-        fun handleChildReadinessRoute(
-            uri: String,
-            method: String,
-            nonce: String,
-            isReadinessOnly: Boolean
-        ): ReadinessRouteResult {
-            if (uri == READINESS_PROBE_PATH) {
-                if (method != "GET") {
-                    return ReadinessRouteResult(
-                        statusCode = HTTP_STATUS_METHOD_NOT_ALLOWED,
-                        headers = mapOf("Allow" to "GET", "Content-Type" to "application/json"),
-                        body = mapOf("error" to "method_not_allowed", "message" to "Readiness probe strictly requires GET")
-                    )
+        fun executeReadinessProbe(
+            readinessUrl: String,
+            expectedNonce: String,
+            sslSocketFactory: SSLSocketFactory? = null,
+            connectTimeoutMs: Int = 5000,
+            readTimeoutMs: Int = 5000,
+            maxSizeBytes: Int = 65536
+        ): ReadinessProbeResult {
+            val url = URI(readinessUrl).toURL()
+            val conn = url.openConnection() as HttpURLConnection
+            if (conn is HttpsURLConnection && sslSocketFactory != null) {
+                conn.sslSocketFactory = sslSocketFactory
+            }
+            conn.requestMethod = "GET"
+            conn.instanceFollowRedirects = false
+            conn.connectTimeout = connectTimeoutMs
+            conn.readTimeout = readTimeoutMs
+
+            val tStart = System.currentTimeMillis()
+            val responseCode: Int
+            val responseBody: String
+            try {
+                conn.connect()
+                responseCode = conn.responseCode
+                val contentType = conn.contentType ?: ""
+                require(contentType.startsWith("application/json")) {
+                    "Expected application/json Content-Type, got ''"
                 }
-                return ReadinessRouteResult(
-                    statusCode = 200,
-                    headers = mapOf("Content-Type" to "application/json"),
-                    body = mapOf("status" to "ready", "nonce" to nonce)
-                )
+                val stream: InputStream = if (responseCode in 200..299) conn.inputStream else (conn.errorStream ?: ByteArrayInputStream(ByteArray(0)))
+                val bytes = stream.use { s ->
+                    val buf = ByteArray(maxSizeBytes)
+                    var total = 0
+                    while (total < buf.size) {
+                        val r = s.read(buf, total, buf.size - total)
+                        if (r == -1) break
+                        total += r
+                    }
+                    if (s.read() != -1) {
+                        throw IllegalArgumentException("Readiness response exceeded bounded limit of  bytes")
+                    }
+                    buf.copyOf(total)
+                }
+                responseBody = String(bytes, Charsets.UTF_8)
+            } finally {
+                conn.disconnect()
             }
-            if (isReadinessOnly) {
-                return ReadinessRouteResult(
-                    statusCode = HTTP_STATUS_FORBIDDEN,
-                    headers = mapOf("Content-Type" to "application/json"),
-                    body = mapOf(
-                        "error" to "forbidden",
-                        "message" to "Harness is running in READINESS-ONLY mode. Financial endpoints and paired requests are strictly blocked."
-                    )
-                )
+            val latency = System.currentTimeMillis() - tStart
+
+            require(responseCode == 200) {
+                "Readiness probe returned HTTP  (expected 200)"
             }
-            return ReadinessRouteResult(
-                statusCode = 404,
-                headers = mapOf("Content-Type" to "application/json"),
-                body = mapOf("error" to "not_found")
+            val readinessObj = StrictJsonParser.parse(responseBody).asObject()
+            val statusVal = readinessObj["status"]?.asStringOrNull()
+                ?: throw IllegalArgumentException("Readiness response missing 'status'")
+            val nonceVal = readinessObj["nonce"]?.asStringOrNull()
+                ?: throw IllegalArgumentException("Readiness response missing 'nonce'")
+            require(statusVal == "ready") {
+                "Readiness response status expected 'ready', got ''"
+            }
+            require(nonceVal == expectedNonce) {
+                "Readiness response nonce mismatch: expected , got "
+            }
+
+            return ReadinessProbeResult(
+                statusCode = responseCode,
+                latencyMs = latency,
+                body = responseBody,
+                status = statusVal,
+                nonce = nonceVal
             )
         }
 

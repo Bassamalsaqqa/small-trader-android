@@ -153,57 +153,17 @@ class SmallTraderOnlineCashPilotSmokeTest {
             val expectedNonce = config.startupTls.readinessNonce
                 ?: throw IllegalStateException("startup_tls.readiness_nonce is required in READY state")
 
-            val tStartReadiness = System.currentTimeMillis()
-            val conn = URL(readinessUrl).openConnection() as HttpsURLConnection
-            conn.requestMethod = "GET"
-            conn.instanceFollowRedirects = false
-            conn.connectTimeout = 5000
-            conn.readTimeout = 5000
-            val readinessCode: Int
-            val readinessBody: String
-            try {
-                conn.connect()
-                readinessCode = conn.responseCode
-                val contentType = conn.contentType ?: ""
-                require(contentType.startsWith("application/json")) {
-                    "Expected application/json Content-Type, got '$contentType'"
-                }
-                val stream: InputStream = if (readinessCode in 200..299) conn.inputStream else conn.errorStream
-                val bytes = stream.use { s ->
-                    val buf = ByteArray(65536)
-                    var total = 0
-                    while (total < buf.size) {
-                        val r = s.read(buf, total, buf.size - total)
-                        if (r == -1) break
-                        total += r
-                    }
-                    buf.copyOf(total)
-                }
-                readinessBody = String(bytes, Charsets.UTF_8)
-            } finally {
-                conn.disconnect()
-            }
-            val readinessLatency = System.currentTimeMillis() - tStartReadiness
-
-            require(readinessCode == 200) {
-                "Readiness probe returned HTTP $readinessCode (expected 200)"
-            }
-            val readinessObj = StrictJsonParser.parse(readinessBody).asObject()
-            val statusVal = readinessObj["status"]?.asStringOrNull()
-            val nonceVal = readinessObj["nonce"]?.asStringOrNull()
-            require(statusVal == "ready") {
-                "Readiness response status expected 'ready', got '$statusVal'"
-            }
-            require(nonceVal == expectedNonce) {
-                "Readiness response nonce mismatch: expected $expectedNonce, got $nonceVal"
-            }
+            val probeResult = CashPilotHandoffConfig.executeReadinessProbe(
+                readinessUrl = readinessUrl,
+                expectedNonce = expectedNonce
+            )
 
             scenarios.add(
                 ScenarioEvidence(
                     name = "readiness_probe",
                     status = "PASS",
-                    httpStatusCode = 200,
-                    latencyMs = readinessLatency,
+                    httpStatusCode = probeResult.statusCode,
+                    latencyMs = probeResult.latencyMs,
                     details = "Host loopback HTTPS GET probe verified HTTP 200 with matching nonce (JVM runner avoided emulator alias)"
                 )
             )

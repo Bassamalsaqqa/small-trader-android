@@ -7,6 +7,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Assert.assertThrows
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.Test
 import java.io.File
 import java.nio.file.Files
@@ -875,60 +878,206 @@ class CashPilotHandoffConfigTest {
         assertTrue(json.contains("[REDACTED_PATH]"))
     }
     @Test
-    fun readinessProbe_nonGetMethodReturns405MethodNotAllowed() {
-        val nonGetMethods = listOf("POST", "PUT", "DELETE", "PATCH", "HEAD")
-        for (m in nonGetMethods) {
-            val res = CashPilotHandoffConfig.handleChildReadinessRoute(
-                uri = CashPilotHandoffConfig.READINESS_PROBE_PATH,
-                method = m,
-                nonce = "test-nonce-1234",
-                isReadinessOnly = true
+    fun readinessProbe_success_200MimeNonceMatching() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json; charset=utf-8")
+                    .setBody("""{"status":"ready","nonce":"authoritative-readiness-nonce-5678"}""")
             )
-            assertEquals("Expected 405 for method $m", 405, res.statusCode)
-            assertEquals("GET", res.headers["Allow"])
-            assertEquals("application/json", res.headers["Content-Type"])
-            assertEquals("method_not_allowed", res.body["error"])
+            val url = server.url(CashPilotHandoffConfig.READINESS_PROBE_PATH).toString()
+            val result = CashPilotHandoffConfig.executeReadinessProbe(
+                readinessUrl = url,
+                expectedNonce = "authoritative-readiness-nonce-5678"
+            )
+            assertEquals(200, result.statusCode)
+            assertEquals("ready", result.status)
+            assertEquals("authoritative-readiness-nonce-5678", result.nonce)
+
+            val recorded = server.takeRequest()
+            assertEquals("GET", recorded.method)
+            assertEquals(CashPilotHandoffConfig.READINESS_PROBE_PATH, recorded.path)
+        } finally {
+            server.shutdown()
         }
     }
+
     @Test
-    fun readinessProbe_nonReadinessRouteUnderReadinessScopeReturns403Forbidden() {
-        val nonReadinessUris = listOf(
-            "/api/v2/sales/online-cash",
-            "/companies/01M7CZPF6TP283F3ZRXF5P8GT2/sales/online-cash",
-            "/status"
-        )
-        for (uri in nonReadinessUris) {
-            val res = CashPilotHandoffConfig.handleChildReadinessRoute(
-                uri = uri,
-                method = "GET",
-                nonce = "test-nonce-1234",
-                isReadinessOnly = true
+    fun readinessProbe_redirectRejection_throwsException() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(302)
+                    .setHeader("Location", "/somewhere-else")
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"status":"ready","nonce":"test-nonce-1234"}""")
             )
-            assertEquals("Expected 403 for non-readiness URI $uri under readiness-only scope", 403, res.statusCode)
-            assertEquals("application/json", res.headers["Content-Type"])
-            assertEquals("forbidden", res.body["error"])
-            assertTrue(res.body["message"]!!.contains("READINESS-ONLY"))
+            val url = server.url(CashPilotHandoffConfig.READINESS_PROBE_PATH).toString()
+            val ex = assertThrows(IllegalArgumentException::class.java) {
+                CashPilotHandoffConfig.executeReadinessProbe(
+                    readinessUrl = url,
+                    expectedNonce = "test-nonce-1234"
+                )
+            }
+            assertTrue("Expected 302 rejection, got: " + ex.message, ex.message!!.contains("302"))
+        } finally {
+            server.shutdown()
         }
     }
+
     @Test
-    fun readinessProbe_getReadinessRouteReturns200WithNonce() {
-        val res = CashPilotHandoffConfig.handleChildReadinessRoute(
-            uri = CashPilotHandoffConfig.READINESS_PROBE_PATH,
-            method = "GET",
-            nonce = "authoritative-readiness-nonce-5678",
-            isReadinessOnly = true
-        )
-        assertEquals(200, res.statusCode)
-        assertEquals("application/json", res.headers["Content-Type"])
-        assertEquals("ready", res.body["status"])
-        assertEquals("authoritative-readiness-nonce-5678", res.body["nonce"])
+    fun readinessProbe_oversizedResponse_throwsException() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            val oversizedBody = "x".repeat(70000)
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(oversizedBody)
+            )
+            val url = server.url(CashPilotHandoffConfig.READINESS_PROBE_PATH).toString()
+            val ex = assertThrows(IllegalArgumentException::class.java) {
+                CashPilotHandoffConfig.executeReadinessProbe(
+                    readinessUrl = url,
+                    expectedNonce = "test-nonce-1234"
+                )
+            }
+            assertTrue("Expected oversized limit rejection, got: " + ex.message, ex.message!!.contains("exceeded bounded limit"))
+        } finally {
+            server.shutdown()
+        }
     }
+
     @Test
-    fun runtimeFiles_constantsAndPermsMatchHarness() {
+    fun readinessProbe_invalidJson_throwsException() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("{ malformed json }")
+            )
+            val url = server.url(CashPilotHandoffConfig.READINESS_PROBE_PATH).toString()
+            assertThrows(Exception::class.java) {
+                CashPilotHandoffConfig.executeReadinessProbe(
+                    readinessUrl = url,
+                    expectedNonce = "test-nonce-1234"
+                )
+            }
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun readinessProbe_nonceMismatch_throwsException() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"status":"ready","nonce":"wrong-nonce-9999"}""")
+            )
+            val url = server.url(CashPilotHandoffConfig.READINESS_PROBE_PATH).toString()
+            val ex = assertThrows(IllegalArgumentException::class.java) {
+                CashPilotHandoffConfig.executeReadinessProbe(
+                    readinessUrl = url,
+                    expectedNonce = "expected-nonce-1111"
+                )
+            }
+            assertTrue("Expected nonce mismatch rejection, got: " + ex.message, ex.message!!.contains("nonce mismatch"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun readinessProbe_statusNotReady_throwsException() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"status":"degraded","nonce":"matching-nonce-2222"}""")
+            )
+            val url = server.url(CashPilotHandoffConfig.READINESS_PROBE_PATH).toString()
+            val ex = assertThrows(IllegalArgumentException::class.java) {
+                CashPilotHandoffConfig.executeReadinessProbe(
+                    readinessUrl = url,
+                    expectedNonce = "matching-nonce-2222"
+                )
+            }
+            assertTrue("Expected status ready rejection, got: " + ex.message, ex.message!!.contains("status expected 'ready'"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun readinessProbe_nonJsonMime_throwsException() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "text/html; charset=utf-8")
+                    .setBody("""{"status":"ready","nonce":"matching-nonce-3333"}""")
+            )
+            val url = server.url(CashPilotHandoffConfig.READINESS_PROBE_PATH).toString()
+            val ex = assertThrows(IllegalArgumentException::class.java) {
+                CashPilotHandoffConfig.executeReadinessProbe(
+                    readinessUrl = url,
+                    expectedNonce = "matching-nonce-3333"
+                )
+            }
+            assertTrue("Expected MIME rejection, got: " + ex.message, ex.message!!.contains("Expected application/json Content-Type"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun readinessProbe_non200StatusCode_throwsException() {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(503)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"error":"service_unavailable"}""")
+            )
+            val url = server.url(CashPilotHandoffConfig.READINESS_PROBE_PATH).toString()
+            val ex = assertThrows(IllegalArgumentException::class.java) {
+                CashPilotHandoffConfig.executeReadinessProbe(
+                    readinessUrl = url,
+                    expectedNonce = "matching-nonce-4444"
+                )
+            }
+            assertTrue("Expected 503 rejection, got: " + ex.message, ex.message!!.contains("returned HTTP 503"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun runtimeFiles_constantsMatchHarness() {
         assertEquals("runtime_client_handoff.json", CashPilotHandoffConfig.EXPECTED_RUNTIME_HANDOFF_FILENAME)
         assertEquals("runtime_credentials.json", CashPilotHandoffConfig.EXPECTED_RUNTIME_CREDENTIALS_FILENAME)
         assertEquals("/_harness/readiness", CashPilotHandoffConfig.READINESS_PROBE_PATH)
-        assertEquals(405, CashPilotHandoffConfig.HTTP_STATUS_METHOD_NOT_ALLOWED)
-        assertEquals(403, CashPilotHandoffConfig.HTTP_STATUS_FORBIDDEN)
     }
 }
