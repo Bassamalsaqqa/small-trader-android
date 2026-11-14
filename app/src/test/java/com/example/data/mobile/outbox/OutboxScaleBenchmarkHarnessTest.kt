@@ -315,7 +315,7 @@ class OutboxScaleBenchmarkHarnessTest {
             ioDispatcher = Dispatchers.IO,
             onPageReadHook = { pageIndex ->
                 if (pageIndex == halfwayPage) {
-                    pendingWriteFuture = executor.submit {
+                    pendingWriteFuture = executor.submit<CaptureResult> {
                         captureWaitStartNs = System.nanoTime()
                         writeAttemptStarted.countDown()
                         val result = repoWriter.captureSale(concurrentEvent)
