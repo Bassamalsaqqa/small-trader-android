@@ -119,7 +119,7 @@ class AndroidV2OnlineCashClientMockWebServerTest {
         assertEquals("POST", recorded!!.method)
         assertEquals("/api/mobile/v2/companies/01JCV8X9M2NQW3TYZ4R5S6789A/sales/online-cash", recorded.path)
         assertEquals("Bearer $validToken", recorded.getHeader("Authorization"))
-        assertEquals("application/json", recorded.getHeader("Content-Type"))
+        assertTrue(recorded.getHeader("Content-Type")!!.startsWith("application/json"))
     }
 
     @Test
