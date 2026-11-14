@@ -1,0 +1,90 @@
+{
+  "jvm_invocations": 1,
+  "exit": 0,
+  "duration": 13.337527751922607,
+  "source_hashes_equal": true,
+  "heads_equal": true,
+  "artifacts": [
+    {
+      "source": "/home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/build/test-results/testDebugUnitTest/TEST-com.example.data.mobile.readclient.pilot.SmallTraderOnlineCashPilotSmokeTest.xml",
+      "preserved": "/tmp/root-readiness-ooug5prl/0-TEST-com.example.data.mobile.readclient.pilot.SmallTraderOnlineCashPilotSmokeTest.xml",
+      "sha256": "51e834a7f5d358e0e6544eb03b355e40130e0455d0d2c8de9b7099390b07c6eb",
+      "mtime": 1794683575.214304
+    },
+    {
+      "source": "/home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/docs/integration/v2-online-cash-evidence/paired-online-cash-pilot-evidence.json",
+      "preserved": "/tmp/root-readiness-ooug5prl/1-paired-online-cash-pilot-evidence.json",
+      "sha256": "0bfaba51e8ab55ae49ab5bf05f374fe4091d48c2a694dd4b810e120049246c5d",
+      "mtime": 1794683574.4542994
+    }
+  ],
+  "fresh_json": {
+    "runId": "60c64b1d-c720-4998-a655-3c148256f31d",
+    "timestamp": "2026-11-14T19:12:54Z",
+    "backendHead": "d7c7324535b1e6586140ab1e3561966342d625d6",
+    "clientHead": "78ac4437e4010b68408278788dc82eb826fe8014",
+    "manifestDigest": "8e48f3692a88f5ac3f333f81536d70eb3541228959968697fda03f68df44befc",
+    "baseUrl": "https://127.0.0.1:18443/api/mobile/v2",
+    "lifecycleGrant": "READINESS_ONLY",
+    "ttlExpiresAt": "2026-11-14T20:12:41+00:00",
+    "overallStatus": "PASS",
+    "scenarios": [
+      {
+        "name": "readiness_probe",
+        "status": "PASS",
+        "httpStatusCode": 200,
+        "latencyMs": 306,
+        "details": "Host loopback HTTPS GET probe verified HTTP 200 with matching nonce (JVM runner avoided emulator alias)"
+      },
+      {
+        "name": "financial_cash_fresh_commit_201",
+        "status": "NOT_RUN",
+        "httpStatusCode": null,
+        "latencyMs": 0,
+        "details": "Financial execution not authorized under current lifecycle grant; readiness only verified"
+      },
+      {
+        "name": "financial_cash_idempotent_replay_200",
+        "status": "NOT_RUN",
+        "httpStatusCode": null,
+        "latencyMs": 0,
+        "details": "Financial execution not authorized under current lifecycle grant; readiness only verified"
+      },
+      {
+        "name": "financial_cash_event_status_posted",
+        "status": "NOT_RUN",
+        "httpStatusCode": null,
+        "latencyMs": 0,
+        "details": "Financial execution not authorized under current lifecycle grant; readiness only verified"
+      },
+      {
+        "name": "financial_cash_tamper_409",
+        "status": "NOT_RUN",
+        "httpStatusCode": null,
+        "latencyMs": 0,
+        "details": "Financial execution not authorized under current lifecycle grant; readiness only verified"
+      },
+      {
+        "name": "transport_lost_ack_recovery",
+        "status": "NOT_RUN",
+        "httpStatusCode": null,
+        "latencyMs": 0,
+        "details": "Financial execution not authorized under current lifecycle grant"
+      },
+      {
+        "name": "stock_permission_rollback_probes",
+        "status": "NOT_RUN",
+        "httpStatusCode": null,
+        "latencyMs": 0,
+        "details": "Financial execution not authorized under current lifecycle grant"
+      }
+    ]
+  },
+  "verdict": "READINESS_JVM_TESTS_PASS",
+  "backend_cleanup_exit": 1,
+  "owned_temp_absent": true,
+  "ports_closed": {
+    "18080": true,
+    "18443": true
+  }
+}

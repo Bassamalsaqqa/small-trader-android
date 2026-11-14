@@ -1,9 +1,10 @@
 {
-  "status": "FINANCIAL_PILOT_HOLD",
+  "status": "READINESS_QUALIFIED_FINANCIAL_PILOT_HOLD",
   "scope": "client_implementation_and_unit_qa",
   "scopeDetail": {
     "basicSmoke": "PASS (MockWebServer hermetic fixtures)",
-    "fullPilot": "NOT_RUN (lost-ACK fault injection, stock rollback, and paired live backend integration pending)"
+    "coordinatedReadiness": "PASS (2/2 tests PASS in 13.34s against live disposable backend harness)",
+    "fullPilot": "NOT_RUN (lost-ACK fault injection, stock rollback, and financial transactions pending live authorized window)"
   },
   "qualificationNote": "Hermetic client implementation unit qualification under PR #23. Independent publication HEAD (SMALL_TRADER_EXPECTED_CLIENT_SHA) and executable HEAD (SMALL_TRADER_EXPECTED_CLIENT_EXECUTABLE_SHA) pin separation verified with 6 new regression tests. Status recovery economic reconciliation, payment completeness, pilot acceptance enforcement, and exact base MIME validation verified. Source attested at clean commit 78ac443.",
   "contractEndpointClarification": "Authoritative mobile contract offline-events status endpoint remains /api/mobile/v2/companies/{companyId}/offline-events/{clientEventId}/status. Reviewer suggestion of /v2/sales/events is non-contract and not implemented. No mTLS or TLS client certificate auth required on mobile client.",
@@ -78,5 +79,23 @@
     "failed": 1,
     "skipped": 0,
     "preservationNote": "Preserved historical without modification; failed on local client pin check before network/credentials"
+  },
+  "readinessStatus": "PASS (HTTP 200 loopback probe verified via CA-trusted TLS)",
+  "financialPilotStatus": "HOLD / NOT_RUN (financial routes blocked HTTP 403, zero financial transactions)",
+  "publicationCommit": "653327243b2f5a4541c5fcf8cbe9520769e6be50",
+  "coordinatedReadinessResult": {
+    "verdict": "READINESS_JVM_TESTS_PASS",
+    "backendRuntimeHead": "d7c7324535b1e6586140ab1e3561966342d625d6",
+    "backendSourceHead": "a8540ff83513b49988d90c77cf284831cfd5b2de",
+    "clientPublicationHead": "653327243b2f5a4541c5fcf8cbe9520769e6be50",
+    "clientExecutableHead": "78ac4437e4010b68408278788dc82eb826fe8014",
+    "liveHandoffSha256": "8e48f3692a88f5ac3f333f81536d70eb3541228959968697fda03f68df44befc",
+    "rootOutcomeSha256": "dd267bc4f3a505d1558020758545ac1e40159114eca0b9538fb9f37839aeffe7",
+    "freshXmlSha256": "51e834a7f5d358e0e6544eb03b355e40130e0455d0d2c8de9b7099390b07c6eb",
+    "freshJsonSha256": "0bfaba51e8ab55ae49ab5bf05f374fe4091d48c2a694dd4b810e120049246c5d",
+    "tests": 2,
+    "passed": 2,
+    "financialProbes": "ALL 6 financial scenarios strictly NOT_RUN",
+    "metadataOmissionDisclosure": "CashPilotEvidence.toJson() emits only clientHead (alias exec 78ac443) and omits separate clientPublicationHead/clientExecutableHead keys. Pub 6533272 and exec 78ac443 verified from root pins."
   }
 }

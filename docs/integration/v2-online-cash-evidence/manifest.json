@@ -1,7 +1,7 @@
 {
   "executionCommit": "78ac4437e4010b68408278788dc82eb826fe8014",
-  "evidenceGenerationUtc": "2026-11-14T19:01:51Z",
-  "evidenceGenerationLocal": "2026-11-14T21:02:00+02:00",
+  "evidenceGenerationUtc": "2026-11-14T19:17:28Z",
+  "evidenceGenerationLocal": "2026-11-14T21:17:00+02:00",
   "timestampClarification": "Historical manifest timestamp was recorded as 2026-11-14T19:46:00Z due to local clock (+02:00) being formatted with trailing 'Z' instead of '+02:00' offset (actual UTC was 17:46Z, matching commit 17:48Z and XML 17:45Z). Preserved with this explicit clarification rather than retrofiction.",
   "pinsDisclosure": "Contemporaneous git commit pins from intermediate conversational steps were not automatically logged at runtime and are not retroconstructed. Pinned verification at commit 753fb51 explicitly captures git HEAD, status, and source file SHA256 hashes before and after test and lint executions in source-attestation-753f.json.",
   "sourceFiles": {
@@ -395,5 +395,103 @@
     "retainedArtifactsCount": 14,
     "probeVerification": "Safe GET /_readiness_forbidden_probe 403 NO financial route",
     "preservationNote": "Preserved historical without modification; failed on local client pin check before network/credentials"
-  }
+  },
+  "evidencePublicationCommit": "653327243b2f5a4541c5fcf8cbe9520769e6be50",
+  "metadataOmissionDisclosure": "CashPilotEvidence.toJson() in app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotEvidence.kt serializes only clientHead (mapped to executable HEAD 78ac4437e4010b68408278788dc82eb826fe8014) and does not emit separate clientPublicationHead and clientExecutableHead keys in paired-online-cash-pilot-evidence.json (SHA 0bfaba51e8ab55ae49ab5bf05f374fe4091d48c2a694dd4b810e120049246c5d). The publication HEAD (653327243b2f5a4541c5fcf8cbe9520769e6be50) and executable HEAD (78ac4437e4010b68408278788dc82eb826fe8014) were verified independently at execution time by the root test harness via environment variables SMALL_TRADER_EXPECTED_CLIENT_SHA and SMALL_TRADER_EXPECTED_CLIENT_EXECUTABLE_SHA as recorded in backend_manifest.json and root_outcome.json.",
+  "coordinatedReadiness": {
+    "status": "READINESS_JVM_TESTS_PASS",
+    "verdict": "READINESS_ONLY_QUALIFIED (NOT financial pilot qualification)",
+    "jvmInvocations": 1,
+    "exitCode": 0,
+    "durationSeconds": 13.337527751922607,
+    "backendRuntimeHead": "d7c7324535b1e6586140ab1e3561966342d625d6",
+    "backendSourceHead": "a8540ff83513b49988d90c77cf284831cfd5b2de",
+    "clientPublicationHead": "653327243b2f5a4541c5fcf8cbe9520769e6be50",
+    "clientExecutableHead": "78ac4437e4010b68408278788dc82eb826fe8014",
+    "liveHandoffSha256": "8e48f3692a88f5ac3f333f81536d70eb3541228959968697fda03f68df44befc",
+    "rootOutcomeSha256": "dd267bc4f3a505d1558020758545ac1e40159114eca0b9538fb9f37839aeffe7",
+    "testsExecuted": 2,
+    "passed": 2,
+    "skipped": 0,
+    "failed": 0,
+    "errors": 0,
+    "testDetails": {
+      "readinessProbe": "PASS (HTTP 200, latency 306ms, exact matching nonce via CA-trusted TLS)",
+      "testCashPilotFinancialAcceptanceEnforcement": "PASS (0.002s, unconfirmed states throw)",
+      "financialScenarios": "6 scenarios strictly NOT_RUN (financial routes blocked HTTP 403, 0 POST requests, 0 tokens touched)"
+    },
+    "cleanup": {
+      "childHarnessExit": 1,
+      "childHarnessExitNote": "Clean SIGTERM ABORTED exit 1 on child readiness loop",
+      "ownedTempAbsent": true,
+      "portsClosed": {
+        "18080": true,
+        "18443": true
+      }
+    },
+    "artifacts": {
+      "TEST-com.example.data.mobile.readclient.pilot.SmallTraderOnlineCashPilotSmokeTest.xml": {
+        "sha256": "51e834a7f5d358e0e6544eb03b355e40130e0455d0d2c8de9b7099390b07c6eb",
+        "sizeBytes": 691
+      },
+      "android.log": {
+        "sha256": "be9aa06a8259901b324f0e7d90a3999ef0e6f52272fbcbc4b0f44e326068c283",
+        "sizeBytes": 2379
+      },
+      "android_post.json": {
+        "sha256": "1fee9e7b4278b0904013d8f7eba38d7097b72bcaa3d93740ecf1261530e4d657",
+        "sizeBytes": 27155
+      },
+      "android_pre.json": {
+        "sha256": "3f948f6cfcc23bef892c96430326447a094f3a272b6ee4c605406b726415a1aa",
+        "sizeBytes": 27141
+      },
+      "android_result.json": {
+        "sha256": "8f9da64aa1645666d9ecba248a216e1774879017bfcac0d1b6b3333cccebf623",
+        "sizeBytes": 1041
+      },
+      "backend.log": {
+        "sha256": "fd7eedd59cd0b334a4d9305b8c65ec0697d8cff0c9d792602466f462202c5ebc",
+        "sizeBytes": 756
+      },
+      "backend_manifest.json": {
+        "sha256": "88c8c2e2389f7486e73c74f4f660aa0621bf3c8486a85590b6c4bbb44bb83f5f",
+        "sizeBytes": 5118
+      },
+      "live_verified.json": {
+        "sha256": "42528b2ead0e60c3bb1e35b727044e6e0ca9b7ad19dab180012527057ab76704",
+        "sizeBytes": 728
+      },
+      "paired-online-cash-pilot-evidence.json": {
+        "sha256": "0bfaba51e8ab55ae49ab5bf05f374fe4091d48c2a694dd4b810e120049246c5d",
+        "sizeBytes": 2184
+      },
+      "root_outcome.json": {
+        "sha256": "dd267bc4f3a505d1558020758545ac1e40159114eca0b9538fb9f37839aeffe7",
+        "sizeBytes": 3525
+      }
+    }
+  },
+  "retainedFailedWindows": [
+    {
+      "window": "Window 0 (Initial Integration Failures)",
+      "description": "Initial compiler failure and first MockWebServer test failure before fixes",
+      "artifacts": [
+        "first-compiler-failure.log",
+        "first-0c0-test-failure.log"
+      ]
+    },
+    {
+      "window": "Window 1 (First Coordinated TLS Window)",
+      "description": "Client admission failure before HTTP due to single pin variable comparison",
+      "location": "/tmp/root-readiness-bar7pq1o",
+      "xmlSha256": "dc2340af6bfabddcef4fd1793a334de2ca5d47686e26b62d9fed1beaaa702e9d",
+      "tests": 2,
+      "passed": 1,
+      "failed": 1,
+      "skipped": 0,
+      "probeVerification": "Safe GET /_readiness_forbidden_probe 403 NO financial route",
+      "preservationNote": "Preserved historical without modification; failed on local client pin check before network/credentials"
+    }
+  ]
 }

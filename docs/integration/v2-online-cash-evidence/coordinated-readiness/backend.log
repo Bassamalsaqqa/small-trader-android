@@ -1,0 +1,14 @@
+Mobile V2 Harness — Readiness-Only Probe Test (--readiness-only)
+Owned schema created: accounting_p8_tmp_84fa14fb4cb2
+  Provision OK — schema: accounting_p8_tmp_84fa14fb4cb2
+Readiness probe test succeeded.
+  TLS proxy port   : https://127.0.0.1:18443
+  Readiness probe  : verified HTTP 200 and matching nonce via CA-trusted TLS.
+  Client handoff   : /tmp/v2_harness_c8253786b061d82a/runtime_client_handoff.json
+  Financial routes : strictly blocked (HTTP 403) in child router.
+Holding readiness state for 120s (PID 1204264). Press Ctrl+C to terminate early.
+Readiness hold ABORTED by interrupt signal SIGTERM.
+
+Shutting down and cleaning up owned processes, files, and schemas...
+Owned schema dropped: accounting_p8_tmp_84fa14fb4cb2
+Cleanup completed.

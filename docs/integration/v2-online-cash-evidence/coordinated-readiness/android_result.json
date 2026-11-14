@@ -1,0 +1,21 @@
+{
+  "jvm_invocations": 1,
+  "exit": 0,
+  "duration": 13.337527751922607,
+  "source_hashes_equal": true,
+  "heads_equal": true,
+  "artifacts": [
+    {
+      "source": "/home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/build/test-results/testDebugUnitTest/TEST-com.example.data.mobile.readclient.pilot.SmallTraderOnlineCashPilotSmokeTest.xml",
+      "preserved": "/tmp/root-readiness-ooug5prl/0-TEST-com.example.data.mobile.readclient.pilot.SmallTraderOnlineCashPilotSmokeTest.xml",
+      "sha256": "51e834a7f5d358e0e6544eb03b355e40130e0455d0d2c8de9b7099390b07c6eb",
+      "mtime": 1794683575.214304
+    },
+    {
+      "source": "/home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/docs/integration/v2-online-cash-evidence/paired-online-cash-pilot-evidence.json",
+      "preserved": "/tmp/root-readiness-ooug5prl/1-paired-online-cash-pilot-evidence.json",
+      "sha256": "0bfaba51e8ab55ae49ab5bf05f374fe4091d48c2a694dd4b810e120049246c5d",
+      "mtime": 1794683574.4542994
+    }
+  ]
+}
