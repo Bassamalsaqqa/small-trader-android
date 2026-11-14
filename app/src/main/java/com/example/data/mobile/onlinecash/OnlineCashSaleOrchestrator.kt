@@ -7,6 +7,16 @@ import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.readclient.ReadClientErrorResponse
 
 /**
+ * Immutable active execution scope encapsulating actor, device, company, and monotonic generation.
+ */
+data class OnlineSaleScope(
+    val actorId: ServerUlid,
+    val deviceId: ClientUuid,
+    val companyId: ServerUlid,
+    val generation: Long
+)
+
+/**
  * Authoritative receipt returned upon successful online sale processing.
  *
  * Invariant:
@@ -27,8 +37,8 @@ data class OnlineCashSaleReceipt(
 ) {
     override fun toString(): String =
         "OnlineCashSaleReceipt(companyId=$companyId, clientEventId=$clientEventId, " +
-                "payloadDigest=$payloadDigest, invoiceId=$invoiceId, invoiceNumber="$invoiceNumber", " +
-                "paymentId=$paymentId, grandTotal=$grandTotal, postedAt="$postedAt", wasReplay=$wasReplay)"
+                "payloadDigest=$payloadDigest, invoiceId=$invoiceId, invoiceNumber='$invoiceNumber', " +
+                "paymentId=$paymentId, grandTotal=$grandTotal, postedAt='$postedAt', wasReplay=$wasReplay)"
 }
 
 /**
@@ -75,7 +85,7 @@ sealed class OnlineCashOrchestrationResult {
         val actual: PayloadDigest?
     ) : OnlineCashOrchestrationResult()
 
-    /** Pre-dispatch scope generation mismatch; zero HTTP requests dispatched */
+    /** Scope generation or active scope mismatch; zero HTTP requests or discarded response */
     data class ScopeMismatch(val expected: Long, val actual: Long) : OnlineCashOrchestrationResult()
 
     /** Pre-dispatch scope or argument validation error; zero HTTP requests dispatched */
@@ -97,19 +107,37 @@ sealed class OnlineCashOrchestrationResult {
  *
  * SCOPE AND BOUNDARY ARCHITECTURE:
  * - Operates strictly with [AndroidV2OnlineCashClient] and [PreparedOnlineSaleIntent].
- * - Completely separate from the durable offline outbox synchronization coordinator ([com.example.data.mobile.sync.SaleSyncCoordinator]).
- * - Does NOT reuse offline queue claims or translate 15-field offline events to online cash.
+ * - Completely separate from the durable offline outbox synchronization coordinator.
  * - Missing local credentials never lock the outbox queue.
  * - Enforces status-first recovery on lost ACK before replaying the EXACT original prepared wire bytes.
  * - Status recovery strictly requires a matching non-null payload digest (fails closed on null or mismatch).
  * - Enforces schema honesty: never fabricates payment references.
+ * - Guards ALL result branches post-network against stale session scope.
  */
 class OnlineCashSaleOrchestrator(
     private val client: AndroidV2OnlineCashClient,
     private val tokenProvider: () -> String?,
     private val scopeGenerationProvider: () -> Long = { 0L },
-    private val onAuthDeniedLockScope: ((scopeGeneration: Long, error: ReadClientErrorResponse) -> Unit)? = null
+    private val onAuthDeniedLockScope: ((scopeGeneration: Long, error: ReadClientErrorResponse) -> Unit)? = null,
+    private val activeScopeSupplier: (() -> OnlineSaleScope?)? = null
 ) {
+
+    private fun isScopeMatching(
+        currentGen: Long,
+        intent: PreparedOnlineSaleIntent,
+        targetCompanyId: ServerUlid,
+        targetDeviceId: ClientUuid
+    ): Boolean {
+        if (currentGen != intent.scopeGeneration) return false
+        if (activeScopeSupplier != null) {
+            val active = activeScopeSupplier.invoke() ?: return false
+            return active.generation == intent.scopeGeneration &&
+                    active.actorId == intent.context.actorId &&
+                    active.companyId == targetCompanyId &&
+                    active.deviceId == targetDeviceId
+        }
+        return true
+    }
 
     /**
      * Dispatches a prepared online cash sale.
@@ -133,13 +161,13 @@ class OnlineCashSaleOrchestrator(
                 expectedCurrency = targetCurrency,
                 expectedClientEventId = intent.clientEventId
             )
-        } catch (e: IllegalArgumentException) {
-            return OnlineCashOrchestrationResult.PreDispatchValidationError(e.message ?: "Scope validation failed")
+        } catch (_: IllegalArgumentException) {
+            return OnlineCashOrchestrationResult.PreDispatchValidationError("SCOPE_VALIDATION_FAILED")
         }
 
-        // 2. Pre-dispatch scope generation check (ZERO HTTP)
+        // 2. Pre-dispatch scope generation and active scope check (ZERO HTTP)
         val initialScopeGen = scopeGenerationProvider()
-        if (intent.scopeGeneration != initialScopeGen) {
+        if (!isScopeMatching(initialScopeGen, intent, targetCompanyId, targetDeviceId)) {
             return OnlineCashOrchestrationResult.ScopeMismatch(
                 expected = initialScopeGen,
                 actual = intent.scopeGeneration
@@ -154,36 +182,121 @@ class OnlineCashSaleOrchestrator(
             )
         }
 
-        // 4. Dispatch via V2 Online Cash Client with Lost-ACK recovery
+        // 4. Dispatch via V2 Online Cash Client with Lost-ACK recovery and active scope guard
+        val isScopeActive = {
+            val currentGen = scopeGenerationProvider()
+            isScopeMatching(currentGen, intent, targetCompanyId, targetDeviceId)
+        }
+
         val executionResult = client.executeOnlineCashSale(
             token = token,
-            companyId = intent.context.companyId,
-            clientEventId = intent.clientEventId,
-            expectedPayloadDigest = intent.expectedNormativeProfileDigest,
-            canonicalBytes = intent.rawWireBytes
+            intent = intent,
+            isScopeActive = isScopeActive
         )
 
-        // 5. Evaluate execution result with strict scope generation and schema honesty
+        // 5. Post-network scope validation guarding ALL result branches
+        val postNetworkScopeGen = scopeGenerationProvider()
+        val scopeStillActive = isScopeMatching(postNetworkScopeGen, intent, targetCompanyId, targetDeviceId)
+
+        if (!scopeStillActive) {
+            return when (executionResult) {
+                is OnlineCashExecutionResult.AuthDenied -> OnlineCashOrchestrationResult.StaleAuthDenied(
+                    error = executionResult.error,
+                    intentScopeGeneration = intent.scopeGeneration,
+                    currentScopeGeneration = postNetworkScopeGen
+                )
+                else -> OnlineCashOrchestrationResult.ScopeMismatch(
+                    expected = intent.scopeGeneration,
+                    actual = postNetworkScopeGen
+                )
+            }
+        }
+
+        // 6. Evaluate execution result with strict financial consistency and schema honesty
         return when (executionResult) {
             is OnlineCashExecutionResult.Success -> {
-                val receipt = if (executionResult.commitResponse != null) {
+                if (executionResult.commitResponse != null) {
                     val commit = executionResult.commitResponse
-                    OnlineCashSaleReceipt(
-                        companyId = intent.context.companyId,
-                        clientEventId = commit.clientEventId,
-                        payloadDigest = intent.expectedNormativeProfileDigest,
-                        invoiceId = commit.invoiceId,
-                        invoiceNumber = commit.invoiceNumber,
-                        paymentId = commit.paymentId,
-                        paymentReceiptNumber = commit.paymentReceiptNumber,
-                        grandTotal = commit.grandTotal,
-                        postedAt = commit.postedAt,
-                        wasReplay = executionResult.wasReplay
-                    )
+
+                    // Event parity check
+                    if (commit.clientEventId != intent.clientEventId) {
+                        return OnlineCashOrchestrationResult.ParseFailure("EVENT_PARITY_MISMATCH")
+                    }
+
+                    // Authoritative financial verification with prepared profile
+                    val isFullCash = intent.profile.payment.settlementMode == "full"
+                    if (isFullCash) {
+                        // Must have non-null payment reference
+                        if (commit.paymentId == null) {
+                            val receipt = OnlineCashSaleReceipt(
+                                companyId = intent.context.companyId,
+                                clientEventId = commit.clientEventId,
+                                payloadDigest = intent.expectedNormativeProfileDigest,
+                                invoiceId = commit.invoiceId,
+                                invoiceNumber = commit.invoiceNumber,
+                                paymentId = null,
+                                paymentReceiptNumber = commit.paymentReceiptNumber,
+                                grandTotal = commit.grandTotal,
+                                postedAt = commit.postedAt,
+                                wasReplay = executionResult.wasReplay
+                            )
+                            return OnlineCashOrchestrationResult.PostedWithoutPaymentReference(receipt)
+                        }
+
+                        // Verify paid/total/change consistency: amountPaid - changeReturned == grandTotal
+                        val computedTotal = commit.amountPaid.value.subtract(commit.changeReturned.value)
+                        if (computedTotal.compareTo(commit.grandTotal.value) != 0) {
+                            return OnlineCashOrchestrationResult.ParseFailure("FINANCIAL_CONSISTENCY_MISMATCH")
+                        }
+
+                        // Verify amountPaid matches prepared profile payment amount
+                        if (commit.amountPaid.value.compareTo(intent.profile.payment.amount.value) != 0) {
+                            return OnlineCashOrchestrationResult.ParseFailure("FINANCIAL_CONSISTENCY_MISMATCH")
+                        }
+
+                        val receipt = OnlineCashSaleReceipt(
+                            companyId = intent.context.companyId,
+                            clientEventId = commit.clientEventId,
+                            payloadDigest = intent.expectedNormativeProfileDigest,
+                            invoiceId = commit.invoiceId,
+                            invoiceNumber = commit.invoiceNumber,
+                            paymentId = commit.paymentId,
+                            paymentReceiptNumber = commit.paymentReceiptNumber,
+                            grandTotal = commit.grandTotal,
+                            postedAt = commit.postedAt,
+                            wasReplay = executionResult.wasReplay
+                        )
+                        OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(receipt)
+                    } else {
+                        val receipt = OnlineCashSaleReceipt(
+                            companyId = intent.context.companyId,
+                            clientEventId = commit.clientEventId,
+                            payloadDigest = intent.expectedNormativeProfileDigest,
+                            invoiceId = commit.invoiceId,
+                            invoiceNumber = commit.invoiceNumber,
+                            paymentId = commit.paymentId,
+                            paymentReceiptNumber = commit.paymentReceiptNumber,
+                            grandTotal = commit.grandTotal,
+                            postedAt = commit.postedAt,
+                            wasReplay = executionResult.wasReplay
+                        )
+                        if (receipt.paymentId != null) {
+                            OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(receipt)
+                        } else {
+                            OnlineCashOrchestrationResult.PostedWithoutPaymentReference(receipt)
+                        }
+                    }
                 } else if (executionResult.statusResponse != null) {
                     val status = executionResult.statusResponse
                     val official = status.officialInvoice
-                        ?: return OnlineCashOrchestrationResult.ParseFailure("Posted status response missing official_invoice")
+                        ?: return OnlineCashOrchestrationResult.ParseFailure("MISSING_OFFICIAL_INVOICE")
+
+                    if (status.clientEventId != intent.clientEventId) {
+                        return OnlineCashOrchestrationResult.ParseFailure("EVENT_PARITY_MISMATCH")
+                    }
+                    if (status.companyId != intent.context.companyId) {
+                        return OnlineCashOrchestrationResult.ParseFailure("TENANT_PARITY_MISMATCH")
+                    }
 
                     // Status digest MUST be non-null and match expected normative digest
                     if (status.payloadDigest == null || status.payloadDigest != intent.expectedNormativeProfileDigest) {
@@ -193,7 +306,7 @@ class OnlineCashSaleOrchestrator(
                         )
                     }
 
-                    OnlineCashSaleReceipt(
+                    val receipt = OnlineCashSaleReceipt(
                         companyId = status.companyId,
                         clientEventId = status.clientEventId,
                         payloadDigest = status.payloadDigest,
@@ -205,33 +318,22 @@ class OnlineCashSaleOrchestrator(
                         postedAt = official.postedAt,
                         wasReplay = executionResult.wasReplay
                     )
-                } else {
-                    return OnlineCashOrchestrationResult.ParseFailure("Execution success missing response DTO")
-                }
 
-                // Schema honesty check: do NOT fabricate payment references
-                if (receipt.paymentId != null) {
-                    OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(receipt)
+                    if (receipt.paymentId != null) {
+                        OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(receipt)
+                    } else {
+                        OnlineCashOrchestrationResult.PostedWithoutPaymentReference(receipt)
+                    }
                 } else {
-                    OnlineCashOrchestrationResult.PostedWithoutPaymentReference(receipt)
+                    OnlineCashOrchestrationResult.ParseFailure("MISSING_RESPONSE_DTO")
                 }
             }
             is OnlineCashExecutionResult.Conflict -> {
                 OnlineCashOrchestrationResult.BusinessConflict(executionResult.error)
             }
             is OnlineCashExecutionResult.AuthDenied -> {
-                val currentScopeGen = scopeGenerationProvider()
-                if (currentScopeGen == intent.scopeGeneration) {
-                    onAuthDeniedLockScope?.invoke(currentScopeGen, executionResult.error)
-                    OnlineCashOrchestrationResult.AuthDenied(executionResult.error, currentScopeGen)
-                } else {
-                    // Stale 401 callback for previous session scope: do NOT lock current scope
-                    OnlineCashOrchestrationResult.StaleAuthDenied(
-                        error = executionResult.error,
-                        intentScopeGeneration = intent.scopeGeneration,
-                        currentScopeGeneration = currentScopeGen
-                    )
-                }
+                onAuthDeniedLockScope?.invoke(postNetworkScopeGen, executionResult.error)
+                OnlineCashOrchestrationResult.AuthDenied(executionResult.error, postNetworkScopeGen)
             }
             is OnlineCashExecutionResult.Forbidden -> {
                 OnlineCashOrchestrationResult.Forbidden(executionResult.error)
@@ -240,7 +342,7 @@ class OnlineCashSaleOrchestrator(
                 OnlineCashOrchestrationResult.ValidationFailed(executionResult.error)
             }
             is OnlineCashExecutionResult.ParseFailure -> {
-                if (executionResult.category.contains("Payload digest missing or mismatch", ignoreCase = true)) {
+                if (executionResult.category.contains("DIGEST", ignoreCase = true)) {
                     OnlineCashOrchestrationResult.StatusDigestMismatch(
                         expected = intent.expectedNormativeProfileDigest,
                         actual = null

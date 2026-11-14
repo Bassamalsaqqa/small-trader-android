@@ -1,5 +1,6 @@
 package com.example.data.mobile.onlinecash
 
+import com.example.data.mobile.contract.CanonicalJsonSerializer
 import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.PayloadDigest
 import com.example.data.mobile.contract.ServerUlid
@@ -22,6 +23,7 @@ import java.util.Arrays
  *
  * Invariants:
  * - Wire bytes are immutable and defensively copied on access.
+ * - Wire bytes strictly match canonical RFC 8785 representation of the RAW 7 request keys.
  * - No Double or unquoted float lexemes permitted.
  * - Pre-dispatch validation guarantees strict event/company/device/currency parity.
  * - Sanitized toString() prevents credential or wire leaks.
@@ -32,6 +34,7 @@ class PreparedOnlineSaleIntent private constructor(
     val deviceId: ClientUuid,
     val currency: String,
     val expectedNormativeProfileDigest: PayloadDigest,
+    val profile: OnlineSaleIntentProfile,
     rawWireBytes: ByteArray,
     val scopeGeneration: Long
 ) {
@@ -53,19 +56,11 @@ class PreparedOnlineSaleIntent private constructor(
         expectedCurrency: String,
         expectedClientEventId: ClientUuid? = null
     ) {
-        require(context.companyId == expectedCompanyId) {
-            "Tenant company mismatch before dispatch: prepared company ${context.companyId} != target $expectedCompanyId"
-        }
-        require(deviceId == expectedDeviceId) {
-            "Device mismatch before dispatch: prepared device $deviceId != target $expectedDeviceId"
-        }
-        require(currency == expectedCurrency) {
-            "Currency mismatch before dispatch: prepared currency "$currency" != target "$expectedCurrency""
-        }
+        require(context.companyId == expectedCompanyId) { "COMPANY_MISMATCH" }
+        require(deviceId == expectedDeviceId) { "DEVICE_MISMATCH" }
+        require(currency == expectedCurrency) { "CURRENCY_MISMATCH" }
         if (expectedClientEventId != null) {
-            require(clientEventId == expectedClientEventId) {
-                "Client event ID mismatch before dispatch: prepared event $clientEventId != target $expectedClientEventId"
-            }
+            require(clientEventId == expectedClientEventId) { "CLIENT_EVENT_ID_MISMATCH" }
         }
     }
 
@@ -94,11 +89,21 @@ class PreparedOnlineSaleIntent private constructor(
 
     override fun toString(): String =
         "PreparedOnlineSaleIntent(companyId=${context.companyId}, clientEventId=$clientEventId, " +
-                "deviceId=$deviceId, currency="$currency", digest=$expectedNormativeProfileDigest, " +
+                "deviceId=$deviceId, currency='$currency', digest=$expectedNormativeProfileDigest, " +
                 "bytes=${defensiveWireBytes.size}, scopeGen=$scopeGeneration)"
 
     companion object {
         const val MAX_WIRE_BYTES = 1024 * 1024 // Strict 1 MiB bound
+
+        val ALLOWED_RAW_WIRE_KEYS: Set<String> = setOf(
+            "client_event_id",
+            "device_id",
+            "customer_id",
+            "warehouse_id",
+            "currency",
+            "lines",
+            "payment"
+        )
 
         /**
          * Parses, validates, and prepares an immutable online intent from raw wire bytes.
@@ -116,7 +121,7 @@ class PreparedOnlineSaleIntent private constructor(
         ): PreparedOnlineSaleIntent {
             require(rawWireBytes.isNotEmpty()) { "Wire payload cannot be empty" }
             require(rawWireBytes.size <= MAX_WIRE_BYTES) {
-                "Wire payload exceeds 1 MiB limit: ${rawWireBytes.size} bytes (max $MAX_WIRE_BYTES)"
+                "Wire payload exceeds 1 MiB limit"
             }
 
             // Strict UTF-8 decoding with REPORT on malformed or unmappable bytes
@@ -125,16 +130,32 @@ class PreparedOnlineSaleIntent private constructor(
                 .onUnmappableCharacter(CodingErrorAction.REPORT)
             val charBuffer = try {
                 decoder.decode(ByteBuffer.wrap(rawWireBytes.clone()))
-            } catch (e: Exception) {
-                throw IllegalArgumentException("Malformed UTF-8 in wire payload: ${e.message}", e)
+            } catch (_: Exception) {
+                throw IllegalArgumentException("Malformed UTF-8 wire payload")
             }
             val rawJsonString = charBuffer.toString()
 
             // Strict canonical JSON parsing: rejects duplicates, floats/Doubles, invalid lexemes
             val rootObj = try {
                 StrictJsonParser.parse(rawJsonString).asObject()
-            } catch (e: Exception) {
-                throw IllegalArgumentException("Invalid canonical JSON wire payload: ${e.message}", e)
+            } catch (_: Exception) {
+                throw IllegalArgumentException("Invalid canonical JSON wire payload")
+            }
+
+            // Strict raw 7-key validation
+            val unexpected = rootObj.properties.keys - ALLOWED_RAW_WIRE_KEYS
+            require(unexpected.isEmpty()) { "Unexpected keys in wire payload: $unexpected" }
+            val missing = ALLOWED_RAW_WIRE_KEYS - rootObj.properties.keys
+            require(missing.isEmpty()) { "Missing required wire payload keys: $missing" }
+
+            // Strict canonical byte equality check against RFC 8785 canonical bytes of the raw 7 keys
+            val canonicalBytes = try {
+                CanonicalJsonSerializer.serializeToUtf8Bytes(rootObj)
+            } catch (_: Exception) {
+                throw IllegalArgumentException("Invalid canonical JSON wire payload")
+            }
+            require(Arrays.equals(rawWireBytes, canonicalBytes)) {
+                "Wire payload does not match strict canonical JSON byte representation"
             }
 
             val clientEventId = ClientUuid.parse(rootObj.require("client_event_id").asString())
@@ -147,7 +168,7 @@ class PreparedOnlineSaleIntent private constructor(
 
             if (expectedDigest != null) {
                 require(computedDigest == expectedDigest) {
-                    "Computed normative profile digest $computedDigest does not match expected golden digest $expectedDigest"
+                    "Computed normative profile digest does not match expected digest"
                 }
             }
 
@@ -157,6 +178,7 @@ class PreparedOnlineSaleIntent private constructor(
                 deviceId = deviceId,
                 currency = currency,
                 expectedNormativeProfileDigest = computedDigest,
+                profile = profile,
                 rawWireBytes = rawWireBytes,
                 scopeGeneration = scopeGeneration
             )

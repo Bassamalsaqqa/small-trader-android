@@ -2,28 +2,41 @@
 
 ## Architectural Boundaries and Review Remediation
 
-This directory records the verification evidence, schemas, and architectural boundaries for the Mobile V2 Online Cash client implementation.
+This directory records verified execution evidence, schemas, and architectural boundaries for the Mobile V2 Online Cash client implementation under PR #23.
 
-### Boundary Preservation
-1. **Separation from Durable Offline Outbox**:
-   The offline queue coordinator (`SaleSyncCoordinator`) and gateway interface (`SaleSyncGateway`) remain solely responsible for 15-field durable offline sale events. Direct online cash transactions use the dedicated `OnlineCashSaleOrchestrator` with `PreparedOnlineSaleIntent`.
-2. **Removal of Unwired Adapter**:
-   `OnlineCashSaleSyncGateway` was removed. It had incorrectly attempted to pass 15-field offline events to the 7-key online cash endpoint and fabricated payment references via `paymentId ?: invoiceId`.
-3. **No Synthetic Payment Fabrication**:
-   For approved full cash or online sale commits, `OnlineCashSaleReceipt` strictly preserves `paymentId: ServerUlid?` as returned by the backend. When `payment_id` is null on the wire, the result is schema-honest (`PostedWithoutPaymentReference`) without fabricating synthetic identifiers.
-4. **Normative Intent Profile and Bounded Wire Payload**:
-   `PreparedOnlineSaleIntent` enforces strict 1 MiB bounding, strict UTF-8 validation (rejecting malformed/unmappable sequences), canonical JSON with exact decimal strings (no IEEE-754 floats), and pre-dispatch parity checks against tenant company, device, currency, and client event ID.
-   The expected payload digest is computed strictly from `OnlineSaleIntentProfile.fromContextAndRequest(context, raw7KeyRequest)` yielding authoritative profile digest `0847` (`sha256:0847e10d89777e103252ebfa2d27f89a95832a5d70e01af57afe6423f703c630`).
-5. **Lost-ACK Status-First Recovery & Non-Null Digest Invariant**:
-   If an initial POST drops or times out, `AndroidV2OnlineCashClient` queries event status before attempting replay. When status is `posted`, `payload_digest` MUST be non-null and match the expected normative digest; missing or mismatched digests fail closed. When status is `unknown`, safe replay of the EXACT original prepared wire bytes is performed.
-6. **Scope Generation Authentication Guard**:
-   In-flight 401 Unauthorized responses check against the active session scope generation. A stale 401 callback from an older scope generation will not trigger an auth lock on a new session scope.
-7. **Local Token Non-Denial**:
-   Absence of a local staff session token yields `LocalTokenUnavailable` without dispatching HTTP or triggering server authentication lock callbacks.
-8. **Isolated Smoke Pilot**:
-   `SmallTraderOnlineCashPilotSmokeTest` requires explicit `SMALL_TRADER_CASH_PILOT_HANDOFF` and independent backend SHA (`SMALL_TRADER_EXPECTED_BACKEND_SHA`). Fallback to V1 read pilot handoff is completely removed.
+### Review Remediation and Hardening
+1. **Compilation Errors Fixed**:
+   Prior commit f697451 introduced syntax errors from unescaped double quotes in Kotlin string templates in `PreparedOnlineSaleIntent.kt` and `OnlineCashSaleReceipt.toString()`. These were fixed and verified. The initial failure log is preserved in `first-compiler-failure.log`.
+2. **Post-Network Scope Guarding Across ALL Result Branches**:
+   Previously, only pre-dispatch and 401 branches checked session generation. A 201 Created or 200 replay response returning after account switch or logout could return a foreign stale receipt. `OnlineCashSaleOrchestrator` now guards ALL result branches after network I/O. If session generation or active scope (`actorId`, `deviceId`, `companyId`, `generation`) has changed, it returns `ScopeMismatch` (or `StaleAuthDenied` for 401) without leaking receipts or locking a new session scope.
+3. **Strict Canonical Wire Byte Equality**:
+   `PreparedOnlineSaleIntent.prepare` strictly enforces that raw wire bytes match RFC 8785 canonical JSON bytes of the RAW 7 request keys (`client_event_id`, `device_id`, `customer_id`, `warehouse_id`, `currency`, `lines`, `payment`) via `CanonicalJsonSerializer.serializeToUtf8Bytes(rootObj)`. Any whitespace, formatting discrepancy, or non-canonical key order fails closed before dispatch. The 10-key context profile digest is independently computed and verified.
+4. **Economic Dispatch Restriction**:
+   Low-level `submitSale` is marked `internal` to prevent bypassing verified intent preparation. Public economic dispatch is strictly bound to `executeOnlineCashSale(token, intent: PreparedOnlineSaleIntent)`.
+5. **Sanitized Error Categories**:
+   Raw exception messages (`e.message`), causes, and untrusted string IDs have been removed from errors and `toString()`. Standard fixed sanitized categories are returned (`SCOPE_VALIDATION_FAILED`, `FINANCIAL_CONSISTENCY_MISMATCH`, `EVENT_PARITY_MISMATCH`, etc.).
+6. **Authoritative Full Cash Consistency**:
+   `ConfirmedFinancialSuccess` requires:
+   - Non-null `paymentId` and `paymentReceiptNumber`.
+   - `amountPaid == profile.payment.amount`.
+   - `amountPaid - changeReturned == grandTotal`.
+   If `paymentId` is null, returns schema-honest `PostedWithoutPaymentReference` without fabricating synthetic IDs. Financial amount discrepancies fail closed with `FINANCIAL_CONSISTENCY_MISMATCH`.
+7. **Source-Pinned Fail-Closed Smoke Harness**:
+   `SmallTraderOnlineCashPilotSmokeTest` requires `SMALL_TRADER_CASH_PILOT_HANDOFF` and independent `SMALL_TRADER_EXPECTED_BACKEND_SHA`. When configured, missing required pins (`manifestDigests`) strictly fails closed (assertion failure, not skipped).
 
-## Test Artifacts and Historical Evidence
-- `historical-76/`: Preserves 8 XML test execution reports (76 passing tests) executed prior to lease boundaries.
-- `manifest.json`: Exact SHA-256 source and fixture attestation.
-- `summary.json`: Test counts and lease execution gate status.
+## Execution Evidence (171 Tests)
+All tests executed under authorized QA lease constraints (`-XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xmx1536m --max-workers=1`):
+- `test-results/`:
+  - `TEST-com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest.xml` (34 tests, 0 failures)
+  - `TEST-com.example.data.mobile.contract.v2.ContractV2WireValidationTest.xml` (12 tests, 0 failures)
+  - `TEST-com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest.xml` (6 tests, 0 failures)
+  - `TEST-com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest.xml` (5 tests, 0 failures)
+  - `TEST-com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest.xml` (11 tests, 0 failures)
+  - `TEST-com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest.xml` (15 tests, 0 failures)
+  - `TEST-com.example.data.mobile.contract.v2.SaleCommitResponseTest.xml` (6 tests, 0 failures)
+  - `TEST-com.example.data.mobile.contract.v2.SaleEventStatusResponseTest.xml` (5 tests, 0 failures)
+  - `TEST-com.example.data.mobile.readclient.SharedTransportAllowlistRegressionTest.xml` (4 tests, 0 failures)
+  - `TEST-com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest.xml` (21 tests, 0 failures)
+  - `TEST-com.example.data.mobile.session.StaffSessionCoordinatorTest.xml` (51 tests, 0 failures)
+  - `TEST-com.example.data.mobile.readclient.pilot.SmallTraderOnlineCashPilotSmokeTest.xml` (1 test, 1 skipped)
+- Total: 171 tests (170 passed, 1 skipped, 0 failures, 0 errors).

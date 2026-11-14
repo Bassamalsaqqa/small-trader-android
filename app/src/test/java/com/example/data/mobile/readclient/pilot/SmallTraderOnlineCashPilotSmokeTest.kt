@@ -52,6 +52,11 @@ class SmallTraderOnlineCashPilotSmokeTest {
                 requireIndependentSha = true
             )
 
+            // Strict source-pinned fail-closed enforcement when configured
+            require(config.manifestDigests.candidateRev3.isNotBlank() && config.manifestDigests.primaryPinRev2.isNotBlank()) {
+                "Safety invariant violation: empty required pins in handoff config"
+            }
+
             // Configure isolated JVM test CA trust if provided
             if (config.caCertPath != null) {
                 val caFile = File(config.caCertPath)

@@ -149,7 +149,7 @@ class AndroidV2OnlineCashClient(
      * @param expectedPayloadDigest SHA-256 digest of original normative request
      * @param canonicalBytes Defensively copied canonical UTF-8 bytes of wire request
      */
-    fun submitSale(
+    internal fun submitSale(
         token: String,
         companyId: ServerUlid,
         clientEventId: ClientUuid,
@@ -166,7 +166,7 @@ class AndroidV2OnlineCashClient(
         val charBuffer = try {
             decoder.decode(ByteBuffer.wrap(canonicalBytes.clone()))
         } catch (e: Exception) {
-            return OnlineCashSubmitResult.ParseFailure("Malformed UTF-8 payload: ${e.message}")
+            return OnlineCashSubmitResult.ParseFailure("MALFORMED_UTF8")
         }
         val bodyString = charBuffer.toString()
 
@@ -194,7 +194,7 @@ class AndroidV2OnlineCashClient(
                         val rootObj = StrictJsonParser.parse(response.body).asObject()
                         val commit = SaleCommitResponse.fromStrictJson(rootObj)
                         if (commit.clientEventId != clientEventId) {
-                            OnlineCashSubmitResult.ParseFailure("Event parity mismatch: response client_event_id != requested clientEventId")
+                            OnlineCashSubmitResult.ParseFailure("EVENT_PARITY_MISMATCH")
                         } else {
                             OnlineCashSubmitResult.Created(commit)
                         }
@@ -208,7 +208,7 @@ class AndroidV2OnlineCashClient(
                         val rootObj = StrictJsonParser.parse(response.body).asObject()
                         val commit = SaleCommitResponse.fromStrictJson(rootObj)
                         if (commit.clientEventId != clientEventId) {
-                            OnlineCashSubmitResult.ParseFailure("Event parity mismatch on replay")
+                            OnlineCashSubmitResult.ParseFailure("EVENT_PARITY_MISMATCH")
                         } else {
                             OnlineCashSubmitResult.Replayed(commit)
                         }
@@ -342,12 +342,31 @@ class AndroidV2OnlineCashClient(
      *    e. If status is 403: returns Forbidden.
      *    f. If status fails transiently: returns IndeterminateTransient, preserving original event ID and bytes.
      */
+    /**
+     * Authoritative economic dispatch entrypoint requiring a verified PreparedOnlineSaleIntent.
+     */
     fun executeOnlineCashSale(
+        token: String,
+        intent: PreparedOnlineSaleIntent,
+        isScopeActive: () -> Boolean = { true }
+    ): OnlineCashExecutionResult {
+        return executeOnlineCashSale(
+            token = token,
+            companyId = intent.context.companyId,
+            clientEventId = intent.clientEventId,
+            expectedPayloadDigest = intent.expectedNormativeProfileDigest,
+            canonicalBytes = intent.rawWireBytes,
+            isScopeActive = isScopeActive
+        )
+    }
+
+    internal fun executeOnlineCashSale(
         token: String,
         companyId: ServerUlid,
         clientEventId: ClientUuid,
         expectedPayloadDigest: PayloadDigest,
-        canonicalBytes: ByteArray
+        canonicalBytes: ByteArray,
+        isScopeActive: () -> Boolean = { true }
     ): OnlineCashExecutionResult {
         val defensiveBytes = canonicalBytes.clone()
 
@@ -381,6 +400,14 @@ class AndroidV2OnlineCashClient(
                 reason = "HTTP_${initialSubmit.statusCode}"
             )
             is OnlineCashSubmitResult.TransientError -> {
+                if (!isScopeActive()) {
+                    return OnlineCashExecutionResult.IndeterminateTransient(
+                        clientEventId = clientEventId,
+                        payloadDigest = expectedPayloadDigest,
+                        reason = "SCOPE_STALE"
+                    )
+                }
+
                 // Lost ACK: MUST look up status before attempting replay
                 val statusResult = checkStatus(
                     token = token,
@@ -392,16 +419,16 @@ class AndroidV2OnlineCashClient(
                     is OnlineCashStatusResult.Posted -> {
                         val statusResp = statusResult.response
                         if (statusResp.clientEventId != clientEventId) {
-                            return OnlineCashExecutionResult.ParseFailure("Event parity violation in status recovery")
+                            return OnlineCashExecutionResult.ParseFailure("EVENT_PARITY_MISMATCH")
                         }
                         if (statusResp.companyId != companyId) {
-                            return OnlineCashExecutionResult.ParseFailure("Tenant parity violation in status recovery")
+                            return OnlineCashExecutionResult.ParseFailure("TENANT_PARITY_MISMATCH")
                         }
                         if (statusResp.officialInvoice == null) {
-                            return OnlineCashExecutionResult.ParseFailure("Posted status missing official_invoice")
+                            return OnlineCashExecutionResult.ParseFailure("MISSING_OFFICIAL_INVOICE")
                         }
                         if (statusResp.payloadDigest == null || statusResp.payloadDigest != expectedPayloadDigest) {
-                            return OnlineCashExecutionResult.ParseFailure("Payload digest missing or mismatch in status recovery")
+                            return OnlineCashExecutionResult.ParseFailure("PAYLOAD_DIGEST_MISMATCH")
                         }
                         OnlineCashExecutionResult.Success(
                             commitResponse = null,
@@ -410,6 +437,14 @@ class AndroidV2OnlineCashClient(
                         )
                     }
                     is OnlineCashStatusResult.Unknown -> {
+                        if (!isScopeActive()) {
+                            return OnlineCashExecutionResult.IndeterminateTransient(
+                                clientEventId = clientEventId,
+                                payloadDigest = expectedPayloadDigest,
+                                reason = "SCOPE_STALE"
+                            )
+                        }
+
                         // Unknown is not proof of no future commit, but permits safe replay of original bytes.
                         // Event ID and digest are preserved; never regenerate sale.
                         val replaySubmit = submitSale(

@@ -1,34 +1,21 @@
 {
-  "historical_saved_passes": {
-    "suites": 8,
-    "tests": 76,
-    "failures": 0,
-    "errors": 0,
-    "skipped": 0,
-    "evidence_directory": "docs/integration/v2-online-cash-evidence/historical-76"
-  },
-  "current_inventory": {
-    "status": "source_ready_lease_pending",
-    "mode": "SOURCEFIRST",
-    "review_remediations": [
-      "Removed unwired OnlineCashSaleSyncGateway adapter (which incorrectly routed 15-field offline events to 7-key online cash API and fabricated payment ULIDs)",
-      "Implemented PreparedOnlineSaleIntent: immutable wire bytes (bounded to 1 MiB, strict canonical UTF-8, no IEEE-754 floats), exact pre-dispatch scope checks, normative profile digest (sha256:0847...)",
-      "Implemented OnlineCashSaleOrchestrator: separate from durable offline gateway, status-first Lost-ACK recovery with non-null matching digest invariant, schema-honest null payment reference handling (zero synthetic fabrication)",
-      "Scope generation tracking guards against stale 401 callbacks locking newer session scopes",
-      "Missing local token returns LocalTokenUnavailable without locking queue as server AuthDenied",
-      "Removed V1 pilot handoff fallback in SmallTraderOnlineCashPilotSmokeTest (only SMALL_TRADER_CASH_PILOT_HANDOFF accepted with independent backend SHA pin)",
-      "Added 14 comprehensive integration tests covering synthetic fixtures, corrupt UTF-8, oversize, non-canonical floats, wrong digests, status recovery, and scope mismatch"
-    ],
-    "pins": {
-      "synthetic_tag": "syntheticca5a",
-      "backend_qualified_commit": 698,
-      "manifest_sha256": "3248b9721c3e2a09e84ae478ddb0171c3ea576fd0cbdd70b3606e4cdda4ff3e7",
-      "normative_profile_digest": "sha256:0847e10d89777e103252ebfa2d27f89a95832a5d70e01af57afe6423f703c630"
-    }
-  },
-  "execution_gate": {
-    "tests_executed_previously": 76,
-    "new_tests_added_source": 18,
-    "lease_status": "pending_lead_grant"
-  }
+  "status": "QUALIFIED",
+  "pr": 23,
+  "branch": "t3/android-v2-online-cash-client",
+  "totalSuites": 12,
+  "totalTests": 171,
+  "passed": 170,
+  "skipped": 1,
+  "failures": 0,
+  "errors": 0,
+  "fixesApplied": [
+    "Fixed invalid Kotlin string quotes in PreparedOnlineSaleIntent and OnlineCashSaleReceipt",
+    "Guarded ALL result branches against post-network stale scope generation in OnlineCashSaleOrchestrator",
+    "Added OnlineSaleScope and activeScopeSupplier supporting actor/device/company/generation verification",
+    "Restricted submitSale to internal; economic dispatch can only use PreparedOnlineSaleIntent",
+    "Sanitized error categories removing raw exception messages and untrusted IDs",
+    "Verified full cash financial consistency (amountPaid == payment.amount, amountPaid - change == grandTotal, non-null paymentId)",
+    "Added new tests: new generation during 201, status replay 401, malformed canonical byte rejection, financial consistency check",
+    "Enforced fail-closed source-pinned required pins in smoke test"
+  ]
 }

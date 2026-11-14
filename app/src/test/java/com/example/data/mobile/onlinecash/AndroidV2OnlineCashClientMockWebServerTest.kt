@@ -1,5 +1,7 @@
 package com.example.data.mobile.onlinecash
 
+import com.example.data.mobile.contract.CanonicalJsonSerializer
+import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.PayloadDigest
 import com.example.data.mobile.contract.ServerUlid
@@ -387,10 +389,10 @@ class AndroidV2OnlineCashClientMockWebServerTest {
 
     @Test
     fun testLostAckRecoveryAuthDeniedPreservesLock() {
-        // 1. Initial POST drops
+        // 1. Initial POST drops after request is transmitted (lost ACK)
         server!!.enqueue(
             MockResponse()
-                .setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
+                .setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
         )
         // 2. Status check returns 401 Unauthorized
         server!!.enqueue(
@@ -424,7 +426,8 @@ class AndroidV2OnlineCashClientMockWebServerTest {
         currencyMinorUnits = 2
     )
 
-    private val syntheticRawWirePayload = """{
+    private val syntheticRawWirePayload = CanonicalJsonSerializer.serializeToUtf8Bytes(
+        StrictJsonParser.parse("""{
         "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
         "device_id": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
         "customer_id": "01M7CZPF6TP283F3ZRXF5P8GT3",
@@ -448,7 +451,8 @@ class AndroidV2OnlineCashClientMockWebServerTest {
             "cash_account_id": "01M7CZPF6TP283F3ZRXF5P8GT8",
             "amount": "58.000000"
         }
-    }""".toByteArray(Charsets.UTF_8)
+    }""").asObject()
+    )
 
     private val syntheticCommitJson = """{
         "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
@@ -671,10 +675,10 @@ class AndroidV2OnlineCashClientMockWebServerTest {
             "queried_at": "2026-11-14T12:05:00Z"
         }"""
 
-        // 1. Initial POST drops
+        // 1. Initial POST drops after request is transmitted (lost ACK)
         server!!.enqueue(
             MockResponse()
-                .setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
+                .setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
         )
         // 2. Status response has payload_digest: null (missing digest)
         server!!.enqueue(
@@ -731,10 +735,10 @@ class AndroidV2OnlineCashClientMockWebServerTest {
             "queried_at": "2026-11-14T12:05:00Z"
         }"""
 
-        // 1. Initial POST drops
+        // 1. Initial POST drops after request is transmitted (lost ACK)
         server!!.enqueue(
             MockResponse()
-                .setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
+                .setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
         )
         // 2. Status response has wrong digest
         server!!.enqueue(
@@ -781,10 +785,10 @@ class AndroidV2OnlineCashClientMockWebServerTest {
             "queried_at": "2026-11-14T12:05:00Z"
         }"""
 
-        // 1. Initial POST drops
+        // 1. Initial POST drops after request is transmitted (lost ACK)
         server!!.enqueue(
             MockResponse()
-                .setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
+                .setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
         )
         // 2. Status check returns 200 unknown (safe to replay original wire bytes)
         server!!.enqueue(
@@ -993,7 +997,6 @@ class AndroidV2OnlineCashClientMockWebServerTest {
             scopeGenerationProvider = {
                 // Generation advanced to 2L while request was in-flight
                 scopeGen.getAndSet(2L)
-                2L
             },
             onAuthDeniedLockScope = { _, _ -> lockScopeInvoked.set(true) }
         )
@@ -1045,4 +1048,244 @@ class AndroidV2OnlineCashClientMockWebServerTest {
         assertTrue("Expected AuthDenied", result is OnlineCashOrchestrationResult.AuthDenied)
         assertEquals("Fresh 401 on matching generation MUST invoke lock callback", 1L, lockedGeneration.get())
     }
+
+    @Test
+    fun testOnlineOrchestrationNewGenerationDuring201GuardsAgainstForeignStaleReceipt() {
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(201)
+                .setHeader("Content-Type", "application/json")
+                .setBody(syntheticCommitJson)
+        )
+
+        val client = createClient()
+        val scopeGen = AtomicLong(1L)
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = {
+                // Initial check returns 1L, but in-flight logout/switch changes generation to 2L
+                scopeGen.getAndSet(2L)
+            }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        assertTrue("Expected ScopeMismatch on post-network stale generation", result is OnlineCashOrchestrationResult.ScopeMismatch)
+        val mismatch = result as OnlineCashOrchestrationResult.ScopeMismatch
+        assertEquals(1L, mismatch.expected)
+        assertEquals(2L, mismatch.actual)
+    }
+
+    @Test
+    fun testOnlineOrchestrationStatusReplay401() {
+        // Test case 1: Matching scope on replay 401 invokes lock callback
+        val lockScopeInvoked = AtomicBoolean(false)
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        // 1. Initial submit drops (transient socket timeout)
+        server!!.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+        // 2. Status lookup returns unknown (safe to replay)
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{
+                    "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+                    "company_id": "01M7CZPF6TP283F3ZRXF5P8GT2",
+                    "status": "unknown",
+                    "payload_digest": null,
+                    "official_invoice": null,
+                    "conflict": null,
+                    "queried_at": "2026-11-14T12:00:00Z"
+                }""")
+        )
+        // 3. Replay submit returns 401
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(401)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"error":{"code":"UNAUTHENTICATED","message":"Token expired."}}""")
+        )
+
+        val client = createClient()
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = { 1L },
+            onAuthDeniedLockScope = { _, _ -> lockScopeInvoked.set(true) }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        assertTrue("Expected AuthDenied on replay 401 with matching scope", result is OnlineCashOrchestrationResult.AuthDenied)
+        assertTrue("Matching scope 401 on replay MUST invoke lock callback", lockScopeInvoked.get())
+    }
+
+    @Test
+    fun testOnlineOrchestrationStatusReplay401StaleNoCallback() {
+        // Test case 2: Stale scope on replay 401 does NOT invoke lock callback
+        val lockScopeInvoked = AtomicBoolean(false)
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        // 1. Initial submit drops
+        server!!.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+        // 2. Status lookup returns unknown
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{
+                    "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+                    "company_id": "01M7CZPF6TP283F3ZRXF5P8GT2",
+                    "status": "unknown",
+                    "payload_digest": null,
+                    "official_invoice": null,
+                    "conflict": null,
+                    "queried_at": "2026-11-14T12:00:00Z"
+                }""")
+        )
+        // 3. Replay submit returns 401
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(401)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"error":{"code":"UNAUTHENTICATED","message":"Token expired."}}""")
+        )
+
+        val client = createClient()
+        var callCount = 0
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = {
+                callCount++
+                if (callCount > 2) 2L else 1L
+            },
+            onAuthDeniedLockScope = { _, _ -> lockScopeInvoked.set(true) }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        assertTrue("Expected StaleAuthDenied or ScopeMismatch", result is OnlineCashOrchestrationResult.StaleAuthDenied || result is OnlineCashOrchestrationResult.ScopeMismatch)
+        assertFalse("Stale generation on replay 401 MUST NOT lock new scope", lockScopeInvoked.get())
+    }
+
+    @Test
+    fun testOnlineOrchestrationMalformedCanonicalZeroHttp() {
+        val malformedWhitespacePayload = """{
+            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+            "device_id": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
+            "customer_id": "01M7CZPF6TP283F3ZRXF5P8GT3",
+            "warehouse_id": "01M7CZPF6TP283F3ZRXF5P8GT4",
+            "currency": "ILS",
+            "lines": [
+                {
+                    "product_id": "01M7CZPF6TP283F3ZRXF5P8GT5",
+                    "product_unit_id": "01M7CZPF6TP283F3ZRXF5P8GT6",
+                    "conversion_to_base": "1.000000",
+                    "quantity": "1.000000",
+                    "unit_price": "50.000000",
+                    "tax_rate_id": "01M7CZPF6TP283F3ZRXF5P8GT7",
+                    "tax_rate": "16.000000",
+                    "tax_inclusive": false
+                }
+            ],
+            "payment": {
+                "settlement_mode": "full",
+                "payment_method": "cash",
+                "cash_account_id": "01M7CZPF6TP283F3ZRXF5P8GT8",
+                "amount": "58.000000"
+            }
+        }""".toByteArray(Charsets.UTF_8)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            PreparedOnlineSaleIntent.prepare(
+                context = sampleContext,
+                rawWireBytes = malformedWhitespacePayload,
+                scopeGeneration = 1L
+            )
+        }
+        assertEquals("Zero HTTP requests on malformed canonical payload", 0, server!!.requestCount)
+    }
+
+    @Test
+    fun testOnlineOrchestrationFinancialConsistencyMismatchFailsClosed() {
+        val inconsistentCommit = """{
+            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+            "status": "posted",
+            "invoice_id": "01M7CZPF6TP283F3ZRXF5P8GT9",
+            "invoice_number": "INV-2026-00099",
+            "payment_id": "01M7CZPF6TP283F3ZRXF5P8GTA",
+            "payment_receipt_number": "RCT-2026-00099",
+            "grand_total": "58.000000",
+            "amount_paid": "50.000000",
+            "change_returned": "0.000000",
+            "posted_at": "2026-11-14T12:00:00Z"
+        }"""
+
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(201)
+                .setHeader("Content-Type", "application/json")
+                .setBody(inconsistentCommit)
+        )
+
+        val client = createClient()
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = { 1L }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        assertTrue("Inconsistent financial amounts must fail closed", result is OnlineCashOrchestrationResult.ParseFailure)
+        assertEquals("FINANCIAL_CONSISTENCY_MISMATCH", (result as OnlineCashOrchestrationResult.ParseFailure).category)
+    }
 }
+
