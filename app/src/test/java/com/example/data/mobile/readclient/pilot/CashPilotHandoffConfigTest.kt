@@ -16,6 +16,9 @@ import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermissions
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+
+private const val FIXTURE_APPROVED_CLIENT_SHA = "019ea39af09558c2622356cb22235572747e3ddc"
+private const val FIXTURE_EXECUTABLE_CLIENT_SHA = "ddfc75536e647c65a6a7e8868c9336cee93769ec"
 /**
  * Hermetic parser and admission tests for CashPilotHandoffConfig.
  *
@@ -172,7 +175,8 @@ class CashPilotHandoffConfigTest {
             val config = CashPilotHandoffConfig.fromFile(
                 file = handoffFile,
                 expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                 expectedHandoffSha = handoffSha,
                 allowNonPosixForTesting = true
             )
@@ -180,6 +184,9 @@ class CashPilotHandoffConfigTest {
             assertEquals(CashPilotHandoffConfig.SCOPE_READINESS_ONLY, config.handoffScope)
             assertEquals(CashPilotHandoffConfig.PHASE_ACTIVE_TLS_READY, config.lifecyclePhase)
             assertEquals("https://127.0.0.1:18443/api/mobile/v2", config.baseUrl)
+            assertEquals(FIXTURE_APPROVED_CLIENT_SHA, config.peerAndroidApprovedHeadSha)
+            assertEquals(FIXTURE_EXECUTABLE_CLIENT_SHA, config.peerAndroidExecutableHeadSha)
+            assertEquals(FIXTURE_EXECUTABLE_CLIENT_SHA, config.peerAndroidHeadSha)
             assertEquals("01M7CZPF6TP283F3ZRXF5P8GT2", config.fixture.companyId.value)
             assertEquals("ILS", config.fixture.companyBaseCurrency)
             assertEquals(2, config.fixture.currencyMinorUnits)
@@ -215,7 +222,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = badFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
@@ -236,7 +244,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = handoffFile,
                     expectedBackendSha = null,
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = "401dbb3c2528a30edfb6beaa5065e89bf225c348a4d88eba9d47d7f93cff543a",
                     allowNonPosixForTesting = true
                 )
@@ -258,7 +267,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = handoffFile,
                     expectedBackendSha = "0000000000000000000000000000000000000000",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = handoffSha,
                     allowNonPosixForTesting = true
                 )
@@ -284,7 +294,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = badHandoff,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
@@ -311,7 +322,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = badFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
@@ -336,7 +348,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = badFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
@@ -363,7 +376,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = badFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
@@ -391,7 +405,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = missingFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = shaMissing,
                     allowNonPosixForTesting = true
                 )
@@ -410,7 +425,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = oobFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = shaOob,
                     allowNonPosixForTesting = true
                 )
@@ -435,7 +451,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = badFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
@@ -462,7 +479,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = badFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
@@ -482,7 +500,8 @@ class CashPilotHandoffConfigTest {
             val config = CashPilotHandoffConfig.fromFile(
                 file = goodHandoff,
                 expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                 expectedHandoffSha = CashPilotHandoffConfig.computeSha256(goodHandoff.readBytes()),
                 allowNonPosixForTesting = true
             )
@@ -512,7 +531,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = badFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
@@ -533,7 +553,8 @@ class CashPilotHandoffConfigTest {
             val config = CashPilotHandoffConfig.fromFile(
                 file = handoffFile,
                 expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                 expectedHandoffSha = handoffSha,
                 allowNonPosixForTesting = true
             )
@@ -559,7 +580,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = badFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
@@ -580,7 +602,8 @@ class CashPilotHandoffConfigTest {
             val config = CashPilotHandoffConfig.fromFile(
                 file = goodHandoff,
                 expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                 expectedHandoffSha = handoffSha,
                 allowNonPosixForTesting = true
             )
@@ -621,7 +644,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = badFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
@@ -651,7 +675,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = legacyFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
@@ -679,7 +704,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = badFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
@@ -710,7 +736,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = badFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
@@ -769,7 +796,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = expiredFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
@@ -796,7 +824,8 @@ class CashPilotHandoffConfigTest {
                 CashPilotHandoffConfig.fromFile(
                     file = inlineFile,
                     expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                    expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                     expectedHandoffSha = sha,
                     allowNonPosixForTesting = true
                 )
@@ -822,7 +851,8 @@ class CashPilotHandoffConfigTest {
             val configWithoutApproval = CashPilotHandoffConfig.fromFile(
                 file = goodHandoff,
                 expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                 expectedHandoffSha = sha,
                 expectedLifecycle = "FINANCIAL_PAIRED_RUN",
                 rootApprovedHandoffSha = null,
@@ -833,7 +863,8 @@ class CashPilotHandoffConfigTest {
             val configWithApproval = CashPilotHandoffConfig.fromFile(
                 file = goodHandoff,
                 expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
-                expectedClientSha = "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+                expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
                 expectedHandoffSha = sha,
                 expectedLifecycle = "FINANCIAL_PAIRED_RUN",
                 rootApprovedHandoffSha = sha,
@@ -1126,5 +1157,158 @@ class CashPilotHandoffConfigTest {
         assertEquals("runtime_client_handoff.json", CashPilotHandoffConfig.EXPECTED_RUNTIME_HANDOFF_FILENAME)
         assertEquals("runtime_credentials.json", CashPilotHandoffConfig.EXPECTED_RUNTIME_CREDENTIALS_FILENAME)
         assertEquals("/_harness/readiness", CashPilotHandoffConfig.READINESS_PROBE_PATH)
+    }
+
+    @Test
+    fun testDistinctGenuinePubExecSuccess() {
+        val tempDir = createPrivateDir()
+        try {
+            val (handoffFile, _, _) = createValidFixtures(tempDir)
+            val handoffSha = CashPilotHandoffConfig.computeSha256(handoffFile.readBytes())
+            val config = CashPilotHandoffConfig.fromFile(
+                file = handoffFile,
+                expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
+                expectedHandoffSha = handoffSha,
+                allowNonPosixForTesting = true
+            )
+            assertEquals(FIXTURE_APPROVED_CLIENT_SHA, config.peerAndroidApprovedHeadSha)
+            assertEquals(FIXTURE_EXECUTABLE_CLIENT_SHA, config.peerAndroidExecutableHeadSha)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testMissingExternalExecutableShaRefusesBeforeCredentialsOrNetwork() {
+        val tempDir = createPrivateDir()
+        try {
+            val (handoffFile, _, _) = createValidFixtures(tempDir)
+            val handoffSha = CashPilotHandoffConfig.computeSha256(handoffFile.readBytes())
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = handoffFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = null,
+                    expectedHandoffSha = handoffSha,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have thrown for missing external executable SHA")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message?.contains(CashPilotHandoffConfig.ENV_EXPECTED_CLIENT_EXECUTABLE_SHA) == true)
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testWrongPublicationShaRefuses() {
+        val tempDir = createPrivateDir()
+        try {
+            val (handoffFile, _, _) = createValidFixtures(tempDir)
+            val handoffSha = CashPilotHandoffConfig.computeSha256(handoffFile.readBytes())
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = handoffFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = "1111111111111111111111111111111111111111",
+                    expectedClientExecutableSha = FIXTURE_EXECUTABLE_CLIENT_SHA,
+                    expectedHandoffSha = handoffSha,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have thrown for wrong publication SHA")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message?.contains("Peer Android approved publication HEAD pin mismatch") == true)
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testWrongExecutableShaRefuses() {
+        val tempDir = createPrivateDir()
+        try {
+            val (handoffFile, _, _) = createValidFixtures(tempDir)
+            val handoffSha = CashPilotHandoffConfig.computeSha256(handoffFile.readBytes())
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = handoffFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = FIXTURE_APPROVED_CLIENT_SHA,
+                    expectedClientExecutableSha = "2222222222222222222222222222222222222222",
+                    expectedHandoffSha = handoffSha,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have thrown for wrong executable SHA")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message?.contains("Peer Android executable HEAD pin mismatch") == true)
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testSwappedPublicationAndExecutablePinsRefuse() {
+        val tempDir = createPrivateDir()
+        try {
+            val (handoffFile, _, _) = createValidFixtures(tempDir)
+            val handoffSha = CashPilotHandoffConfig.computeSha256(handoffFile.readBytes())
+            try {
+                CashPilotHandoffConfig.fromFile(
+                    file = handoffFile,
+                    expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                    expectedClientSha = FIXTURE_EXECUTABLE_CLIENT_SHA, // Swapped!
+                    expectedClientExecutableSha = FIXTURE_APPROVED_CLIENT_SHA, // Swapped!
+                    expectedHandoffSha = handoffSha,
+                    allowNonPosixForTesting = true
+                )
+                fail("Should have thrown for swapped publication and executable pins")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(
+                    e.message?.contains("Peer Android approved publication HEAD pin mismatch") == true ||
+                    e.message?.contains("Peer Android executable HEAD pin mismatch") == true
+                )
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testCurrent824PublicationAnd753ExecutableRegression() {
+        val tempDir = createPrivateDir()
+        try {
+            val (goodHandoff, _, _) = createValidFixtures(tempDir)
+            val updatedJson = goodHandoff.readText(Charsets.UTF_8)
+                .replace(
+                    "\"peer_android_approved_head_sha\": \"019ea39af09558c2622356cb22235572747e3ddc\",",
+                    "\"peer_android_approved_head_sha\": \"824cb7dac1f17a3530f178134f9d9168e7e50b94\",",
+                )
+                .replace(
+                    "\"peer_android_executable_head_sha\": \"ddfc75536e647c65a6a7e8868c9336cee93769ec\",",
+                    "\"peer_android_executable_head_sha\": \"753fb5133e28acb1284370dd7a84e3929e7b1a7d\",",
+                )
+            val regressionFile = createPrivateFile(tempDir, "regression_handoff.json", updatedJson)
+            val regSha = CashPilotHandoffConfig.computeSha256(regressionFile.readBytes())
+
+            val config = CashPilotHandoffConfig.fromFile(
+                file = regressionFile,
+                expectedBackendSha = "4a2e0b28f8b4a4bced4a4aed3e7f69abaf7c3ac1",
+                expectedClientSha = "824cb7dac1f17a3530f178134f9d9168e7e50b94",
+                expectedClientExecutableSha = "753fb5133e28acb1284370dd7a84e3929e7b1a7d",
+                expectedHandoffSha = regSha,
+                allowNonPosixForTesting = true
+            )
+            assertEquals("824cb7dac1f17a3530f178134f9d9168e7e50b94", config.peerAndroidApprovedHeadSha)
+            assertEquals("753fb5133e28acb1284370dd7a84e3929e7b1a7d", config.peerAndroidExecutableHeadSha)
+            assertEquals("753fb5133e28acb1284370dd7a84e3929e7b1a7d", config.peerAndroidHeadSha)
+        } finally {
+            tempDir.deleteRecursively()
+        }
     }
 }

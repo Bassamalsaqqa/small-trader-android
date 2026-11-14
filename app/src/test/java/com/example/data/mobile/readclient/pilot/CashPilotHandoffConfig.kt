@@ -142,7 +142,9 @@ class CashPilotHandoffConfig private constructor(
     val expiresAt: String,
     val backendPins: Map<String, String>,
     val backendExecutionHeadSha: String,
-    val peerAndroidHeadSha: String,
+    val peerAndroidApprovedHeadSha: String,
+    val peerAndroidExecutableHeadSha: String,
+    val peerAndroidHeadSha: String = peerAndroidExecutableHeadSha,
     val endpoints: CashPilotEndpoints,
     val fixture: CashPilotFixture,
     val credentialsPath: String,
@@ -161,7 +163,7 @@ class CashPilotHandoffConfig private constructor(
     override fun toString(): String =
         "CashPilotHandoffConfig(schemaVersion='$schemaVersion', scope='$handoffScope', " +
                 "lifecyclePhase='$lifecyclePhase', baseUrl='$baseUrl', " +
-                "backendExecutionHead='$backendExecutionHeadSha', peerAndroidHead='$peerAndroidHeadSha', " +
+                "backendExecutionHead='$backendExecutionHeadSha', peerAndroidApprovedHead='$peerAndroidApprovedHeadSha', peerAndroidExecutableHead='$peerAndroidExecutableHeadSha', " +
                 "credentialsPath='[REDACTED_PATH]', credentials=$credentials, " +
                 "isProvisionOnly=$isProvisionOnly, isReadinessOnly=$isReadinessOnly, isFinancialApproved=$isFinancialApproved)"
 
@@ -169,6 +171,7 @@ class CashPilotHandoffConfig private constructor(
         const val ENV_CASH_PILOT_HANDOFF = "SMALL_TRADER_CASH_PILOT_HANDOFF"
         const val ENV_EXPECTED_BACKEND_SHA = "SMALL_TRADER_EXPECTED_BACKEND_SHA"
         const val ENV_EXPECTED_CLIENT_SHA = "SMALL_TRADER_EXPECTED_CLIENT_SHA"
+        const val ENV_EXPECTED_CLIENT_EXECUTABLE_SHA = "SMALL_TRADER_EXPECTED_CLIENT_EXECUTABLE_SHA"
         const val ENV_EXPECTED_HANDOFF_SHA = "SMALL_TRADER_EXPECTED_HANDOFF_SHA"
         const val ENV_EXPECTED_LIFECYCLE = "SMALL_TRADER_EXPECTED_LIFECYCLE"
         const val ENV_ROOT_APPROVED_HANDOFF_SHA = "SMALL_TRADER_ROOT_APPROVED_HANDOFF_SHA"
@@ -459,6 +462,7 @@ class CashPilotHandoffConfig private constructor(
             file: File,
             expectedBackendSha: String? = null,
             expectedClientSha: String? = null,
+            expectedClientExecutableSha: String? = null,
             expectedHandoffSha: String? = null,
             expectedLifecycle: String? = null,
             rootApprovedHandoffSha: String? = null,
@@ -472,6 +476,11 @@ class CashPilotHandoffConfig private constructor(
             val clientShaEnv = expectedClientSha ?: System.getenv(ENV_EXPECTED_CLIENT_SHA)?.trim()
             require(!clientShaEnv.isNullOrBlank() && HEX_40_REGEX.matches(clientShaEnv)) {
                 "Safety invariant violation: $ENV_EXPECTED_CLIENT_SHA is mandatory (40 hex lowercase); never trust handoff alone"
+            }
+
+            val clientExecShaEnv = expectedClientExecutableSha ?: System.getenv(ENV_EXPECTED_CLIENT_EXECUTABLE_SHA)?.trim()
+            require(!clientExecShaEnv.isNullOrBlank() && HEX_40_REGEX.matches(clientExecShaEnv)) {
+                "Safety invariant violation: $ENV_EXPECTED_CLIENT_EXECUTABLE_SHA is mandatory (40 hex lowercase); never trust handoff alone"
             }
 
             val handoffShaEnv = expectedHandoffSha ?: System.getenv(ENV_EXPECTED_HANDOFF_SHA)?.trim()
@@ -490,6 +499,7 @@ class CashPilotHandoffConfig private constructor(
                 actualHandoffSha = actualHandoffSha,
                 expectedBackendSha = backendShaEnv,
                 expectedClientSha = clientShaEnv,
+                expectedClientExecutableSha = clientExecShaEnv,
                 expectedLifecycle = expectedLifecycle ?: System.getenv(ENV_EXPECTED_LIFECYCLE)?.trim(),
                 rootApprovedHandoffSha = rootApprovedHandoffSha ?: System.getenv(ENV_ROOT_APPROVED_HANDOFF_SHA)?.trim(),
                 allowNonPosixForTesting = allowNonPosixForTesting
@@ -501,6 +511,7 @@ class CashPilotHandoffConfig private constructor(
             actualHandoffSha: String,
             expectedBackendSha: String,
             expectedClientSha: String,
+            expectedClientExecutableSha: String,
             expectedLifecycle: String? = null,
             rootApprovedHandoffSha: String? = null,
             allowNonPosixForTesting: Boolean = false
@@ -596,12 +607,17 @@ class CashPilotHandoffConfig private constructor(
             }
 
             val backendExecutionHeadSha = pinsMap["backend_execution_head_sha"] ?: ""
-            val peerAndroidHeadSha = pinsMap["peer_android_executable_head_sha"] ?: ""
+            val peerAndroidApprovedHeadSha = pinsMap["peer_android_approved_head_sha"] ?: ""
+            val peerAndroidExecutableHeadSha = pinsMap["peer_android_executable_head_sha"] ?: ""
+
             require(backendExecutionHeadSha.equals(expectedBackendSha, ignoreCase = true)) {
                 "Backend execution HEAD pin mismatch: expected $expectedBackendSha, got $backendExecutionHeadSha"
             }
-            require(peerAndroidHeadSha.equals(expectedClientSha, ignoreCase = true)) {
-                "Peer Android executable HEAD pin mismatch: expected $expectedClientSha, got $peerAndroidHeadSha"
+            require(peerAndroidApprovedHeadSha.equals(expectedClientSha, ignoreCase = true)) {
+                "Peer Android approved publication HEAD pin mismatch: expected $expectedClientSha, got $peerAndroidApprovedHeadSha"
+            }
+            require(peerAndroidExecutableHeadSha.equals(expectedClientExecutableSha, ignoreCase = true)) {
+                "Peer Android executable HEAD pin mismatch: expected $expectedClientExecutableSha, got $peerAndroidExecutableHeadSha"
             }
 
             // Endpoints
@@ -974,7 +990,9 @@ class CashPilotHandoffConfig private constructor(
                 expiresAt = expiresAt,
                 backendPins = pinsMap,
                 backendExecutionHeadSha = backendExecutionHeadSha,
-                peerAndroidHeadSha = peerAndroidHeadSha,
+                peerAndroidApprovedHeadSha = peerAndroidApprovedHeadSha,
+                peerAndroidExecutableHeadSha = peerAndroidExecutableHeadSha,
+                peerAndroidHeadSha = peerAndroidExecutableHeadSha,
                 endpoints = endpoints,
                 fixture = fixture,
                 credentialsPath = credentialsPath,

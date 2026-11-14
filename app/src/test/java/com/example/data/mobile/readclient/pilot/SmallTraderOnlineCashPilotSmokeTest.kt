@@ -459,7 +459,9 @@ class SmallTraderOnlineCashPilotSmokeTest {
             if (config != null) {
                 val evidence = CashPilotEvidence(
                     backendHead = config.backendExecutionHeadSha,
-                    clientHead = config.peerAndroidHeadSha,
+                    clientHead = config.peerAndroidExecutableHeadSha,
+                    clientPublicationHead = config.peerAndroidApprovedHeadSha,
+                    clientExecutableHead = config.peerAndroidExecutableHeadSha,
                     manifestDigest = config.handoffFileSha256,
                     baseUrl = config.baseUrl,
                     lifecycleGrant = if (config.isFinancialApproved) CashPilotHandoffConfig.LIFECYCLE_FINANCIAL_PAIRED_RUN else CashPilotHandoffConfig.LIFECYCLE_READINESS_ONLY,

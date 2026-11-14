@@ -23,6 +23,8 @@ data class CashPilotEvidence(
     val timestamp: String = currentIsoUtcTimestamp(),
     val backendHead: String,
     val clientHead: String? = null,
+    val clientPublicationHead: String? = null,
+    val clientExecutableHead: String? = null,
     val manifestDigest: String,
     val baseUrl: String,
     val lifecycleGrant: String,
