@@ -73,6 +73,15 @@
     "suites": 15,
     "tests": 168,
     "current_execution_claimed": 0,
-    "status": "awaiting_qa_rerun"
+    "status": "focused_execution_passed_independent_source_review_pending"
+  },
+  "current_execution": {
+    "source": "85d8c4e9d9f1e125f00d720a6a38831507da1550",
+    "suites": 15,
+    "tests": 168,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "evidence": "supervisor-qa/manifest.json"
   }
 }

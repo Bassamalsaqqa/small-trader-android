@@ -63,3 +63,6 @@ This slice resolves GitHub PR 21 review `5895663783` and independent review `589
 - `lint-results-debug.xml`: Android lint results baseline.
 
 Supervisor follow-up adds a separate-connection writer barrier after page caching, with bounded joins outside inspection. This test and removal-of-transaction sensitivity still require execution; source inspection alone is not race qualification. Auth-blocked queues now assert zero decrypt probes.
+
+## Supervisor execution follow-up
+At executable source `85d8c4e9d9f1e125f00d720a6a38831507da1550`, root ran 31 health tests and then 168 tests across 15 focused suites, all passing. Earlier two infrastructure failures and the subsequent 31-test/two-failure source run are retained separately. Removing only the outer transaction caused the dedicated contention regression to fail with the expected writer-committed assertion; source was restored byte-exact. See `supervisor-qa/manifest.json` for source hashes, log hashes, commands/settings and scope. This follow-up supersedes the earlier unexecuted-inventory status; it is not a fresh lint/build/device or financial qualification. Independent review of retained-key and legacy-validation fixes remains pending.
