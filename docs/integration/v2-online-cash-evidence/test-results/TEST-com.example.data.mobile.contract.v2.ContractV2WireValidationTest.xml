@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-11-14T17:09:03.561Z" hostname="pasta-hp-worker" time="0.101">
+<testsuite name="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-11-14T17:45:47.904Z" hostname="pasta-hp-worker" time="0.12">
   <properties/>
-  <testcase name="testLineLimitEnforcedOnWireAndCopy" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.064"/>
-  <testcase name="testPaymentPrecisionEnforcedDuringProfileConstruction" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.003"/>
+  <testcase name="testLineLimitEnforcedOnWireAndCopy" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.082"/>
+  <testcase name="testPaymentPrecisionEnforcedDuringProfileConstruction" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.002"/>
   <testcase name="testCheck32bContextCurrencyMinorUnitsBooleanFalseRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.002"/>
-  <testcase name="testCheck31aUnknownRootFieldRejectedBeforeProjection" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.002"/>
-  <testcase name="testCheck32eNonUlidUuidInContextRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.006"/>
-  <testcase name="testContextIdentityTrailingNewlineRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.002"/>
-  <testcase name="testCheck32dContextMissingKeyRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.001"/>
-  <testcase name="testCheck31bUnknownLineFieldRejectedBeforeProjection" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.008"/>
-  <testcase name="testCheck32aContextCurrencyMinorUnitsBooleanTrueRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.001"/>
+  <testcase name="testCheck31aUnknownRootFieldRejectedBeforeProjection" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.003"/>
+  <testcase name="testCheck32eNonUlidUuidInContextRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.005"/>
+  <testcase name="testContextIdentityTrailingNewlineRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.001"/>
+  <testcase name="testCheck32dContextMissingKeyRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.002"/>
+  <testcase name="testCheck31bUnknownLineFieldRejectedBeforeProjection" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.007"/>
+  <testcase name="testCheck32aContextCurrencyMinorUnitsBooleanTrueRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.002"/>
   <testcase name="testCheck32cContextWithExtraKeyRejected" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.001"/>
-  <testcase name="testCheck31cUnknownPaymentFieldRejectedBeforeProjection" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.002"/>
-  <testcase name="testCheck30aMissingTaxRateIdThrowsNeverImplicitNoTax" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.003"/>
+  <testcase name="testCheck31cUnknownPaymentFieldRejectedBeforeProjection" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.001"/>
+  <testcase name="testCheck30aMissingTaxRateIdThrowsNeverImplicitNoTax" classname="com.example.data.mobile.contract.v2.ContractV2WireValidationTest" time="0.004"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

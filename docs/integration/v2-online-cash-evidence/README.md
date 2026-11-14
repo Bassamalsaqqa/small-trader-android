@@ -1,86 +1,55 @@
-# V2 Online Cash Client & Readiness Verification Evidence (PR #23)
+# V2 Online Cash Client Evidence Artifacts
 
-## Qualification Scope
-> **QUALIFIED for Android Client Implementation ONLY**
-> The qualification status and test verification recorded herein apply strictly to the Android mobile client implementation and its local hermetic unit/mock tests under PR #23. It does NOT denote qualification across all financial backend systems or complete end-to-end financial qualification.
+This directory contains hermetic unit test evidence, execution logs, and cryptographic manifests for Android V2 Online Cash and Status Client under PR #23.
 
-## Architectural Boundaries and Readiness Refactoring
+## Status: FINANCIAL_PILOT_HOLD
+- **Execution Source Commit**: `9f7de1478c27b68055e56dc169e90394486af5a7`
+- **Scope**: Client implementation and unit QA qualification.
+- **Financial Status**: Online cash pilot execution remains on **HOLD** pending coordinated disposal pairing with backend Laravel PR #102.
+- **Resource Bounds**: `--max-workers=1`, `ActiveProcessorCount=2`, `SerialGC`, `1536m` in-process.
 
-This directory records verified execution evidence, test suite outputs, logs, and architectural boundaries for the Mobile V2 Online Cash client implementation under PR #23 at commit `ad10a4ceaa301f7d272cdf4702414f63a69a20c7`.
+## Summary of Executed Test Suites (Commit 9f7de14)
+- **Total Test Suites**: 18
+- **Total Tests**: 285
+- **Passed**: 283
+- **Skipped**: 2 (intentional opt-in paired smoke tests via `Assume.assumeTrue`)
+- **Failures**: 0
+- **Errors**: 0
+- **Duration**: 21s
 
-### Review Remediation and Code Alignment
-1. **Fake Backend Route Helper Removed**:
-   Removed Kotlin `handleChildReadinessRoute` and `ReadinessRouteResult` from `CashPilotHandoffConfig.kt`. These previously mirrored PHP backend route handling (`DisposableMobileV2BackendHarness::handleChildReadinessRoute`). HTTP route constants 405 and 403 were likewise removed.
-2. **Authoritative Client Readiness Probe Extracted**:
-   Implemented `CashPilotHandoffConfig.executeReadinessProbe(...)` returning `ReadinessProbeResult(statusCode, latencyMs, body, status, nonce)`. It enforces:
-   - Loopback GET request with redirect following strictly disabled (`instanceFollowRedirects = false`).
-   - Response status HTTP 200 (rejecting redirects and error codes).
-   - Content-Type `application/json` (permitting charset suffix).
-   - Bounded payload consumption (<= 64 KiB, `maxSizeBytes = 65536`) with oversized payload rejection.
-   - Strict JSON parsing and object validation.
-   - Status field equals `"ready"`.
-   - Nonce matching expected nonce verbatim.
-3. **Single Real Code Path**:
-   `SmallTraderOnlineCashPilotSmokeTest.kt` Step 3 was refactored to call `CashPilotHandoffConfig.executeReadinessProbe(...)` directly, ensuring the smoke harness and unit tests exercise the identical client implementation.
-4. **Hermetic Client Response Validation Tests via MockWebServer**:
-   In `CashPilotHandoffConfigTest.kt`, removed the 4 fake mirror cases and replaced them with 9 hermetic unit tests using OkHttp `MockWebServer`:
-   - `readinessProbe_success_200MimeNonceMatching`
-   - `readinessProbe_redirectRejection_throwsException` (verifies HTTP 302 rejection)
-   - `readinessProbe_oversizedResponse_throwsException` (verifies >64 KiB rejection)
-   - `readinessProbe_invalidJson_throwsException` (verifies malformed JSON rejection)
-   - `readinessProbe_nonceMismatch_throwsException` (verifies nonce mismatch rejection)
-   - `readinessProbe_statusNotReady_throwsException` (verifies non-ready status rejection)
-   - `readinessProbe_nonJsonMime_throwsException` (verifies non-JSON MIME rejection)
-   - `readinessProbe_non200StatusCode_throwsException` (verifies HTTP 503 rejection)
-   - `runtimeFiles_constantsMatchHarness` (verifies runtime handoff file names and probe path)
-5. **Raw Task Execution Logs**:
-   - `first-0c0-test-failure.log`: Contemporaneous raw log from initial execution of commit `0c0b1bb`, where string template interpolation was momentarily missing in exception messages.
-   - `ad10-test-execution.log`: Full raw log from fresh rerun with `--rerun-tasks` at commit `ad10a4c`, verifying 33 actionable tasks executed, BUILD SUCCESSFUL in 2m 19s.
-   - `first-compiler-failure.log`: Historical syntax error log from early quote escaping fix.
+### Suite Breakdown
+1. `com.example.data.mobile.contract.v2.ContractV2WireValidationTest` (12 tests - PASS)
+2. `com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest` (6 tests - PASS)
+3. `com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest` (5 tests - PASS)
+4. `com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest` (11 tests - PASS)
+5. `com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest` (15 tests - PASS)
+6. `com.example.data.mobile.contract.v2.SaleCommitResponseTest` (6 tests - PASS)
+7. `com.example.data.mobile.contract.v2.SaleEventStatusResponseTest` (5 tests - PASS)
+8. `com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest` (38 tests - PASS)
+   - Includes regressions for wrong total status recovery, null payment status recovery, commit over-tender mismatch, and null payment_receipt_number.
+9. `com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest` (37 tests - PASS)
+   - Includes exact case-insensitive base MIME matching regressions.
+10. `com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest` (19 tests - PASS)
+11. `com.example.data.mobile.readclient.pilot.SmallTraderOnlineCashPilotSmokeTest` (2 tests: 1 PASS, 1 SKIPPED)
+    - `testCashPilotFinancialAcceptanceEnforcement`: PASS (proves PostedWithoutPaymentReference and unconfirmed states fail acceptance).
+    - `executePairedOnlineCashPilotSmoke`: SKIPPED (requires active pairing handoff).
+12. `com.example.data.mobile.readclient.pilot.SmallTraderReadPilotSmokeTest` (1 test - SKIPPED)
+13. `com.example.data.mobile.session.SecureStaffSessionStoreTest` (37 tests - PASS)
+14. `com.example.data.mobile.session.StaffSessionCoordinatorTest` (51 tests - PASS)
+15. `com.example.data.mobile.readclient.http.OkHttpMockWebServerTest` (14 tests - PASS)
+16. `com.example.data.mobile.readclient.http.OkHttpTransportLoopbackServerTest` (12 tests - PASS)
+17. `com.example.data.mobile.readclient.http.OkHttpTransportSecurityTest` (12 tests - PASS)
+18. `com.example.data.mobile.readclient.http.PlatformHttpUrlConnectionAmbientEvidenceTest` (2 tests - PASS)
 
-### Network Isolation and Resource Bounds
-- **Backend Readiness Worker**: Backend worker `6e8c` completed with exit code 0 (GET 200 nonce CA+SAN in 8.236s), verified schema 0 root cleanup, and closed ports 18080 and 18443. All runtime handoff and TLS files were deleted before Android QA execution.
-- **Zero External HTTP Calls**: No external HTTP requests were made. Both paired smoke tests (`SmallTraderOnlineCashPilotSmokeTest` and `SmallTraderReadPilotSmokeTest`) safely skipped via `Assume.assumeTrue`.
-- **Resource Constraints**:
-  - Max workers: 1 (`--max-workers=1`, `-Dorg.gradle.workers.max=1`)
-  - Active processor count: 2 (`-XX:ActiveProcessorCount=2`)
-  - Garbage collector: SerialGC (`-XX:+UseSerialGC`)
-  - Heap: 1536 MiB (`-Xmx1536m`)
-  - Daemon: Disabled (`--no-daemon`)
-  - Execution mode: Single-process in-line task execution.
-- **Production Code Unchanged**: `app/src/main` is 100% untouched and verified identical to `ddfc75536e647c65a6a7e8868c9336cee93769ec`.
+## Historical Evidence Separation
+- `historical-76/`: 8 suites (76 tests) from initial baseline `f697451`.
+- `historical-171-ddfc/`: 12 suites (171 tests) from model foundation `ddfc75536e647c65a6a7e8868c9336cee93769ec`.
+- `historical-238-ad10/`: 14 suites (238 tests) from readiness helper refactor `ad10a4ceaa301f7d272cdf4702414f63a69a20c7`.
+- `test-results/`: 18 suites (285 tests) current head `9f7de1478c27b68055e56dc169e90394486af5a7`.
 
----
-
-## Test Suite Structure & Historical Separation
-
-### 1. Current Verified Execution: 14 Suites / 238 Tests (Commit `ad10a4c`)
-Stored in `test-results/`:
-- `TEST-com.example.data.mobile.contract.v2.ContractV2WireValidationTest.xml` (12 tests, 0 failures, 0 skipped)
-- `TEST-com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest.xml` (6 tests, 0 failures, 0 skipped)
-- `TEST-com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest.xml` (5 tests, 0 failures, 0 skipped)
-- `TEST-com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest.xml` (11 tests, 0 failures, 0 skipped)
-- `TEST-com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest.xml` (15 tests, 0 failures, 0 skipped)
-- `TEST-com.example.data.mobile.contract.v2.SaleCommitResponseTest.xml` (6 tests, 0 failures, 0 skipped)
-- `TEST-com.example.data.mobile.contract.v2.SaleEventStatusResponseTest.xml` (5 tests, 0 failures, 0 skipped)
-- `TEST-com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest.xml` (34 tests, 0 failures, 0 skipped)
-- `TEST-com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest.xml` (35 tests, 0 failures, 0 skipped)
-- `TEST-com.example.data.mobile.readclient.pilot.ReadPilotHandoffConfigTest.xml` (19 tests, 0 failures, 0 skipped)
-- `TEST-com.example.data.mobile.readclient.pilot.SmallTraderOnlineCashPilotSmokeTest.xml` (1 test, 0 failures, 1 skipped)
-- `TEST-com.example.data.mobile.readclient.pilot.SmallTraderReadPilotSmokeTest.xml` (1 test, 0 failures, 1 skipped)
-- `TEST-com.example.data.mobile.session.SecureStaffSessionStoreTest.xml` (37 tests, 0 failures, 0 skipped)
-- `TEST-com.example.data.mobile.session.StaffSessionCoordinatorTest.xml` (51 tests, 0 failures, 0 skipped)
-- **Total**: 14 suites, 238 tests (236 passed, 2 skipped via `Assume.assumeTrue`, 0 failures, 0 errors).
-
-### 2. Historical Baseline: 12 Suites / 171 Tests (Commit `ddfc755`)
-Stored in `historical-171-ddfc/` for audit continuity:
-- 12 suites, 171 tests (170 passed, 1 skipped, 0 failures, 0 errors).
-
-### 3. Historical Baseline: 8 Suites / 76 Tests (Commit `f697451`)
-Stored in `historical-76/` for provenance continuity:
-- 8 suites, 76 tests (76 passed, 0 failures, 0 errors).
-
----
-
-## Heavy QA Lease Release
-The short exclusive hermetic QA lease granted to Android is **formally released**. Subsequent work operates in the documentation lane only.
+## Execution Logs
+- `9f7d-test-execution.log`: Current 18-suite hermetic execution log (285 tests).
+- `ad10-test-execution.log`: Historical 14-suite rerun log (238 tests).
+- `first-0c0-test-failure.log`: Contemporaneous failure log from commit `0c0b1bb` showing string interpolation defect.
+- `manifest.json`: Cryptographic SHA256 hashes of all XML artifacts and logs.
+- `summary.json`: Structured machine-readable qualification and audit record.
