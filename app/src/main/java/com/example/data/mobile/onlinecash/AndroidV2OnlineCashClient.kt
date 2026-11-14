@@ -13,6 +13,8 @@ import com.example.data.mobile.readclient.ReadClientErrorResponse
 import com.example.data.mobile.readclient.ReadClientTransport
 import com.example.data.mobile.readclient.TransportRequest
 import com.example.data.mobile.readclient.ValidationUtils
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 import java.util.concurrent.CancellationException
 
 /**
@@ -154,8 +156,21 @@ class AndroidV2OnlineCashClient(
         expectedPayloadDigest: PayloadDigest,
         canonicalBytes: ByteArray
     ): OnlineCashSubmitResult {
+        require(canonicalBytes.isNotEmpty()) { "canonicalBytes cannot be empty" }
+        require(canonicalBytes.size <= 1024 * 1024) { "Payload exceeds 1 MiB bound: ${canonicalBytes.size} bytes" }
+        require(expectedPayloadDigest.value.isNotEmpty()) { "expectedPayloadDigest must not be empty" }
+
+        val decoder = Charsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+        val charBuffer = try {
+            decoder.decode(ByteBuffer.wrap(canonicalBytes.clone()))
+        } catch (e: Exception) {
+            return OnlineCashSubmitResult.ParseFailure("Malformed UTF-8 payload: ${e.message}")
+        }
+        val bodyString = charBuffer.toString()
+
         val path = EndpointSecurity.onlineCashSalePath(companyId)
-        val bodyString = String(canonicalBytes.clone(), Charsets.UTF_8)
 
         val transportRequest = TransportRequest(
             method = HttpMethod.POST,
@@ -382,8 +397,11 @@ class AndroidV2OnlineCashClient(
                         if (statusResp.companyId != companyId) {
                             return OnlineCashExecutionResult.ParseFailure("Tenant parity violation in status recovery")
                         }
-                        if (statusResp.payloadDigest != null && statusResp.payloadDigest != expectedPayloadDigest) {
-                            return OnlineCashExecutionResult.ParseFailure("Payload digest mismatch in status recovery")
+                        if (statusResp.officialInvoice == null) {
+                            return OnlineCashExecutionResult.ParseFailure("Posted status missing official_invoice")
+                        }
+                        if (statusResp.payloadDigest == null || statusResp.payloadDigest != expectedPayloadDigest) {
+                            return OnlineCashExecutionResult.ParseFailure("Payload digest missing or mismatch in status recovery")
                         }
                         OnlineCashExecutionResult.Success(
                             commitResponse = null,

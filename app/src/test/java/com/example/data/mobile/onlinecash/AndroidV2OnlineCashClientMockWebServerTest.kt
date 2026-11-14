@@ -4,8 +4,10 @@ import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.PayloadDigest
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.readclient.http.OkHttpTransport
-import com.example.data.mobile.sync.SyncStatusOutcome
-import com.example.data.mobile.sync.SyncSubmitOutcome
+import com.example.data.mobile.contract.v2.OnlineSaleContext
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import org.junit.Assert.assertThrows
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
@@ -406,83 +408,70 @@ class AndroidV2OnlineCashClientMockWebServerTest {
         assertEquals("UNAUTHENTICATED", auth.code)
     }
 
-    @Test
-    fun testSaleSyncGatewayAdapterParity() {
-        server!!.enqueue(
-            MockResponse()
-                .setResponseCode(200)
-                .setHeader("Content-Type", "application/json")
-                .setBody(sampleStatusPostedJson)
-        )
+    // -------------------------------------------------------------
+    // Online Cash Orchestrator Integration Tests
+    // -------------------------------------------------------------
 
-        val client = createClient()
-        val gateway = OnlineCashSaleSyncGateway(client) { validToken }
+    private val authCompanyId = ServerUlid.parse("01M7CZPF6TP283F3ZRXF5P8GT2")
+    private val authActorId = ServerUlid.parse("01M7CZPF6TP283F3ZRXF5P8GT1")
+    private val authEventId = ClientUuid.parse("c0686be5-888f-4890-90bf-1f05f416a19a")
+    private val authDeviceId = ClientUuid.parse("f81d4fae-7dec-11d0-a765-00a0c91e6bf6")
+    private val authDigest = PayloadDigest.parse("sha256:0847e10d89777e103252ebfa2d27f89a95832a5d70e01af57afe6423f703c630")
 
-        val statusOutcome = gateway.checkStatus(
-            companyId = companyId,
-            actorId = ServerUlid.parse("01JCV8X9M11111111111111111"),
-            deviceId = ClientUuid.parse("8e2b8bc6-f80c-4034-8c88-59368d1f2e10"),
-            clientEventId = clientEventId,
-            payloadDigest = validDigest
-        )
+    private val sampleContext = OnlineSaleContext(
+        companyId = authCompanyId,
+        actorId = authActorId,
+        currencyMinorUnits = 2
+    )
 
-        assertTrue("Expected SyncStatusOutcome.Posted", statusOutcome is SyncStatusOutcome.Posted)
-        val ack = (statusOutcome as SyncStatusOutcome.Posted).ack
-        assertEquals(companyId, ack.companyId)
-        assertEquals(clientEventId, ack.clientEventId)
-        assertEquals("01JCV8X9ME7890123456789ABC", ack.invoiceUlid.value)
-    }
+    private val syntheticRawWirePayload = """{
+        "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+        "device_id": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
+        "customer_id": "01M7CZPF6TP283F3ZRXF5P8GT3",
+        "warehouse_id": "01M7CZPF6TP283F3ZRXF5P8GT4",
+        "currency": "ILS",
+        "lines": [
+            {
+                "product_id": "01M7CZPF6TP283F3ZRXF5P8GT5",
+                "product_unit_id": "01M7CZPF6TP283F3ZRXF5P8GT6",
+                "conversion_to_base": "1.000000",
+                "quantity": "1.000000",
+                "unit_price": "50.000000",
+                "tax_rate_id": "01M7CZPF6TP283F3ZRXF5P8GT7",
+                "tax_rate": "16.000000",
+                "tax_inclusive": false
+            }
+        ],
+        "payment": {
+            "settlement_mode": "full",
+            "payment_method": "cash",
+            "cash_account_id": "01M7CZPF6TP283F3ZRXF5P8GT8",
+            "amount": "58.000000"
+        }
+    }""".toByteArray(Charsets.UTF_8)
+
+    private val syntheticCommitJson = """{
+        "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+        "status": "posted",
+        "invoice_id": "01M7CZPF6TP283F3ZRXF5P8GT9",
+        "invoice_number": "INV-2026-00099",
+        "payment_id": "01M7CZPF6TP283F3ZRXF5P8GTA",
+        "payment_receipt_number": "RCT-2026-00099",
+        "grand_total": "58.000000",
+        "amount_paid": "58.000000",
+        "change_returned": "0.000000",
+        "posted_at": "2026-11-14T12:00:00Z"
+    }"""
 
     @Test
     fun testSubmitAuthoritativeSyntheticTemplateWirePayload() {
-        val authCompanyId = ServerUlid.parse("01M7CZPF6TP283F3ZRXF5P8GT2")
-        val authEventId = ClientUuid.parse("c0686be5-888f-4890-90bf-1f05f416a19a")
-        val authDigest = PayloadDigest.parse("sha256:0847e10d89777e103252ebfa2d27f89a95832a5d70e01af57afe6423f703c630")
-
-        val rawWirePayload = """{
-            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
-            "device_id": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
-            "customer_id": "01M7CZPF6TP283F3ZRXF5P8GT3",
-            "warehouse_id": "01M7CZPF6TP283F3ZRXF5P8GT4",
-            "currency": "ILS",
-            "lines": [
-                {
-                    "product_id": "01M7CZPF6TP283F3ZRXF5P8GT5",
-                    "product_unit_id": "01M7CZPF6TP283F3ZRXF5P8GT6",
-                    "conversion_to_base": "1.000000",
-                    "quantity": "1.000000",
-                    "unit_price": "50.000000",
-                    "tax_rate_id": "01M7CZPF6TP283F3ZRXF5P8GT7",
-                    "tax_rate": "16.000000",
-                    "tax_inclusive": false
-                }
-            ],
-            "payment": {
-                "settlement_mode": "full",
-                "payment_method": "cash",
-                "cash_account_id": "01M7CZPF6TP283F3ZRXF5P8GT8",
-                "amount": "58.000000"
-            }
-        }""".toByteArray(Charsets.UTF_8)
-
-        val commitJson = """{
-            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
-            "status": "posted",
-            "invoice_id": "01M7CZPF6TP283F3ZRXF5P8GT9",
-            "invoice_number": "INV-2026-00099",
-            "payment_id": "01M7CZPF6TP283F3ZRXF5P8GTA",
-            "payment_receipt_number": "RCT-2026-00099",
-            "grand_total": "58.000000",
-            "amount_paid": "58.000000",
-            "change_returned": "0.000000",
-            "posted_at": "2026-11-14T12:00:00Z"
-        }"""
+        val rawWirePayload = syntheticRawWirePayload
 
         server!!.enqueue(
             MockResponse()
                 .setResponseCode(201)
                 .setHeader("Content-Type", "application/json")
-                .setBody(commitJson)
+                .setBody(syntheticCommitJson)
         )
 
         val client = createClient()
@@ -504,5 +493,556 @@ class AndroidV2OnlineCashClientMockWebServerTest {
         assertNotNull(recorded)
         assertEquals("POST", recorded!!.method)
         assertEquals("/api/mobile/v2/companies/01M7CZPF6TP283F3ZRXF5P8GT2/sales/online-cash", recorded.path)
+    }
+
+    @Test
+    fun testOnlineOrchestration7KeyRawProfileSyntheticFixtureSuccess() {
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(201)
+                .setHeader("Content-Type", "application/json")
+                .setBody(syntheticCommitJson)
+        )
+
+        val client = createClient()
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = { 1L }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        assertTrue("Expected ConfirmedFinancialSuccess", result is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess)
+        val receipt = (result as OnlineCashOrchestrationResult.ConfirmedFinancialSuccess).receipt
+        assertEquals(authEventId, receipt.clientEventId)
+        assertEquals(authCompanyId, receipt.companyId)
+        assertEquals("01M7CZPF6TP283F3ZRXF5P8GT9", receipt.invoiceId.value)
+        assertEquals("01M7CZPF6TP283F3ZRXF5P8GTA", receipt.paymentId?.value)
+        assertEquals("58.000000", receipt.grandTotal.toPlainString())
+        assertFalse(receipt.wasReplay)
+    }
+
+    @Test
+    fun testOnlineOrchestrationNullPaymentNoSyntheticFabrication() {
+        val commitWithNullPayment = """{
+            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+            "status": "posted",
+            "invoice_id": "01M7CZPF6TP283F3ZRXF5P8GT9",
+            "invoice_number": "INV-2026-00099",
+            "payment_id": null,
+            "payment_receipt_number": null,
+            "grand_total": "58.000000",
+            "amount_paid": "58.000000",
+            "change_returned": "0.000000",
+            "posted_at": "2026-11-14T12:00:00Z"
+        }"""
+
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(201)
+                .setHeader("Content-Type", "application/json")
+                .setBody(commitWithNullPayment)
+        )
+
+        val client = createClient()
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = { 1L }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        // Schema honesty: null payment_id MUST NOT be synthetically fabricated via invoice_id
+        assertTrue("Expected PostedWithoutPaymentReference", result is OnlineCashOrchestrationResult.PostedWithoutPaymentReference)
+        val receipt = (result as OnlineCashOrchestrationResult.PostedWithoutPaymentReference).receipt
+        assertNull("paymentId must be schema-honest null without synthetic fabrication", receipt.paymentId)
+        assertEquals("01M7CZPF6TP283F3ZRXF5P8GT9", receipt.invoiceId.value)
+    }
+
+    @Test
+    fun testOnlineOrchestrationLostAckStatusPostedMatchingDigestRecovery() {
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        val statusPostedJson = """{
+            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+            "company_id": "01M7CZPF6TP283F3ZRXF5P8GT2",
+            "status": "posted",
+            "payload_digest": "sha256:0847e10d89777e103252ebfa2d27f89a95832a5d70e01af57afe6423f703c630",
+            "official_invoice": {
+                "invoice_id": "01M7CZPF6TP283F3ZRXF5P8GT9",
+                "invoice_number": "INV-2026-00099",
+                "payment_id": "01M7CZPF6TP283F3ZRXF5P8GTA",
+                "payment_receipt_number": "RCT-2026-00099",
+                "grand_total": "58.000000",
+                "posted_at": "2026-11-14T12:00:00Z"
+            },
+            "conflict": null,
+            "queried_at": "2026-11-14T12:05:00Z"
+        }"""
+
+        // 1. Initial POST drops with socket disconnect
+        server!!.enqueue(
+            MockResponse()
+                .setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
+        )
+        // 2. Recovery GET status returns 200 posted with matching non-null payload digest
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(statusPostedJson)
+        )
+
+        val client = createClient(connectTimeoutMs = 1000, readTimeoutMs = 1000)
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = { 1L }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        assertTrue("Expected ConfirmedFinancialSuccess on status recovery", result is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess)
+        val receipt = (result as OnlineCashOrchestrationResult.ConfirmedFinancialSuccess).receipt
+        assertTrue(receipt.wasReplay)
+        assertEquals("01M7CZPF6TP283F3ZRXF5P8GT9", receipt.invoiceId.value)
+        assertEquals("01M7CZPF6TP283F3ZRXF5P8GTA", receipt.paymentId?.value)
+    }
+
+    @Test
+    fun testOnlineOrchestrationLostAckStatusPostedMissingDigestFailsClosed() {
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        val statusPostedNoDigestJson = """{
+            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+            "company_id": "01M7CZPF6TP283F3ZRXF5P8GT2",
+            "status": "posted",
+            "payload_digest": null,
+            "official_invoice": {
+                "invoice_id": "01M7CZPF6TP283F3ZRXF5P8GT9",
+                "invoice_number": "INV-2026-00099",
+                "payment_id": "01M7CZPF6TP283F3ZRXF5P8GTA",
+                "payment_receipt_number": "RCT-2026-00099",
+                "grand_total": "58.000000",
+                "posted_at": "2026-11-14T12:00:00Z"
+            },
+            "conflict": null,
+            "queried_at": "2026-11-14T12:05:00Z"
+        }"""
+
+        // 1. Initial POST drops
+        server!!.enqueue(
+            MockResponse()
+                .setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
+        )
+        // 2. Status response has payload_digest: null (missing digest)
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(statusPostedNoDigestJson)
+        )
+
+        val client = createClient(connectTimeoutMs = 1000, readTimeoutMs = 1000)
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = { 1L }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        // Must FAIL CLOSED on missing payload digest
+        assertTrue("Expected StatusDigestMismatch on null digest", result is OnlineCashOrchestrationResult.StatusDigestMismatch)
+        val mismatch = result as OnlineCashOrchestrationResult.StatusDigestMismatch
+        assertEquals(authDigest, mismatch.expected)
+        assertNull(mismatch.actual)
+    }
+
+    @Test
+    fun testOnlineOrchestrationLostAckStatusPostedWrongDigestFailsClosed() {
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        val statusPostedWrongDigestJson = """{
+            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+            "company_id": "01M7CZPF6TP283F3ZRXF5P8GT2",
+            "status": "posted",
+            "payload_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "official_invoice": {
+                "invoice_id": "01M7CZPF6TP283F3ZRXF5P8GT9",
+                "invoice_number": "INV-2026-00099",
+                "payment_id": "01M7CZPF6TP283F3ZRXF5P8GTA",
+                "payment_receipt_number": "RCT-2026-00099",
+                "grand_total": "58.000000",
+                "posted_at": "2026-11-14T12:00:00Z"
+            },
+            "conflict": null,
+            "queried_at": "2026-11-14T12:05:00Z"
+        }"""
+
+        // 1. Initial POST drops
+        server!!.enqueue(
+            MockResponse()
+                .setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
+        )
+        // 2. Status response has wrong digest
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(statusPostedWrongDigestJson)
+        )
+
+        val client = createClient(connectTimeoutMs = 1000, readTimeoutMs = 1000)
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = { 1L }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        // Must FAIL CLOSED on mismatched payload digest
+        assertTrue("Expected StatusDigestMismatch on wrong digest", result is OnlineCashOrchestrationResult.StatusDigestMismatch)
+    }
+
+    @Test
+    fun testOnlineOrchestrationLostAckStatusUnknownSafeExactReplay409() {
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        val statusUnknownJson = """{
+            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+            "company_id": "01M7CZPF6TP283F3ZRXF5P8GT2",
+            "status": "unknown",
+            "payload_digest": null,
+            "official_invoice": null,
+            "conflict": null,
+            "queried_at": "2026-11-14T12:05:00Z"
+        }"""
+
+        // 1. Initial POST drops
+        server!!.enqueue(
+            MockResponse()
+                .setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
+        )
+        // 2. Status check returns 200 unknown (safe to replay original wire bytes)
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(statusUnknownJson)
+        )
+        // 3. Replay POST of EXACT SAME original bytes returns 409 Conflict
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(409)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"error":{"code":"CONFLICT","message":"Replay business conflict."}}""")
+        )
+
+        val client = createClient(connectTimeoutMs = 1000, readTimeoutMs = 1000)
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = { 1L }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        assertTrue("Expected BusinessConflict on 409 replay", result is OnlineCashOrchestrationResult.BusinessConflict)
+        assertEquals("CONFLICT", (result as OnlineCashOrchestrationResult.BusinessConflict).error.code)
+
+        // Verify request sequence: POST -> GET status -> replay POST
+        assertEquals(3, server!!.requestCount)
+        val req1 = server!!.takeRequest()
+        val req2 = server!!.takeRequest()
+        val req3 = server!!.takeRequest()
+        assertEquals("POST", req1.method)
+        assertEquals("GET", req2.method)
+        assertEquals("POST", req3.method)
+        // Verify EXACT SAME original wire bytes replayed
+        assertEquals(req1.body.readUtf8(), req3.body.readUtf8())
+    }
+
+    @Test
+    fun testOnlineOrchestrationLocalTokenUnavailableNoQueueAuthLock() {
+        val lockScopeInvoked = AtomicBoolean(false)
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        val client = createClient()
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { null }, // Missing token locally
+            scopeGenerationProvider = { 1L },
+            onAuthDeniedLockScope = { _, _ -> lockScopeInvoked.set(true) }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        assertTrue("Expected LocalTokenUnavailable", result is OnlineCashOrchestrationResult.LocalTokenUnavailable)
+        assertFalse("Missing local token MUST NOT lock queue as server AuthDenied", lockScopeInvoked.get())
+        assertEquals("Zero HTTP requests dispatched when local token unavailable", 0, server!!.requestCount)
+    }
+
+    @Test
+    fun testOnlineOrchestrationCorruptUtf8ZeroHttp() {
+        val corruptBytes = byteArrayOf(0xC0.toByte(), 0xAF.toByte())
+
+        assertThrows(IllegalArgumentException::class.java) {
+            PreparedOnlineSaleIntent.prepare(
+                context = sampleContext,
+                rawWireBytes = corruptBytes,
+                scopeGeneration = 1L
+            )
+        }
+        assertEquals("Zero HTTP requests on corrupt UTF-8", 0, server!!.requestCount)
+    }
+
+    @Test
+    fun testOnlineOrchestrationOversizePayloadZeroHttp() {
+        val oversizeBytes = ByteArray(1024 * 1024 + 1) { 0x20 }
+
+        assertThrows(IllegalArgumentException::class.java) {
+            PreparedOnlineSaleIntent.prepare(
+                context = sampleContext,
+                rawWireBytes = oversizeBytes,
+                scopeGeneration = 1L
+            )
+        }
+        assertEquals("Zero HTTP requests on oversize payload", 0, server!!.requestCount)
+    }
+
+    @Test
+    fun testOnlineOrchestrationNonCanonicalDoubleZeroHttp() {
+        val floatPayload = """{
+            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+            "device_id": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
+            "customer_id": "01M7CZPF6TP283F3ZRXF5P8GT3",
+            "warehouse_id": "01M7CZPF6TP283F3ZRXF5P8GT4",
+            "currency": "ILS",
+            "lines": [],
+            "payment": { "amount": 58.5 }
+        }""".toByteArray(Charsets.UTF_8)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            PreparedOnlineSaleIntent.prepare(
+                context = sampleContext,
+                rawWireBytes = floatPayload,
+                scopeGeneration = 1L
+            )
+        }
+        assertEquals("Zero HTTP requests on float payload", 0, server!!.requestCount)
+    }
+
+    @Test
+    fun testOnlineOrchestrationWrongNormativeDigestZeroHttp() {
+        val wrongDigest = PayloadDigest.parse("sha256:1111111111111111111111111111111111111111111111111111111111111111")
+
+        assertThrows(IllegalArgumentException::class.java) {
+            PreparedOnlineSaleIntent.prepare(
+                context = sampleContext,
+                rawWireBytes = syntheticRawWirePayload,
+                scopeGeneration = 1L,
+                expectedDigest = wrongDigest
+            )
+        }
+        assertEquals("Zero HTTP requests on wrong expected digest", 0, server!!.requestCount)
+    }
+
+    @Test
+    fun testOnlineOrchestrationPreDispatchMismatchCasesZeroHttp() {
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        val client = createClient()
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = { 1L }
+        )
+
+        // 1. Company mismatch
+        val mismatchCompany = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789A")
+        val res1 = orchestrator.dispatchOnlineCashSale(intent, mismatchCompany, authDeviceId, "ILS")
+        assertTrue(res1 is OnlineCashOrchestrationResult.PreDispatchValidationError)
+
+        // 2. Device mismatch
+        val mismatchDevice = ClientUuid.parse("8e2b8bc6-f80c-4034-8c88-59368d1f2e10")
+        val res2 = orchestrator.dispatchOnlineCashSale(intent, authCompanyId, mismatchDevice, "ILS")
+        assertTrue(res2 is OnlineCashOrchestrationResult.PreDispatchValidationError)
+
+        // 3. Currency mismatch
+        val res3 = orchestrator.dispatchOnlineCashSale(intent, authCompanyId, authDeviceId, "USD")
+        assertTrue(res3 is OnlineCashOrchestrationResult.PreDispatchValidationError)
+
+        // 4. Scope generation mismatch before dispatch
+        val mismatchedScopeOrchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = { 2L } // Provider at 2L, intent at 1L
+        )
+        val res4 = mismatchedScopeOrchestrator.dispatchOnlineCashSale(intent, authCompanyId, authDeviceId, "ILS")
+        assertTrue(res4 is OnlineCashOrchestrationResult.ScopeMismatch)
+
+        assertEquals("Zero HTTP requests on pre-dispatch mismatches", 0, server!!.requestCount)
+    }
+
+    @Test
+    fun testOnlineOrchestrationScopeGenerationStale401NoCallback() {
+        val lockScopeInvoked = AtomicBoolean(false)
+        val scopeGen = AtomicLong(1L)
+
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(401)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"error":{"code":"UNAUTHENTICATED","message":"Token expired."}}""")
+        )
+
+        val client = createClient()
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = {
+                // Generation advanced to 2L while request was in-flight
+                scopeGen.getAndSet(2L)
+                2L
+            },
+            onAuthDeniedLockScope = { _, _ -> lockScopeInvoked.set(true) }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        assertTrue("Expected StaleAuthDenied", result is OnlineCashOrchestrationResult.StaleAuthDenied)
+        assertFalse("Stale 401 callback for previous scope MUST NOT lock new scope", lockScopeInvoked.get())
+    }
+
+    @Test
+    fun testOnlineOrchestrationFresh401InvokesLockCallback() {
+        val lockedGeneration = AtomicLong(-1L)
+
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(401)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"error":{"code":"UNAUTHENTICATED","message":"Token expired."}}""")
+        )
+
+        val client = createClient()
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = { 1L },
+            onAuthDeniedLockScope = { gen, _ -> lockedGeneration.set(gen) }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        assertTrue("Expected AuthDenied", result is OnlineCashOrchestrationResult.AuthDenied)
+        assertEquals("Fresh 401 on matching generation MUST invoke lock callback", 1L, lockedGeneration.get())
     }
 }

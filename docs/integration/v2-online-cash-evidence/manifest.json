@@ -1,0 +1,42 @@
+{
+  "module": "v2-online-cash-client",
+  "leadCoordinatedPR": 23,
+  "backendSyntheticFixture": {
+    "tag": "syntheticca5a",
+    "backendQualifiedCommit": 698,
+    "manifestSha256": "3248b9721c3e2a09e84ae478ddb0171c3ea576fd0cbdd70b3606e4cdda4ff3e7",
+    "normativeProfileDigest": "sha256:0847e10d89777e103252ebfa2d27f89a95832a5d70e01af57afe6423f703c630"
+  },
+  "sourceSha256": {
+    "app/src/main/java/com/example/data/mobile/contract/v2/SaleCommitModels.kt": "03ae61244e83c79010e9f45a7b0fcfa9ea4fc45c71a3962649da598b958c2cb5",
+    "app/src/main/java/com/example/data/mobile/onlinecash/AndroidV2OnlineCashClient.kt": "2b5bb61d52e20e87bc9ed3fde8308c0e0866646f65f8bfcb122c53889d36958a",
+    "app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt": "5279b2fc441374796a7d6723e9efe89566858504b7e156f7a392b10c4dca9978",
+    "app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt": "9e191bab9445c0c8dfb0512482c0e4a75c4e967c4bb919096f431f5419ac1179",
+    "app/src/test/java/com/example/data/mobile/onlinecash/AndroidV2OnlineCashClientMockWebServerTest.kt": "61a53794a2bdf2835c3fbfbd5c79813d694e9ba0456cbdd672cedd8afcd08f26",
+    "app/src/test/java/com/example/data/mobile/readclient/SharedTransportAllowlistRegressionTest.kt": "7ffd0cd9bd45f0a9c5aee6afe77aaf8e0e4f8f5176ada966ea1d2bab2f923f33",
+    "app/src/test/java/com/example/data/mobile/readclient/pilot/SmallTraderOnlineCashPilotSmokeTest.kt": "f3ab29db9c79aaf743783cc6ce04e726c4a8be50e291fa72b7b2618909fe0a35"
+  },
+  "historical76Evidence": {
+    "suiteCount": 8,
+    "testCount": 76,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "files": {
+      "TEST-com.example.data.mobile.contract.v2.ContractV2WireValidationTest.xml": "dfcb0453c88ba26eddc8466f783aa3554d1c50072286de1f751f20403261ff72",
+      "TEST-com.example.data.mobile.contract.v2.OfflineSaleV2GoldenParityTest.xml": "c0bbb7ff94537268d4f2cbbe8979e11c7302c6acacd8a3972624230e6eb9b912",
+      "TEST-com.example.data.mobile.contract.v2.OnlineSaleIntentProfileGoldenParityTest.xml": "f2c76b82bf0f9a867f22e8aecba94b426dcb9df485c5ee2709d78bbfd9822938",
+      "TEST-com.example.data.mobile.contract.v2.OnlineSaleIntentProfileMutationTest.xml": "a469283b8cfac31a38f6686690d8a08ef687e1c06a2bf11a49eb51a9cfa8097b",
+      "TEST-com.example.data.mobile.contract.v2.PaymentDecimalConsistencyTest.xml": "945e49f07ea4297acf952ee05b3b374d09c4a077041644dc228dc5cdce834851",
+      "TEST-com.example.data.mobile.contract.v2.SaleCommitResponseTest.xml": "13116670861321ebd0542752667c97dd0263e067f4bb631338325186c8b72f22",
+      "TEST-com.example.data.mobile.contract.v2.SaleEventStatusResponseTest.xml": "a23aa9ab96f6c12a5a4b36fa431da0362d7a89e83535584c9ac0ca94a49973bb",
+      "TEST-com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest.xml": "4dd15ac2388c39aaa7ce2f854406c2c65c51c4a51329896f6c867b53fdbd0c91"
+    }
+  },
+  "limits": [
+    "SOURCEFIRST mode active: no Gradle / dependency / build commands until lead grants lease",
+    "Historical 76 execution results preserved in historical-76/ directory",
+    "Newly added online orchestration integration tests added to source inventory pending lease execution",
+    "No network pilot or production credentials published"
+  ]
+}

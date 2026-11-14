@@ -30,10 +30,9 @@ class SmallTraderOnlineCashPilotSmokeTest {
     @Test
     fun executePairedOnlineCashPilotSmoke() {
         val handoffEnv = System.getenv(ENV_CASH_PILOT_HANDOFF)
-            ?: System.getenv(ReadPilotHandoffConfig.ENV_HANDOFF_PATH)
 
         Assume.assumeTrue(
-            "Neither '$ENV_CASH_PILOT_HANDOFF' nor '${ReadPilotHandoffConfig.ENV_HANDOFF_PATH}' set. Paired online cash pilot skipped (explicit NOT RUN).",
+            "'$ENV_CASH_PILOT_HANDOFF' not set. Paired online cash pilot skipped (explicit NOT RUN).",
             !handoffEnv.isNullOrBlank()
         )
 
