@@ -11,7 +11,43 @@ This directory contains hermetic unit test evidence, live coordinated readiness 
 
 ---
 
-## 1. Focused Serializer & Parser Test Pass (Commit b7e61eb)
+## 1. Synthetic Financial Golden Fixture Parity (Commit 88d4066)
+
+Cross-repo golden fixture generated via actual `CashPilotEvidence.toJsonString()` (`CashPilotEvidence.kt` blob SHA `edfba4bc03372131a245b1cf1826811fc9066d5a` unchanged from `b7e61eb`) for PHP outer validator parity ([GitHub Review 5906853631](https://github.com/Bassamalsaqqa/small-trader-android/pull/23#pullrequestreview-5906853631)):
+
+### Key Fixture Metadata & Invariants
+- **Generation Method**: Executed `CashPilotHandoffConfigTest.testCashPilotEvidenceDeterministicSyntheticFinancialGolden` (1 test executed, 1 passed, 0 failures, 0 errors, exit code 0 in 84.0s).
+- **Qualification Scope**: **SYNTHETIC FIXTURE GENERATION ONLY** (Unit test PASS). This is **STRICTLY NOT** a financial run or financial pass; no live network, TLS, DB, or financial transaction was executed.
+- **Wire JSON Invariant**: `synthetic-financial-golden-wire.json` contains pure wire JSON output from `CashPilotEvidence.toJsonString()` with **zero extra synthetic flags or fields**.
+- **Separate Provenance Wrapper**: `synthetic-financial-golden-wrapper.json` wraps the wire evidence and carries `"synthetic": true`, purpose, and cryptographic provenance separate from the wire payload.
+- **Deterministic Pins & Scenarios**:
+  - `clientPublicationHead`: `c00aedb70ea06f28ae42282149c030df76dc300d`
+  - `clientExecutableHead`: `b7e61eb4ed0aed2f5040d9fc44f9764b310be530`
+  - `clientHead`: `b7e61eb4ed0aed2f5040d9fc44f9764b310be530` (legacy alias)
+  - `backendHead`: `cfc28baaaaf52521ecbc88f1ba4c621afee17221` (synthetic backend pin)
+  - `lifecycleGrant`: `FINANCIAL_PAIRED_RUN`
+  - `overallStatus`: `PASS`
+  - **All 5 Basic Scenarios (PASS)**:
+    1. `readiness_probe`: HTTP 200
+    2. `financial_cash_fresh_commit_201`: HTTP 201
+    3. `financial_cash_idempotent_replay_200`: HTTP 200
+    4. `financial_cash_event_status_posted`: HTTP 200 (exact lowercase 'posted')
+    5. `financial_cash_tamper_409`: HTTP 409
+  - **2 Advanced Fault Scenarios (NOT_RUN)**:
+    6. `transport_lost_ack_recovery`: HTTP null
+    7. `stock_permission_rollback_probes`: HTTP null
+
+### Cryptographic Artifact Hashes (`synthetic-golden-fixture/`)
+- `synthetic-financial-golden-wire.json`: `25ae020de247d03c5aa57538592cd82574d62d6e4041e845ad11ea835c7f6aa6` (2,367 bytes)
+- `synthetic-financial-golden-wrapper.json`: `7458f05b57fe149beec9e26ebec77015b45f2acfcc428687f10c216f80f1592d` (2,961 bytes)
+- `TEST-com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest.xml`: `3b679a13c9a332588a959568b7158706720d9444491a770470e2dc6dfffa5174` (531 bytes)
+- `golden-test-execution.log`: `86c49050ea8328572b254db009a644cae3abdd5fa3b0307c471d458cc1df2223` (3,029 bytes)
+- `source-attestation-88d4.json`: `8a40f6aee8de16869263ea2b6300c2507e33bae49d9537b44d61e359303def14` (37,506 bytes)
+- `manifest.json`: `2135861348655859da9ef4f232cbb1b3ba87debce0b9806340df62bce0476f08` (2,395 bytes)
+
+---
+
+## 2. Focused Serializer & Parser Test Pass (Commit b7e61eb)
 
 Focused test execution verifying the serialization of explicit publication and executable client pins in `CashPilotEvidence.toJsonString()` ([GitHub Review 5906747082](https://github.com/Bassamalsaqqa/small-trader-android/pull/23#pullrequestreview-5906747082)):
 
@@ -30,7 +66,7 @@ Focused test execution verifying the serialization of explicit publication and e
 
 ---
 
-## 2. Live Coordinated Readiness Verification (PASS)
+## 3. Live Coordinated Readiness Verification (PASS)
 
 Coordinated readiness execution against live disposable backend harness (`1 JVM invocation`, `duration 13.3375s`, `exit 0`):
 
@@ -66,7 +102,7 @@ Coordinated readiness execution against live disposable backend harness (`1 JVM 
 
 ---
 
-## 3. Hermetic Unit Test Pass (291 Tests, Commit 78ac443)
+## 4. Hermetic Unit Test Pass (291 Tests, Commit 78ac443)
 
 - **Total Test Suites**: 18
 - **Total Tests**: 291
@@ -79,7 +115,7 @@ Coordinated readiness execution against live disposable backend harness (`1 JVM 
 
 ---
 
-## 4. Retained Failed Windows & Historical Failures
+## 5. Retained Failed Windows & Historical Failures
 
 ### Historical Unit Failures (Compiler & Mock)
 - `first-compiler-failure.log`: Initial compilation failure on test refactor before parameter fixes.
@@ -100,6 +136,7 @@ Coordinated readiness execution against live disposable backend harness (`1 JVM 
 ---
 
 ## Evidence Directory Organization
+- `synthetic-golden-fixture/`: 6 artifacts for PHP validator cross-repo parity (wire JSON, wrapper, XML, log, attestation, manifest).
 - `focused-serializer-test/`: 3 artifacts from the focused CashPilotHandoffConfigTest pass (XML, log, and attestation).
 - `coordinated-readiness/`: 10 safe artifacts from the live coordinated readiness verification (XML, JSON, logs, root outcome, and attestations).
 - `test-results/`: 18 hermetic XML test suites (291 tests) from commit `78ac443`.

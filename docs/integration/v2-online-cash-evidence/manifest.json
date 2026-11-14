@@ -536,5 +536,52 @@
         "sizeBytes": 29661
       }
     }
+  },
+  "syntheticGoldenExecution": {
+    "workflow": "synthetic_financial_golden_generation",
+    "executionCommit": "88d40664272305a0505a4f262e8c47b3d99a80ac",
+    "task": "cleanTestDebugUnitTest testDebugUnitTest --tests com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest.testCashPilotEvidenceDeterministicSyntheticFinancialGolden",
+    "exitCode": 0,
+    "durationSeconds": 84.0,
+    "suite": "com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest",
+    "tests": 1,
+    "passed": 1,
+    "skipped": 0,
+    "failures": 0,
+    "errors": 0,
+    "resourceLimits": {
+      "maxWorkers": 1,
+      "activeProcessorCount": 2,
+      "garbageCollector": "SerialGC",
+      "maxHeap": "1536m",
+      "inProcess": true,
+      "noDaemon": true
+    },
+    "artifacts": {
+      "synthetic-financial-golden-wire.json": {
+        "sha256": "25ae020de247d03c5aa57538592cd82574d62d6e4041e845ad11ea835c7f6aa6",
+        "sizeBytes": 2367
+      },
+      "synthetic-financial-golden-wrapper.json": {
+        "sha256": "7458f05b57fe149beec9e26ebec77015b45f2acfcc428687f10c216f80f1592d",
+        "sizeBytes": 2961
+      },
+      "TEST-com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest.xml": {
+        "sha256": "3b679a13c9a332588a959568b7158706720d9444491a770470e2dc6dfffa5174",
+        "sizeBytes": 531
+      },
+      "golden-test-execution.log": {
+        "sha256": "86c49050ea8328572b254db009a644cae3abdd5fa3b0307c471d458cc1df2223",
+        "sizeBytes": 3029
+      },
+      "source-attestation-88d4.json": {
+        "sha256": "8a40f6aee8de16869263ea2b6300c2507e33bae49d9537b44d61e359303def14",
+        "sizeBytes": 37506
+      },
+      "manifest.json": {
+        "sha256": "2135861348655859da9ef4f232cbb1b3ba87debce0b9806340df62bce0476f08",
+        "sizeBytes": 2395
+      }
+    }
   }
 }

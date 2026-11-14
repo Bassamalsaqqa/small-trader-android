@@ -144,5 +144,20 @@
       "StrictJsonParser roundtrip confirms exact distinct values and null omission",
       "zero literal NUL bytes and sensitive data redaction preserved"
     ]
+  },
+  "syntheticGoldenFixture": {
+    "status": "GENERATED_UNIT_TEST_PASS",
+    "qualificationScope": "SYNTHETIC_FIXTURE_ONLY_NOT_FINANCIAL_RUN",
+    "executionCommit": "88d40664272305a0505a4f262e8c47b3d99a80ac",
+    "serializerBlobSha": "edfba4bc03372131a245b1cf1826811fc9066d5a",
+    "goldenWireSha256": "25ae020de247d03c5aa57538592cd82574d62d6e4041e845ad11ea835c7f6aa6",
+    "goldenWrapperSha256": "7458f05b57fe149beec9e26ebec77015b45f2acfcc428687f10c216f80f1592d",
+    "tests": 1,
+    "passed": 1,
+    "skipped": 0,
+    "failures": 0,
+    "errors": 0,
+    "task": "cleanTestDebugUnitTest testDebugUnitTest --tests com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest.testCashPilotEvidenceDeterministicSyntheticFinancialGolden",
+    "directory": "synthetic-golden-fixture"
   }
 }
