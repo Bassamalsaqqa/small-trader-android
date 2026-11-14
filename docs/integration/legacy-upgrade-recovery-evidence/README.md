@@ -43,17 +43,18 @@ This slice resolves GitHub PR 21 review `5895663783` and independent review `589
 4. **Room Schema Integrity**:
    - Room v1 identity hash `6eddfecc8dabbb7ec370b858ec36714a` remains strictly intact with zero schema diff.
 
-## Test Summary
-- **Exact-source test inventory (Outbox & Staff Workspace)**: 15 suites, 165 tests (all passing source invariants).
-  - `OutboxHealthGateTest`: 28 tests (including 11/100+ paged verification, late corrupt/legacy, scan mutation, cancellation, same-DB missing-key capture refusal).
-  - `StaffOutboxRecoveryComposeTest`: 16 tests (including pre-auth zero-query gate, cancel company selection warning restoration, async generation barrier, catalog preservation).
-  - Outbox storage & concurrency suites: 121 tests.
-- **Project-wide inventory**: 58 suites, 617 tests.
+## Test Summary & Verification Status
+- **Historical Saved Verification (PR21 baseline)**:
+  - Saved XML test artifacts report 15 suites, 140 tests passed (0 failures, 0 errors, 0 skipped).
+  - Historical health gate suite: 10 tests; historical recovery compose suite: 9 tests; durable outbox suites: 121 tests.
+- **Current Source Inventory (Expanded Coverage)**:
+  - 15 suites, 167 source tests in inventory (incorporates 30 tests in `OutboxHealthGateTest` and 16 tests in `StaffOutboxRecoveryComposeTest`).
+  - Added regressions: same-count corrupt payload replacement (`pagedVerification_sameCountCorruptPayloadReplacement_failsClosedAsCorrupt`), empty queue auth lock mutation (`emptyScopeWithAuthLockAndCorruptRow_returnsAuthBlocked_neverNewEmptyReady`), keyset pagination across 11 and 100+ rows, late corrupt/legacy rows, cancellation propagation, and SQLite writer serialization.
+- **Current Execution Status**:
+  - **Zero Current Execution**: 0 tests are claimed as executed in this source-only turn. Source invariants and snapshot coherence have been corrected in code; execution remains strictly pending QA rerun.
+  - **Exclusive Lease Policy**: Backend PR 95 holds an exclusive heavy build/database lease; no Gradle build, test execution, or dependency resolution was run.
 - **Python Contract Validation**: 303 checks passed in normal mode; 303 checks passed in optimized (`-O`) mode.
-- **Build / Execution Status**:
-  - Backend PR95 currently owns the exclusive database/build lease.
-  - Gradle compilation and Android instrumentation are not run in this source-ready turn until the supervisor grants the build lease.
-  - Device/Keystore/upgrade/OEM remain **BLOCKED / UNVERIFIED** (no approved device host).
+- **On-Device Blockers**: Real Android Keystore, device process kill, instrumentation, and actual transfer/restore remain **BLOCKED / UNVERIFIED** (no approved device host).
 
 ## Files in this Directory
 - `summary.json`: Test suite names and updated test counts (15 suites, 165 tests).

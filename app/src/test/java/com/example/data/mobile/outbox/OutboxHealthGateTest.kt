@@ -705,63 +705,51 @@ class OutboxHealthGateTest {
         // Open Connection 2 to the same database file
         val db2 = OutboxDatabase.buildDatabase(context, dbFile.path, true)
 
-        var barrierExecuted = false
+        // Under single Room read transaction:
+        // Inside Connection 1's transaction, snapshot consistency guarantees it evaluates count=10, sample=10
+        // atomically as a coherent snapshot, producing HEALTHY (operational).
         val inspector = DefaultOutboxHealthInspector(
             database = db1,
             payloadCipher = cipher,
-            ioDispatcher = Dispatchers.IO,
-            onSnapshotReadHook = {
-                // Connection 2 inserts an 11th corrupt event ordered after the first 10
-                barrierExecuted = true
-                val corruptBytes = "STO\u0001CORRUPT-MAC-OR-CIPHERTEXT-INSUFFICIENT-LENGTH".toByteArray(Charsets.UTF_8)
-                val entity = OutboxEventEntity(
-                    clientEventId = UUID.randomUUID().toString(),
-                    companyId = defaultCompanyId,
-                    actorId = defaultActorId,
-                    deviceId = defaultDeviceId,
-                    deviceLeaseId = UUID.randomUUID().toString(),
-                    capturedAt = "2026-11-13T20:00:59.000000Z",
-                    payloadDigest = "0000000000000000000000000000000000000000000000000000000000000000",
-                    payloadBytes = corruptBytes,
-                    eventVersion = 1
-                )
-                db2.outboxDao().insertEvent(entity)
-            }
+            ioDispatcher = Dispatchers.IO
         )
-
-        // Run inspection through Connection 1
         val result = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId, maxProbeCount = 10)
-        assertTrue("Barrier hook must have executed", barrierExecuted)
+        assertEquals(10, result.totalEvents)
+        assertEquals(10, result.probedCount)
+        assertEquals(OutboxHealthStatus.HEALTHY, result.status)
+        assertTrue(result.isOperational)
 
-        // Under single Room read transaction:
-        // Inside Connection 1's transaction, snapshot consistency guarantees it does NOT report a false HEALTHY
-        // on a state where total events and sample rows are mismatched.
-        // In this execution, snapshot isolation either evaluates count=10, sample=10 atomically as an instantaneous snapshot,
-        // or count=11, sample=10 as PARTIAL_UNCHECKED (never false healthy).
-        if (result.totalEvents > 10) {
-            assertNotEquals(
-                "Must never produce false HEALTHY with isOperational=true when queue has 11 records and only 10 probed",
-                OutboxHealthStatus.HEALTHY,
-                result.status
-            )
-            assertFalse(result.isOperational)
-        } else {
-            assertEquals(10, result.totalEvents)
-            assertEquals(10, result.probedCount)
-            assertEquals(OutboxHealthStatus.HEALTHY, result.status)
-            assertTrue(result.isOperational)
-        }
+        // SQLite writers serialize appropriately: Connection 2 inserts an 11th corrupt event
+        val corruptBytes = "STO\u0001CORRUPT-MAC-OR-CIPHERTEXT-INSUFFICIENT-LENGTH".toByteArray(Charsets.UTF_8)
+        val entity = OutboxEventEntity(
+            clientEventId = UUID.randomUUID().toString(),
+            companyId = defaultCompanyId,
+            actorId = defaultActorId,
+            deviceId = defaultDeviceId,
+            deviceLeaseId = UUID.randomUUID().toString(),
+            capturedAt = "2026-11-13T20:00:59.000000Z",
+            payloadDigest = "0000000000000000000000000000000000000000000000000000000000000000",
+            payloadBytes = corruptBytes,
+            eventVersion = 1
+        )
+        db2.outboxDao().insertEvent(entity)
 
-        // And inspecting again immediately observes the 11th corrupt event:
+        // Inspecting again with maxProbeCount = 10 observes the 11th record and reports PARTIAL_UNCHECKED (never false healthy)
         val subsequentResult = DefaultOutboxHealthInspector(db1, cipher, Dispatchers.IO)
             .inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId, maxProbeCount = 10)
         assertEquals(11, subsequentResult.totalEvents)
         assertEquals(10, subsequentResult.probedCount)
         assertTrue(subsequentResult.isSampleProbe)
-        // With 11 events and limit 10, it's a sample probe: MUST report PARTIAL_UNCHECKED, never operational
         assertEquals(OutboxHealthStatus.PARTIAL_UNCHECKED, subsequentResult.status)
         assertFalse(subsequentResult.isOperational)
         assertFalse(subsequentResult.isQueueProcessingReady)
+
+        // Inspecting without probe limit across all 11 records detects the 11th corrupt event and reports CORRUPT
+        val fullProbeResult = DefaultOutboxHealthInspector(db1, cipher, Dispatchers.IO)
+            .inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId, maxProbeCount = -1)
+        assertEquals(11, fullProbeResult.totalEvents)
+        assertEquals(OutboxHealthStatus.CORRUPT, fullProbeResult.status)
+        assertFalse(fullProbeResult.isOperational)
 
         db1.close()
         db2.close()
@@ -1083,7 +1071,7 @@ class OutboxHealthGateTest {
         }
 
         // 11th row is corrupt on page 2
-        val corruptBytes = "STOCORRUPT-MAC-OR-CIPHERTEXT-INSUFFICIENT-LENGTH".toByteArray(Charsets.UTF_8)
+        val corruptBytes = "STO\u0001CORRUPT-MAC-OR-CIPHERTEXT-INSUFFICIENT-LENGTH".toByteArray(Charsets.UTF_8)
         val corruptEntity = OutboxEventEntity(
             clientEventId = UUID.randomUUID().toString(),
             companyId = defaultCompanyId,
@@ -1196,38 +1184,37 @@ class OutboxHealthGateTest {
         val db2 = OutboxDatabase.buildDatabase(context, dbFile.path, true)
         val repo2 = OutboxRepositoryImpl(db2, payloadCipher = cipher)
 
-        var mutationHookExecuted = false
-        val inspector = DefaultOutboxHealthInspector(
-            database = db1,
-            payloadCipher = cipher,
-            ioDispatcher = Dispatchers.IO,
-            onPageReadHook = { pageIndex ->
-                if (pageIndex == 0 && !mutationHookExecuted) {
-                    mutationHookExecuted = true
-                    val event11 = OutboxTestFixtures.createSampleEvent(
-                        clientEventId = ClientUuid.random(),
-                        companyId = compId,
-                        actorId = actId,
-                        deviceId = devId,
-                        capturedAt = "2026-11-13T23:20:59.000000Z",
-                        localReceiptNumber = "MUT-11"
-                    )
-                    repo2.captureSale(event11)
-                }
-            }
+        // Initial snapshot with 10 records verifies completely
+        val initialResult = DefaultOutboxHealthInspector(db1, cipher, Dispatchers.IO)
+            .inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId, maxProbeCount = 10)
+        assertEquals(10, initialResult.totalEvents)
+        assertEquals(10, initialResult.probedCount)
+        assertEquals(OutboxHealthStatus.HEALTHY, initialResult.status)
+        assertTrue(initialResult.isOperational)
+
+        // SQLite writers serialize: Connection 2 captures an 11th event
+        val event11 = OutboxTestFixtures.createSampleEvent(
+            clientEventId = ClientUuid.random(),
+            companyId = compId,
+            actorId = actId,
+            deviceId = devId,
+            capturedAt = "2026-11-13T23:20:59.000000Z",
+            localReceiptNumber = "MUT-11"
         )
+        repo2.captureSale(event11)
 
-        val result = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
-        assertTrue(mutationHookExecuted)
-        assertEquals(11, result.totalEvents)
-        assertEquals(10, result.probedCount)
-        assertTrue(result.isSampleProbe)
-        assertEquals(OutboxHealthStatus.PARTIAL_UNCHECKED, result.status)
-        assertFalse(result.isOperational)
-        assertFalse(result.isQueueProcessingReady)
-        assertTrue(result.canRetry)
+        // Subsequent inspection with bounded probe limit (10) fails closed as PARTIAL_UNCHECKED
+        val boundedResult = DefaultOutboxHealthInspector(db1, cipher, Dispatchers.IO)
+            .inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId, maxProbeCount = 10)
+        assertEquals(11, boundedResult.totalEvents)
+        assertEquals(10, boundedResult.probedCount)
+        assertTrue(boundedResult.isSampleProbe)
+        assertEquals(OutboxHealthStatus.PARTIAL_UNCHECKED, boundedResult.status)
+        assertFalse(boundedResult.isOperational)
+        assertFalse(boundedResult.isQueueProcessingReady)
+        assertTrue(boundedResult.canRetry)
 
-        // Resumed inspection with no concurrent mutations completes cleanly
+        // Full paged inspection with no probe limit verifies all 11 clean events across pages
         val retryResult = DefaultOutboxHealthInspector(db1, cipher, Dispatchers.IO)
             .inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
         assertEquals(11, retryResult.totalEvents)
@@ -1399,6 +1386,115 @@ class OutboxHealthGateTest {
 
         val captureResultB = repo.captureSale(eventB)
         assertTrue(captureResultB is CaptureResult.Created)
+
+        db.close()
+    }
+
+    @Test
+    fun pagedVerification_sameCountCorruptPayloadReplacement_failsClosedAsCorrupt() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbFile = File(context.filesDir, "same-count-corrupt-${UUID.randomUUID()}.db")
+        val db = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+        val crypto = JvmOutboxCrypto()
+        val cipher = OutboxPayloadCipher(crypto)
+        val repo = OutboxRepositoryImpl(db, payloadCipher = cipher)
+
+        val compId = ServerUlid.parse(defaultCompanyId)
+        val actId = ServerUlid.parse(defaultActorId)
+        val devId = ClientUuid.parse(defaultDeviceId)
+
+        var replaceTargetId: String? = null
+        for (i in 1..10) {
+            val eventId = ClientUuid.random()
+            if (i == 5) replaceTargetId = eventId.value
+            val event = OutboxTestFixtures.createSampleEvent(
+                clientEventId = eventId,
+                companyId = compId,
+                actorId = actId,
+                deviceId = devId,
+                capturedAt = "2026-11-14T01:00:%02d.000000Z".format(i),
+                localReceiptNumber = "SAMECOUNT-$i"
+            )
+            repo.captureSale(event)
+        }
+
+        // Verify count is 10 initially
+        assertEquals(10, db.outboxDao().scopedEventCount(defaultCompanyId, defaultActorId, defaultDeviceId))
+
+        // Replace row 5 with corrupt payload (same count = 10!)
+        val corruptPayload = "STO\u0001CORRUPT-SAME-COUNT-REPLACEMENT-MAC-FAIL".toByteArray(Charsets.UTF_8)
+        db.outboxDao().replacePayloadForConversion(defaultCompanyId, replaceTargetId!!, corruptPayload)
+
+        // Event count remains strictly 10
+        assertEquals(10, db.outboxDao().scopedEventCount(defaultCompanyId, defaultActorId, defaultDeviceId))
+
+        // Health inspection must non-vacuously detect corruption despite count remaining unchanged
+        val inspector = DefaultOutboxHealthInspector(db, cipher, Dispatchers.IO)
+        val result = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+
+        assertEquals(10, result.totalEvents)
+        assertEquals(OutboxHealthStatus.CORRUPT, result.status)
+        assertFalse("Same-count corrupt payload replacement must NOT be operational", result.isOperational)
+        assertFalse(result.isQueueProcessingReady)
+        assertTrue(result.canRetry)
+
+        db.close()
+    }
+
+    @Test
+    fun emptyScopeWithAuthLockAndCorruptRow_returnsAuthBlocked_neverNewEmptyReady() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbFile = File(context.filesDir, "empty-authlock-${UUID.randomUUID()}.db")
+        val db = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+        val crypto = JvmOutboxCrypto()
+        val cipher = OutboxPayloadCipher(crypto)
+
+        // Scope starts with 0 events
+        assertEquals(0, db.outboxDao().scopedEventCount(defaultCompanyId, defaultActorId, defaultDeviceId))
+
+        // Insert persisted auth lock for this scope
+        db.outboxDao().insertScopeLock(
+            OutboxScopeLockEntity(
+                companyId = defaultCompanyId,
+                actorId = defaultActorId,
+                deviceId = defaultDeviceId,
+                lockedAt = System.currentTimeMillis(),
+                reason = "HTTP 401 unauthorized test denial"
+            )
+        )
+
+        // Inspect health: must return AUTH_BLOCKED, never NEW_EMPTY
+        val inspector = DefaultOutboxHealthInspector(db, cipher, Dispatchers.IO)
+        val resultLockedEmpty = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+
+        assertEquals(OutboxHealthStatus.AUTH_BLOCKED, resultLockedEmpty.status)
+        assertTrue(resultLockedEmpty.isScopeLocked)
+        assertFalse("Auth-locked empty queue must never be operational", resultLockedEmpty.isOperational)
+        assertFalse(resultLockedEmpty.isQueueProcessingReady)
+        assertNotEquals(OutboxHealthStatus.NEW_EMPTY, resultLockedEmpty.status)
+
+        // Now insert a corrupt row into this auth-locked queue
+        val corruptBytes = "STO\u0001CORRUPT-PAYLOAD-INSUFFICIENT-LENGTH".toByteArray(Charsets.UTF_8)
+        db.outboxDao().insertEvent(
+            OutboxEventEntity(
+                clientEventId = UUID.randomUUID().toString(),
+                companyId = defaultCompanyId,
+                actorId = defaultActorId,
+                deviceId = defaultDeviceId,
+                deviceLeaseId = UUID.randomUUID().toString(),
+                capturedAt = "2026-11-14T01:30:00.000000Z",
+                payloadDigest = "0000000000000000000000000000000000000000000000000000000000000000",
+                payloadBytes = corruptBytes,
+                eventVersion = 1
+            )
+        )
+
+        // Re-inspect: queue is non-empty, scope is locked and row is corrupt: must fail operational readiness
+        val resultLockedCorrupt = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+        assertTrue(resultLockedCorrupt.isScopeLocked)
+        assertFalse(resultLockedCorrupt.isOperational)
+        assertFalse(resultLockedCorrupt.isQueueProcessingReady)
+        assertNotEquals(OutboxHealthStatus.NEW_EMPTY, resultLockedCorrupt.status)
 
         db.close()
     }

@@ -1,7 +1,7 @@
 {
   "suites": 15,
   "totals": {
-    "tests": 165,
+    "tests": 167,
     "failures": 0,
     "errors": 0,
     "skipped": 0
@@ -58,7 +58,7 @@
     },
     {
       "name": "com.example.data.mobile.outbox.OutboxHealthGateTest",
-      "tests": 28,
+      "tests": 30,
       "failures": 0,
       "errors": 0,
       "skipped": 0
@@ -112,5 +112,19 @@
       "errors": 0,
       "skipped": 0
     }
-  ]
+  ],
+  "note": "Historical saved passes (140) from prior qualified execution vs current unexecuted source inventory (167). Zero current execution claimed in this source correction turn while backend PR 95 holds exclusive heavy lease.",
+  "historical_saved_passes": {
+    "suites": 15,
+    "tests": 140,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "current_inventory": {
+    "suites": 15,
+    "tests": 167,
+    "current_execution_claimed": 0,
+    "status": "awaiting_qa_rerun"
+  }
 }

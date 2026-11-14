@@ -118,6 +118,31 @@ class UnavailableOutboxHealthInspector(
     )
 }
 
+/**
+ * Default inspector evaluating outbox health off the main thread.
+ *
+ * Durability and Snapshot Coherence Guarantees:
+ * 1. Single Coherent SQLite Transaction:
+ *    Executes a single Room transaction ([database.runInTransaction]) encompassing the initial
+ *    scope evaluation, global key admission, auth lock status, bounded keyset pagination across all
+ *    records, cryptographic payload authentication, and final health determination.
+ * 2. Scope, Time, and Lock Limitations:
+ *    - Scope: Provides snapshot isolation guarantees across all queries in the scope.
+ *    - Writer Serialization: In SQLite, transactions serialize write operations. Room's
+ *      [runInTransaction] holds a database lock during inspection; external SQLite writers
+ *      serialize appropriately and will wait until the inspection transaction completes.
+ *    - Bounded Resource Usage: Inspection uses keyset pagination bounded to [OutboxHealthInspector.DEFAULT_PAGE_SIZE]
+ *      (10 records per page), preventing whole-queue memory materialization even for large backlogs.
+ *    - Strict Off-Main-Thread Execution: Guaranteed execution on [ioDispatcher] with non-main-thread assertions.
+ * 3. Cancellation Propagation:
+ *    - Active cancellation checks ([currentCoroutineContext().ensureActive()]) execute at each page
+ *      and row. Cancellation immediately rolls back the transaction and releases all locks without swallowing
+ *      [CancellationException].
+ * 4. Zero False Positives / Zero Destructive Actions:
+ *    - Empty queues ([NEW_EMPTY]) generate zero encryption keys.
+ *    - Unauthenticated/legacy/corrupt records are preserved on disk with zero writes, zero destructive drops,
+ *      and zero key minting.
+ */
 class DefaultOutboxHealthInspector(
     private val database: OutboxDatabase,
     private val payloadCipher: OutboxPayloadCipher = OutboxPayloadCipher(),
@@ -158,20 +183,381 @@ class DefaultOutboxHealthInspector(
         val maxEnvelopeBytes = ContractConstants.MAX_PAYLOAD_BYTES + 32
         val maxEnvelopeBytesPlusOne = maxEnvelopeBytes + 1
 
-        // Gather scoped count, classifications, auth lock, and bounded initial page
-        val snapshot = try {
-            database.outboxDao().getScopedHealthSnapshot(
-                companyId = companyId,
-                actorId = actorId,
-                deviceId = deviceId,
-                maxEnvelopeBytesPlusOne = maxEnvelopeBytesPlusOne,
-                limit = pageSize,
-                onBetweenCountAndSample = onSnapshotReadHook
-            )
+        val result = try {
+            database.runInTransaction<OutboxHealthResult> {
+                // Gather scoped count, classifications, auth lock, and bounded initial page under ONE coherent transaction
+                val snapshot = database.outboxDao().getScopedHealthSnapshot(
+                    companyId = companyId,
+                    actorId = actorId,
+                    deviceId = deviceId,
+                    maxEnvelopeBytesPlusOne = maxEnvelopeBytesPlusOne,
+                    limit = pageSize,
+                    onBetweenCountAndSample = onSnapshotReadHook
+                )
+
+                val scopedTotal = snapshot.totalScopedEvents
+                val isScopeLocked = snapshot.isScopeLocked
+                val nonEncryptedCount = snapshot.nonEncryptedCount
+                val globalTotal = snapshot.totalGlobalEvents
+
+                if (isScopeLocked && scopedTotal == 0) {
+                    return@runInTransaction OutboxHealthResult(
+                        status = OutboxHealthStatus.AUTH_BLOCKED,
+                        totalEvents = 0,
+                        probedCount = 0,
+                        isSampleProbe = false,
+                        isScopeLocked = true,
+                        messageEn = "Offline sync is temporarily paused. Please sign in again or contact support.",
+                        messageAr = "المزامنة متوقفة مؤقتاً. يرجى تسجيل الدخول مجدداً أو التواصل مع الدعم الفني.",
+                        detailMessageEn = "Contact support",
+                        detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                        canRetry = true
+                    )
+                }
+
+                if (scopedTotal == 0) {
+                    // New empty queue for this scope.
+                    // If the database has global events (> 0), repository capture requires a retained key: payloadCipher.prepare(true).
+                    // Same-DB Company A legacy/no key + Company B empty must NOT claim capture ready.
+                    if (globalTotal > 0) {
+                        try {
+                            payloadCipher.prepare(true)
+                        } catch (e: OutboxStorageException) {
+                            return@runInTransaction when (e.error) {
+                                OutboxStorageError.KEY_LOCKED -> OutboxHealthResult(
+                                    status = OutboxHealthStatus.ENCRYPTED_LOCKED,
+                                    totalEvents = 0,
+                                    probedCount = 0,
+                                    isSampleProbe = false,
+                                    isScopeLocked = isScopeLocked,
+                                    messageEn = "The secure encryption key is locked or invalidated. We have not changed stored sales. Some records need help before syncing.",
+                                    messageAr = "مفتاح التشفير الآمن مقفل أو تم إبطاله. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                                    detailMessageEn = "Contact support",
+                                    detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                                    canRetry = true
+                                )
+                                OutboxStorageError.KEY_UNAVAILABLE -> OutboxHealthResult(
+                                    status = OutboxHealthStatus.KEY_UNAVAILABLE,
+                                    totalEvents = 0,
+                                    probedCount = 0,
+                                    isSampleProbe = false,
+                                    isScopeLocked = isScopeLocked,
+                                    messageEn = "The secure encryption key is unavailable on this device. We have not changed stored sales. Some records need help before syncing.",
+                                    messageAr = "مفتاح التشفير الآمن غير متوفر على هذا الجهاز. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                                    detailMessageEn = "Contact support",
+                                    detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                                    canRetry = true
+                                )
+                                else -> OutboxHealthResult(
+                                    status = OutboxHealthStatus.STORAGE_UNAVAILABLE,
+                                    totalEvents = 0,
+                                    probedCount = 0,
+                                    isSampleProbe = false,
+                                    isScopeLocked = isScopeLocked,
+                                    messageEn = "Secure storage is unavailable. We have not changed stored sales. Some records need help before syncing.",
+                                    messageAr = "وحدة التخزين الآمنة غير متوفرة. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                                    detailMessageEn = "Contact support",
+                                    detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                                    canRetry = true
+                                )
+                            }
+                        }
+                    }
+
+                    return@runInTransaction OutboxHealthResult(
+                        status = OutboxHealthStatus.NEW_EMPTY,
+                        totalEvents = 0,
+                        probedCount = 0,
+                        isSampleProbe = false,
+                        isScopeLocked = false,
+                        messageEn = "New empty outbox queue ready for operations.",
+                        messageAr = "طابور الترحيل فارغ وجاهز للعمليات.",
+                        canRetry = false
+                    )
+                }
+
+                // If non-encrypted rows exist in this scope
+                if (nonEncryptedCount > 0) {
+                    val status = if (nonEncryptedCount == scopedTotal) {
+                        OutboxHealthStatus.LEGACY_PLAINTEXT
+                    } else {
+                        OutboxHealthStatus.MIXED_QUEUE
+                    }
+                    val isMixed = status == OutboxHealthStatus.MIXED_QUEUE
+                    val messageEn = if (isMixed) {
+                        "Outbox storage contains conflicting record formats. We have not changed stored sales. Some records need help before syncing."
+                    } else {
+                        "Storage records require format upgrade before syncing. We have not changed stored sales. Some records need help before syncing."
+                    }
+                    val messageAr = if (isMixed) {
+                        "تحتوي وحدة التخزين على تنسيقات سجلات غير متوافقة. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة."
+                    } else {
+                        "تتطلب السجلات ترقية التنسيق قبل المزامنة. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة."
+                    }
+                    return@runInTransaction OutboxHealthResult(
+                        status = status,
+                        totalEvents = scopedTotal,
+                        probedCount = nonEncryptedCount,
+                        isSampleProbe = scopedTotal > nonEncryptedCount,
+                        isScopeLocked = isScopeLocked,
+                        messageEn = messageEn,
+                        messageAr = messageAr,
+                        detailMessageEn = "Contact support",
+                        detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                        canRetry = true
+                    )
+                }
+
+                // Check scope lock for non-empty queue
+                if (isScopeLocked) {
+                    return@runInTransaction OutboxHealthResult(
+                        status = OutboxHealthStatus.AUTH_BLOCKED,
+                        totalEvents = scopedTotal,
+                        probedCount = 0,
+                        isSampleProbe = scopedTotal > 0,
+                        isScopeLocked = true,
+                        messageEn = "Offline sync is temporarily paused. Please sign in again or contact support.",
+                        messageAr = "المزامنة متوقفة مؤقتاً. يرجى تسجيل الدخول مجدداً أو التواصل مع الدعم الفني.",
+                        detailMessageEn = "Contact support",
+                        detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                        canRetry = true
+                    )
+                }
+
+                // Prepare cipher for reading encrypted payloads
+                try {
+                    payloadCipher.prepare(false)
+                } catch (e: OutboxStorageException) {
+                    return@runInTransaction when (e.error) {
+                        OutboxStorageError.KEY_LOCKED -> OutboxHealthResult(
+                            status = OutboxHealthStatus.ENCRYPTED_LOCKED,
+                            totalEvents = scopedTotal,
+                            probedCount = 0,
+                            isSampleProbe = scopedTotal > 0,
+                            isScopeLocked = isScopeLocked,
+                            messageEn = "The secure encryption key is locked or invalidated. We have not changed stored sales. Some records need help before syncing.",
+                            messageAr = "مفتاح التشفير الآمن مقفل أو تم إبطاله. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                            detailMessageEn = "Contact support",
+                            detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                            canRetry = true
+                        )
+                        OutboxStorageError.KEY_UNAVAILABLE -> OutboxHealthResult(
+                            status = OutboxHealthStatus.KEY_UNAVAILABLE,
+                            totalEvents = scopedTotal,
+                            probedCount = 0,
+                            isSampleProbe = scopedTotal > 0,
+                            isScopeLocked = isScopeLocked,
+                            messageEn = "The secure encryption key is unavailable on this device. We have not changed stored sales. Some records need help before syncing.",
+                            messageAr = "مفتاح التشفير الآمن غير متوفر على هذا الجهاز. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                            detailMessageEn = "Contact support",
+                            detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                            canRetry = true
+                        )
+                        else -> OutboxHealthResult(
+                            status = OutboxHealthStatus.STORAGE_UNAVAILABLE,
+                            totalEvents = scopedTotal,
+                            probedCount = 0,
+                            isSampleProbe = scopedTotal > 0,
+                            isScopeLocked = isScopeLocked,
+                            messageEn = "Secure storage is unavailable. We have not changed stored sales. Some records need help before syncing.",
+                            messageAr = "وحدة التخزين الآمنة غير متوفرة. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                            detailMessageEn = "Contact support",
+                            detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                            canRetry = true
+                        )
+                    }
+                }
+
+                // Bounded, cancellable, keyset-paged verification across scoped rows
+                val targetProbeLimit = if (maxProbeCount > 0) minOf(maxProbeCount, scopedTotal) else scopedTotal
+                var verifiedCount = 0
+                var currentPage = snapshot.sampleRows
+                var pageIndex = 0
+                var lastCapturedAt: String? = null
+                var lastClientEventId: String? = null
+
+                while (currentPage.isNotEmpty() && verifiedCount < targetProbeLimit) {
+                    currentCoroutineContext().ensureActive()
+                    onPageReadHook?.invoke(pageIndex)
+
+                    for (row in currentPage) {
+                        currentCoroutineContext().ensureActive()
+                        if (verifiedCount >= targetProbeLimit) break
+
+                        if (row.payloadLength > maxEnvelopeBytes) {
+                            return@runInTransaction OutboxHealthResult(
+                                status = OutboxHealthStatus.CORRUPT,
+                                totalEvents = scopedTotal,
+                                probedCount = verifiedCount + 1,
+                                isSampleProbe = scopedTotal > (verifiedCount + 1),
+                                isScopeLocked = isScopeLocked,
+                                messageEn = "Storage records exceeded maximum allowed envelope size. We have not changed stored sales. Some records need help before syncing.",
+                                messageAr = "تجاوزت بعض السجلات الحد الأقصى لحجم التخزين. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                                detailMessageEn = "Contact support",
+                                detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                                canRetry = true
+                            )
+                        }
+
+                        val bytes = row.boundedPayloadBytes
+                        if (!payloadCipher.isEncrypted(bytes)) {
+                            val status = if (payloadCipher.hasStoEnvelope(bytes)) {
+                                OutboxHealthStatus.CORRUPT
+                            } else {
+                                OutboxHealthStatus.MIXED_QUEUE
+                            }
+                            return@runInTransaction OutboxHealthResult(
+                                status = status,
+                                totalEvents = scopedTotal,
+                                probedCount = verifiedCount + 1,
+                                isSampleProbe = scopedTotal > (verifiedCount + 1),
+                                isScopeLocked = isScopeLocked,
+                                messageEn = if (status == OutboxHealthStatus.CORRUPT)
+                                    "Storage records could not be cryptographically authenticated. We have not changed stored sales. Some records need help before syncing."
+                                else
+                                    "Outbox storage contains conflicting record formats. We have not changed stored sales. Some records need help before syncing.",
+                                messageAr = if (status == OutboxHealthStatus.CORRUPT)
+                                    "تعذر التحقق من التشفير الأمني للسجلات. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة."
+                                else
+                                    "تحتوي وحدة التخزين على تنسيقات سجلات غير متوافقة. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                                detailMessageEn = "Contact support",
+                                detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                                canRetry = true
+                            )
+                        }
+
+                        val eventEntity = OutboxEventEntity(
+                            clientEventId = row.clientEventId,
+                            companyId = row.companyId,
+                            actorId = row.actorId,
+                            deviceId = row.deviceId,
+                            deviceLeaseId = row.deviceLeaseId,
+                            capturedAt = row.capturedAt,
+                            payloadDigest = row.payloadDigest,
+                            payloadBytes = row.boundedPayloadBytes,
+                            eventVersion = row.eventVersion
+                        )
+                        try {
+                            payloadCipher.decrypt(eventEntity)
+                        } catch (e: OutboxStorageException) {
+                            return@runInTransaction when (e.error) {
+                                OutboxStorageError.KEY_LOCKED -> OutboxHealthResult(
+                                    status = OutboxHealthStatus.ENCRYPTED_LOCKED,
+                                    totalEvents = scopedTotal,
+                                    probedCount = verifiedCount + 1,
+                                    isSampleProbe = scopedTotal > (verifiedCount + 1),
+                                    isScopeLocked = isScopeLocked,
+                                    messageEn = "The secure encryption key is locked or invalidated. We have not changed stored sales. Some records need help before syncing.",
+                                    messageAr = "مفتاح التشفير الآمن مقفل أو تم إبطاله. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                                    detailMessageEn = "Contact support",
+                                    detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                                    canRetry = true
+                                )
+                                OutboxStorageError.KEY_UNAVAILABLE -> OutboxHealthResult(
+                                    status = OutboxHealthStatus.KEY_UNAVAILABLE,
+                                    totalEvents = scopedTotal,
+                                    probedCount = verifiedCount + 1,
+                                    isSampleProbe = scopedTotal > (verifiedCount + 1),
+                                    isScopeLocked = isScopeLocked,
+                                    messageEn = "The secure encryption key is unavailable on this device. We have not changed stored sales. Some records need help before syncing.",
+                                    messageAr = "مفتاح التشفير الآمن غير متوفر على هذا الجهاز. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                                    detailMessageEn = "Contact support",
+                                    detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                                    canRetry = true
+                                )
+                                OutboxStorageError.CORRUPT, OutboxStorageError.OVERSIZED -> OutboxHealthResult(
+                                    status = OutboxHealthStatus.CORRUPT,
+                                    totalEvents = scopedTotal,
+                                    probedCount = verifiedCount + 1,
+                                    isSampleProbe = scopedTotal > (verifiedCount + 1),
+                                    isScopeLocked = isScopeLocked,
+                                    messageEn = "Storage records could not be cryptographically authenticated. We have not changed stored sales. Some records need help before syncing.",
+                                    messageAr = "تعذر التحقق من التشفير الأمني للسجلات. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                                    detailMessageEn = "Contact support",
+                                    detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                                    canRetry = true
+                                )
+                                OutboxStorageError.LEGACY_CONVERSION_REQUIRED -> OutboxHealthResult(
+                                    status = OutboxHealthStatus.MIXED_QUEUE,
+                                    totalEvents = scopedTotal,
+                                    probedCount = verifiedCount + 1,
+                                    isSampleProbe = scopedTotal > (verifiedCount + 1),
+                                    isScopeLocked = isScopeLocked,
+                                    messageEn = "Outbox storage contains conflicting record formats. We have not changed stored sales. Some records need help before syncing.",
+                                    messageAr = "تحتوي وحدة التخزين على تنسيقات سجلات غير متوافقة. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                                    detailMessageEn = "Contact support",
+                                    detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                                    canRetry = true
+                                )
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            return@runInTransaction OutboxHealthResult(
+                                status = OutboxHealthStatus.CORRUPT,
+                                totalEvents = scopedTotal,
+                                probedCount = verifiedCount + 1,
+                                isSampleProbe = scopedTotal > (verifiedCount + 1),
+                                isScopeLocked = isScopeLocked,
+                                messageEn = "Storage records could not be cryptographically authenticated. We have not changed stored sales. Some records need help before syncing.",
+                                messageAr = "تعذر التحقق من التشفير الأمني للسجلات. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
+                                detailMessageEn = "Contact support",
+                                detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                                canRetry = true
+                            )
+                        }
+
+                        lastCapturedAt = row.capturedAt
+                        lastClientEventId = row.clientEventId
+                        verifiedCount++
+                    }
+
+                    if (verifiedCount < targetProbeLimit) {
+                        pageIndex++
+                        val limitForNext = minOf(pageSize, targetProbeLimit - verifiedCount)
+                        currentPage = database.outboxDao().scopedEventsPageForHealthProbe(
+                            companyId = companyId,
+                            actorId = actorId,
+                            deviceId = deviceId,
+                            afterCapturedAt = lastCapturedAt,
+                            afterClientEventId = lastClientEventId,
+                            maxEnvelopeBytesPlusOne = maxEnvelopeBytesPlusOne,
+                            limit = limitForNext
+                        )
+                    }
+                }
+
+                val isSampleProbe = (maxProbeCount > 0 && maxProbeCount < scopedTotal) || (verifiedCount < scopedTotal)
+
+                if (isSampleProbe) {
+                    return@runInTransaction OutboxHealthResult(
+                        status = OutboxHealthStatus.PARTIAL_UNCHECKED,
+                        totalEvents = scopedTotal,
+                        probedCount = verifiedCount,
+                        isSampleProbe = true,
+                        isScopeLocked = false,
+                        messageEn = "Queue contains unverified offline records beyond probe limit. Queue processing cannot be granted from a partial sample.",
+                        messageAr = "يحتوي طابور الترحيل على سجلات غير مفحوصة تتجاوز حد الفحص. لا يمكن منح صلاحية المعالجة بناءً على عينة جزئية.",
+                        detailMessageEn = "Contact support",
+                        detailMessageAr = "يرجى التواصل مع الدعم الفني.",
+                        canRetry = true
+                    )
+                }
+
+                return@runInTransaction OutboxHealthResult(
+                    status = OutboxHealthStatus.HEALTHY,
+                    totalEvents = scopedTotal,
+                    probedCount = verifiedCount,
+                    isSampleProbe = false,
+                    isScopeLocked = false,
+                    messageEn = "Encrypted offline queue is healthy.",
+                    messageAr = "طابور الترحيل المشفر يعمل بشكل سليم.",
+                    canRetry = false
+                )
+            }
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (_: Exception) {
             return@withContext OutboxHealthResult(
                 status = OutboxHealthStatus.STORAGE_UNAVAILABLE,
                 totalEvents = 0,
@@ -186,368 +572,6 @@ class DefaultOutboxHealthInspector(
             )
         }
 
-        val scopedTotal = snapshot.totalScopedEvents
-        val isScopeLocked = snapshot.isScopeLocked
-        val nonEncryptedCount = snapshot.nonEncryptedCount
-        val globalTotal = snapshot.totalGlobalEvents
-
-        if (isScopeLocked && scopedTotal == 0) {
-            return@withContext OutboxHealthResult(
-                status = OutboxHealthStatus.AUTH_BLOCKED,
-                totalEvents = 0,
-                probedCount = 0,
-                isSampleProbe = false,
-                isScopeLocked = true,
-                messageEn = "Offline sync is temporarily paused. Please sign in again or contact support.",
-                messageAr = "المزامنة متوقفة مؤقتاً. يرجى تسجيل الدخول مجدداً أو التواصل مع الدعم الفني.",
-                detailMessageEn = "Contact support",
-                detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                canRetry = true
-            )
-        }
-
-        if (scopedTotal == 0) {
-            // New empty queue for this scope.
-            // If the database has global events (> 0), repository capture requires a retained key: payloadCipher.prepare(true).
-            // Same-DB Company A legacy/no key + Company B empty must NOT claim capture ready.
-            if (globalTotal > 0) {
-                try {
-                    payloadCipher.prepare(true)
-                } catch (e: OutboxStorageException) {
-                    return@withContext when (e.error) {
-                        OutboxStorageError.KEY_LOCKED -> OutboxHealthResult(
-                            status = OutboxHealthStatus.ENCRYPTED_LOCKED,
-                            totalEvents = 0,
-                            probedCount = 0,
-                            isSampleProbe = false,
-                            isScopeLocked = isScopeLocked,
-                            messageEn = "The secure encryption key is locked or invalidated. We have not changed stored sales. Some records need help before syncing.",
-                            messageAr = "مفتاح التشفير الآمن مقفل أو تم إبطاله. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
-                            detailMessageEn = "Contact support",
-                            detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                            canRetry = true
-                        )
-                        OutboxStorageError.KEY_UNAVAILABLE -> OutboxHealthResult(
-                            status = OutboxHealthStatus.KEY_UNAVAILABLE,
-                            totalEvents = 0,
-                            probedCount = 0,
-                            isSampleProbe = false,
-                            isScopeLocked = isScopeLocked,
-                            messageEn = "The secure encryption key is unavailable on this device. We have not changed stored sales. Some records need help before syncing.",
-                            messageAr = "مفتاح التشفير الآمن غير متوفر على هذا الجهاز. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
-                            detailMessageEn = "Contact support",
-                            detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                            canRetry = true
-                        )
-                        else -> OutboxHealthResult(
-                            status = OutboxHealthStatus.CORRUPT,
-                            totalEvents = 0,
-                            probedCount = 0,
-                            isSampleProbe = false,
-                            isScopeLocked = isScopeLocked,
-                            messageEn = "Storage records could not be cryptographically authenticated. We have not changed stored sales. Some records need help before syncing.",
-                            messageAr = "تعذر التحقق من التشفير الأمني للسجلات. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
-                            detailMessageEn = "Contact support",
-                            detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                            canRetry = true
-                        )
-                    }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Exception) {
-                    return@withContext OutboxHealthResult(
-                        status = OutboxHealthStatus.KEY_UNAVAILABLE,
-                        totalEvents = 0,
-                        probedCount = 0,
-                        isSampleProbe = false,
-                        isScopeLocked = isScopeLocked,
-                        messageEn = "The secure encryption key is unavailable on this device. We have not changed stored sales. Some records need help before syncing.",
-                        messageAr = "مفتاح التشفير الآمن غير متوفر على هذا الجهاز. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
-                        detailMessageEn = "Contact support",
-                        detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                        canRetry = true
-                    )
-                }
-            }
-
-            return@withContext OutboxHealthResult(
-                status = OutboxHealthStatus.NEW_EMPTY,
-                totalEvents = 0,
-                probedCount = 0,
-                isSampleProbe = false,
-                isScopeLocked = isScopeLocked,
-                messageEn = "Encrypted offline queue is ready.",
-                messageAr = "طابور الترحيل المشفر جاهز للاستخدام.",
-                canRetry = false
-            )
-        }
-
-        // Fast-path SQL unencrypted classification check
-        if (nonEncryptedCount == scopedTotal) {
-            // All scoped events are unencrypted legacy plaintext
-            for (row in snapshot.sampleRows) {
-                currentCoroutineContext().ensureActive()
-                val eventEntity = OutboxEventEntity(
-                    clientEventId = row.clientEventId,
-                    companyId = row.companyId,
-                    actorId = row.actorId,
-                    deviceId = row.deviceId,
-                    deviceLeaseId = row.deviceLeaseId,
-                    capturedAt = row.capturedAt,
-                    payloadDigest = row.payloadDigest,
-                    payloadBytes = row.boundedPayloadBytes,
-                    eventVersion = row.eventVersion
-                )
-                try {
-                    payloadCipher.verifyLegacy(eventEntity)
-                } catch (_: Exception) {
-                    return@withContext OutboxHealthResult(
-                        status = OutboxHealthStatus.CORRUPT,
-                        totalEvents = scopedTotal,
-                        probedCount = snapshot.sampleRows.size,
-                        isSampleProbe = scopedTotal > snapshot.sampleRows.size,
-                        isScopeLocked = isScopeLocked,
-                        messageEn = "Pre-existing offline records failed integrity validation. We have not changed stored sales. Some records need help before syncing.",
-                        messageAr = "فشل التحقق من سلامة السجلات السابقة. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
-                        detailMessageEn = "Contact support",
-                        detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                        canRetry = true
-                    )
-                }
-            }
-            return@withContext OutboxHealthResult(
-                status = OutboxHealthStatus.LEGACY_PLAINTEXT,
-                totalEvents = scopedTotal,
-                probedCount = snapshot.sampleRows.size,
-                isSampleProbe = scopedTotal > snapshot.sampleRows.size,
-                isScopeLocked = isScopeLocked,
-                messageEn = "Pre-existing unencrypted sales records detected. We have not changed stored sales. Some records need help before syncing.",
-                messageAr = "تم اكتشاف سجلات مبيعات سابقة غير مشفرة. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
-                detailMessageEn = "Contact support",
-                detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                canRetry = true
-            )
-        }
-
-        if (nonEncryptedCount > 0) {
-            return@withContext OutboxHealthResult(
-                status = OutboxHealthStatus.MIXED_QUEUE,
-                totalEvents = scopedTotal,
-                probedCount = snapshot.sampleRows.size,
-                isSampleProbe = scopedTotal > snapshot.sampleRows.size,
-                isScopeLocked = isScopeLocked,
-                messageEn = "Outbox storage contains conflicting record formats. We have not changed stored sales. Some records need help before syncing.",
-                messageAr = "تحتوي وحدة التخزين على تنسيقات سجلات غير متوافقة. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
-                detailMessageEn = "Contact support",
-                detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                canRetry = true
-            )
-        }
-
-        // Bounded, cancellable, paged verification across scoped rows
-        val targetProbeLimit = if (maxProbeCount > 0) minOf(maxProbeCount, scopedTotal) else scopedTotal
-        var verifiedCount = 0
-        var currentPage = snapshot.sampleRows
-        var pageIndex = 0
-        var lastCapturedAt: String? = null
-        var lastClientEventId: String? = null
-
-        while (currentPage.isNotEmpty() && verifiedCount < targetProbeLimit) {
-            currentCoroutineContext().ensureActive()
-            onPageReadHook?.invoke(pageIndex)
-
-            for (row in currentPage) {
-                currentCoroutineContext().ensureActive()
-                if (verifiedCount >= targetProbeLimit) break
-
-                if (row.payloadLength > maxEnvelopeBytes) {
-                    return@withContext OutboxHealthResult(
-                        status = OutboxHealthStatus.CORRUPT,
-                        totalEvents = scopedTotal,
-                        probedCount = verifiedCount + 1,
-                        isSampleProbe = scopedTotal > (verifiedCount + 1),
-                        isScopeLocked = isScopeLocked,
-                        messageEn = "Storage records exceeded maximum allowed envelope size. We have not changed stored sales. Some records need help before syncing.",
-                        messageAr = "تجاوزت بعض السجلات الحد الأقصى لحجم التخزين. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
-                        detailMessageEn = "Contact support",
-                        detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                        canRetry = true
-                    )
-                }
-
-                val bytes = row.boundedPayloadBytes
-                if (!payloadCipher.isEncrypted(bytes)) {
-                    val status = if (payloadCipher.hasStoEnvelope(bytes)) {
-                        OutboxHealthStatus.CORRUPT
-                    } else {
-                        OutboxHealthStatus.MIXED_QUEUE
-                    }
-                    return@withContext OutboxHealthResult(
-                        status = status,
-                        totalEvents = scopedTotal,
-                        probedCount = verifiedCount + 1,
-                        isSampleProbe = scopedTotal > (verifiedCount + 1),
-                        isScopeLocked = isScopeLocked,
-                        messageEn = if (status == OutboxHealthStatus.CORRUPT)
-                            "Storage records could not be cryptographically authenticated. We have not changed stored sales. Some records need help before syncing."
-                        else
-                            "Outbox storage contains conflicting record formats. We have not changed stored sales. Some records need help before syncing.",
-                        messageAr = if (status == OutboxHealthStatus.CORRUPT)
-                            "تعذر التحقق من التشفير الأمني للسجلات. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة."
-                        else
-                            "تحتوي وحدة التخزين على تنسيقات سجلات غير متوافقة. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
-                        detailMessageEn = "Contact support",
-                        detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                        canRetry = true
-                    )
-                }
-
-                val eventEntity = OutboxEventEntity(
-                    clientEventId = row.clientEventId,
-                    companyId = row.companyId,
-                    actorId = row.actorId,
-                    deviceId = row.deviceId,
-                    deviceLeaseId = row.deviceLeaseId,
-                    capturedAt = row.capturedAt,
-                    payloadDigest = row.payloadDigest,
-                    payloadBytes = row.boundedPayloadBytes,
-                    eventVersion = row.eventVersion
-                )
-                try {
-                    payloadCipher.decrypt(eventEntity)
-                } catch (e: OutboxStorageException) {
-                    return@withContext when (e.error) {
-                        OutboxStorageError.KEY_LOCKED -> OutboxHealthResult(
-                            status = OutboxHealthStatus.ENCRYPTED_LOCKED,
-                            totalEvents = scopedTotal,
-                            probedCount = verifiedCount + 1,
-                            isSampleProbe = scopedTotal > (verifiedCount + 1),
-                            isScopeLocked = isScopeLocked,
-                            messageEn = "The secure encryption key is locked or invalidated. We have not changed stored sales. Some records need help before syncing.",
-                            messageAr = "مفتاح التشفير الآمن مقفل أو تم إبطاله. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
-                            detailMessageEn = "Contact support",
-                            detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                            canRetry = true
-                        )
-                        OutboxStorageError.KEY_UNAVAILABLE -> OutboxHealthResult(
-                            status = OutboxHealthStatus.KEY_UNAVAILABLE,
-                            totalEvents = scopedTotal,
-                            probedCount = verifiedCount + 1,
-                            isSampleProbe = scopedTotal > (verifiedCount + 1),
-                            isScopeLocked = isScopeLocked,
-                            messageEn = "The secure encryption key is unavailable on this device. We have not changed stored sales. Some records need help before syncing.",
-                            messageAr = "مفتاح التشفير الآمن غير متوفر على هذا الجهاز. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
-                            detailMessageEn = "Contact support",
-                            detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                            canRetry = true
-                        )
-                        OutboxStorageError.CORRUPT, OutboxStorageError.OVERSIZED -> OutboxHealthResult(
-                            status = OutboxHealthStatus.CORRUPT,
-                            totalEvents = scopedTotal,
-                            probedCount = verifiedCount + 1,
-                            isSampleProbe = scopedTotal > (verifiedCount + 1),
-                            isScopeLocked = isScopeLocked,
-                            messageEn = "Storage records could not be cryptographically authenticated. We have not changed stored sales. Some records need help before syncing.",
-                            messageAr = "تعذر التحقق من التشفير الأمني للسجلات. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
-                            detailMessageEn = "Contact support",
-                            detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                            canRetry = true
-                        )
-                        OutboxStorageError.LEGACY_CONVERSION_REQUIRED -> OutboxHealthResult(
-                            status = OutboxHealthStatus.MIXED_QUEUE,
-                            totalEvents = scopedTotal,
-                            probedCount = verifiedCount + 1,
-                            isSampleProbe = scopedTotal > (verifiedCount + 1),
-                            isScopeLocked = isScopeLocked,
-                            messageEn = "Outbox storage contains conflicting record formats. We have not changed stored sales. Some records need help before syncing.",
-                            messageAr = "تحتوي وحدة التخزين على تنسيقات سجلات غير متوافقة. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
-                            detailMessageEn = "Contact support",
-                            detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                            canRetry = true
-                        )
-                    }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Exception) {
-                    return@withContext OutboxHealthResult(
-                        status = OutboxHealthStatus.CORRUPT,
-                        totalEvents = scopedTotal,
-                        probedCount = verifiedCount + 1,
-                        isSampleProbe = scopedTotal > (verifiedCount + 1),
-                        isScopeLocked = isScopeLocked,
-                        messageEn = "Storage records could not be cryptographically authenticated. We have not changed stored sales. Some records need help before syncing.",
-                        messageAr = "تعذر التحقق من التشفير الأمني للسجلات. لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
-                        detailMessageEn = "Contact support",
-                        detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                        canRetry = true
-                    )
-                }
-
-                lastCapturedAt = row.capturedAt
-                lastClientEventId = row.clientEventId
-                verifiedCount++
-            }
-
-            if (verifiedCount < targetProbeLimit) {
-                pageIndex++
-                val limitForNext = minOf(pageSize, targetProbeLimit - verifiedCount)
-                currentPage = database.outboxDao().scopedEventsPageForHealthProbe(
-                    companyId = companyId,
-                    actorId = actorId,
-                    deviceId = deviceId,
-                    afterCapturedAt = lastCapturedAt,
-                    afterClientEventId = lastClientEventId,
-                    maxEnvelopeBytesPlusOne = maxEnvelopeBytesPlusOne,
-                    limit = limitForNext
-                )
-            }
-        }
-
-        // Check persisted scope lock
-        val isCurrentlyLocked = isScopeLocked || database.outboxDao().isScopeLocked(companyId, actorId, deviceId)
-        if (isCurrentlyLocked) {
-            return@withContext OutboxHealthResult(
-                status = OutboxHealthStatus.AUTH_BLOCKED,
-                totalEvents = scopedTotal,
-                probedCount = verifiedCount,
-                isSampleProbe = scopedTotal > verifiedCount,
-                isScopeLocked = true,
-                messageEn = "Offline sync is temporarily paused. Please sign in again or contact support.",
-                messageAr = "المزامنة متوقفة مؤقتاً. يرجى تسجيل الدخول مجدداً أو التواصل مع الدعم الفني.",
-                detailMessageEn = "Contact support",
-                detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                canRetry = true
-            )
-        }
-
-        // Durable generation / snapshot check: verify that count has not mutated during the scan
-        val currentScopedCount = database.outboxDao().scopedEventCount(companyId, actorId, deviceId)
-        val isSampleProbe = (maxProbeCount > 0 && maxProbeCount < currentScopedCount) || (verifiedCount < currentScopedCount)
-
-        if (isSampleProbe) {
-            return@withContext OutboxHealthResult(
-                status = OutboxHealthStatus.PARTIAL_UNCHECKED,
-                totalEvents = currentScopedCount,
-                probedCount = verifiedCount,
-                isSampleProbe = true,
-                isScopeLocked = false,
-                messageEn = "Queue contains unverified offline records beyond probe limit. Queue processing cannot be granted from a partial sample.",
-                messageAr = "يحتوي طابور الترحيل على سجلات غير مفحوصة تتجاوز حد الفحص. لا يمكن منح صلاحية المعالجة بناءً على عينة جزئية.",
-                detailMessageEn = "Contact support",
-                detailMessageAr = "يرجى التواصل مع الدعم الفني.",
-                canRetry = true
-            )
-        }
-
-        return@withContext OutboxHealthResult(
-            status = OutboxHealthStatus.HEALTHY,
-            totalEvents = currentScopedCount,
-            probedCount = verifiedCount,
-            isSampleProbe = false,
-            isScopeLocked = false,
-            messageEn = "Encrypted offline queue is healthy.",
-            messageAr = "طابور الترحيل المشفر يعمل بشكل سليم.",
-            canRetry = false
-        )
+        return@withContext result
     }
 }

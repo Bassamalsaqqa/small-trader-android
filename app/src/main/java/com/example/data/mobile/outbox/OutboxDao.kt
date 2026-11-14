@@ -69,6 +69,7 @@ data class OutboxHealthScopeSnapshot(
 
 @Dao
 abstract class OutboxDao {
+    @Transaction
     open fun getScopedHealthSnapshot(
         companyId: String,
         actorId: String,
