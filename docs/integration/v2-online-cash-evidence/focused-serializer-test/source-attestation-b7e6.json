@@ -1,0 +1,566 @@
+{
+  "workflow": "focused_serializer_roundtrip_verification",
+  "sourceCommit": "b7e61eb4ed0aed2f5040d9fc44f9764b310be530",
+  "executionCommit": "b7e61eb4ed0aed2f5040d9fc44f9764b310be530",
+  "resourceFlags": {
+    "maxWorkers": 1,
+    "activeProcessorCount": 2,
+    "garbageCollector": "SerialGC",
+    "maxHeap": "1536m",
+    "inProcess": true,
+    "noDaemon": true
+  },
+  "steps": [
+    {
+      "name": "CashPilotHandoffConfigTest_focused",
+      "command": [
+        "/home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/gradlew",
+        "-p",
+        "/home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1",
+        "cleanTestDebugUnitTest",
+        "testDebugUnitTest",
+        "--no-build-cache",
+        "--tests",
+        "com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest",
+        "--max-workers=1",
+        "-Dorg.gradle.workers.max=1",
+        "-Dorg.gradle.jvmargs=-XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xmx1536m",
+        "-Pkotlin.compiler.execution.strategy=in-process",
+        "--no-daemon"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 78.56009888648987,
+      "logFile": "b7e6-focused-test-execution.log",
+      "preGitHead": "b7e61eb4ed0aed2f5040d9fc44f9764b310be530",
+      "preGitStatus": "?? app/docs/",
+      "preSourceHashes": {
+        "app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt": {
+          "sha256": "b3cf44919de8a895ec564c7046c8f99b712e2092bb1eece6402bb975063aed9d",
+          "sizeBytes": 18162
+        },
+        "app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt": {
+          "sha256": "aee0e422baa134f6c2e075e75a3a2603f05d7b4545e7facd4aa70be339a8091d",
+          "sizeBytes": 8205
+        },
+        "app/src/main/java/com/example/data/mobile/onlinecash/AndroidV2OnlineCashClient.kt": {
+          "sha256": "6b9e7cd24478d7c924e76fc9690ea14eeb7cbda82b6c0c1406861b0b9256cd7e",
+          "sizeBytes": 25584
+        },
+        "app/src/main/java/com/example/data/mobile/contract/v2/PaymentDecimalConsistency.kt": {
+          "sha256": "385296a4ff95c57f1f7362cabd4fc8224f11dd05739120199149400efe809261",
+          "sizeBytes": 7577
+        },
+        "app/src/main/java/com/example/data/mobile/contract/v2/OfflineSaleModelsV2.kt": {
+          "sha256": "9f2372ade1d764b9f7631c37df67dd0b7864ee0735fdcf401209dd4381facc0f",
+          "sizeBytes": 21679
+        },
+        "app/src/main/java/com/example/data/mobile/contract/v2/OnlineSaleIntentProfile.kt": {
+          "sha256": "6a008ef6361e2127793065bf47226777f74d98f68fb9768f477a617c243cc06c",
+          "sizeBytes": 23307
+        },
+        "app/src/main/java/com/example/data/mobile/contract/v2/SaleCommitModels.kt": {
+          "sha256": "e8928ab6603d103e7b0385ceda36c1f0f26b40d50ac3226ef35e9bc890429657",
+          "sizeBytes": 15069
+        },
+        "app/src/main/java/com/example/data/mobile/session/SecureStaffSessionStore.kt": {
+          "sha256": "0d841d5ae14c58bf0dd56099f705c78298d7618274af6bcd5d269ad40cb100fd",
+          "sizeBytes": 14334
+        },
+        "app/src/main/java/com/example/data/mobile/session/StaffSessionCoordinator.kt": {
+          "sha256": "88242656f5ad76738c32e0a58cc921817be50260168ac857aa84a56b4181550d",
+          "sizeBytes": 43330
+        },
+        "app/src/main/java/com/example/data/mobile/readclient/http/OkHttpTransport.kt": {
+          "sha256": "31fdbe904866e006f9e58e74ce6266bbf7d355e1e2b00ca07474d743a5abfed8",
+          "sizeBytes": 25009
+        },
+        "app/src/test/java/com/example/data/mobile/onlinecash/AndroidV2OnlineCashClientMockWebServerTest.kt": {
+          "sha256": "0e60facaf53c6f3908aedeabaa2dc5e259dfe23cf0ad6b5892f226b1c927cd4e",
+          "sizeBytes": 62090
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotEvidence.kt": {
+          "sha256": "653c297144d26cbb5ca439b3f38b106af4db3913a4a6fcf5038a302b6a31dc9b",
+          "sizeBytes": 4948
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotHandoffConfig.kt": {
+          "sha256": "37ffc4c8399a85dcf17767d3245aada6bd24f264de78a5793689a9ff594d3b83",
+          "sizeBytes": 54974
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotHandoffConfigTest.kt": {
+          "sha256": "3564f8c2c343cc1a126b5727d5e285e83b7dfa69b45c6086a7bb520636a5e894",
+          "sizeBytes": 66996
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/pilot/SmallTraderOnlineCashPilotSmokeTest.kt": {
+          "sha256": "c29bfb3d9a8c6a4b51fbe3b2f39ed73dc14b7a31900ca7f087b8fd4778c34e97",
+          "sizeBytes": 32834
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/pilot/ReadPilotHandoffConfig.kt": {
+          "sha256": "01670c8581cf637c6493af6e63277fe477a00eb6ba6f396cbe3b365d3d06a320",
+          "sizeBytes": 40318
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/pilot/ReadPilotHandoffConfigTest.kt": {
+          "sha256": "73e71f9966c542f00ab361f6e621940ec8185dfd68ce243b6d45191d143d347d",
+          "sizeBytes": 24485
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/pilot/SmallTraderReadPilotSmokeTest.kt": {
+          "sha256": "c1d214228a824f3c9d330011dc275264d7e05b039029ad4cdd4e42575384c5a8",
+          "sizeBytes": 34245
+        },
+        "app/src/test/java/com/example/data/mobile/contract/v2/ContractV2WireValidationTest.kt": {
+          "sha256": "631956d0ea1b0126effebbcfe2d29de05afee2fc0f0752c81739d69c732ff822",
+          "sizeBytes": 8812
+        },
+        "app/src/test/java/com/example/data/mobile/contract/v2/OfflineSaleV2GoldenParityTest.kt": {
+          "sha256": "28dc50cad7a09aa5f0852d64907025dba5ca31a0b32e6f2259d56d31453d0b03",
+          "sizeBytes": 9751
+        },
+        "app/src/test/java/com/example/data/mobile/contract/v2/OnlineSaleIntentProfileGoldenParityTest.kt": {
+          "sha256": "ea513a94060e992931da01ee8fc80fc47499f9a84841224142ce8ad10a474237",
+          "sizeBytes": 11684
+        },
+        "app/src/test/java/com/example/data/mobile/contract/v2/OnlineSaleIntentProfileMutationTest.kt": {
+          "sha256": "f774f4ff54ee141a9e8194a8340fa2cd646f728b2368f58cd7579726694ebad2",
+          "sizeBytes": 7623
+        },
+        "app/src/test/java/com/example/data/mobile/contract/v2/PaymentDecimalConsistencyTest.kt": {
+          "sha256": "de6972a75877fdb0d40014e77a23b87075b0dcf8ec6564ec8a3cbc6f5e9756cb",
+          "sizeBytes": 9840
+        },
+        "app/src/test/java/com/example/data/mobile/contract/v2/SaleCommitResponseTest.kt": {
+          "sha256": "b99a7b3e160619511863f8e589fd821b02af3604879db96d05174f5ea164cfc6",
+          "sizeBytes": 6249
+        },
+        "app/src/test/java/com/example/data/mobile/contract/v2/SaleEventStatusResponseTest.kt": {
+          "sha256": "361c7b2f91a32fc9f129fb03cad4282512e3a504f04f392025f67ae8178496a5",
+          "sizeBytes": 5629
+        },
+        "app/src/test/java/com/example/data/mobile/session/SecureStaffSessionStoreTest.kt": {
+          "sha256": "6d4d2405472cd84813ebdbc08df56888ad8e00612e124a49862896d91936d4af",
+          "sizeBytes": 42346
+        },
+        "app/src/test/java/com/example/data/mobile/session/StaffSessionCoordinatorTest.kt": {
+          "sha256": "526bc971a24c49dec189e5b1120b2be6cc387e42e4e3362fd3d9a9f12ee3795f",
+          "sizeBytes": 74975
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/http/OkHttpMockWebServerTest.kt": {
+          "sha256": "6d5f1481dd6d5dbe635f9cc57996c4ad07826219f594c41770b7f13985898a2d",
+          "sizeBytes": 20105
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/http/OkHttpTransportLoopbackServerTest.kt": {
+          "sha256": "344a2f0158a1fbe716c269343a9d382db9244dd129c224c1981e3d1c8be7b1d4",
+          "sizeBytes": 20129
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/http/OkHttpTransportSecurityTest.kt": {
+          "sha256": "575c4fe05b869f4d990e0c2eb2cfd31c689423abae740bf397a8cb31c912936a",
+          "sizeBytes": 20916
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/http/PlatformHttpUrlConnectionAmbientEvidenceTest.kt": {
+          "sha256": "8e83876676c5615798e62308303c348741319f17475ddfa583c024e155d19318",
+          "sizeBytes": 4579
+        }
+      },
+      "postGitHead": "b7e61eb4ed0aed2f5040d9fc44f9764b310be530",
+      "postGitStatus": "?? app/docs/\n?? docs/integration/v2-online-cash-evidence/focused-serializer-test/",
+      "postSourceHashes": {
+        "app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt": {
+          "sha256": "b3cf44919de8a895ec564c7046c8f99b712e2092bb1eece6402bb975063aed9d",
+          "sizeBytes": 18162
+        },
+        "app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt": {
+          "sha256": "aee0e422baa134f6c2e075e75a3a2603f05d7b4545e7facd4aa70be339a8091d",
+          "sizeBytes": 8205
+        },
+        "app/src/main/java/com/example/data/mobile/onlinecash/AndroidV2OnlineCashClient.kt": {
+          "sha256": "6b9e7cd24478d7c924e76fc9690ea14eeb7cbda82b6c0c1406861b0b9256cd7e",
+          "sizeBytes": 25584
+        },
+        "app/src/main/java/com/example/data/mobile/contract/v2/PaymentDecimalConsistency.kt": {
+          "sha256": "385296a4ff95c57f1f7362cabd4fc8224f11dd05739120199149400efe809261",
+          "sizeBytes": 7577
+        },
+        "app/src/main/java/com/example/data/mobile/contract/v2/OfflineSaleModelsV2.kt": {
+          "sha256": "9f2372ade1d764b9f7631c37df67dd0b7864ee0735fdcf401209dd4381facc0f",
+          "sizeBytes": 21679
+        },
+        "app/src/main/java/com/example/data/mobile/contract/v2/OnlineSaleIntentProfile.kt": {
+          "sha256": "6a008ef6361e2127793065bf47226777f74d98f68fb9768f477a617c243cc06c",
+          "sizeBytes": 23307
+        },
+        "app/src/main/java/com/example/data/mobile/contract/v2/SaleCommitModels.kt": {
+          "sha256": "e8928ab6603d103e7b0385ceda36c1f0f26b40d50ac3226ef35e9bc890429657",
+          "sizeBytes": 15069
+        },
+        "app/src/main/java/com/example/data/mobile/session/SecureStaffSessionStore.kt": {
+          "sha256": "0d841d5ae14c58bf0dd56099f705c78298d7618274af6bcd5d269ad40cb100fd",
+          "sizeBytes": 14334
+        },
+        "app/src/main/java/com/example/data/mobile/session/StaffSessionCoordinator.kt": {
+          "sha256": "88242656f5ad76738c32e0a58cc921817be50260168ac857aa84a56b4181550d",
+          "sizeBytes": 43330
+        },
+        "app/src/main/java/com/example/data/mobile/readclient/http/OkHttpTransport.kt": {
+          "sha256": "31fdbe904866e006f9e58e74ce6266bbf7d355e1e2b00ca07474d743a5abfed8",
+          "sizeBytes": 25009
+        },
+        "app/src/test/java/com/example/data/mobile/onlinecash/AndroidV2OnlineCashClientMockWebServerTest.kt": {
+          "sha256": "0e60facaf53c6f3908aedeabaa2dc5e259dfe23cf0ad6b5892f226b1c927cd4e",
+          "sizeBytes": 62090
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotEvidence.kt": {
+          "sha256": "653c297144d26cbb5ca439b3f38b106af4db3913a4a6fcf5038a302b6a31dc9b",
+          "sizeBytes": 4948
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotHandoffConfig.kt": {
+          "sha256": "37ffc4c8399a85dcf17767d3245aada6bd24f264de78a5793689a9ff594d3b83",
+          "sizeBytes": 54974
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotHandoffConfigTest.kt": {
+          "sha256": "3564f8c2c343cc1a126b5727d5e285e83b7dfa69b45c6086a7bb520636a5e894",
+          "sizeBytes": 66996
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/pilot/SmallTraderOnlineCashPilotSmokeTest.kt": {
+          "sha256": "c29bfb3d9a8c6a4b51fbe3b2f39ed73dc14b7a31900ca7f087b8fd4778c34e97",
+          "sizeBytes": 32834
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/pilot/ReadPilotHandoffConfig.kt": {
+          "sha256": "01670c8581cf637c6493af6e63277fe477a00eb6ba6f396cbe3b365d3d06a320",
+          "sizeBytes": 40318
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/pilot/ReadPilotHandoffConfigTest.kt": {
+          "sha256": "73e71f9966c542f00ab361f6e621940ec8185dfd68ce243b6d45191d143d347d",
+          "sizeBytes": 24485
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/pilot/SmallTraderReadPilotSmokeTest.kt": {
+          "sha256": "c1d214228a824f3c9d330011dc275264d7e05b039029ad4cdd4e42575384c5a8",
+          "sizeBytes": 34245
+        },
+        "app/src/test/java/com/example/data/mobile/contract/v2/ContractV2WireValidationTest.kt": {
+          "sha256": "631956d0ea1b0126effebbcfe2d29de05afee2fc0f0752c81739d69c732ff822",
+          "sizeBytes": 8812
+        },
+        "app/src/test/java/com/example/data/mobile/contract/v2/OfflineSaleV2GoldenParityTest.kt": {
+          "sha256": "28dc50cad7a09aa5f0852d64907025dba5ca31a0b32e6f2259d56d31453d0b03",
+          "sizeBytes": 9751
+        },
+        "app/src/test/java/com/example/data/mobile/contract/v2/OnlineSaleIntentProfileGoldenParityTest.kt": {
+          "sha256": "ea513a94060e992931da01ee8fc80fc47499f9a84841224142ce8ad10a474237",
+          "sizeBytes": 11684
+        },
+        "app/src/test/java/com/example/data/mobile/contract/v2/OnlineSaleIntentProfileMutationTest.kt": {
+          "sha256": "f774f4ff54ee141a9e8194a8340fa2cd646f728b2368f58cd7579726694ebad2",
+          "sizeBytes": 7623
+        },
+        "app/src/test/java/com/example/data/mobile/contract/v2/PaymentDecimalConsistencyTest.kt": {
+          "sha256": "de6972a75877fdb0d40014e77a23b87075b0dcf8ec6564ec8a3cbc6f5e9756cb",
+          "sizeBytes": 9840
+        },
+        "app/src/test/java/com/example/data/mobile/contract/v2/SaleCommitResponseTest.kt": {
+          "sha256": "b99a7b3e160619511863f8e589fd821b02af3604879db96d05174f5ea164cfc6",
+          "sizeBytes": 6249
+        },
+        "app/src/test/java/com/example/data/mobile/contract/v2/SaleEventStatusResponseTest.kt": {
+          "sha256": "361c7b2f91a32fc9f129fb03cad4282512e3a504f04f392025f67ae8178496a5",
+          "sizeBytes": 5629
+        },
+        "app/src/test/java/com/example/data/mobile/session/SecureStaffSessionStoreTest.kt": {
+          "sha256": "6d4d2405472cd84813ebdbc08df56888ad8e00612e124a49862896d91936d4af",
+          "sizeBytes": 42346
+        },
+        "app/src/test/java/com/example/data/mobile/session/StaffSessionCoordinatorTest.kt": {
+          "sha256": "526bc971a24c49dec189e5b1120b2be6cc387e42e4e3362fd3d9a9f12ee3795f",
+          "sizeBytes": 74975
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/http/OkHttpMockWebServerTest.kt": {
+          "sha256": "6d5f1481dd6d5dbe635f9cc57996c4ad07826219f594c41770b7f13985898a2d",
+          "sizeBytes": 20105
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/http/OkHttpTransportLoopbackServerTest.kt": {
+          "sha256": "344a2f0158a1fbe716c269343a9d382db9244dd129c224c1981e3d1c8be7b1d4",
+          "sizeBytes": 20129
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/http/OkHttpTransportSecurityTest.kt": {
+          "sha256": "575c4fe05b869f4d990e0c2eb2cfd31c689423abae740bf397a8cb31c912936a",
+          "sizeBytes": 20916
+        },
+        "app/src/test/java/com/example/data/mobile/readclient/http/PlatformHttpUrlConnectionAmbientEvidenceTest.kt": {
+          "sha256": "8e83876676c5615798e62308303c348741319f17475ddfa583c024e155d19318",
+          "sizeBytes": 4579
+        }
+      }
+    }
+  ],
+  "command": [
+    "/home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/gradlew",
+    "-p",
+    "/home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1",
+    "cleanTestDebugUnitTest",
+    "testDebugUnitTest",
+    "--no-build-cache",
+    "--tests",
+    "com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest",
+    "--max-workers=1",
+    "-Dorg.gradle.workers.max=1",
+    "-Dorg.gradle.jvmargs=-XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xmx1536m",
+    "-Pkotlin.compiler.execution.strategy=in-process",
+    "--no-daemon"
+  ],
+  "exitCode": 0,
+  "durationSeconds": 78.56009888648987,
+  "logFile": "b7e6-focused-test-execution.log",
+  "preGitHead": "b7e61eb4ed0aed2f5040d9fc44f9764b310be530",
+  "preGitStatus": "?? app/docs/",
+  "preSourceHashes": {
+    "app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt": {
+      "sha256": "b3cf44919de8a895ec564c7046c8f99b712e2092bb1eece6402bb975063aed9d",
+      "sizeBytes": 18162
+    },
+    "app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt": {
+      "sha256": "aee0e422baa134f6c2e075e75a3a2603f05d7b4545e7facd4aa70be339a8091d",
+      "sizeBytes": 8205
+    },
+    "app/src/main/java/com/example/data/mobile/onlinecash/AndroidV2OnlineCashClient.kt": {
+      "sha256": "6b9e7cd24478d7c924e76fc9690ea14eeb7cbda82b6c0c1406861b0b9256cd7e",
+      "sizeBytes": 25584
+    },
+    "app/src/main/java/com/example/data/mobile/contract/v2/PaymentDecimalConsistency.kt": {
+      "sha256": "385296a4ff95c57f1f7362cabd4fc8224f11dd05739120199149400efe809261",
+      "sizeBytes": 7577
+    },
+    "app/src/main/java/com/example/data/mobile/contract/v2/OfflineSaleModelsV2.kt": {
+      "sha256": "9f2372ade1d764b9f7631c37df67dd0b7864ee0735fdcf401209dd4381facc0f",
+      "sizeBytes": 21679
+    },
+    "app/src/main/java/com/example/data/mobile/contract/v2/OnlineSaleIntentProfile.kt": {
+      "sha256": "6a008ef6361e2127793065bf47226777f74d98f68fb9768f477a617c243cc06c",
+      "sizeBytes": 23307
+    },
+    "app/src/main/java/com/example/data/mobile/contract/v2/SaleCommitModels.kt": {
+      "sha256": "e8928ab6603d103e7b0385ceda36c1f0f26b40d50ac3226ef35e9bc890429657",
+      "sizeBytes": 15069
+    },
+    "app/src/main/java/com/example/data/mobile/session/SecureStaffSessionStore.kt": {
+      "sha256": "0d841d5ae14c58bf0dd56099f705c78298d7618274af6bcd5d269ad40cb100fd",
+      "sizeBytes": 14334
+    },
+    "app/src/main/java/com/example/data/mobile/session/StaffSessionCoordinator.kt": {
+      "sha256": "88242656f5ad76738c32e0a58cc921817be50260168ac857aa84a56b4181550d",
+      "sizeBytes": 43330
+    },
+    "app/src/main/java/com/example/data/mobile/readclient/http/OkHttpTransport.kt": {
+      "sha256": "31fdbe904866e006f9e58e74ce6266bbf7d355e1e2b00ca07474d743a5abfed8",
+      "sizeBytes": 25009
+    },
+    "app/src/test/java/com/example/data/mobile/onlinecash/AndroidV2OnlineCashClientMockWebServerTest.kt": {
+      "sha256": "0e60facaf53c6f3908aedeabaa2dc5e259dfe23cf0ad6b5892f226b1c927cd4e",
+      "sizeBytes": 62090
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotEvidence.kt": {
+      "sha256": "653c297144d26cbb5ca439b3f38b106af4db3913a4a6fcf5038a302b6a31dc9b",
+      "sizeBytes": 4948
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotHandoffConfig.kt": {
+      "sha256": "37ffc4c8399a85dcf17767d3245aada6bd24f264de78a5793689a9ff594d3b83",
+      "sizeBytes": 54974
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotHandoffConfigTest.kt": {
+      "sha256": "3564f8c2c343cc1a126b5727d5e285e83b7dfa69b45c6086a7bb520636a5e894",
+      "sizeBytes": 66996
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/pilot/SmallTraderOnlineCashPilotSmokeTest.kt": {
+      "sha256": "c29bfb3d9a8c6a4b51fbe3b2f39ed73dc14b7a31900ca7f087b8fd4778c34e97",
+      "sizeBytes": 32834
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/pilot/ReadPilotHandoffConfig.kt": {
+      "sha256": "01670c8581cf637c6493af6e63277fe477a00eb6ba6f396cbe3b365d3d06a320",
+      "sizeBytes": 40318
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/pilot/ReadPilotHandoffConfigTest.kt": {
+      "sha256": "73e71f9966c542f00ab361f6e621940ec8185dfd68ce243b6d45191d143d347d",
+      "sizeBytes": 24485
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/pilot/SmallTraderReadPilotSmokeTest.kt": {
+      "sha256": "c1d214228a824f3c9d330011dc275264d7e05b039029ad4cdd4e42575384c5a8",
+      "sizeBytes": 34245
+    },
+    "app/src/test/java/com/example/data/mobile/contract/v2/ContractV2WireValidationTest.kt": {
+      "sha256": "631956d0ea1b0126effebbcfe2d29de05afee2fc0f0752c81739d69c732ff822",
+      "sizeBytes": 8812
+    },
+    "app/src/test/java/com/example/data/mobile/contract/v2/OfflineSaleV2GoldenParityTest.kt": {
+      "sha256": "28dc50cad7a09aa5f0852d64907025dba5ca31a0b32e6f2259d56d31453d0b03",
+      "sizeBytes": 9751
+    },
+    "app/src/test/java/com/example/data/mobile/contract/v2/OnlineSaleIntentProfileGoldenParityTest.kt": {
+      "sha256": "ea513a94060e992931da01ee8fc80fc47499f9a84841224142ce8ad10a474237",
+      "sizeBytes": 11684
+    },
+    "app/src/test/java/com/example/data/mobile/contract/v2/OnlineSaleIntentProfileMutationTest.kt": {
+      "sha256": "f774f4ff54ee141a9e8194a8340fa2cd646f728b2368f58cd7579726694ebad2",
+      "sizeBytes": 7623
+    },
+    "app/src/test/java/com/example/data/mobile/contract/v2/PaymentDecimalConsistencyTest.kt": {
+      "sha256": "de6972a75877fdb0d40014e77a23b87075b0dcf8ec6564ec8a3cbc6f5e9756cb",
+      "sizeBytes": 9840
+    },
+    "app/src/test/java/com/example/data/mobile/contract/v2/SaleCommitResponseTest.kt": {
+      "sha256": "b99a7b3e160619511863f8e589fd821b02af3604879db96d05174f5ea164cfc6",
+      "sizeBytes": 6249
+    },
+    "app/src/test/java/com/example/data/mobile/contract/v2/SaleEventStatusResponseTest.kt": {
+      "sha256": "361c7b2f91a32fc9f129fb03cad4282512e3a504f04f392025f67ae8178496a5",
+      "sizeBytes": 5629
+    },
+    "app/src/test/java/com/example/data/mobile/session/SecureStaffSessionStoreTest.kt": {
+      "sha256": "6d4d2405472cd84813ebdbc08df56888ad8e00612e124a49862896d91936d4af",
+      "sizeBytes": 42346
+    },
+    "app/src/test/java/com/example/data/mobile/session/StaffSessionCoordinatorTest.kt": {
+      "sha256": "526bc971a24c49dec189e5b1120b2be6cc387e42e4e3362fd3d9a9f12ee3795f",
+      "sizeBytes": 74975
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/http/OkHttpMockWebServerTest.kt": {
+      "sha256": "6d5f1481dd6d5dbe635f9cc57996c4ad07826219f594c41770b7f13985898a2d",
+      "sizeBytes": 20105
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/http/OkHttpTransportLoopbackServerTest.kt": {
+      "sha256": "344a2f0158a1fbe716c269343a9d382db9244dd129c224c1981e3d1c8be7b1d4",
+      "sizeBytes": 20129
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/http/OkHttpTransportSecurityTest.kt": {
+      "sha256": "575c4fe05b869f4d990e0c2eb2cfd31c689423abae740bf397a8cb31c912936a",
+      "sizeBytes": 20916
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/http/PlatformHttpUrlConnectionAmbientEvidenceTest.kt": {
+      "sha256": "8e83876676c5615798e62308303c348741319f17475ddfa583c024e155d19318",
+      "sizeBytes": 4579
+    }
+  },
+  "postGitHead": "b7e61eb4ed0aed2f5040d9fc44f9764b310be530",
+  "postGitStatus": "?? app/docs/\n?? docs/integration/v2-online-cash-evidence/focused-serializer-test/",
+  "postSourceHashes": {
+    "app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt": {
+      "sha256": "b3cf44919de8a895ec564c7046c8f99b712e2092bb1eece6402bb975063aed9d",
+      "sizeBytes": 18162
+    },
+    "app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt": {
+      "sha256": "aee0e422baa134f6c2e075e75a3a2603f05d7b4545e7facd4aa70be339a8091d",
+      "sizeBytes": 8205
+    },
+    "app/src/main/java/com/example/data/mobile/onlinecash/AndroidV2OnlineCashClient.kt": {
+      "sha256": "6b9e7cd24478d7c924e76fc9690ea14eeb7cbda82b6c0c1406861b0b9256cd7e",
+      "sizeBytes": 25584
+    },
+    "app/src/main/java/com/example/data/mobile/contract/v2/PaymentDecimalConsistency.kt": {
+      "sha256": "385296a4ff95c57f1f7362cabd4fc8224f11dd05739120199149400efe809261",
+      "sizeBytes": 7577
+    },
+    "app/src/main/java/com/example/data/mobile/contract/v2/OfflineSaleModelsV2.kt": {
+      "sha256": "9f2372ade1d764b9f7631c37df67dd0b7864ee0735fdcf401209dd4381facc0f",
+      "sizeBytes": 21679
+    },
+    "app/src/main/java/com/example/data/mobile/contract/v2/OnlineSaleIntentProfile.kt": {
+      "sha256": "6a008ef6361e2127793065bf47226777f74d98f68fb9768f477a617c243cc06c",
+      "sizeBytes": 23307
+    },
+    "app/src/main/java/com/example/data/mobile/contract/v2/SaleCommitModels.kt": {
+      "sha256": "e8928ab6603d103e7b0385ceda36c1f0f26b40d50ac3226ef35e9bc890429657",
+      "sizeBytes": 15069
+    },
+    "app/src/main/java/com/example/data/mobile/session/SecureStaffSessionStore.kt": {
+      "sha256": "0d841d5ae14c58bf0dd56099f705c78298d7618274af6bcd5d269ad40cb100fd",
+      "sizeBytes": 14334
+    },
+    "app/src/main/java/com/example/data/mobile/session/StaffSessionCoordinator.kt": {
+      "sha256": "88242656f5ad76738c32e0a58cc921817be50260168ac857aa84a56b4181550d",
+      "sizeBytes": 43330
+    },
+    "app/src/main/java/com/example/data/mobile/readclient/http/OkHttpTransport.kt": {
+      "sha256": "31fdbe904866e006f9e58e74ce6266bbf7d355e1e2b00ca07474d743a5abfed8",
+      "sizeBytes": 25009
+    },
+    "app/src/test/java/com/example/data/mobile/onlinecash/AndroidV2OnlineCashClientMockWebServerTest.kt": {
+      "sha256": "0e60facaf53c6f3908aedeabaa2dc5e259dfe23cf0ad6b5892f226b1c927cd4e",
+      "sizeBytes": 62090
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotEvidence.kt": {
+      "sha256": "653c297144d26cbb5ca439b3f38b106af4db3913a4a6fcf5038a302b6a31dc9b",
+      "sizeBytes": 4948
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotHandoffConfig.kt": {
+      "sha256": "37ffc4c8399a85dcf17767d3245aada6bd24f264de78a5793689a9ff594d3b83",
+      "sizeBytes": 54974
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotHandoffConfigTest.kt": {
+      "sha256": "3564f8c2c343cc1a126b5727d5e285e83b7dfa69b45c6086a7bb520636a5e894",
+      "sizeBytes": 66996
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/pilot/SmallTraderOnlineCashPilotSmokeTest.kt": {
+      "sha256": "c29bfb3d9a8c6a4b51fbe3b2f39ed73dc14b7a31900ca7f087b8fd4778c34e97",
+      "sizeBytes": 32834
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/pilot/ReadPilotHandoffConfig.kt": {
+      "sha256": "01670c8581cf637c6493af6e63277fe477a00eb6ba6f396cbe3b365d3d06a320",
+      "sizeBytes": 40318
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/pilot/ReadPilotHandoffConfigTest.kt": {
+      "sha256": "73e71f9966c542f00ab361f6e621940ec8185dfd68ce243b6d45191d143d347d",
+      "sizeBytes": 24485
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/pilot/SmallTraderReadPilotSmokeTest.kt": {
+      "sha256": "c1d214228a824f3c9d330011dc275264d7e05b039029ad4cdd4e42575384c5a8",
+      "sizeBytes": 34245
+    },
+    "app/src/test/java/com/example/data/mobile/contract/v2/ContractV2WireValidationTest.kt": {
+      "sha256": "631956d0ea1b0126effebbcfe2d29de05afee2fc0f0752c81739d69c732ff822",
+      "sizeBytes": 8812
+    },
+    "app/src/test/java/com/example/data/mobile/contract/v2/OfflineSaleV2GoldenParityTest.kt": {
+      "sha256": "28dc50cad7a09aa5f0852d64907025dba5ca31a0b32e6f2259d56d31453d0b03",
+      "sizeBytes": 9751
+    },
+    "app/src/test/java/com/example/data/mobile/contract/v2/OnlineSaleIntentProfileGoldenParityTest.kt": {
+      "sha256": "ea513a94060e992931da01ee8fc80fc47499f9a84841224142ce8ad10a474237",
+      "sizeBytes": 11684
+    },
+    "app/src/test/java/com/example/data/mobile/contract/v2/OnlineSaleIntentProfileMutationTest.kt": {
+      "sha256": "f774f4ff54ee141a9e8194a8340fa2cd646f728b2368f58cd7579726694ebad2",
+      "sizeBytes": 7623
+    },
+    "app/src/test/java/com/example/data/mobile/contract/v2/PaymentDecimalConsistencyTest.kt": {
+      "sha256": "de6972a75877fdb0d40014e77a23b87075b0dcf8ec6564ec8a3cbc6f5e9756cb",
+      "sizeBytes": 9840
+    },
+    "app/src/test/java/com/example/data/mobile/contract/v2/SaleCommitResponseTest.kt": {
+      "sha256": "b99a7b3e160619511863f8e589fd821b02af3604879db96d05174f5ea164cfc6",
+      "sizeBytes": 6249
+    },
+    "app/src/test/java/com/example/data/mobile/contract/v2/SaleEventStatusResponseTest.kt": {
+      "sha256": "361c7b2f91a32fc9f129fb03cad4282512e3a504f04f392025f67ae8178496a5",
+      "sizeBytes": 5629
+    },
+    "app/src/test/java/com/example/data/mobile/session/SecureStaffSessionStoreTest.kt": {
+      "sha256": "6d4d2405472cd84813ebdbc08df56888ad8e00612e124a49862896d91936d4af",
+      "sizeBytes": 42346
+    },
+    "app/src/test/java/com/example/data/mobile/session/StaffSessionCoordinatorTest.kt": {
+      "sha256": "526bc971a24c49dec189e5b1120b2be6cc387e42e4e3362fd3d9a9f12ee3795f",
+      "sizeBytes": 74975
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/http/OkHttpMockWebServerTest.kt": {
+      "sha256": "6d5f1481dd6d5dbe635f9cc57996c4ad07826219f594c41770b7f13985898a2d",
+      "sizeBytes": 20105
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/http/OkHttpTransportLoopbackServerTest.kt": {
+      "sha256": "344a2f0158a1fbe716c269343a9d382db9244dd129c224c1981e3d1c8be7b1d4",
+      "sizeBytes": 20129
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/http/OkHttpTransportSecurityTest.kt": {
+      "sha256": "575c4fe05b869f4d990e0c2eb2cfd31c689423abae740bf397a8cb31c912936a",
+      "sizeBytes": 20916
+    },
+    "app/src/test/java/com/example/data/mobile/readclient/http/PlatformHttpUrlConnectionAmbientEvidenceTest.kt": {
+      "sha256": "8e83876676c5615798e62308303c348741319f17475ddfa583c024e155d19318",
+      "sizeBytes": 4579
+    }
+  }
+}

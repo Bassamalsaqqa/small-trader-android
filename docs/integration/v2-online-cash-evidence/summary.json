@@ -10,7 +10,7 @@
   "contractEndpointClarification": "Authoritative mobile contract offline-events status endpoint remains /api/mobile/v2/companies/{companyId}/offline-events/{clientEventId}/status. Reviewer suggestion of /v2/sales/events is non-contract and not implemented. No mTLS or TLS client certificate auth required on mobile client.",
   "pr": 23,
   "branch": "t3/android-v2-online-cash-client",
-  "sourceCommit": "78ac4437e4010b68408278788dc82eb826fe8014",
+  "sourceCommit": "b7e61eb4ed0aed2f5040d9fc44f9764b310be530",
   "previousExecutionCommit": "753fb5133e28acb1284370dd7a84e3929e7b1a7d",
   "totalSuites": 18,
   "totalTests": 291,
@@ -126,6 +126,23 @@
         "probeVerification": "Safe GET /_readiness_forbidden_probe returned 403; NO financial route / POST tested",
         "preservationNote": "Failed in CashPilotHandoffConfig.fromFile comparing single pin against executable head before HTTP or credentials dispatch"
       }
+    ]
+  },
+  "focusedSerializerTest": {
+    "status": "PASS",
+    "suite": "com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest",
+    "tests": 44,
+    "passed": 44,
+    "skipped": 0,
+    "failures": 0,
+    "errors": 0,
+    "executionCommit": "b7e61eb4ed0aed2f5040d9fc44f9764b310be530",
+    "keyAssertions": [
+      "clientPublicationHead explicitly serialized in CashPilotEvidence.toJsonString()",
+      "clientExecutableHead explicitly serialized in CashPilotEvidence.toJsonString()",
+      "legacy clientHead preserved as alias to executable head",
+      "StrictJsonParser roundtrip confirms exact distinct values and null omission",
+      "zero literal NUL bytes and sensitive data redaction preserved"
     ]
   }
 }

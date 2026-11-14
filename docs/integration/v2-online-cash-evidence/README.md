@@ -5,14 +5,32 @@ This directory contains hermetic unit test evidence, live coordinated readiness 
 ## Status: READINESS_QUALIFIED / FINANCIAL_PILOT_HOLD
 - **Readiness Verdict**: **PASS** (Live coordinated readiness probe verified HTTP 200 via CA-trusted TLS loopback in 13.34s)
 - **Financial Pilot Status**: **HOLD / NOT_RUN** (Financial scenarios NOT_RUN; safe non-readiness GET returned 403; no authentication or financial HTTP dispatch; parser loaded private runtime credential file locally)
-- **Client Publication Commit**: `58e8478bfdf02a1a681e6ff63bbbc06694b9f746` (documentation and evidence publication)
-- **Client Executable Source Commit**: `78ac4437e4010b68408278788dc82eb826fe8014` (`app/src/main/` 100% untouched vs qualified `753fb5133e28acb1284370dd7a84e3929e7b1a7d`)
+- **Client Executable Source Commit**: `b7e61eb4ed0aed2f5040d9fc44f9764b310be530` (`app/src/main/` 100% untouched vs qualified `753fb5133e28acb1284370dd7a84e3929e7b1a7d`)
 - **Backend Runtime Execution HEAD**: `d7c7324535b1e6586140ab1e3561966342d625d6` (source `a8540ff83513b49988d90c77cf284831cfd5b2de` frozen)
-- **Scope Distinction**: Live readiness qualification is **STRICTLY SEPARATE** from the 291-test hermetic unit suite. This qualifies transport readiness ONLY, not overall financial transactions, stock rollback, or signed devices.
+- **Scope Distinction**: Live readiness qualification is **STRICTLY SEPARATE** from the 291-test hermetic unit suite and the focused serializer test pass. This qualifies transport readiness ONLY, not overall financial transactions, stock rollback, or signed devices.
 
 ---
 
-## 1. Live Coordinated Readiness Verification (PASS)
+## 1. Focused Serializer & Parser Test Pass (Commit b7e61eb)
+
+Focused test execution verifying the serialization of explicit publication and executable client pins in `CashPilotEvidence.toJsonString()` ([GitHub Review 5906747082](https://github.com/Bassamalsaqqa/small-trader-android/pull/23#pullrequestreview-5906747082)):
+
+### Results
+- **Task**: `cleanTestDebugUnitTest testDebugUnitTest --no-build-cache --tests com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest`
+- **Resource Bounds**: `--max-workers=1`, `ActiveProcessorCount=2`, `SerialGC`, `1536m` in-process, `--no-daemon`
+- **Total Tests**: **44 passed, 0 skipped, 0 failures, 0 errors** in 78.56s (test execution time 0.395s)
+- **Key Assertions Verified**:
+  1. `testCashPilotEvidenceDistinctPublicationAndExecutablePinsSerialization`: Evaluates actual `CashPilotEvidence.toJsonString()`, strictly parsed via `StrictJsonParser.parse(json).asObject()`. Confirms exact values for `clientPublicationHead` and `clientExecutableHead`, confirms legacy `clientHead` alias, confirms omission of `clientPublicationHead` when null, and verifies canonical escaping of quotes and whitespace in pins.
+  2. `testCashPilotEvidenceSerializationZeroLiteralNul`: Evaluates zero literal NUL byte invariant, sensitive data redaction (`[REDACTED_EMAIL]`, `[REDACTED_PATH]`), and verifies all three pin fields (`clientHead`, `clientPublicationHead`, `clientExecutableHead`).
+
+### Cryptographic Artifact Hashes (`focused-serializer-test/`)
+- `TEST-com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest.xml`: `2d2f5ddfc9467b291214d5dd996b540733c57649d40e90a9c11dd09a53c0ac7b`
+- `b7e6-focused-test-execution.log`: `86c5c40c4b1c4948b25d61954489eeba209f98f4e3c3a29ea18634ead1c4e386`
+- `source-attestation-b7e6.json`: `7508b63d112bcf0238a46658d6580dd8147d0f925e972e6bb7d7ec59df8c8c36` (pre-test and post-test source hashes match identically at commit `b7e61eb4ed0aed2f5040d9fc44f9764b310be530`)
+
+---
+
+## 2. Live Coordinated Readiness Verification (PASS)
 
 Coordinated readiness execution against live disposable backend harness (`1 JVM invocation`, `duration 13.3375s`, `exit 0`):
 
@@ -41,9 +59,6 @@ Coordinated readiness execution against live disposable backend harness (`1 JVM 
 - `android_pre.json`: `3f948f6cfcc23bef892c96430326447a094f3a272b6ee4c605406b726415a1aa`
 - `android_post.json`: `1fee9e7b4278b0904013d8f7eba38d7097b72bcaa3d93740ecf1261530e4d657`
 
-### Disclosure of Evidence Serializer Metadata Omission
-`CashPilotEvidence.toJson()` in `app/src/test/.../CashPilotEvidence.kt` serializes only `clientHead` (mapped to executable HEAD `78ac4437e4010b68408278788dc82eb826fe8014`) and omits separate `clientPublicationHead` and `clientExecutableHead` keys in `paired-online-cash-pilot-evidence.json` (SHA `0bfaba51e8ab55ae49ab5bf05f374fe4091d48c2a694dd4b810e120049246c5d`). Both publication HEAD (`653327243b2f5a4541c5fcf8cbe9520769e6be50`) and executable HEAD (`78ac4437e4010b68408278788dc82eb826fe8014`) were independently verified by the root harness environment pins (`SMALL_TRADER_EXPECTED_CLIENT_SHA` and `SMALL_TRADER_EXPECTED_CLIENT_EXECUTABLE_SHA`).
-
 ### Backend Cleanup & Port Closure
 - Child harness exited with SIGTERM exit 1 as designed.
 - Disposable schema (`accounting_p8_tmp_84fa14fb4cb2`) and temporary runtime directories were cleanly deleted.
@@ -51,7 +66,7 @@ Coordinated readiness execution against live disposable backend harness (`1 JVM 
 
 ---
 
-## 2. Hermetic Unit Test Pass (291 Tests, Commit 78ac443)
+## 3. Hermetic Unit Test Pass (291 Tests, Commit 78ac443)
 
 - **Total Test Suites**: 18
 - **Total Tests**: 291
@@ -64,7 +79,7 @@ Coordinated readiness execution against live disposable backend harness (`1 JVM 
 
 ---
 
-## 3. Retained Failed Windows & Historical Failures
+## 4. Retained Failed Windows & Historical Failures
 
 ### Historical Unit Failures (Compiler & Mock)
 - `first-compiler-failure.log`: Initial compilation failure on test refactor before parameter fixes.
@@ -85,6 +100,7 @@ Coordinated readiness execution against live disposable backend harness (`1 JVM 
 ---
 
 ## Evidence Directory Organization
+- `focused-serializer-test/`: 3 artifacts from the focused CashPilotHandoffConfigTest pass (XML, log, and attestation).
 - `coordinated-readiness/`: 10 safe artifacts from the live coordinated readiness verification (XML, JSON, logs, root outcome, and attestations).
 - `test-results/`: 18 hermetic XML test suites (291 tests) from commit `78ac443`.
 - `historical-76/`, `historical-171-ddfc/`, `historical-238-ad10/`: Historical test milestones.

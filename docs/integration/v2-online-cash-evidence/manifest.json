@@ -1,7 +1,7 @@
 {
-  "executionCommit": "78ac4437e4010b68408278788dc82eb826fe8014",
-  "evidenceGenerationUtc": "2026-11-14T19:21:13Z",
-  "evidenceGenerationLocal": "2026-11-14T21:21:00+02:00",
+  "executionCommit": "b7e61eb4ed0aed2f5040d9fc44f9764b310be530",
+  "evidenceGenerationUtc": "2026-11-14T19:49:34Z",
+  "evidenceGenerationLocal": "2026-11-14T21:49:00+02:00",
   "timestampClarification": "Historical manifest timestamp was recorded as 2026-11-14T19:46:00Z due to local clock (+02:00) being formatted with trailing 'Z' instead of '+02:00' offset (actual UTC was 17:46Z, matching commit 17:48Z and XML 17:45Z). Preserved with this explicit clarification rather than retrofiction.",
   "pinsDisclosure": "Contemporaneous git commit pins from intermediate conversational steps were not automatically logged at runtime and are not retroconstructed. Pinned verification at commit 753fb51 explicitly captures git HEAD, status, and source file SHA256 hashes before and after test and lint executions in source-attestation-753f.json.",
   "sourceFiles": {
@@ -54,8 +54,8 @@
       "sizeBytes": 54974
     },
     "app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotHandoffConfigTest.kt": {
-      "sha256": "9c673695ba9be087ad3f4aaeb55446c10c282d981d57f877bbb2bdb485ee4cab",
-      "sizeBytes": 63118
+      "sha256": "3564f8c2c343cc1a126b5727d5e285e83b7dfa69b45c6086a7bb520636a5e894",
+      "sizeBytes": 66996
     },
     "app/src/test/java/com/example/data/mobile/readclient/pilot/SmallTraderOnlineCashPilotSmokeTest.kt": {
       "sha256": "c29bfb3d9a8c6a4b51fbe3b2f39ed73dc14b7a31900ca7f087b8fd4778c34e97",
@@ -501,5 +501,40 @@
         "preservationNote": "Failed in CashPilotHandoffConfig.fromFile comparing single pin against executable head before HTTP or credentials dispatch"
       }
     ]
+  },
+  "focusedSerializerExecution": {
+    "workflow": "focused_serializer_roundtrip_verification",
+    "executionCommit": "b7e61eb4ed0aed2f5040d9fc44f9764b310be530",
+    "task": "cleanTestDebugUnitTest testDebugUnitTest --tests com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest",
+    "exitCode": 0,
+    "durationSeconds": 78.56,
+    "suite": "com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest",
+    "tests": 44,
+    "passed": 44,
+    "skipped": 0,
+    "failures": 0,
+    "errors": 0,
+    "resourceLimits": {
+      "maxWorkers": 1,
+      "activeProcessorCount": 2,
+      "garbageCollector": "SerialGC",
+      "maxHeap": "1536m",
+      "inProcess": true,
+      "noDaemon": true
+    },
+    "artifacts": {
+      "TEST-com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest.xml": {
+        "sha256": "2d2f5ddfc9467b291214d5dd996b540733c57649d40e90a9c11dd09a53c0ac7b",
+        "sizeBytes": 7238
+      },
+      "b7e6-focused-test-execution.log": {
+        "sha256": "86c5c40c4b1c4948b25d61954489eeba209f98f4e3c3a29ea18634ead1c4e386",
+        "sizeBytes": 2808
+      },
+      "source-attestation-b7e6.json": {
+        "sha256": "7508b63d112bcf0238a46658d6580dd8147d0f925e972e6bb7d7ec59df8c8c36",
+        "sizeBytes": 29661
+      }
+    }
   }
 }
