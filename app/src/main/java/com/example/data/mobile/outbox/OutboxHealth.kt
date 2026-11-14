@@ -135,7 +135,7 @@ class UnavailableOutboxHealthInspector(
  *      (10 records per page), preventing whole-queue memory materialization even for large backlogs.
  *    - Strict Off-Main-Thread Execution: Guaranteed execution on [ioDispatcher] with non-main-thread assertions.
  * 3. Cancellation Propagation:
- *    - Active cancellation checks ([currentCoroutineContext().ensureActive()]) execute at each page
+ *    - Active cancellation checks ([inspectionContext.ensureActive()]) execute at each page
  *      and row. Cancellation immediately rolls back the transaction and releases all locks without swallowing
  *      [CancellationException].
  * 4. Zero False Positives / Zero Destructive Actions:
@@ -161,7 +161,8 @@ class DefaultOutboxHealthInspector(
             "Outbox health inspection must run off the main thread"
         }
 
-        currentCoroutineContext().ensureActive()
+        val inspectionContext = currentCoroutineContext()
+        inspectionContext.ensureActive()
 
         // Privacy and isolation: scope cannot be blank. Unauthorized/blank scopes fail closed.
         if (companyId.isBlank() || actorId.isBlank() || deviceId.isBlank()) {
@@ -377,11 +378,11 @@ class DefaultOutboxHealthInspector(
                 var lastClientEventId: String? = null
 
                 while (currentPage.isNotEmpty() && verifiedCount < targetProbeLimit) {
-                    currentCoroutineContext().ensureActive()
+                    inspectionContext.ensureActive()
                     onPageReadHook?.invoke(pageIndex)
 
                     for (row in currentPage) {
-                        currentCoroutineContext().ensureActive()
+                        inspectionContext.ensureActive()
                         if (verifiedCount >= targetProbeLimit) break
 
                         if (row.payloadLength > maxEnvelopeBytes) {
