@@ -6,6 +6,9 @@ import com.example.data.mobile.contract.ContractConstants
 import com.example.data.mobile.contract.PayloadDigest
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.StrictJsonArray
+import com.example.data.mobile.contract.StrictJsonElement
+import com.example.data.mobile.contract.StrictJsonNull
+import com.example.data.mobile.contract.StrictJsonNumber
 import com.example.data.mobile.contract.StrictJsonObject
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.contract.StrictJsonString
@@ -112,6 +115,18 @@ data class CashPilotStartupTls(
  * - All fixture IDs verified for parity with parsed_request and server_synthesized_context.
  * - Normative profile digest verified using fresh OnlineSaleIntentProfile computation and asserted distinct from raw wire SHA.
  */
+
+private fun StrictJsonElement?.asStringOrNull(): String? = (this as? StrictJsonString)?.value
+
+/**
+ * Result of evaluating readiness probe router.
+ */
+data class ReadinessRouteResult(
+    val statusCode: Int,
+    val headers: Map<String, String>,
+    val body: Map<String, String>
+)
+
 class CashPilotHandoffConfig private constructor(
     val schemaVersion: String,
     val handoffScope: String,
@@ -154,6 +169,54 @@ class CashPilotHandoffConfig private constructor(
         const val EXPECTED_CLIENT_HANDOFF_SCHEMA_SHA256 =
             "edaef0309765e10d6462b36b5c660eb02f65c057c810ab72f756f7664e3ca275"
 
+        const val EXPECTED_RUNTIME_HANDOFF_FILENAME = "runtime_client_handoff.json"
+        const val EXPECTED_RUNTIME_CREDENTIALS_FILENAME = "runtime_credentials.json"
+        const val READINESS_PROBE_PATH = "/_harness/readiness"
+        const val HTTP_STATUS_METHOD_NOT_ALLOWED = 405
+        const val HTTP_STATUS_FORBIDDEN = 403
+
+        /**
+         * Authoritative handler mirroring backend DisposableMobileV2BackendHarness::handleChildReadinessRoute.
+         * Enforces GET-only access (returning 405 for all other HTTP methods).
+         * Enforces readiness-only boundary pre-framework (returning 403 for non-readiness routes).
+         */
+        fun handleChildReadinessRoute(
+            uri: String,
+            method: String,
+            nonce: String,
+            isReadinessOnly: Boolean
+        ): ReadinessRouteResult {
+            if (uri == READINESS_PROBE_PATH) {
+                if (method != "GET") {
+                    return ReadinessRouteResult(
+                        statusCode = HTTP_STATUS_METHOD_NOT_ALLOWED,
+                        headers = mapOf("Allow" to "GET", "Content-Type" to "application/json"),
+                        body = mapOf("error" to "method_not_allowed", "message" to "Readiness probe strictly requires GET")
+                    )
+                }
+                return ReadinessRouteResult(
+                    statusCode = 200,
+                    headers = mapOf("Content-Type" to "application/json"),
+                    body = mapOf("status" to "ready", "nonce" to nonce)
+                )
+            }
+            if (isReadinessOnly) {
+                return ReadinessRouteResult(
+                    statusCode = HTTP_STATUS_FORBIDDEN,
+                    headers = mapOf("Content-Type" to "application/json"),
+                    body = mapOf(
+                        "error" to "forbidden",
+                        "message" to "Harness is running in READINESS-ONLY mode. Financial endpoints and paired requests are strictly blocked."
+                    )
+                )
+            }
+            return ReadinessRouteResult(
+                statusCode = 404,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = mapOf("error" to "not_found")
+            )
+        }
+
         const val PHASE_PROVISIONED_AWAITING_TLS = "PROVISIONED_AWAITING_TLS_START"
         const val PHASE_ACTIVE_TLS_READY = "ACTIVE_TLS_READY"
         const val PHASE_READINESS_ONLY_VERIFIED = "READINESS_ONLY_VERIFIED"
@@ -171,7 +234,7 @@ class CashPilotHandoffConfig private constructor(
 
         val HEX_40_REGEX = Regex("^[0-9a-f]{40}$", RegexOption.IGNORE_CASE)
         val HEX_64_REGEX = Regex("^[0-9a-f]{64}$", RegexOption.IGNORE_CASE)
-        val ISO_DATETIME_REGEX = Regex("^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
+        val ISO_DATETIME_REGEX = Regex("""^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$""")
         val CROCKFORD_ULID_REGEX = Regex("^[0-7][0-9A-HJKMNP-TV-Z]{25}$")
         val UUID_REGEX = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
         val CURRENCY_REGEX = Regex("^[A-Z]{3}$")
@@ -413,28 +476,28 @@ class CashPilotHandoffConfig private constructor(
                 throw RuntimeException("Malformed client handoff artifact: unexpected top-level field(s): $extraKeys")
             }
 
-            val schemaVersion = root["schema_version"]?.asString()?.value ?: ""
+            val schemaVersion = root["schema_version"]?.asStringOrNull() ?: ""
             require(schemaVersion == "1.0.0") {
                 "Unsupported schema_version '$schemaVersion'; expected '1.0.0'"
             }
 
-            val handoffScope = root["handoff_scope"]?.asString()?.value ?: ""
+            val handoffScope = root["handoff_scope"]?.asStringOrNull() ?: ""
             val allowedScopes = setOf(SCOPE_LOCAL_PROVISION_ONLY, SCOPE_READINESS_ONLY, SCOPE_PAIRED_EXECUTION)
             require(handoffScope in allowedScopes) {
                 "Invalid handoff_scope '$handoffScope'; must be one of $allowedScopes"
             }
 
-            val lifecyclePhase = root["lifecycle_phase"]?.asString()?.value ?: ""
+            val lifecyclePhase = root["lifecycle_phase"]?.asStringOrNull() ?: ""
             val allowedPhases = setOf(PHASE_PROVISIONED_AWAITING_TLS, PHASE_ACTIVE_TLS_READY, PHASE_READINESS_ONLY_VERIFIED)
             require(lifecyclePhase in allowedPhases) {
                 "Invalid lifecycle_phase '$lifecyclePhase'; must be one of $allowedPhases"
             }
 
-            val createdAt = root["created_at"]?.asString()?.value ?: ""
+            val createdAt = root["created_at"]?.asStringOrNull() ?: ""
             require(ISO_DATETIME_REGEX.matches(createdAt)) {
                 "Malformed created_at timestamp: '$createdAt'"
             }
-            val expiresAt = root["expires_at"]?.asString()?.value ?: ""
+            val expiresAt = root["expires_at"]?.asStringOrNull() ?: ""
             require(ISO_DATETIME_REGEX.matches(expiresAt)) {
                 "Malformed expires_at timestamp: '$expiresAt'"
             }
@@ -460,7 +523,7 @@ class CashPilotHandoffConfig private constructor(
             if (extraPins.isNotEmpty()) {
                 throw RuntimeException("Unexpected backend_runtime_pins: $extraPins")
             }
-            val pinsMap = pinsObj.properties.mapValues { it.value.asString()?.value ?: "" }
+            val pinsMap = pinsObj.properties.mapValues { it.value.asStringOrNull() ?: "" }
 
             val sha40PinKeys = setOf(
                 "qualified_core_head_sha", "backend_execution_head_sha", "qualified_app_tree_sha",
@@ -504,8 +567,8 @@ class CashPilotHandoffConfig private constructor(
             if (extraEndpoints.isNotEmpty()) {
                 throw RuntimeException("Unexpected endpoints keys: $extraEndpoints")
             }
-            val baseUrl = endpointsObj["base_url"]?.asString()?.value ?: ""
-            val loopbackBaseUrl = endpointsObj["loopback_base_url"]?.asString()?.value ?: ""
+            val baseUrl = endpointsObj["base_url"]?.asStringOrNull() ?: ""
+            val loopbackBaseUrl = endpointsObj["loopback_base_url"]?.asStringOrNull() ?: ""
             validateHttpsOrigin(baseUrl)
             validateHttpsOrigin(loopbackBaseUrl)
 
@@ -518,9 +581,9 @@ class CashPilotHandoffConfig private constructor(
             if (extraRoutes.isNotEmpty()) {
                 throw RuntimeException("Unexpected routes keys: $extraRoutes")
             }
-            val onlineCashRoute = routesObj["online_cash_sale"]?.asString()?.value ?: ""
-            val offlineStatusRoute = routesObj["offline_event_status"]?.asString()?.value ?: ""
-            val readinessRoute = routesObj["readiness_probe"]?.asString()?.value ?: ""
+            val onlineCashRoute = routesObj["online_cash_sale"]?.asStringOrNull() ?: ""
+            val offlineStatusRoute = routesObj["offline_event_status"]?.asStringOrNull() ?: ""
+            val readinessRoute = routesObj["readiness_probe"]?.asStringOrNull() ?: ""
             val endpoints = CashPilotEndpoints(
                 baseUrl = baseUrl,
                 loopbackBaseUrl = loopbackBaseUrl,
@@ -540,39 +603,41 @@ class CashPilotHandoffConfig private constructor(
                 throw RuntimeException("Unexpected fixture field(s): $extraFixture")
             }
 
-            val schemaName = fixtureObj["schema_name"]?.asString()?.value
+            val schemaName = fixtureObj["schema_name"]?.asStringOrNull()
                 ?: throw RuntimeException("fixture missing 'schema_name'")
-            val companyPubId = fixtureObj["company_public_id"]?.asString()?.value
+            val companyPubId = fixtureObj["company_public_id"]?.asStringOrNull()
                 ?: throw RuntimeException("fixture missing 'company_public_id'")
-            val baseCurrency = fixtureObj["company_base_currency"]?.asString()?.value
+            val baseCurrency = fixtureObj["company_base_currency"]?.asStringOrNull()
                 ?: throw RuntimeException("fixture missing 'company_base_currency'")
             require(CURRENCY_REGEX.matches(baseCurrency)) {
                 "fixture 'company_base_currency' must match $CURRENCY_REGEX: '$baseCurrency'"
             }
             val minorUnitsElem = fixtureObj["currency_minor_units"]
                 ?: throw RuntimeException("fixture missing 'currency_minor_units'")
-            val fixtureMinorUnits = minorUnitsElem.asNumber()?.value?.toInt()
-                ?: throw RuntimeException("fixture 'currency_minor_units' must be an integer (no defaults)")
+            if (minorUnitsElem !is StrictJsonNumber || !minorUnitsElem.isInt) {
+                throw RuntimeException("fixture 'currency_minor_units' must be an integer (no defaults)")
+            }
+            val fixtureMinorUnits = minorUnitsElem.asInt()
             require(fixtureMinorUnits in 0..6) {
                 "fixture 'currency_minor_units' must be in 0..6, got $fixtureMinorUnits"
             }
-            val staffPubId = fixtureObj["staff_actor_public_id"]?.asString()?.value
+            val staffPubId = fixtureObj["staff_actor_public_id"]?.asStringOrNull()
                 ?: throw RuntimeException("fixture missing 'staff_actor_public_id'")
-            val devId = fixtureObj["device_id"]?.asString()?.value
+            val devId = fixtureObj["device_id"]?.asStringOrNull()
                 ?: throw RuntimeException("fixture missing 'device_id'")
-            val custPubId = fixtureObj["customer_public_id"]?.asString()?.value
+            val custPubId = fixtureObj["customer_public_id"]?.asStringOrNull()
                 ?: throw RuntimeException("fixture missing 'customer_public_id'")
-            val whPubId = fixtureObj["warehouse_public_id"]?.asString()?.value
+            val whPubId = fixtureObj["warehouse_public_id"]?.asStringOrNull()
                 ?: throw RuntimeException("fixture missing 'warehouse_public_id'")
-            val prodPubId = fixtureObj["product_public_id"]?.asString()?.value
+            val prodPubId = fixtureObj["product_public_id"]?.asStringOrNull()
                 ?: throw RuntimeException("fixture missing 'product_public_id'")
-            val prodUnitPubId = fixtureObj["product_unit_public_id"]?.asString()?.value
+            val prodUnitPubId = fixtureObj["product_unit_public_id"]?.asStringOrNull()
                 ?: throw RuntimeException("fixture missing 'product_unit_public_id'")
-            val taxRatePubId = fixtureObj["tax_rate_public_id"]?.asString()?.value
+            val taxRatePubId = fixtureObj["tax_rate_public_id"]?.asStringOrNull()
                 ?: throw RuntimeException("fixture missing 'tax_rate_public_id'")
-            val cashAccPubId = fixtureObj["cash_account_public_id"]?.asString()?.value
+            val cashAccPubId = fixtureObj["cash_account_public_id"]?.asStringOrNull()
                 ?: throw RuntimeException("fixture missing 'cash_account_public_id'")
-            val sampleEvtId = fixtureObj["sample_event_id"]?.asString()?.value
+            val sampleEvtId = fixtureObj["sample_event_id"]?.asStringOrNull()
                 ?: throw RuntimeException("fixture missing 'sample_event_id'")
 
             val fixture = CashPilotFixture(
@@ -601,9 +666,9 @@ class CashPilotHandoffConfig private constructor(
             if (extraRawWire.isNotEmpty()) {
                 throw RuntimeException("Unexpected raw_wire_sample key(s): $extraRawWire")
             }
-            val rawPayloadJson = rawWireObj["raw_wire_payload_json"]?.asString()?.value
+            val rawPayloadJson = rawWireObj["raw_wire_payload_json"]?.asStringOrNull()
                 ?: throw RuntimeException("raw_wire_sample missing 'raw_wire_payload_json'")
-            val rawPayloadSha = rawWireObj["raw_wire_payload_sha256"]?.asString()?.value
+            val rawPayloadSha = rawWireObj["raw_wire_payload_sha256"]?.asStringOrNull()
                 ?: throw RuntimeException("raw_wire_sample missing 'raw_wire_payload_sha256'")
             require(HEX_64_REGEX.matches(rawPayloadSha)) {
                 "raw_wire_payload_sha256 must be 64 lowercase hex characters: '$rawPayloadSha'"
@@ -638,10 +703,10 @@ class CashPilotHandoffConfig private constructor(
             )
 
             // Parity checks between parsed request wire IDs and fixture
-            require(parsedReq["customer_id"]?.asString()?.value == fixture.customerId.value) { "Customer ID parity mismatch" }
-            require(parsedReq["warehouse_id"]?.asString()?.value == fixture.warehouseId.value) { "Warehouse ID parity mismatch" }
-            require(parsedReq["device_id"]?.asString()?.value == fixture.deviceId.value) { "Device ID parity mismatch" }
-            require(parsedReq["currency"]?.asString()?.value == fixture.companyBaseCurrency) { "Currency parity mismatch" }
+            require(parsedReq["customer_id"]?.asStringOrNull() == fixture.customerId.value) { "Customer ID parity mismatch" }
+            require(parsedReq["warehouse_id"]?.asStringOrNull() == fixture.warehouseId.value) { "Warehouse ID parity mismatch" }
+            require(parsedReq["device_id"]?.asStringOrNull() == fixture.deviceId.value) { "Device ID parity mismatch" }
+            require(parsedReq["currency"]?.asStringOrNull() == fixture.companyBaseCurrency) { "Currency parity mismatch" }
 
             // Validate lines
             val linesArray = parsedReq["lines"]?.asArray()
@@ -670,15 +735,15 @@ class CashPilotHandoffConfig private constructor(
             if (extraPaymentKeys.isNotEmpty()) {
                 throw RuntimeException("payment unexpected key(s): $extraPaymentKeys")
             }
-            val settlementMode = paymentObj["settlement_mode"]?.asString()?.value
+            val settlementMode = paymentObj["settlement_mode"]?.asStringOrNull()
             require(settlementMode == "full") {
                 "Cash pilot payment settlement_mode must be 'full', got '$settlementMode'"
             }
-            val paymentMethod = paymentObj["payment_method"]?.asString()?.value
+            val paymentMethod = paymentObj["payment_method"]?.asStringOrNull()
             require(paymentMethod == "cash") {
                 "Cash pilot payment payment_method must be 'cash', got '$paymentMethod'"
             }
-            val cashAccId = paymentObj["cash_account_id"]?.asString()?.value
+            val cashAccId = paymentObj["cash_account_id"]?.asStringOrNull()
                 ?: throw RuntimeException("payment missing 'cash_account_id'")
             require(CROCKFORD_ULID_REGEX.matches(cashAccId)) {
                 "payment 'cash_account_id' must be a valid non-null ULID: '$cashAccId'"
@@ -698,14 +763,16 @@ class CashPilotHandoffConfig private constructor(
             if (extraCtx.isNotEmpty()) {
                 throw RuntimeException("Unexpected server_synthesized_context key(s): $extraCtx")
             }
-            val ctxCompanyIdStr = ctxObj["company_id"]?.asString()?.value
+            val ctxCompanyIdStr = ctxObj["company_id"]?.asStringOrNull()
                 ?: throw RuntimeException("server_synthesized_context missing 'company_id'")
-            val ctxActorIdStr = ctxObj["actor_id"]?.asString()?.value
+            val ctxActorIdStr = ctxObj["actor_id"]?.asStringOrNull()
                 ?: throw RuntimeException("server_synthesized_context missing 'actor_id'")
             val ctxMinorUnitsElem = ctxObj["currency_minor_units"]
                 ?: throw RuntimeException("server_synthesized_context missing 'currency_minor_units'")
-            val ctxMinorUnits = ctxMinorUnitsElem.asNumber()?.value?.toInt()
-                ?: throw RuntimeException("server_synthesized_context 'currency_minor_units' must be an integer (no defaults)")
+            if (ctxMinorUnitsElem !is StrictJsonNumber || !ctxMinorUnitsElem.isInt) {
+                throw RuntimeException("server_synthesized_context 'currency_minor_units' must be an integer (no defaults)")
+            }
+            val ctxMinorUnits = ctxMinorUnitsElem.asInt()
             require(ctxMinorUnits in 0..6) {
                 "server_synthesized_context 'currency_minor_units' must be in 0..6, got $ctxMinorUnits"
             }
@@ -722,7 +789,7 @@ class CashPilotHandoffConfig private constructor(
             )
 
             // Canonical intent profile digest computation & verification
-            val declaredDigestStr = root["canonical_intent_profile_digest"]?.asString()?.value
+            val declaredDigestStr = root["canonical_intent_profile_digest"]?.asStringOrNull()
                 ?: throw RuntimeException("Missing 'canonical_intent_profile_digest'")
             require(declaredDigestStr.startsWith("sha256:") && declaredDigestStr.length == 71) {
                 "canonical_intent_profile_digest must begin with 'sha256:' followed by 64 hex characters: '$declaredDigestStr'"
@@ -738,7 +805,7 @@ class CashPilotHandoffConfig private constructor(
             }
 
             // Credentials path & loading
-            val credentialsPath = root["credentials_path"]?.asString()?.value ?: ""
+            val credentialsPath = root["credentials_path"]?.asStringOrNull() ?: ""
             require(credentialsPath.isNotBlank() && credentialsPath.startsWith("/") && credentialsPath.endsWith(".json")) {
                 "credentials_path must be an absolute path ending in .json starting with /"
             }
@@ -758,7 +825,7 @@ class CashPilotHandoffConfig private constructor(
             if (extraHist.isNotEmpty()) {
                 throw RuntimeException("Unexpected historical_ca5a_reference key(s): $extraHist")
             }
-            val historicalMap = historicalObj.properties.mapValues { it.value.asString()?.value ?: "" }
+            val historicalMap = historicalObj.properties.mapValues { it.value.asStringOrNull() ?: "" }
             for ((hk, hv) in historicalMap) {
                 require(HEX_64_REGEX.matches(hv)) { "Historical key '$hk' must be 64 lowercase hex: '$hv'" }
             }
@@ -774,17 +841,17 @@ class CashPilotHandoffConfig private constructor(
                 throw RuntimeException("Unexpected startup_tls key(s): $extraTls")
             }
 
-            val tlsStatus = tlsObj["status"]?.asString()?.value ?: ""
+            val tlsStatus = tlsObj["status"]?.asStringOrNull() ?: ""
             val allowedTlsStatuses = setOf(TLS_STATUS_UNAVAILABLE, TLS_STATUS_ACTIVE_READY, TLS_STATUS_READINESS_ONLY)
             require(tlsStatus in allowedTlsStatuses) {
                 "Invalid startup_tls.status '$tlsStatus'; must be one of $allowedTlsStatuses"
             }
 
-            val caCertPath = tlsObj["ca_cert_path"]?.asString()?.value
-            val caCertSha256 = tlsObj["ca_cert_sha256"]?.asString()?.value
-            val readinessUrl = tlsObj["readiness_url"]?.asString()?.value
-            val androidReadinessUrl = tlsObj["android_readiness_url"]?.asString()?.value
-            val readinessNonce = tlsObj["readiness_nonce"]?.asString()?.value
+            val caCertPath = tlsObj["ca_cert_path"]?.asStringOrNull()
+            val caCertSha256 = tlsObj["ca_cert_sha256"]?.asStringOrNull()
+            val readinessUrl = tlsObj["readiness_url"]?.asStringOrNull()
+            val androidReadinessUrl = tlsObj["android_readiness_url"]?.asStringOrNull()
+            val readinessNonce = tlsObj["readiness_nonce"]?.asStringOrNull()
 
             val isProvisionOnly = handoffScope == SCOPE_LOCAL_PROVISION_ONLY ||
                     lifecyclePhase == PHASE_PROVISIONED_AWAITING_TLS ||
@@ -796,27 +863,31 @@ class CashPilotHandoffConfig private constructor(
                 }
             } else {
                 require(!caCertPath.isNullOrBlank()) { "startup_tls.ca_cert_path is required when ready" }
-                val caFile = File(caCertPath)
+                val resolvedCaPath: String = caCertPath
+                val caFile = File(resolvedCaPath)
                 require(caFile.exists() && caFile.isFile) { "CA cert file not found: [REDACTED_FILE]" }
                 require(!caCertSha256.isNullOrBlank() && HEX_64_REGEX.matches(caCertSha256)) {
                     "startup_tls.ca_cert_sha256 is required and must be 64-hex when ready"
                 }
+                val resolvedCaSha: String = caCertSha256
                 val caBytes = readBoundedBytesOnce(caFile, allowNonPosixForTesting = allowNonPosixForTesting)
                 val actualCaSha = computeSha256(caBytes)
-                require(actualCaSha.equals(caCertSha256, ignoreCase = true)) {
-                    "CA cert SHA-256 integrity mismatch: expected $caCertSha256, computed $actualCaSha"
+                require(actualCaSha.equals(resolvedCaSha, ignoreCase = true)) {
+                    "CA cert SHA-256 integrity mismatch: expected $resolvedCaSha, computed $actualCaSha"
                 }
 
                 require(!readinessUrl.isNullOrBlank()) { "startup_tls.readiness_url is required when ready" }
-                validateHttpsOrigin(readinessUrl)
-                val hostUri = URI(readinessUrl)
+                val resolvedReadinessUrl: String = readinessUrl
+                validateHttpsOrigin(resolvedReadinessUrl)
+                val hostUri = URI(resolvedReadinessUrl)
                 require(hostUri.host == "127.0.0.1" || hostUri.host == "localhost") {
                     "startup_tls.readiness_url must be host loopback (127.0.0.1), got '${hostUri.host}'"
                 }
 
                 require(!androidReadinessUrl.isNullOrBlank()) { "startup_tls.android_readiness_url is required when ready" }
-                validateHttpsOrigin(androidReadinessUrl)
-                val androidUri = URI(androidReadinessUrl)
+                val resolvedAndroidReadinessUrl: String = androidReadinessUrl
+                validateHttpsOrigin(resolvedAndroidReadinessUrl)
+                val androidUri = URI(resolvedAndroidReadinessUrl)
                 require(androidUri.host == "10.0.2.2") {
                     "startup_tls.android_readiness_url must be Android emulator loopback (10.0.2.2), got '${androidUri.host}'"
                 }
@@ -878,11 +949,11 @@ class CashPilotHandoffConfig private constructor(
             val bytes = readBoundedBytesOnce(credFile, allowNonPosixForTesting = allowNonPosixForTesting)
             val root = StrictJsonParser.parse(String(bytes, Charsets.UTF_8)).asObject()
 
-            val rawToken = root["raw_token"]?.asString()?.value
+            val rawToken = root["raw_token"]?.asStringOrNull()
                 ?: throw RuntimeException("Credentials missing 'raw_token'")
-            val tokenHash = root["token_hash"]?.asString()?.value
+            val tokenHash = root["token_hash"]?.asStringOrNull()
                 ?: throw RuntimeException("Credentials missing 'token_hash'")
-            val devIdStr = root["device_id"]?.asString()?.value
+            val devIdStr = root["device_id"]?.asStringOrNull()
                 ?: throw RuntimeException("Credentials missing 'device_id'")
 
             val computedTokenHash = computeSha256(rawToken.toByteArray(Charsets.UTF_8))
@@ -894,8 +965,8 @@ class CashPilotHandoffConfig private constructor(
                 rawToken = rawToken,
                 tokenHash = tokenHash,
                 deviceId = ClientUuid.parse(devIdStr),
-                staffEmail = root["staff_email"]?.asString()?.value,
-                schema = root["schema"]?.asString()?.value
+                staffEmail = root["staff_email"]?.asStringOrNull(),
+                schema = root["schema"]?.asStringOrNull()
             )
         }
     }

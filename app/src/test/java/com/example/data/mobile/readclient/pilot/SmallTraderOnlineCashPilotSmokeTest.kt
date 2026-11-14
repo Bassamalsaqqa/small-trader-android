@@ -44,6 +44,10 @@ import javax.net.ssl.HttpsURLConnection
  * - Overall status is PASS only if required executed scenarios passed.
  * - Evidence output contains zero financial secrets, tokens, or raw bodies.
  */
+
+private fun com.example.data.mobile.contract.StrictJsonElement?.asStringOrNull(): String? =
+    (this as? com.example.data.mobile.contract.StrictJsonString)?.value
+
 class SmallTraderOnlineCashPilotSmokeTest {
 
     @Test
@@ -185,8 +189,8 @@ class SmallTraderOnlineCashPilotSmokeTest {
                 "Readiness probe returned HTTP $readinessCode (expected 200)"
             }
             val readinessObj = StrictJsonParser.parse(readinessBody).asObject()
-            val statusVal = readinessObj["status"]?.asString()?.value
-            val nonceVal = readinessObj["nonce"]?.asString()?.value
+            val statusVal = readinessObj["status"]?.asStringOrNull()
+            val nonceVal = readinessObj["nonce"]?.asStringOrNull()
             require(statusVal == "ready") {
                 "Readiness response status expected 'ready', got '$statusVal'"
             }
@@ -473,7 +477,7 @@ class SmallTraderOnlineCashPilotSmokeTest {
 
         val modifiedLines = originalLines.map { lineElem ->
             val lineObj = lineElem.asObject()
-            val origQty = lineObj["quantity"]?.asString()?.value
+            val origQty = lineObj["quantity"]?.asStringOrNull()
                 ?: throw IllegalArgumentException("Line missing 'quantity'")
             val doubledQty = BigDecimal(origQty).multiply(BigDecimal(2))
                 .setScale(6, RoundingMode.UNNECESSARY).toPlainString()
@@ -484,7 +488,7 @@ class SmallTraderOnlineCashPilotSmokeTest {
 
         val originalPayment = originalReq["payment"]?.asObject()
             ?: throw IllegalArgumentException("Missing payment in parsed request")
-        val origAmount = originalPayment["amount"]?.asString()?.value
+        val origAmount = originalPayment["amount"]?.asStringOrNull()
             ?: throw IllegalArgumentException("Missing payment amount in parsed request")
 
         val origAmountBd = BigDecimal(origAmount)
