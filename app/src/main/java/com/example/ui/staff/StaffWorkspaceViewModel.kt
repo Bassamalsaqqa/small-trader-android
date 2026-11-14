@@ -88,6 +88,15 @@ class StaffWorkspaceViewModel(
     private var productRequestSeq: Long = 0L
     private var customerRequestSeq: Long = 0L
 
+    // Dedicated outbox health intent sequence so health checks do NOT invalidate unrelated catalog/auth jobs
+    private var outboxHealthIntentSeq: Long = 0L
+
+    // Cached health result for restoring warning+retry on cancelCompanySelection
+    private var cachedOutboxHealthResult: OutboxHealthResult? = null
+    private var cachedHealthCompanyId: String? = null
+    private var cachedHealthActorId: String? = null
+    private var cachedHealthDeviceId: String? = null
+
     // Active authenticated tenant and device scope for outbox inspection
     private var activeScopeCompanyId: String? = null
     private var activeScopeActorId: String? = null
@@ -101,17 +110,42 @@ class StaffWorkspaceViewModel(
 
     /**
      * Inspects local outbox health scoped strictly to the authenticated (companyId, actorId, deviceId).
+     * Derives immutable actual coordinator ReadReady session scope, not caller IDs.
+     * Validates phase, coordinator generation, scope activity, actor, and device BEFORE any inspector I/O.
      * Runs off the main thread after entering READ_READY.
      * Never blocks normal read workspace navigation or product/customer queries.
      */
-    fun triggerScopedOutboxHealth(companyId: String, actorId: String, deviceId: String) {
+    internal fun triggerScopedOutboxHealth() {
+        if (_uiState.value.phase != StaffWorkspacePhase.READ_READY) return
+        val coord = coordinator ?: return
+        val readyState = coord.authState as? StaffAuthState.ReadReady ?: return
+        val currentGen = coord.currentGeneration
+        val activeComp = _uiState.value.activeCompany ?: return
+        val companyUlid = readyState.session.selectedCompanyId ?: return
+        if (activeComp.companyId != companyUlid.value) return
+        if (!coord.isScopeActive(currentGen, companyUlid)) return
+
+        val actorId = readyState.session.actorUlid.value
+        val deviceId = readyState.session.deviceUuid.value
+        val staffActor = _uiState.value.staffActor
+        if (staffActor != null && staffActor.actorId != actorId) return
+
+        val companyId = companyUlid.value
         activeScopeCompanyId = companyId
         activeScopeActorId = actorId
         activeScopeDeviceId = deviceId
 
-        val intentId = ++activeIntentSeq
+        val intentId = ++outboxHealthIntentSeq
         outboxHealthJob?.cancel()
         outboxHealthJob = viewModelScope.launch {
+            if (_uiState.value.phase != StaffWorkspacePhase.READ_READY ||
+                coord.currentGeneration != currentGen ||
+                !coord.isScopeActive(currentGen, companyUlid) ||
+                coord.authState !is StaffAuthState.ReadReady
+            ) {
+                return@launch
+            }
+
             val health = try {
                 outboxHealthInspector.inspectHealth(companyId, actorId, deviceId)
             } catch (e: CancellationException) {
@@ -122,6 +156,7 @@ class StaffWorkspaceViewModel(
                     totalEvents = 0,
                     probedCount = 0,
                     isSampleProbe = false,
+                    isScopeLocked = false,
                     messageEn = "We have not changed stored sales. Some records need help before syncing.",
                     messageAr = "لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
                     detailMessageEn = "Contact support",
@@ -129,29 +164,73 @@ class StaffWorkspaceViewModel(
                     canRetry = true
                 )
             }
-            if (intentId != activeIntentSeq) return@launch
-            if (_uiState.value.phase != StaffWorkspacePhase.READ_READY ||
-                _uiState.value.activeCompany?.companyId != companyId
+
+            if (intentId != outboxHealthIntentSeq) return@launch
+            if (coord.currentGeneration != currentGen) return@launch
+            if (!coord.isScopeActive(currentGen, companyUlid)) return@launch
+            if (coord.authState !is StaffAuthState.ReadReady) return@launch
+            val currentReady = coord.authState as StaffAuthState.ReadReady
+            if (currentReady.session.selectedCompanyId?.value != companyId ||
+                currentReady.session.actorUlid.value != actorId ||
+                currentReady.session.deviceUuid.value != deviceId
             ) {
                 return@launch
             }
+            if (_uiState.value.phase != StaffWorkspacePhase.READ_READY ||
+                _uiState.value.activeCompany?.companyId != companyId ||
+                _uiState.value.staffActor?.actorId != actorId
+            ) {
+                return@launch
+            }
+
+            cachedOutboxHealthResult = health
+            cachedHealthCompanyId = companyId
+            cachedHealthActorId = actorId
+            cachedHealthDeviceId = deviceId
+
             _uiState.update { it.copy(outboxHealthResult = health, isOutboxRetrying = false) }
         }
     }
 
     /**
      * Retries scoped outbox health inspection off the main thread.
+     * Derives immutable actual coordinator ReadReady session scope.
+     * Validates phase, coordinator generation, scope activity, actor, and device BEFORE any inspector I/O.
      * Never regenerates key or modifies/destroys outbox records.
      */
     fun retryOutboxHealth() {
-        val companyId = activeScopeCompanyId ?: _uiState.value.activeCompany?.companyId ?: return
-        val actorId = activeScopeActorId ?: _uiState.value.staffActor?.actorId ?: return
-        val deviceId = activeScopeDeviceId ?: return
+        if (_uiState.value.phase != StaffWorkspacePhase.READ_READY) return
+        val coord = coordinator ?: return
+        val readyState = coord.authState as? StaffAuthState.ReadReady ?: return
+        val currentGen = coord.currentGeneration
+        val activeComp = _uiState.value.activeCompany ?: return
+        val companyUlid = readyState.session.selectedCompanyId ?: return
+        if (activeComp.companyId != companyUlid.value) return
+        if (!coord.isScopeActive(currentGen, companyUlid)) return
 
-        val intentId = ++activeIntentSeq
+        val companyId = companyUlid.value
+        val actorId = readyState.session.actorUlid.value
+        val deviceId = readyState.session.deviceUuid.value
+        val staffActor = _uiState.value.staffActor
+        if (staffActor != null && staffActor.actorId != actorId) return
+
+        activeScopeCompanyId = companyId
+        activeScopeActorId = actorId
+        activeScopeDeviceId = deviceId
+
+        val intentId = ++outboxHealthIntentSeq
         _uiState.update { it.copy(isOutboxRetrying = true) }
         outboxHealthJob?.cancel()
         outboxHealthJob = viewModelScope.launch {
+            if (_uiState.value.phase != StaffWorkspacePhase.READ_READY ||
+                coord.currentGeneration != currentGen ||
+                !coord.isScopeActive(currentGen, companyUlid) ||
+                coord.authState !is StaffAuthState.ReadReady
+            ) {
+                _uiState.update { it.copy(isOutboxRetrying = false) }
+                return@launch
+            }
+
             val health = try {
                 outboxHealthInspector.inspectHealth(companyId, actorId, deviceId)
             } catch (e: CancellationException) {
@@ -162,6 +241,7 @@ class StaffWorkspaceViewModel(
                     totalEvents = 0,
                     probedCount = 0,
                     isSampleProbe = false,
+                    isScopeLocked = false,
                     messageEn = "We have not changed stored sales. Some records need help before syncing.",
                     messageAr = "لم نقم بتعديل المبيعات المحفوظة. بعض السجلات تحتاج إلى مساعدة قبل المزامنة.",
                     detailMessageEn = "Contact support",
@@ -169,12 +249,30 @@ class StaffWorkspaceViewModel(
                     canRetry = true
                 )
             }
-            if (intentId != activeIntentSeq) return@launch
-            if (_uiState.value.phase != StaffWorkspacePhase.READ_READY ||
-                _uiState.value.activeCompany?.companyId != companyId
+
+            if (intentId != outboxHealthIntentSeq) return@launch
+            if (coord.currentGeneration != currentGen) return@launch
+            if (!coord.isScopeActive(currentGen, companyUlid)) return@launch
+            if (coord.authState !is StaffAuthState.ReadReady) return@launch
+            val currentReady = coord.authState as StaffAuthState.ReadReady
+            if (currentReady.session.selectedCompanyId?.value != companyId ||
+                currentReady.session.actorUlid.value != actorId ||
+                currentReady.session.deviceUuid.value != deviceId
             ) {
                 return@launch
             }
+            if (_uiState.value.phase != StaffWorkspacePhase.READ_READY ||
+                _uiState.value.activeCompany?.companyId != companyId ||
+                _uiState.value.staffActor?.actorId != actorId
+            ) {
+                return@launch
+            }
+
+            cachedOutboxHealthResult = health
+            cachedHealthCompanyId = companyId
+            cachedHealthActorId = actorId
+            cachedHealthDeviceId = deviceId
+
             _uiState.update { it.copy(outboxHealthResult = health, isOutboxRetrying = false) }
         }
     }
@@ -265,9 +363,14 @@ class StaffWorkspaceViewModel(
         productsJob?.cancel()
         customersJob?.cancel()
         outboxHealthJob?.cancel()
+        ++outboxHealthIntentSeq
         activeScopeCompanyId = null
         activeScopeActorId = null
         activeScopeDeviceId = null
+        cachedOutboxHealthResult = null
+        cachedHealthCompanyId = null
+        cachedHealthActorId = null
+        cachedHealthDeviceId = null
 
         authJob = viewModelScope.launch {
             _uiState.update {
@@ -329,7 +432,7 @@ class StaffWorkspaceViewModel(
                                 }
                                 loadProducts(refresh = true)
                                 loadCustomers(refresh = true)
-                                triggerScopedOutboxHealth(compId, actId, devId)
+                                triggerScopedOutboxHealth()
                             } else {
                                 transitionToSignIn()
                             }
@@ -435,9 +538,14 @@ class StaffWorkspaceViewModel(
         productsJob?.cancel()
         customersJob?.cancel()
         outboxHealthJob?.cancel()
+        ++outboxHealthIntentSeq
         activeScopeCompanyId = null
         activeScopeActorId = null
         activeScopeDeviceId = null
+        cachedOutboxHealthResult = null
+        cachedHealthCompanyId = null
+        cachedHealthActorId = null
+        cachedHealthDeviceId = null
 
         authJob = viewModelScope.launch {
             _uiState.update { it.copy(isSubmitting = true, errorMessage = null, outboxHealthResult = null, isOutboxRetrying = false) }
@@ -527,7 +635,7 @@ class StaffWorkspaceViewModel(
                                 }
                                 loadProducts(refresh = true)
                                 loadCustomers(refresh = true)
-                                triggerScopedOutboxHealth(compId, actId, devId)
+                                triggerScopedOutboxHealth()
                             }
                         }
                         is StaffAuthState.MfaRequired -> {
@@ -698,7 +806,7 @@ class StaffWorkspaceViewModel(
                                 }
                                 loadProducts(refresh = true)
                                 loadCustomers(refresh = true)
-                                triggerScopedOutboxHealth(compId, actId, devId)
+                                triggerScopedOutboxHealth()
                             }
                         }
                         is StaffAuthState.CompanySelectionRequired -> {
@@ -766,6 +874,7 @@ class StaffWorkspaceViewModel(
      */
     fun openCompanySelection() {
         outboxHealthJob?.cancel()
+        ++outboxHealthIntentSeq
         if (_uiState.value.availableCompanies.isNotEmpty()) {
             _uiState.update { it.copy(phase = StaffWorkspacePhase.COMPANY_SELECTION, outboxHealthResult = null, isOutboxRetrying = false) }
         } else {
@@ -781,15 +890,35 @@ class StaffWorkspaceViewModel(
 
     /**
      * Cancels company selection: returns to active ReadReady workspace if valid, or logs out if initial login.
+     * Restores owned cached health result if scope is still active and matches, or triggers auth-derived inspection.
+     * Ensures warning and Retry button remain/reappear for legacy/corrupt states, without blocking normal catalog reads.
      */
     fun cancelCompanySelection() {
         outboxHealthJob?.cancel()
+        ++outboxHealthIntentSeq
         val active = _uiState.value.activeCompany
         val coord = coordinator
         if (active != null && coord != null) {
             val ulid = runCatching { ServerUlid.parse(active.companyId) }.getOrNull()
             if (ulid != null && coord.isScopeActive(coord.currentGeneration, ulid)) {
-                _uiState.update { it.copy(phase = StaffWorkspacePhase.READ_READY, errorMessage = null) }
+                val restoredHealth = if (cachedHealthCompanyId == active.companyId &&
+                    cachedHealthActorId == _uiState.value.staffActor?.actorId &&
+                    cachedOutboxHealthResult != null
+                ) {
+                    cachedOutboxHealthResult
+                } else null
+
+                _uiState.update {
+                    it.copy(
+                        phase = StaffWorkspacePhase.READ_READY,
+                        outboxHealthResult = restoredHealth,
+                        isOutboxRetrying = false,
+                        errorMessage = null
+                    )
+                }
+                if (restoredHealth == null) {
+                    triggerScopedOutboxHealth()
+                }
                 return
             }
         }
@@ -819,9 +948,14 @@ class StaffWorkspaceViewModel(
         productsJob?.cancel()
         customersJob?.cancel()
         outboxHealthJob?.cancel()
+        ++outboxHealthIntentSeq
         activeScopeCompanyId = null
         activeScopeActorId = null
         activeScopeDeviceId = null
+        cachedOutboxHealthResult = null
+        cachedHealthCompanyId = null
+        cachedHealthActorId = null
+        cachedHealthDeviceId = null
         clearListsImmediately()
 
         authJob = viewModelScope.launch {
@@ -875,7 +1009,7 @@ class StaffWorkspaceViewModel(
                         }
                         loadProducts(refresh = true)
                         loadCustomers(refresh = true)
-                        triggerScopedOutboxHealth(compId, actId, devId)
+                        triggerScopedOutboxHealth()
                     }
                 }
                 is CoordinatorResult.AuthDenied -> {
@@ -927,9 +1061,14 @@ class StaffWorkspaceViewModel(
         customersJob?.cancel()
         authJob?.cancel()
         outboxHealthJob?.cancel()
+        ++outboxHealthIntentSeq
         activeScopeCompanyId = null
         activeScopeActorId = null
         activeScopeDeviceId = null
+        cachedOutboxHealthResult = null
+        cachedHealthCompanyId = null
+        cachedHealthActorId = null
+        cachedHealthDeviceId = null
         clearListsImmediately()
 
         authJob = viewModelScope.launch {
@@ -976,7 +1115,7 @@ class StaffWorkspaceViewModel(
                         }
                         loadProducts(refresh = true)
                         loadCustomers(refresh = true)
-                        triggerScopedOutboxHealth(compId, actId, devId)
+                        triggerScopedOutboxHealth()
                     }
                 }
                 is CoordinatorResult.AuthDenied -> {
@@ -1018,9 +1157,14 @@ class StaffWorkspaceViewModel(
         customersJob?.cancel()
         authJob?.cancel()
         outboxHealthJob?.cancel()
+        ++outboxHealthIntentSeq
         activeScopeCompanyId = null
         activeScopeActorId = null
         activeScopeDeviceId = null
+        cachedOutboxHealthResult = null
+        cachedHealthCompanyId = null
+        cachedHealthActorId = null
+        cachedHealthDeviceId = null
 
         clearTransientCredentials()
         clearListsImmediately()

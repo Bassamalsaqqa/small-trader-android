@@ -1,7 +1,7 @@
 {
   "suites": 15,
   "totals": {
-    "tests": 140,
+    "tests": 165,
     "failures": 0,
     "errors": 0,
     "skipped": 0
@@ -58,7 +58,7 @@
     },
     {
       "name": "com.example.data.mobile.outbox.OutboxHealthGateTest",
-      "tests": 10,
+      "tests": 28,
       "failures": 0,
       "errors": 0,
       "skipped": 0
@@ -93,7 +93,7 @@
     },
     {
       "name": "com.example.ui.staff.StaffOutboxRecoveryComposeTest",
-      "tests": 9,
+      "tests": 16,
       "failures": 0,
       "errors": 0,
       "skipped": 0

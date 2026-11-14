@@ -12,7 +12,11 @@ import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.outbox.OutboxHealthInspector
 import com.example.data.mobile.outbox.OutboxHealthResult
 import com.example.data.mobile.outbox.OutboxHealthStatus
+import com.example.data.mobile.readclient.ActorProfile
+import com.example.data.mobile.readclient.CompanyMembership
+import com.example.data.mobile.readclient.ProductCatalogResponse
 import com.example.data.mobile.session.CoordinatorResult
+import com.example.data.mobile.session.StaffAuthState
 import com.example.model.AppLanguage
 import com.example.ui.theme.SmallTraderTheme
 import kotlinx.coroutines.CompletableDeferred
@@ -626,5 +630,312 @@ class StaffOutboxRecoveryComposeTest {
         assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
         assertTrue(vm.uiState.value.isQueueProcessingReady)
         assertEquals(OutboxHealthStatus.HEALTHY, vm.uiState.value.outboxHealthResult!!.status)
+    }
+
+    @Test
+    fun preAuth_invocation_triggerScopedOutboxHealth_and_retryOutboxHealth_executeZeroInspectorQueries() = runTest(testDispatcher) {
+        val fakeCoordinator = FakeStaffSessionCoordinator(
+            initialCompanyId = testCompanyIdA,
+            initialActorId = testActorId,
+            installId = testInstallId
+        )
+        fakeCoordinator.authState = StaffAuthState.LoggedOut
+
+        var inspectQueryCount = 0
+        val fakeInspector = object : OutboxHealthInspector {
+            override suspend fun inspectHealth(
+                companyId: String,
+                actorId: String,
+                deviceId: String,
+                maxProbeCount: Int
+            ): OutboxHealthResult {
+                inspectQueryCount++
+                return OutboxHealthResult(
+                    status = OutboxHealthStatus.HEALTHY,
+                    totalEvents = 0,
+                    probedCount = 0,
+                    isSampleProbe = false,
+                    messageEn = "Healthy",
+                    messageAr = "سليم"
+                )
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://pilot.example.com",
+            ioDispatcher = testDispatcher,
+            outboxHealthInspector = fakeInspector
+        )
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.SIGN_IN, vm.uiState.value.phase)
+
+        // Pre-auth invocations of health entry points:
+        vm.triggerScopedOutboxHealth()
+        advanceUntilIdle()
+        assertEquals("triggerScopedOutboxHealth pre-auth must execute ZERO queries", 0, inspectQueryCount)
+
+        vm.retryOutboxHealth()
+        advanceUntilIdle()
+        assertEquals("retryOutboxHealth pre-auth must execute ZERO queries", 0, inspectQueryCount)
+        assertFalse(vm.uiState.value.isOutboxRetrying)
+        assertNull(vm.uiState.value.outboxHealthResult)
+    }
+
+    @Test
+    fun multiCompanyReadReady_healthLegacy_openCompanySelection_thenCancel_restoresWarningAndRetry_catalogNotBlocked() = runTest(testDispatcher) {
+        val fakeCoordinator = FakeStaffSessionCoordinator(
+            initialCompanyId = testCompanyIdA,
+            initialActorId = testActorId,
+            installId = testInstallId
+        )
+        fakeCoordinator.restoreResult = CoordinatorResult.Success(
+            fakeCoordinator.createReadReadyState(testCompanyIdA, "Company A"),
+            generation = 1L,
+            companyId = testCompanyIdA,
+            actorId = testActorId
+        )
+        fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyIdA, "Company A")
+        fakeCoordinator.companyNames[testCompanyIdA] = "Company A"
+        fakeCoordinator.companyNames[testCompanyIdB] = "Company B"
+
+        val sampleProduct = fakeCoordinator.createProductItem("01JCV8X9M2NQW3TYZ4R5S67891", "SKU-OIL", "Extra Virgin Olive Oil")
+        fakeCoordinator.getProductsHandler = {
+            ProductCatalogResponse(
+                companyId = testCompanyIdA,
+                catalogSnapshotVersion = "snap_1",
+                generatedAt = "2026-11-10T12:00:00Z",
+                nextCursor = null,
+                hasMore = false,
+                products = listOf(sampleProduct)
+            )
+        }
+
+        var inspectCallCount = 0
+        val fakeInspector = object : OutboxHealthInspector {
+            override suspend fun inspectHealth(
+                companyId: String,
+                actorId: String,
+                deviceId: String,
+                maxProbeCount: Int
+            ): OutboxHealthResult {
+                inspectCallCount++
+                return OutboxHealthResult(
+                    status = OutboxHealthStatus.LEGACY_PLAINTEXT,
+                    totalEvents = 4,
+                    probedCount = 4,
+                    isSampleProbe = false,
+                    messageEn = "Pre-existing unencrypted sales records detected.",
+                    messageAr = "تم اكتشاف سجلات مبيعات سابقة غير مشفرة.",
+                    canRetry = true
+                )
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://pilot.example.com",
+            ioDispatcher = testDispatcher,
+            outboxHealthInspector = fakeInspector
+        )
+
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+        assertEquals(1, inspectCallCount)
+        assertNotNull(vm.uiState.value.outboxHealthResult)
+        assertEquals(OutboxHealthStatus.LEGACY_PLAINTEXT, vm.uiState.value.outboxHealthResult!!.status)
+        assertFalse(vm.uiState.value.isQueueProcessingReady)
+
+        // Login flow with multiple companies to populate availableCompanies:
+        fakeCoordinator.loginResultProvider = { _, _, _, _ ->
+            fakeCoordinator.authState = StaffAuthState.CompanySelectionRequired(
+                actor = ActorProfile(testActorId, "Bassam", "staff@example.com", "Cashier", "epoch_1"),
+                availableCompanies = listOf(
+                    CompanyMembership(testCompanyIdA, "Company A", "ILS", true),
+                    CompanyMembership(testCompanyIdB, "Company B", "ILS", false)
+                )
+            )
+            CoordinatorResult.Success(fakeCoordinator.authState, generation = 2L)
+        }
+        vm.signIn("staff@example.com", passwordOverride = "pass")
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.COMPANY_SELECTION, vm.uiState.value.phase)
+
+        // Select Company A to enter READ_READY with availableCompanies populated:
+        vm.selectCompany(testCompanyIdA.value)
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+        assertEquals(2, vm.uiState.value.availableCompanies.size)
+        assertNotNull(vm.uiState.value.outboxHealthResult)
+        assertEquals(OutboxHealthStatus.LEGACY_PLAINTEXT, vm.uiState.value.outboxHealthResult!!.status)
+        // Catalog read is populated and NOT blocked:
+        assertTrue(vm.uiState.value.products.isNotEmpty())
+
+        // User opens company selection:
+        vm.openCompanySelection()
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.COMPANY_SELECTION, vm.uiState.value.phase)
+        assertNull("Company selection view must not show outbox health result", vm.uiState.value.outboxHealthResult)
+
+        // User cancels company selection without switching:
+        vm.cancelCompanySelection()
+        advanceUntilIdle()
+
+        // Returned to READ_READY:
+        assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+        // Warning + Retry button MUST remain/reappear present!
+        assertNotNull("Outbox health result must be restored on cancel", vm.uiState.value.outboxHealthResult)
+        assertEquals(OutboxHealthStatus.LEGACY_PLAINTEXT, vm.uiState.value.outboxHealthResult!!.status)
+        assertTrue(vm.uiState.value.outboxHealthResult!!.canRetry)
+        assertFalse(vm.uiState.value.isQueueProcessingReady)
+        // Catalog read remains accessible:
+        assertTrue("Catalog must remain available and non-blocked", vm.uiState.value.products.isNotEmpty())
+    }
+
+    @Test
+    fun asyncStaleHealthResultFromOtherCompany_neverDisplayedAfterSwitch() = runTest(testDispatcher) {
+        val fakeCoordinator = FakeStaffSessionCoordinator(
+            initialCompanyId = testCompanyIdA,
+            initialActorId = testActorId,
+            installId = testInstallId
+        )
+        fakeCoordinator.restoreResult = CoordinatorResult.Success(
+            fakeCoordinator.createReadReadyState(testCompanyIdA, "Company A"),
+            generation = 1L,
+            companyId = testCompanyIdA,
+            actorId = testActorId
+        )
+        fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyIdA, "Company A")
+        fakeCoordinator.companyNames[testCompanyIdA] = "Company A"
+        fakeCoordinator.companyNames[testCompanyIdB] = "Company B"
+
+        val companyASignal = CompletableDeferred<OutboxHealthResult>()
+        val fakeInspector = object : OutboxHealthInspector {
+            override suspend fun inspectHealth(
+                companyId: String,
+                actorId: String,
+                deviceId: String,
+                maxProbeCount: Int
+            ): OutboxHealthResult {
+                return if (companyId == testCompanyIdA.value) {
+                    companyASignal.await()
+                } else {
+                    OutboxHealthResult(
+                        status = OutboxHealthStatus.HEALTHY,
+                        totalEvents = 1,
+                        probedCount = 1,
+                        isSampleProbe = false,
+                        messageEn = "Healthy B",
+                        messageAr = "سليم ب"
+                    )
+                }
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://pilot.example.com",
+            ioDispatcher = testDispatcher,
+            outboxHealthInspector = fakeInspector
+        )
+
+        // Advance to let restoreSession complete and health check start for Company A
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+        assertEquals(testCompanyIdA.value, vm.uiState.value.activeCompany?.companyId)
+        assertNull("Company A health is still pending", vm.uiState.value.outboxHealthResult)
+
+        // User switches to Company B while Company A's check is pending:
+        vm.switchCompany(testCompanyIdB.value)
+        advanceUntilIdle()
+
+        assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+        assertEquals(testCompanyIdB.value, vm.uiState.value.activeCompany?.companyId)
+        assertEquals(OutboxHealthStatus.HEALTHY, vm.uiState.value.outboxHealthResult?.status)
+
+        // Now Company A's delayed/stale health check completes with CORRUPT:
+        companyASignal.complete(
+            OutboxHealthResult(
+                status = OutboxHealthStatus.CORRUPT,
+                totalEvents = 9,
+                probedCount = 9,
+                isSampleProbe = false,
+                messageEn = "Company A Corrupt",
+                messageAr = "فاسد أ",
+                canRetry = true
+            )
+        )
+        advanceUntilIdle()
+
+        // Company B's health state MUST NOT be overwritten by Company A's stale result!
+        assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+        assertEquals(testCompanyIdB.value, vm.uiState.value.activeCompany?.companyId)
+        assertEquals(OutboxHealthStatus.HEALTHY, vm.uiState.value.outboxHealthResult?.status)
+    }
+
+    @Test
+    fun healthInspection_doesNotIncrementActiveIntentSeq_doesNotInvalidateCatalogJobs() = runTest(testDispatcher) {
+        val fakeCoordinator = FakeStaffSessionCoordinator(
+            initialCompanyId = testCompanyIdA,
+            initialActorId = testActorId,
+            installId = testInstallId
+        )
+        fakeCoordinator.restoreResult = CoordinatorResult.Success(
+            fakeCoordinator.createReadReadyState(testCompanyIdA, "Company A"),
+            generation = 1L,
+            companyId = testCompanyIdA,
+            actorId = testActorId
+        )
+        fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyIdA, "Company A")
+
+        val sampleProduct = fakeCoordinator.createProductItem("01JCV8X9M2NQW3TYZ4R5S67891", "SKU-OIL", "Extra Virgin Olive Oil")
+        fakeCoordinator.getProductsHandler = {
+            ProductCatalogResponse(
+                companyId = testCompanyIdA,
+                catalogSnapshotVersion = "snap_1",
+                generatedAt = "2026-11-10T12:00:00Z",
+                nextCursor = null,
+                hasMore = false,
+                products = listOf(sampleProduct)
+            )
+        }
+
+        val fakeInspector = object : OutboxHealthInspector {
+            override suspend fun inspectHealth(
+                companyId: String,
+                actorId: String,
+                deviceId: String,
+                maxProbeCount: Int
+            ): OutboxHealthResult = OutboxHealthResult(
+                status = OutboxHealthStatus.HEALTHY,
+                totalEvents = 0,
+                probedCount = 0,
+                isSampleProbe = false,
+                messageEn = "Healthy",
+                messageAr = "سليم"
+            )
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://pilot.example.com",
+            ioDispatcher = testDispatcher,
+            outboxHealthInspector = fakeInspector
+        )
+        advanceUntilIdle()
+
+        val activeIntentSeqField = StaffWorkspaceViewModel::class.java.getDeclaredField("activeIntentSeq")
+        activeIntentSeqField.isAccessible = true
+        val intentSeqBefore = activeIntentSeqField.getLong(vm)
+
+        // Trigger health retry:
+        vm.retryOutboxHealth()
+        advanceUntilIdle()
+
+        val intentSeqAfter = activeIntentSeqField.getLong(vm)
+        assertEquals("Health check must NOT increment activeIntentSeq", intentSeqBefore, intentSeqAfter)
+
+        // Catalog products remain loaded and valid:
+        assertTrue(vm.uiState.value.products.isNotEmpty())
     }
 }

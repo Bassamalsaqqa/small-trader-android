@@ -59,8 +59,49 @@ data class OutboxHealthProbeEntity(
     }
 }
 
+data class OutboxHealthScopeSnapshot(
+    val totalScopedEvents: Int,
+    val isScopeLocked: Boolean,
+    val nonEncryptedCount: Int,
+    val totalGlobalEvents: Int,
+    val sampleRows: List<OutboxHealthProbeEntity>
+)
+
 @Dao
 abstract class OutboxDao {
+    @Transaction
+    open fun getScopedHealthSnapshot(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        maxEnvelopeBytesPlusOne: Int,
+        limit: Int,
+        onBetweenCountAndSample: (() -> Unit)? = null
+    ): OutboxHealthScopeSnapshot {
+        val isLocked = isScopeLocked(companyId, actorId, deviceId)
+        val total = scopedEventCount(companyId, actorId, deviceId)
+        val globalTotal = eventCount()
+        onBetweenCountAndSample?.invoke()
+        val nonEncrypted = if (total > 0) scopedNonEncryptedEventCount(companyId, actorId, deviceId) else 0
+        val sample = if (total > 0) {
+            scopedSampleEventsForHealthProbe(
+                companyId = companyId,
+                actorId = actorId,
+                deviceId = deviceId,
+                maxEnvelopeBytesPlusOne = maxEnvelopeBytesPlusOne,
+                limit = limit
+            )
+        } else {
+            emptyList()
+        }
+        return OutboxHealthScopeSnapshot(
+            totalScopedEvents = total,
+            isScopeLocked = isLocked,
+            nonEncryptedCount = nonEncrypted,
+            totalGlobalEvents = globalTotal,
+            sampleRows = sample
+        )
+    }
     @Query("SELECT COUNT(*) FROM outbox_events")
     abstract fun eventCount(): Int
 
@@ -100,6 +141,33 @@ abstract class OutboxDao {
         companyId: String,
         actorId: String,
         deviceId: String,
+        maxEnvelopeBytesPlusOne: Int,
+        limit: Int
+    ): List<OutboxHealthProbeEntity>
+
+    @Query("""
+        SELECT client_event_id, company_id, actor_id, device_id, device_lease_id,
+               captured_at, payload_digest, event_version,
+               length(payload_bytes) AS payload_length,
+               substr(payload_bytes, 1, :maxEnvelopeBytesPlusOne) AS bounded_payload_bytes
+        FROM outbox_events
+        WHERE company_id = :companyId
+          AND actor_id = :actorId
+          AND device_id = :deviceId
+          AND (
+            :afterCapturedAt IS NULL 
+            OR captured_at > :afterCapturedAt 
+            OR (captured_at = :afterCapturedAt AND client_event_id > :afterClientEventId)
+          )
+        ORDER BY captured_at ASC, client_event_id ASC
+        LIMIT :limit
+    """)
+    abstract fun scopedEventsPageForHealthProbe(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        afterCapturedAt: String?,
+        afterClientEventId: String?,
         maxEnvelopeBytesPlusOne: Int,
         limit: Int
     ): List<OutboxHealthProbeEntity>

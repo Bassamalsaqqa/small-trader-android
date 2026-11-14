@@ -571,9 +571,9 @@ class OutboxHealthGateTest {
     }
 
     @Test
-    fun hardLimit_negativeOrHugeMaxProbeCount_boundedToHardCap10() = runBlocking {
+    fun negativeOrExplicitProbeCount_verifiesAcrossPagesOrClampsToRequestedLimit() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val dbFile = File(context.filesDir, "probe-bounds-${UUID.randomUUID()}.db")
+        val dbFile = File(context.filesDir, "probe-limits-${UUID.randomUUID()}.db")
         val db = OutboxDatabase.buildDatabase(context, dbFile.path, true)
 
         val crypto = JvmOutboxCrypto()
@@ -597,13 +597,26 @@ class OutboxHealthGateTest {
 
         val inspector = DefaultOutboxHealthInspector(db, payloadCipher = cipher, ioDispatcher = Dispatchers.IO)
 
-        // Passing negative limit should fall back to default (10)
+        // Passing negative/zero limit falls back to full verification across all scoped rows via pages
         val resultNeg = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId, maxProbeCount = -5)
-        assertEquals(10, resultNeg.probedCount)
+        assertEquals(15, resultNeg.probedCount)
+        assertEquals(15, resultNeg.totalEvents)
+        assertEquals(OutboxHealthStatus.HEALTHY, resultNeg.status)
+        assertTrue(resultNeg.isOperational)
 
-        // Passing huge limit (> 10) should be clamped to hard cap (10)
+        // Explicit bounded probe limit (e.g. 5) restricts probing to requested limit
+        val resultBounded = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId, maxProbeCount = 5)
+        assertEquals(5, resultBounded.probedCount)
+        assertEquals(15, resultBounded.totalEvents)
+        assertTrue(resultBounded.isSampleProbe)
+        assertEquals(OutboxHealthStatus.PARTIAL_UNCHECKED, resultBounded.status)
+        assertFalse(resultBounded.isOperational)
+
+        // Passing large limit (e.g. 500) verifies up to min(limit, total) = 15 rows across pages
         val resultHuge = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId, maxProbeCount = 500)
-        assertEquals(10, resultHuge.probedCount)
+        assertEquals(15, resultHuge.probedCount)
+        assertEquals(OutboxHealthStatus.HEALTHY, resultHuge.status)
+        assertTrue(resultHuge.isOperational)
 
         db.close()
     }
@@ -659,6 +672,733 @@ class OutboxHealthGateTest {
         }
         job.join()
         assertTrue("CancellationException must propagate cleanly", caughtCancellation)
+
+        db.close()
+    }
+
+    @Test
+    fun raceTwoConnectionsDeterministicBarrier_cannotFalseHealthyFromInconsistentSnapshot() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbFile = File(context.filesDir, "race-barrier-${UUID.randomUUID()}.db")
+        val db1 = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+        val crypto = JvmOutboxCrypto()
+        val cipher = OutboxPayloadCipher(crypto)
+        val repo1 = OutboxRepositoryImpl(db1, payloadCipher = cipher)
+
+        val compId = ServerUlid.parse(defaultCompanyId)
+        val actId = ServerUlid.parse(defaultActorId)
+        val devId = ClientUuid.parse(defaultDeviceId)
+
+        // Insert exactly 10 valid encrypted events
+        for (i in 1..10) {
+            val event = OutboxTestFixtures.createSampleEvent(
+                clientEventId = ClientUuid.random(),
+                companyId = compId,
+                actorId = actId,
+                deviceId = devId,
+                capturedAt = "2026-11-13T20:00:%02d.000000Z".format(i),
+                localReceiptNumber = "RACE-$i"
+            )
+            repo1.captureSale(event)
+        }
+
+        // Open Connection 2 to the same database file
+        val db2 = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+
+        var barrierExecuted = false
+        val inspector = DefaultOutboxHealthInspector(
+            database = db1,
+            payloadCipher = cipher,
+            ioDispatcher = Dispatchers.IO,
+            onSnapshotReadHook = {
+                // Connection 2 inserts an 11th corrupt event ordered after the first 10
+                barrierExecuted = true
+                val corruptBytes = "STO\u0001CORRUPT-MAC-OR-CIPHERTEXT-INSUFFICIENT-LENGTH".toByteArray(Charsets.UTF_8)
+                val entity = OutboxEventEntity(
+                    clientEventId = UUID.randomUUID().toString(),
+                    companyId = defaultCompanyId,
+                    actorId = defaultActorId,
+                    deviceId = defaultDeviceId,
+                    deviceLeaseId = UUID.randomUUID().toString(),
+                    capturedAt = "2026-11-13T20:00:59.000000Z",
+                    payloadDigest = "0000000000000000000000000000000000000000000000000000000000000000",
+                    payloadBytes = corruptBytes,
+                    eventVersion = 1
+                )
+                db2.outboxDao().insertEvent(entity)
+            }
+        )
+
+        // Run inspection through Connection 1
+        val result = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId, maxProbeCount = 10)
+        assertTrue("Barrier hook must have executed", barrierExecuted)
+
+        // Under single Room read transaction:
+        // Inside Connection 1's transaction, snapshot consistency guarantees it does NOT report a false HEALTHY
+        // on a state where total events and sample rows are mismatched.
+        // In this execution, snapshot isolation either evaluates count=10, sample=10 atomically as an instantaneous snapshot,
+        // or count=11, sample=10 as PARTIAL_UNCHECKED (never false healthy).
+        if (result.totalEvents > 10) {
+            assertNotEquals(
+                "Must never produce false HEALTHY with isOperational=true when queue has 11 records and only 10 probed",
+                OutboxHealthStatus.HEALTHY,
+                result.status
+            )
+            assertFalse(result.isOperational)
+        } else {
+            assertEquals(10, result.totalEvents)
+            assertEquals(10, result.probedCount)
+            assertEquals(OutboxHealthStatus.HEALTHY, result.status)
+            assertTrue(result.isOperational)
+        }
+
+        // And inspecting again immediately observes the 11th corrupt event:
+        val subsequentResult = DefaultOutboxHealthInspector(db1, cipher, Dispatchers.IO)
+            .inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId, maxProbeCount = 10)
+        assertEquals(11, subsequentResult.totalEvents)
+        assertEquals(10, subsequentResult.probedCount)
+        assertTrue(subsequentResult.isSampleProbe)
+        // With 11 events and limit 10, it's a sample probe: MUST report PARTIAL_UNCHECKED, never operational
+        assertEquals(OutboxHealthStatus.PARTIAL_UNCHECKED, subsequentResult.status)
+        assertFalse(subsequentResult.isOperational)
+        assertFalse(subsequentResult.isQueueProcessingReady)
+
+        db1.close()
+        db2.close()
+    }
+
+    @Test
+    fun fatalRoomTransactionRollback_healthInspectionFailsClosed_leavesDatabaseDataUnchanged() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbFile = File(context.filesDir, "fatal-rollback-${UUID.randomUUID()}.db")
+        val db = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+        val crypto = JvmOutboxCrypto()
+        val cipher = OutboxPayloadCipher(crypto)
+        val repo = OutboxRepositoryImpl(db, payloadCipher = cipher)
+
+        val compId = ServerUlid.parse(defaultCompanyId)
+        val actId = ServerUlid.parse(defaultActorId)
+        val devId = ClientUuid.parse(defaultDeviceId)
+
+        for (i in 1..3) {
+            val event = OutboxTestFixtures.createSampleEvent(
+                clientEventId = ClientUuid.random(),
+                companyId = compId,
+                actorId = actId,
+                deviceId = devId,
+                localReceiptNumber = "ROLLBACK-$i"
+            )
+            repo.captureSale(event)
+        }
+
+        assertEquals(3, db.outboxDao().scopedEventCount(defaultCompanyId, defaultActorId, defaultDeviceId))
+
+        // Hook throws runtime exception simulating unexpected failure inside Room transaction
+        val throwingInspector = DefaultOutboxHealthInspector(
+            database = db,
+            payloadCipher = cipher,
+            ioDispatcher = Dispatchers.IO,
+            onSnapshotReadHook = {
+                throw IllegalStateException("Simulated disk error during transaction read")
+            }
+        )
+
+        val result = throwingInspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+        assertEquals(OutboxHealthStatus.STORAGE_UNAVAILABLE, result.status)
+        assertFalse(result.isOperational)
+        assertTrue(result.canRetry)
+
+        // Verify database data remains 100% unchanged after transaction rollback
+        assertEquals(3, db.outboxDao().scopedEventCount(defaultCompanyId, defaultActorId, defaultDeviceId))
+
+        db.close()
+    }
+
+    @Test
+    fun emptyQueueWithPersistedAuthLock_failsOperational_returnsAuthBlocked_noKeystoreCreation() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbFile = File(context.filesDir, "empty-locked-${UUID.randomUUID()}.db")
+        val db = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+        val crypto = JvmOutboxCrypto()
+        val initialKeyGenerations = crypto.keyGenerationCount
+        val cipher = OutboxPayloadCipher(crypto)
+
+        // Queue has 0 events, but is explicitly locked due to HTTP 401 auth denial
+        db.outboxDao().insertScopeLock(
+            OutboxScopeLockEntity(
+                companyId = defaultCompanyId,
+                actorId = defaultActorId,
+                deviceId = defaultDeviceId,
+                lockedAt = System.currentTimeMillis(),
+                reason = "HTTP 401: Authentication denied"
+            )
+        )
+        assertTrue(db.outboxDao().isScopeLocked(defaultCompanyId, defaultActorId, defaultDeviceId))
+
+        val inspector = DefaultOutboxHealthInspector(db, payloadCipher = cipher, ioDispatcher = Dispatchers.IO)
+        val result = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+
+        assertEquals(OutboxHealthStatus.AUTH_BLOCKED, result.status)
+        assertEquals(0, result.totalEvents)
+        assertEquals(0, result.probedCount)
+        assertFalse(result.isSampleProbe)
+        assertTrue(result.isScopeLocked)
+        assertFalse("Locked empty queue must NEVER be operational", result.isOperational)
+        assertFalse("Locked empty queue must NEVER be queue processing ready", result.isQueueProcessingReady)
+        assertTrue(result.canRetry)
+        assertEquals(initialKeyGenerations, crypto.keyGenerationCount)
+
+        db.close()
+    }
+
+    @Test
+    fun nonEmptyEncryptedQueueWithPersistedAuthLock_failsOperational_returnsAuthBlocked() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbFile = File(context.filesDir, "nonempty-locked-${UUID.randomUUID()}.db")
+        val db = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+        val crypto = JvmOutboxCrypto()
+        val cipher = OutboxPayloadCipher(crypto)
+        val repo = OutboxRepositoryImpl(db, payloadCipher = cipher)
+
+        val compId = ServerUlid.parse(defaultCompanyId)
+        val actId = ServerUlid.parse(defaultActorId)
+        val devId = ClientUuid.parse(defaultDeviceId)
+
+        for (i in 1..3) {
+            val event = OutboxTestFixtures.createSampleEvent(
+                clientEventId = ClientUuid.random(),
+                companyId = compId,
+                actorId = actId,
+                deviceId = devId,
+                localReceiptNumber = "LOCKED-$i"
+            )
+            repo.captureSale(event)
+        }
+
+        // All 3 events are valid encrypted records on disk
+        // Lock queue on HTTP 401
+        db.outboxDao().insertScopeLock(
+            OutboxScopeLockEntity(
+                companyId = defaultCompanyId,
+                actorId = defaultActorId,
+                deviceId = defaultDeviceId,
+                lockedAt = System.currentTimeMillis(),
+                reason = "HTTP 401: Session revoked"
+            )
+        )
+
+        val inspector = DefaultOutboxHealthInspector(db, payloadCipher = cipher, ioDispatcher = Dispatchers.IO)
+        val result = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+
+        assertEquals(OutboxHealthStatus.AUTH_BLOCKED, result.status)
+        assertEquals(3, result.totalEvents)
+        assertEquals(3, result.probedCount)
+        assertTrue(result.isScopeLocked)
+        assertFalse("Locked populated queue must not be operational", result.isOperational)
+        assertFalse("Locked populated queue must not be queue processing ready", result.isQueueProcessingReady)
+        assertTrue(result.canRetry)
+
+        db.close()
+    }
+
+    @Test
+    fun otherScopeAuthLockIsolation_doesNotLockUnrelatedTenantScope() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbFile = File(context.filesDir, "lock-isolation-${UUID.randomUUID()}.db")
+        val db = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+        val crypto = JvmOutboxCrypto()
+        val cipher = OutboxPayloadCipher(crypto)
+
+        val foreignCompanyId = "01JCV8X9M2NQW3TYZ4R5S6789B"
+
+        // Lock defaultCompanyId only
+        db.outboxDao().insertScopeLock(
+            OutboxScopeLockEntity(
+                companyId = defaultCompanyId,
+                actorId = defaultActorId,
+                deviceId = defaultDeviceId,
+                lockedAt = System.currentTimeMillis(),
+                reason = "HTTP 401: Tenant A revoked"
+            )
+        )
+
+        val inspector = DefaultOutboxHealthInspector(db, payloadCipher = cipher, ioDispatcher = Dispatchers.IO)
+
+        // defaultCompanyId is locked
+        val resultA = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+        assertEquals(OutboxHealthStatus.AUTH_BLOCKED, resultA.status)
+        assertTrue(resultA.isScopeLocked)
+        assertFalse(resultA.isOperational)
+
+        // foreignCompanyId is NOT locked: reports NEW_EMPTY and is operational
+        val resultB = inspector.inspectHealth(foreignCompanyId, defaultActorId, defaultDeviceId)
+        assertEquals(OutboxHealthStatus.NEW_EMPTY, resultB.status)
+        assertFalse(resultB.isScopeLocked)
+        assertTrue(resultB.isOperational)
+        assertTrue(resultB.isQueueProcessingReady)
+
+        db.close()
+    }
+
+    @Test
+    fun persistedAuthLockPersistsAcrossCloseAndReopen_healthInspectionStillAuthBlocked() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbFile = File(context.filesDir, "reopen-lock-${UUID.randomUUID()}.db")
+        val db1 = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+
+        db1.outboxDao().insertScopeLock(
+            OutboxScopeLockEntity(
+                companyId = defaultCompanyId,
+                actorId = defaultActorId,
+                deviceId = defaultDeviceId,
+                lockedAt = System.currentTimeMillis(),
+                reason = "HTTP 401: Persisted across reopen"
+            )
+        )
+        db1.close()
+
+        // Reopen database from disk
+        val db2 = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+        val crypto = JvmOutboxCrypto()
+        val cipher = OutboxPayloadCipher(crypto)
+        val inspector = DefaultOutboxHealthInspector(db2, payloadCipher = cipher, ioDispatcher = Dispatchers.IO)
+
+        val result = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+        assertEquals(OutboxHealthStatus.AUTH_BLOCKED, result.status)
+        assertTrue(result.isScopeLocked)
+        assertFalse(result.isOperational)
+        assertFalse(result.isQueueProcessingReady)
+
+        db2.close()
+    }
+
+    @Test
+    fun pagedVerification_11CleanRows_verifiesAll_returnsHealthyAndOperational() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbFile = File(context.filesDir, "paged-11-${UUID.randomUUID()}.db")
+        val db = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+        val crypto = JvmOutboxCrypto()
+        val cipher = OutboxPayloadCipher(crypto)
+        val repo = OutboxRepositoryImpl(db, payloadCipher = cipher)
+
+        val compId = ServerUlid.parse(defaultCompanyId)
+        val actId = ServerUlid.parse(defaultActorId)
+        val devId = ClientUuid.parse(defaultDeviceId)
+
+        for (i in 1..11) {
+            val event = OutboxTestFixtures.createSampleEvent(
+                clientEventId = ClientUuid.random(),
+                companyId = compId,
+                actorId = actId,
+                deviceId = devId,
+                capturedAt = "2026-11-13T21:00:%02d.000000Z".format(i),
+                localReceiptNumber = "PAGE11-$i"
+            )
+            repo.captureSale(event)
+        }
+
+        val inspector = DefaultOutboxHealthInspector(db, payloadCipher = cipher, ioDispatcher = Dispatchers.IO)
+        val result = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+
+        assertEquals(11, result.totalEvents)
+        assertEquals(11, result.probedCount)
+        assertFalse(result.isSampleProbe)
+        assertEquals(OutboxHealthStatus.HEALTHY, result.status)
+        assertTrue(result.isOperational)
+        assertTrue(result.isQueueProcessingReady)
+        assertFalse(result.canRetry)
+
+        db.close()
+    }
+
+    @Test
+    fun pagedVerification_100CleanRows_verifiesAll_returnsHealthyAndOperational() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbFile = File(context.filesDir, "paged-100-${UUID.randomUUID()}.db")
+        val db = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+        val crypto = JvmOutboxCrypto()
+        val cipher = OutboxPayloadCipher(crypto)
+        val repo = OutboxRepositoryImpl(db, payloadCipher = cipher)
+
+        val compId = ServerUlid.parse(defaultCompanyId)
+        val actId = ServerUlid.parse(defaultActorId)
+        val devId = ClientUuid.parse(defaultDeviceId)
+
+        for (i in 1..100) {
+            val event = OutboxTestFixtures.createSampleEvent(
+                clientEventId = ClientUuid.random(),
+                companyId = compId,
+                actorId = actId,
+                deviceId = devId,
+                capturedAt = "2026-11-13T22:%02d:%02d.000000Z".format(i / 60, i % 60),
+                localReceiptNumber = "PAGE100-$i"
+            )
+            repo.captureSale(event)
+        }
+
+        var pagesSeen = 0
+        val inspector = DefaultOutboxHealthInspector(
+            database = db,
+            payloadCipher = cipher,
+            ioDispatcher = Dispatchers.IO,
+            onPageReadHook = { pagesSeen++ }
+        )
+        val result = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+
+        assertEquals(100, result.totalEvents)
+        assertEquals(100, result.probedCount)
+        assertFalse(result.isSampleProbe)
+        assertEquals(OutboxHealthStatus.HEALTHY, result.status)
+        assertTrue(result.isOperational)
+        assertTrue(result.isQueueProcessingReady)
+        assertTrue("Must page through in chunks of 10", pagesSeen >= 10)
+
+        db.close()
+    }
+
+    @Test
+    fun pagedVerification_lateCorruptRow_failsClosed_returnsCorrupt() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbFile = File(context.filesDir, "late-corrupt-${UUID.randomUUID()}.db")
+        val db = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+        val crypto = JvmOutboxCrypto()
+        val cipher = OutboxPayloadCipher(crypto)
+        val repo = OutboxRepositoryImpl(db, payloadCipher = cipher)
+
+        val compId = ServerUlid.parse(defaultCompanyId)
+        val actId = ServerUlid.parse(defaultActorId)
+        val devId = ClientUuid.parse(defaultDeviceId)
+
+        // 10 valid encrypted events
+        for (i in 1..10) {
+            val event = OutboxTestFixtures.createSampleEvent(
+                clientEventId = ClientUuid.random(),
+                companyId = compId,
+                actorId = actId,
+                deviceId = devId,
+                capturedAt = "2026-11-13T23:00:%02d.000000Z".format(i),
+                localReceiptNumber = "CLEAN-$i"
+            )
+            repo.captureSale(event)
+        }
+
+        // 11th row is corrupt on page 2
+        val corruptBytes = "STOCORRUPT-MAC-OR-CIPHERTEXT-INSUFFICIENT-LENGTH".toByteArray(Charsets.UTF_8)
+        val corruptEntity = OutboxEventEntity(
+            clientEventId = UUID.randomUUID().toString(),
+            companyId = defaultCompanyId,
+            actorId = defaultActorId,
+            deviceId = defaultDeviceId,
+            deviceLeaseId = UUID.randomUUID().toString(),
+            capturedAt = "2026-11-13T23:00:59.000000Z",
+            payloadDigest = "0000000000000000000000000000000000000000000000000000000000000000",
+            payloadBytes = corruptBytes,
+            eventVersion = 1
+        )
+        db.outboxDao().insertEvent(corruptEntity)
+
+        val inspector = DefaultOutboxHealthInspector(db, payloadCipher = cipher, ioDispatcher = Dispatchers.IO)
+        val result = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+
+        assertEquals(11, result.totalEvents)
+        assertEquals(OutboxHealthStatus.CORRUPT, result.status)
+        assertFalse(result.isOperational)
+        assertFalse(result.isQueueProcessingReady)
+        assertTrue(result.canRetry)
+
+        db.close()
+    }
+
+    @Test
+    fun pagedVerification_lateLegacyRow_failsClosed_returnsMixedQueue() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbFile = File(context.filesDir, "late-legacy-${UUID.randomUUID()}.db")
+        val db = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+        val crypto = JvmOutboxCrypto()
+        val cipher = OutboxPayloadCipher(crypto)
+        val repo = OutboxRepositoryImpl(db, payloadCipher = cipher)
+
+        val compId = ServerUlid.parse(defaultCompanyId)
+        val actId = ServerUlid.parse(defaultActorId)
+        val devId = ClientUuid.parse(defaultDeviceId)
+
+        for (i in 1..10) {
+            val event = OutboxTestFixtures.createSampleEvent(
+                clientEventId = ClientUuid.random(),
+                companyId = compId,
+                actorId = actId,
+                deviceId = devId,
+                capturedAt = "2026-11-13T23:10:%02d.000000Z".format(i),
+                localReceiptNumber = "CLEAN-$i"
+            )
+            repo.captureSale(event)
+        }
+
+        // 11th row is legacy plaintext
+        val legacyEvent = OutboxTestFixtures.createSampleEvent(
+            clientEventId = ClientUuid.random(),
+            companyId = compId,
+            actorId = actId,
+            deviceId = devId,
+            capturedAt = "2026-11-13T23:10:59.000000Z",
+            localReceiptNumber = "LEGACY-11"
+        )
+        val plainBytes = CanonicalJsonSerializer.serialize(legacyEvent).toByteArray(Charsets.UTF_8)
+        val legacyEntity = OutboxEventEntity(
+            clientEventId = legacyEvent.clientEventId.value,
+            companyId = defaultCompanyId,
+            actorId = defaultActorId,
+            deviceId = defaultDeviceId,
+            deviceLeaseId = legacyEvent.deviceLeaseId.value,
+            capturedAt = legacyEvent.capturedAt,
+            payloadDigest = legacyEvent.computePayloadDigest().value,
+            payloadBytes = plainBytes,
+            eventVersion = 1
+        )
+        db.outboxDao().insertEvent(legacyEntity)
+
+        val inspector = DefaultOutboxHealthInspector(db, payloadCipher = cipher, ioDispatcher = Dispatchers.IO)
+        val result = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+
+        assertEquals(11, result.totalEvents)
+        assertEquals(OutboxHealthStatus.MIXED_QUEUE, result.status)
+        assertFalse(result.isOperational)
+        assertFalse(result.isQueueProcessingReady)
+
+        db.close()
+    }
+
+    @Test
+    fun pagedVerification_scanMutation_concurrentInsertion_failsClosedAsPartialUnchecked() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbFile = File(context.filesDir, "scan-mutation-${UUID.randomUUID()}.db")
+        val db1 = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+        val crypto = JvmOutboxCrypto()
+        val cipher = OutboxPayloadCipher(crypto)
+        val repo1 = OutboxRepositoryImpl(db1, payloadCipher = cipher)
+
+        val compId = ServerUlid.parse(defaultCompanyId)
+        val actId = ServerUlid.parse(defaultActorId)
+        val devId = ClientUuid.parse(defaultDeviceId)
+
+        for (i in 1..10) {
+            val event = OutboxTestFixtures.createSampleEvent(
+                clientEventId = ClientUuid.random(),
+                companyId = compId,
+                actorId = actId,
+                deviceId = devId,
+                capturedAt = "2026-11-13T23:20:%02d.000000Z".format(i),
+                localReceiptNumber = "MUT-$i"
+            )
+            repo1.captureSale(event)
+        }
+
+        val db2 = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+        val repo2 = OutboxRepositoryImpl(db2, payloadCipher = cipher)
+
+        var mutationHookExecuted = false
+        val inspector = DefaultOutboxHealthInspector(
+            database = db1,
+            payloadCipher = cipher,
+            ioDispatcher = Dispatchers.IO,
+            onPageReadHook = { pageIndex ->
+                if (pageIndex == 0 && !mutationHookExecuted) {
+                    mutationHookExecuted = true
+                    val event11 = OutboxTestFixtures.createSampleEvent(
+                        clientEventId = ClientUuid.random(),
+                        companyId = compId,
+                        actorId = actId,
+                        deviceId = devId,
+                        capturedAt = "2026-11-13T23:20:59.000000Z",
+                        localReceiptNumber = "MUT-11"
+                    )
+                    repo2.captureSale(event11)
+                }
+            }
+        )
+
+        val result = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+        assertTrue(mutationHookExecuted)
+        assertEquals(11, result.totalEvents)
+        assertEquals(10, result.probedCount)
+        assertTrue(result.isSampleProbe)
+        assertEquals(OutboxHealthStatus.PARTIAL_UNCHECKED, result.status)
+        assertFalse(result.isOperational)
+        assertFalse(result.isQueueProcessingReady)
+        assertTrue(result.canRetry)
+
+        // Resumed inspection with no concurrent mutations completes cleanly
+        val retryResult = DefaultOutboxHealthInspector(db1, cipher, Dispatchers.IO)
+            .inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+        assertEquals(11, retryResult.totalEvents)
+        assertEquals(11, retryResult.probedCount)
+        assertFalse(retryResult.isSampleProbe)
+        assertEquals(OutboxHealthStatus.HEALTHY, retryResult.status)
+        assertTrue(retryResult.isOperational)
+        assertTrue(retryResult.isQueueProcessingReady)
+
+        db1.close()
+        db2.close()
+    }
+
+    @Test
+    fun pagedVerification_cancellation_abortsImmediatelyCleanly() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbFile = File(context.filesDir, "cancel-${UUID.randomUUID()}.db")
+        val db = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+        val crypto = JvmOutboxCrypto()
+        val cipher = OutboxPayloadCipher(crypto)
+        val repo = OutboxRepositoryImpl(db, payloadCipher = cipher)
+
+        val compId = ServerUlid.parse(defaultCompanyId)
+        val actId = ServerUlid.parse(defaultActorId)
+        val devId = ClientUuid.parse(defaultDeviceId)
+
+        for (i in 1..20) {
+            val event = OutboxTestFixtures.createSampleEvent(
+                clientEventId = ClientUuid.random(),
+                companyId = compId,
+                actorId = actId,
+                deviceId = devId,
+                capturedAt = "2026-11-13T23:30:%02d.000000Z".format(i),
+                localReceiptNumber = "CANCEL-$i"
+            )
+            repo.captureSale(event)
+        }
+
+        var cancelledCaught = false
+        val job = launch(Dispatchers.IO) {
+            val inspector = DefaultOutboxHealthInspector(
+                database = db,
+                payloadCipher = cipher,
+                ioDispatcher = Dispatchers.IO,
+                onPageReadHook = { pageIndex ->
+                    if (pageIndex == 0) {
+                        cancel()
+                    }
+                }
+            )
+            try {
+                inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+            } catch (e: CancellationException) {
+                cancelledCaught = true
+                throw e
+            }
+        }
+        job.join()
+        assertTrue("CancellationException must be thrown and caught", cancelledCaught)
+        assertTrue("Job must be cancelled", job.isCancelled)
+
+        // Database remains intact and fully verifiable after cancellation
+        val postCancelResult = DefaultOutboxHealthInspector(db, cipher, Dispatchers.IO)
+            .inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+        assertEquals(20, postCancelResult.totalEvents)
+        assertEquals(20, postCancelResult.probedCount)
+        assertEquals(OutboxHealthStatus.HEALTHY, postCancelResult.status)
+        assertTrue(postCancelResult.isOperational)
+
+        db.close()
+    }
+
+    @Test
+    fun sameDb_companyALegacyNoKey_companyBEmpty_refusesCaptureReady_actualRepositoryCaptureFailsWithoutMintingKey() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbFile = File(context.filesDir, "samedb-missingkey-${UUID.randomUUID()}.db")
+        val db = OutboxDatabase.buildDatabase(context, dbFile.path, true)
+
+        val crypto = JvmOutboxCrypto()
+        val cipher = OutboxPayloadCipher(crypto)
+        val repo = OutboxRepositoryImpl(db, payloadCipher = cipher)
+
+        val companyA = "01JCV8X9M2NQW3TYZ4R5S6789A"
+        val companyB = "01JCV8X9M2NQW3TYZ4R5S6789B"
+        val actor = "01JCV8X9M2NQW3TYZ4R5S6789C"
+        val device = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+
+        // Insert legacy plaintext event for Company A
+        val eventA = OutboxTestFixtures.createSampleEvent(
+            companyId = ServerUlid.parse(companyA),
+            actorId = ServerUlid.parse(actor),
+            deviceId = ClientUuid.parse(device),
+            localReceiptNumber = "COMPA-LEGACY"
+        )
+        val plainBytesA = CanonicalJsonSerializer.serialize(eventA).toByteArray(Charsets.UTF_8)
+        val entityA = OutboxEventEntity(
+            clientEventId = eventA.clientEventId.value,
+            companyId = companyA,
+            actorId = actor,
+            deviceId = device,
+            deviceLeaseId = eventA.deviceLeaseId.value,
+            capturedAt = eventA.capturedAt,
+            payloadDigest = eventA.computePayloadDigest().value,
+            payloadBytes = plainBytesA,
+            eventVersion = 1
+        )
+        db.outboxDao().insertEvent(entityA)
+        assertEquals(1, db.outboxDao().eventCount())
+
+        // Simulate missing encryption key on this legacy install (e.g. no key in KeyStore)
+        crypto.missing = true
+        val initialKeyGenerations = crypto.keyGenerationCount
+
+        val inspector = DefaultOutboxHealthInspector(db, payloadCipher = cipher, ioDispatcher = Dispatchers.IO)
+
+        // Company A: blocked as LEGACY_PLAINTEXT
+        val resultA = inspector.inspectHealth(companyA, actor, device)
+        assertEquals(OutboxHealthStatus.LEGACY_PLAINTEXT, resultA.status)
+        assertFalse(resultA.isOperational)
+
+        // Company B has 0 scoped events, but same DB has global eventCount > 0 and key is missing:
+        // Must NOT claim capture ready (NEW_EMPTY / isOperational=true)!
+        val resultB = inspector.inspectHealth(companyB, actor, device)
+        assertEquals(
+            "Company B must not report NEW_EMPTY when DB has global records and no encryption key exists",
+            OutboxHealthStatus.KEY_UNAVAILABLE,
+            resultB.status
+        )
+        assertFalse("Company B is not operational without a retained encryption key", resultB.isOperational)
+        assertFalse(resultB.isQueueProcessingReady)
+        assertEquals(0, resultB.totalEvents)
+
+        // Test ACTUAL repository capture for Company B:
+        // Because global eventCount() > 0 and key is missing, captureSale MUST fail closed with KEY_UNAVAILABLE.
+        val eventB = OutboxTestFixtures.createSampleEvent(
+            companyId = ServerUlid.parse(companyB),
+            actorId = ServerUlid.parse(actor),
+            deviceId = ClientUuid.parse(device),
+            localReceiptNumber = "COMPB-FIRST"
+        )
+
+        var captureExceptionCaught = false
+        try {
+            repo.captureSale(eventB)
+        } catch (e: OutboxStorageException) {
+            captureExceptionCaught = true
+            assertEquals(OutboxStorageError.KEY_UNAVAILABLE, e.error)
+        }
+        assertTrue("Actual repository capture must fail closed with KEY_UNAVAILABLE", captureExceptionCaught)
+
+        // Invariant: Missing-key refusal preserved, NO replacement key minted
+        assertEquals(
+            "Must NEVER mint a replacement key over existing records on disk",
+            initialKeyGenerations,
+            crypto.keyGenerationCount
+        )
+
+        // Invariant: Company A legacy event in DB is strictly unchanged
+        val storedA = db.outboxDao().getEvent(companyA, eventA.clientEventId.value)
+        assertNotNull(storedA)
+        assertTrue(storedA!!.payloadBytes.contentEquals(plainBytesA))
+
+        // When retained key is available: Company B is NEW_EMPTY and CAN capture
+        crypto.missing = false
+        val resultBWithKey = inspector.inspectHealth(companyB, actor, device)
+        assertEquals(OutboxHealthStatus.NEW_EMPTY, resultBWithKey.status)
+        assertTrue(resultBWithKey.isOperational)
+        assertTrue(resultBWithKey.isQueueProcessingReady)
+
+        val captureResultB = repo.captureSale(eventB)
+        assertTrue(captureResultB is CaptureResult.Created)
 
         db.close()
     }
