@@ -4,8 +4,8 @@ This directory contains hermetic unit test evidence, live coordinated readiness 
 
 ## Status: READINESS_QUALIFIED / FINANCIAL_PILOT_HOLD
 - **Readiness Verdict**: **PASS** (Live coordinated readiness probe verified HTTP 200 via CA-trusted TLS loopback in 13.34s)
-- **Financial Pilot Status**: **HOLD / NOT_RUN** (Financial routes strictly blocked HTTP 403; zero financial POST requests made; zero tokens touched)
-- **Client Publication Commit**: `653327243b2f5a4541c5fcf8cbe9520769e6be50`
+- **Financial Pilot Status**: **HOLD / NOT_RUN** (Financial scenarios NOT_RUN; safe non-readiness GET returned 403; no authentication or financial HTTP dispatch; parser loaded private runtime credential file locally)
+- **Client Publication Commit**: `58e8478bfdf02a1a681e6ff63bbbc06694b9f746` (documentation and evidence publication)
 - **Client Executable Source Commit**: `78ac4437e4010b68408278788dc82eb826fe8014` (`app/src/main/` 100% untouched vs qualified `753fb5133e28acb1284370dd7a84e3929e7b1a7d`)
 - **Backend Runtime Execution HEAD**: `d7c7324535b1e6586140ab1e3561966342d625d6` (source `a8540ff83513b49988d90c77cf284831cfd5b2de` frozen)
 - **Scope Distinction**: Live readiness qualification is **STRICTLY SEPARATE** from the 291-test hermetic unit suite. This qualifies transport readiness ONLY, not overall financial transactions, stock rollback, or signed devices.
@@ -64,13 +64,23 @@ Coordinated readiness execution against live disposable backend harness (`1 JVM 
 
 ---
 
-## 3. Retained Historical Failed Windows
+## 3. Retained Failed Windows & Historical Failures
 
-1. **Window 0 (Initial Integration Failures)**:
-   - Initial compiler failure (`first-compiler-failure.log`) and first MockWebServer test failure (`first-0c0-test-failure.log`) preserved.
-2. **Window 1 (First Coordinated TLS Window Pin Failure)**:
-   - Local client pin mismatch failure before HTTP or credential reading (`/tmp/root-readiness-bar7pq1o`, XML SHA `dc2340af6bfabddcef4fd1793a334de2ca5d47686e26b62d9fed1beaaa702e9d`, 1 PASS, 1 FAIL, 0 SKIP).
-   - Safe GET probe returned HTTP 403 with NO financial route accessed.
+### Historical Unit Failures (Compiler & Mock)
+- `first-compiler-failure.log`: Initial compilation failure on test refactor before parameter fixes.
+- `first-0c0-test-failure.log`: First MockWebServer unit test failure before wire format corrections.
+
+### Real Failed Coordinated Windows
+1. **Window 1 (Zero JVM - Strict Root CA Validation Failure)**:
+   - Location: `/tmp/root-readiness-eb_1btu5`
+   - `root_outcome.json` SHA-256: `0eb6a27a628cea8e35cd9526ebdc470502cec33496d9954090ab7e595fe50a53`
+   - Outcome: `ROOT_TLS_CA_VALIDATION_FAILED_BEFORE_JVM` ("CA cert does not include key usage extension")
+   - Invocations: Zero Android JVM invocations occurred (`android_invocations: 0`). Failed during pre-flight root CA validation before JVM startup; zero private keys read; backend schema `accounting_p8_tmp_a5057b7ce693` cleanly purged.
+2. **Window 2 (1 JVM - Client Admission Pin Comparison Failure)**:
+   - Location: `/tmp/root-readiness-bar7pq1o`
+   - XML SHA-256: `dc2340af6bfabddcef4fd1793a334de2ca5d47686e26b62d9fed1beaaa702e9d` (2 tests: 1 PASS, 1 FAIL, 0 SKIP)
+   - Outcome: `CLIENT_PIN_MISMATCH_BEFORE_HTTP`
+   - Details: Failed closed in `CashPilotHandoffConfig.fromFile` comparing single client pin against executable HEAD before HTTP dispatch. Safe non-readiness probe `GET /_readiness_forbidden_probe` returned HTTP 403; NO financial route / POST tested.
 
 ---
 

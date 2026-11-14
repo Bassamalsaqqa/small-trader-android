@@ -81,7 +81,7 @@
     "preservationNote": "Preserved historical without modification; failed on local client pin check before network/credentials"
   },
   "readinessStatus": "PASS (HTTP 200 loopback probe verified via CA-trusted TLS)",
-  "financialPilotStatus": "HOLD / NOT_RUN (financial routes blocked HTTP 403, zero financial transactions)",
+  "financialPilotStatus": "Financial scenarios NOT_RUN; safe non-readiness GET returned 403; no authentication or financial HTTP dispatch; parser loaded private runtime credential file locally",
   "publicationCommit": "653327243b2f5a4541c5fcf8cbe9520769e6be50",
   "coordinatedReadinessResult": {
     "verdict": "READINESS_JVM_TESTS_PASS",
@@ -95,7 +95,37 @@
     "freshJsonSha256": "0bfaba51e8ab55ae49ab5bf05f374fe4091d48c2a694dd4b810e120049246c5d",
     "tests": 2,
     "passed": 2,
-    "financialProbes": "ALL 6 financial scenarios strictly NOT_RUN",
+    "financialProbes": "Financial scenarios NOT_RUN; safe non-readiness GET returned 403; no authentication or financial HTTP dispatch; parser loaded private runtime credential file locally",
     "metadataOmissionDisclosure": "CashPilotEvidence.toJson() emits only clientHead (alias exec 78ac443) and omits separate clientPublicationHead/clientExecutableHead keys. Pub 6533272 and exec 78ac443 verified from root pins."
+  },
+  "failedWindows": {
+    "historicalUnitFailures": [
+      "first-compiler-failure.log",
+      "first-0c0-test-failure.log"
+    ],
+    "failedCoordinatedWindows": [
+      {
+        "window": "Window 1 (Zero JVM - Strict CA Validation Failure)",
+        "location": "/tmp/root-readiness-eb_1btu5",
+        "rootOutcomeSha256": "0eb6a27a628cea8e35cd9526ebdc470502cec33496d9954090ab7e595fe50a53",
+        "outcome": "ROOT_TLS_CA_VALIDATION_FAILED_BEFORE_JVM",
+        "error": "CA cert does not include key usage extension",
+        "androidInvocations": 0,
+        "ownedSchema": "accounting_p8_tmp_a5057b7ce693",
+        "preservationNote": "Pre-flight root TLS CA validation failed before Android JVM invocation; zero private keys read"
+      },
+      {
+        "window": "Window 2 (1 JVM - Client Admission Pin Comparison Failure)",
+        "location": "/tmp/root-readiness-bar7pq1o",
+        "xmlSha256": "dc2340af6bfabddcef4fd1793a334de2ca5d47686e26b62d9fed1beaaa702e9d",
+        "tests": 2,
+        "passed": 1,
+        "failed": 1,
+        "skipped": 0,
+        "outcome": "CLIENT_PIN_MISMATCH_BEFORE_HTTP",
+        "probeVerification": "Safe GET /_readiness_forbidden_probe returned 403; NO financial route / POST tested",
+        "preservationNote": "Failed in CashPilotHandoffConfig.fromFile comparing single pin against executable head before HTTP or credentials dispatch"
+      }
+    ]
   }
 }

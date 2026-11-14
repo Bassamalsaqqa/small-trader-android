@@ -1,7 +1,7 @@
 {
   "executionCommit": "78ac4437e4010b68408278788dc82eb826fe8014",
-  "evidenceGenerationUtc": "2026-11-14T19:17:28Z",
-  "evidenceGenerationLocal": "2026-11-14T21:17:00+02:00",
+  "evidenceGenerationUtc": "2026-11-14T19:21:13Z",
+  "evidenceGenerationLocal": "2026-11-14T21:21:00+02:00",
   "timestampClarification": "Historical manifest timestamp was recorded as 2026-11-14T19:46:00Z due to local clock (+02:00) being formatted with trailing 'Z' instead of '+02:00' offset (actual UTC was 17:46Z, matching commit 17:48Z and XML 17:45Z). Preserved with this explicit clarification rather than retrofiction.",
   "pinsDisclosure": "Contemporaneous git commit pins from intermediate conversational steps were not automatically logged at runtime and are not retroconstructed. Pinned verification at commit 753fb51 explicitly captures git HEAD, status, and source file SHA256 hashes before and after test and lint executions in source-attestation-753f.json.",
   "sourceFiles": {
@@ -396,7 +396,7 @@
     "probeVerification": "Safe GET /_readiness_forbidden_probe 403 NO financial route",
     "preservationNote": "Preserved historical without modification; failed on local client pin check before network/credentials"
   },
-  "evidencePublicationCommit": "653327243b2f5a4541c5fcf8cbe9520769e6be50",
+  "evidencePublicationCommit": "58e8478bfdf02a1a681e6ff63bbbc06694b9f746",
   "metadataOmissionDisclosure": "CashPilotEvidence.toJson() in app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotEvidence.kt serializes only clientHead (mapped to executable HEAD 78ac4437e4010b68408278788dc82eb826fe8014) and does not emit separate clientPublicationHead and clientExecutableHead keys in paired-online-cash-pilot-evidence.json (SHA 0bfaba51e8ab55ae49ab5bf05f374fe4091d48c2a694dd4b810e120049246c5d). The publication HEAD (653327243b2f5a4541c5fcf8cbe9520769e6be50) and executable HEAD (78ac4437e4010b68408278788dc82eb826fe8014) were verified independently at execution time by the root test harness via environment variables SMALL_TRADER_EXPECTED_CLIENT_SHA and SMALL_TRADER_EXPECTED_CLIENT_EXECUTABLE_SHA as recorded in backend_manifest.json and root_outcome.json.",
   "coordinatedReadiness": {
     "status": "READINESS_JVM_TESTS_PASS",
@@ -418,7 +418,7 @@
     "testDetails": {
       "readinessProbe": "PASS (HTTP 200, latency 306ms, exact matching nonce via CA-trusted TLS)",
       "testCashPilotFinancialAcceptanceEnforcement": "PASS (0.002s, unconfirmed states throw)",
-      "financialScenarios": "6 scenarios strictly NOT_RUN (financial routes blocked HTTP 403, 0 POST requests, 0 tokens touched)"
+      "financialScenarios": "Financial scenarios NOT_RUN; safe non-readiness GET returned 403; no authentication or financial HTTP dispatch; parser loaded private runtime credential file locally"
     },
     "cleanup": {
       "childHarnessExit": 1,
@@ -472,26 +472,34 @@
       }
     }
   },
-  "retainedFailedWindows": [
-    {
-      "window": "Window 0 (Initial Integration Failures)",
-      "description": "Initial compiler failure and first MockWebServer test failure before fixes",
-      "artifacts": [
-        "first-compiler-failure.log",
-        "first-0c0-test-failure.log"
-      ]
-    },
-    {
-      "window": "Window 1 (First Coordinated TLS Window)",
-      "description": "Client admission failure before HTTP due to single pin variable comparison",
-      "location": "/tmp/root-readiness-bar7pq1o",
-      "xmlSha256": "dc2340af6bfabddcef4fd1793a334de2ca5d47686e26b62d9fed1beaaa702e9d",
-      "tests": 2,
-      "passed": 1,
-      "failed": 1,
-      "skipped": 0,
-      "probeVerification": "Safe GET /_readiness_forbidden_probe 403 NO financial route",
-      "preservationNote": "Preserved historical without modification; failed on local client pin check before network/credentials"
-    }
-  ]
+  "historicalFailures": {
+    "unitCompilerAndMockFailures": [
+      "first-compiler-failure.log",
+      "first-0c0-test-failure.log"
+    ],
+    "failedCoordinatedWindows": [
+      {
+        "window": "Window 1 (Zero JVM - Strict CA Validation Failure)",
+        "location": "/tmp/root-readiness-eb_1btu5",
+        "rootOutcomeSha256": "0eb6a27a628cea8e35cd9526ebdc470502cec33496d9954090ab7e595fe50a53",
+        "outcome": "ROOT_TLS_CA_VALIDATION_FAILED_BEFORE_JVM",
+        "error": "CA cert does not include key usage extension",
+        "androidInvocations": 0,
+        "ownedSchema": "accounting_p8_tmp_a5057b7ce693",
+        "preservationNote": "Pre-flight root TLS CA validation failed before Android JVM invocation; zero private keys read"
+      },
+      {
+        "window": "Window 2 (1 JVM - Client Admission Pin Comparison Failure)",
+        "location": "/tmp/root-readiness-bar7pq1o",
+        "xmlSha256": "dc2340af6bfabddcef4fd1793a334de2ca5d47686e26b62d9fed1beaaa702e9d",
+        "tests": 2,
+        "passed": 1,
+        "failed": 1,
+        "skipped": 0,
+        "outcome": "CLIENT_PIN_MISMATCH_BEFORE_HTTP",
+        "probeVerification": "Safe GET /_readiness_forbidden_probe returned 403; NO financial route / POST tested",
+        "preservationNote": "Failed in CashPilotHandoffConfig.fromFile comparing single pin against executable head before HTTP or credentials dispatch"
+      }
+    ]
+  }
 }
