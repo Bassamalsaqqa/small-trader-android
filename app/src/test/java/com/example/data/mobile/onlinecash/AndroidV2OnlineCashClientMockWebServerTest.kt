@@ -1287,5 +1287,182 @@ class AndroidV2OnlineCashClientMockWebServerTest {
         assertTrue("Inconsistent financial amounts must fail closed", result is OnlineCashOrchestrationResult.ParseFailure)
         assertEquals("FINANCIAL_CONSISTENCY_MISMATCH", (result as OnlineCashOrchestrationResult.ParseFailure).category)
     }
-}
 
+    @Test
+    fun testOnlineOrchestrationLostAckStatusPostedWrongTotalFailsClosed() {
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        // Matching tenant, matching event, matching normative digest, non-null payment ID,
+        // but intentionally WRONG grand_total ("99.000000" vs prepared online payment amount "58.000000")
+        val statusWrongTotalJson = """{
+            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+            "company_id": "01M7CZPF6TP283F3ZRXF5P8GT2",
+            "status": "posted",
+            "payload_digest": "sha256:0847e10d89777e103252ebfa2d27f89a95832a5d70e01af57afe6423f703c630",
+            "official_invoice": {
+                "invoice_id": "01M7CZPF6TP283F3ZRXF5P8GT9",
+                "invoice_number": "INV-2026-00099",
+                "payment_id": "01M7CZPF6TP283F3ZRXF5P8GTA",
+                "payment_receipt_number": "RCT-2026-00099",
+                "grand_total": "99.000000",
+                "posted_at": "2026-11-14T12:00:00Z"
+            },
+            "conflict": null,
+            "queried_at": "2026-11-14T12:05:00Z"
+        }"""
+
+        // 1. Initial POST drops with socket disconnect
+        server!!.enqueue(
+            MockResponse()
+                .setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
+        )
+        // 2. Recovery GET status returns 200 posted with matching digest but wrong total
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(statusWrongTotalJson)
+        )
+
+        val client = createClient(connectTimeoutMs = 1000, readTimeoutMs = 1000)
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = { 1L }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        // Fails closed: MUST NOT be confirmed financial success
+        assertTrue("Status recovery with wrong grand_total must fail closed, got: $result",
+            result is OnlineCashOrchestrationResult.ParseFailure)
+        val failure = result as OnlineCashOrchestrationResult.ParseFailure
+        assertEquals("FINANCIAL_CONSISTENCY_MISMATCH", failure.category)
+    }
+
+    @Test
+    fun testOnlineOrchestrationLostAckStatusPostedNullPaymentReturnsPostedWithoutPaymentReference() {
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        // Matching tenant, matching event, matching normative digest, matching grand_total,
+        // but NULL payment_id (deliberate incomplete payment state from backend)
+        val statusNullPaymentJson = """{
+            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+            "company_id": "01M7CZPF6TP283F3ZRXF5P8GT2",
+            "status": "posted",
+            "payload_digest": "sha256:0847e10d89777e103252ebfa2d27f89a95832a5d70e01af57afe6423f703c630",
+            "official_invoice": {
+                "invoice_id": "01M7CZPF6TP283F3ZRXF5P8GT9",
+                "invoice_number": "INV-2026-00099",
+                "payment_id": null,
+                "payment_receipt_number": null,
+                "grand_total": "58.000000",
+                "posted_at": "2026-11-14T12:00:00Z"
+            },
+            "conflict": null,
+            "queried_at": "2026-11-14T12:05:00Z"
+        }"""
+
+        // 1. Initial POST drops with socket disconnect
+        server!!.enqueue(
+            MockResponse()
+                .setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
+        )
+        // 2. Recovery GET status returns 200 posted with null payment_id
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(statusNullPaymentJson)
+        )
+
+        val client = createClient(connectTimeoutMs = 1000, readTimeoutMs = 1000)
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = { 1L }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        // Schema honesty: returns PostedWithoutPaymentReference, NEVER ConfirmedFinancialSuccess
+        assertTrue("Status recovery with null payment_id must return PostedWithoutPaymentReference, got: $result",
+            result is OnlineCashOrchestrationResult.PostedWithoutPaymentReference)
+        val receipt = (result as OnlineCashOrchestrationResult.PostedWithoutPaymentReference).receipt
+        assertNull("paymentId must be null", receipt.paymentId)
+        assertTrue(receipt.wasReplay)
+        assertEquals("01M7CZPF6TP283F3ZRXF5P8GT9", receipt.invoiceId.value)
+    }
+
+    @Test
+    fun testOnlineOrchestrationCommitOverTenderMismatchFailsClosed() {
+        // Qualified online cash slice: payment amount is exact settlement (change 0).
+        // Over-tender (amount_paid > grand_total with positive change_returned) on online cash commit
+        // violates the qualified online cash contract (which requires grand_total == prepared payment amount)
+        val overTenderCommit = """{
+            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+            "status": "posted",
+            "invoice_id": "01M7CZPF6TP283F3ZRXF5P8GT9",
+            "invoice_number": "INV-2026-00099",
+            "payment_id": "01M7CZPF6TP283F3ZRXF5P8GTA",
+            "payment_receipt_number": "RCT-2026-00099",
+            "grand_total": "58.000000",
+            "amount_paid": "60.000000",
+            "change_returned": "2.000000",
+            "posted_at": "2026-11-14T12:00:00Z"
+        }"""
+
+        val intent = PreparedOnlineSaleIntent.prepare(
+            context = sampleContext,
+            rawWireBytes = syntheticRawWirePayload,
+            scopeGeneration = 1L,
+            expectedDigest = authDigest
+        )
+
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(201)
+                .setHeader("Content-Type", "application/json")
+                .setBody(overTenderCommit)
+        )
+
+        val client = createClient()
+        val orchestrator = OnlineCashSaleOrchestrator(
+            client = client,
+            tokenProvider = { validToken },
+            scopeGenerationProvider = { 1L }
+        )
+
+        val result = orchestrator.dispatchOnlineCashSale(
+            intent = intent,
+            targetCompanyId = authCompanyId,
+            targetDeviceId = authDeviceId,
+            targetCurrency = "ILS"
+        )
+
+        // Fails closed because commit amount_paid (60.000000) does not match prepared profile payment amount (58.000000)
+        assertTrue("Over-tender on online cash commit must fail closed, got: $result",
+            result is OnlineCashOrchestrationResult.ParseFailure)
+        assertEquals("FINANCIAL_CONSISTENCY_MISMATCH", (result as OnlineCashOrchestrationResult.ParseFailure).category)
+    }
+}

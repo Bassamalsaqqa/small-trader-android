@@ -254,6 +254,11 @@ class OnlineCashSaleOrchestrator(
                             return OnlineCashOrchestrationResult.ParseFailure("FINANCIAL_CONSISTENCY_MISMATCH")
                         }
 
+                        // Qualified online cash slice: exact settlement with change 0 (grand_total == payment.amount)
+                        if (commit.grandTotal.value.compareTo(intent.profile.payment.amount.value) != 0) {
+                            return OnlineCashOrchestrationResult.ParseFailure("FINANCIAL_CONSISTENCY_MISMATCH")
+                        }
+
                         val receipt = OnlineCashSaleReceipt(
                             companyId = intent.context.companyId,
                             clientEventId = commit.clientEventId,
@@ -306,23 +311,63 @@ class OnlineCashSaleOrchestrator(
                         )
                     }
 
-                    val receipt = OnlineCashSaleReceipt(
-                        companyId = status.companyId,
-                        clientEventId = status.clientEventId,
-                        payloadDigest = status.payloadDigest,
-                        invoiceId = official.invoiceId,
-                        invoiceNumber = official.invoiceNumber,
-                        paymentId = official.paymentId,
-                        paymentReceiptNumber = official.paymentReceiptNumber,
-                        grandTotal = official.grandTotal,
-                        postedAt = official.postedAt,
-                        wasReplay = executionResult.wasReplay
-                    )
+                    val isFullCash = intent.profile.payment.settlementMode == "full"
+                    if (isFullCash) {
+                        // 1. Full cash settlement requires non-null payment reference
+                        if (official.paymentId == null) {
+                            val receipt = OnlineCashSaleReceipt(
+                                companyId = status.companyId,
+                                clientEventId = status.clientEventId,
+                                payloadDigest = status.payloadDigest,
+                                invoiceId = official.invoiceId,
+                                invoiceNumber = official.invoiceNumber,
+                                paymentId = null,
+                                paymentReceiptNumber = official.paymentReceiptNumber,
+                                grandTotal = official.grandTotal,
+                                postedAt = official.postedAt,
+                                wasReplay = executionResult.wasReplay
+                            )
+                            return OnlineCashOrchestrationResult.PostedWithoutPaymentReference(receipt)
+                        }
 
-                    if (receipt.paymentId != null) {
+                        // 2. Authoritative financial reconciliation: official grand total must equal prepared online payment amount
+                        // Qualified online cash slice specifies exact settlement with change 0 (payment.amount == grand_total)
+                        if (official.grandTotal.value.compareTo(intent.profile.payment.amount.value) != 0) {
+                            return OnlineCashOrchestrationResult.ParseFailure("FINANCIAL_CONSISTENCY_MISMATCH")
+                        }
+
+                        val receipt = OnlineCashSaleReceipt(
+                            companyId = status.companyId,
+                            clientEventId = status.clientEventId,
+                            payloadDigest = status.payloadDigest,
+                            invoiceId = official.invoiceId,
+                            invoiceNumber = official.invoiceNumber,
+                            paymentId = official.paymentId,
+                            paymentReceiptNumber = official.paymentReceiptNumber,
+                            grandTotal = official.grandTotal,
+                            postedAt = official.postedAt,
+                            wasReplay = executionResult.wasReplay
+                        )
                         OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(receipt)
                     } else {
-                        OnlineCashOrchestrationResult.PostedWithoutPaymentReference(receipt)
+                        val receipt = OnlineCashSaleReceipt(
+                            companyId = status.companyId,
+                            clientEventId = status.clientEventId,
+                            payloadDigest = status.payloadDigest,
+                            invoiceId = official.invoiceId,
+                            invoiceNumber = official.invoiceNumber,
+                            paymentId = official.paymentId,
+                            paymentReceiptNumber = official.paymentReceiptNumber,
+                            grandTotal = official.grandTotal,
+                            postedAt = official.postedAt,
+                            wasReplay = executionResult.wasReplay
+                        )
+
+                        if (receipt.paymentId != null) {
+                            OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(receipt)
+                        } else {
+                            OnlineCashOrchestrationResult.PostedWithoutPaymentReference(receipt)
+                        }
                     }
                 } else {
                     OnlineCashOrchestrationResult.ParseFailure("MISSING_RESPONSE_DTO")

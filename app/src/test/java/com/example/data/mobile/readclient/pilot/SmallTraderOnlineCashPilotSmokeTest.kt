@@ -9,7 +9,13 @@ import com.example.data.mobile.onlinecash.AndroidV2OnlineCashClient
 import com.example.data.mobile.onlinecash.OnlineCashOrchestrationResult
 import com.example.data.mobile.onlinecash.OnlineCashSaleOrchestrator
 import com.example.data.mobile.onlinecash.OnlineCashStatusResult
+import com.example.data.mobile.contract.ClientUuid
+import com.example.data.mobile.contract.MoneyAmount
+import com.example.data.mobile.contract.PayloadDigest
+import com.example.data.mobile.contract.ServerUlid
+import com.example.data.mobile.onlinecash.OnlineCashSaleReceipt
 import com.example.data.mobile.onlinecash.PreparedOnlineSaleIntent
+import org.junit.Assert.assertFalse
 import com.example.data.mobile.readclient.http.OkHttpTransport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -43,6 +49,13 @@ import javax.net.ssl.HttpsURLConnection
  * - Absent coordinated fault and stock scenarios remain explicitly NOT_RUN (not fake complete).
  * - Overall status is PASS only if required executed scenarios passed.
  * - Evidence output contains zero financial secrets, tokens, or raw bodies.
+ * - STANDALONE PILOT HARNESS NOTICE: This smoke test operates as a standalone client harness.
+ *   OnlineCashSaleOrchestrator is instantiated with a synthetic token provider and default scope
+ *   generation 0. It is NOT integrated into the production Android staff UI, Keystore token refresh
+ *   lifecycle, or persistent encrypted outbox pipeline. Default generation 0 is a harness convenience,
+ *   not real staff session acceptance.
+ * - Pilot financial acceptance strictly requires ConfirmedFinancialSuccess with non-null canonical
+ *   payment references matching across fresh, replay, and status query.
  */
 
 private fun com.example.data.mobile.contract.StrictJsonElement?.asStringOrNull(): String? =
@@ -229,6 +242,8 @@ class SmallTraderOnlineCashPilotSmokeTest {
             }
 
             // STEP 4: FINANCIAL_PAIRED_RUN Execution via OnlineCashSaleOrchestrator
+            // NOTE: Standalone pilot harness only. Orchestrator uses synthetic tokenProvider and default
+            // generation 0; this does NOT wire into normal app UI or persisted outbox workflow.
             val transport = OkHttpTransport(
                 configuredOrigin = config.baseUrl,
                 allowHttpLoopback = false
@@ -263,10 +278,27 @@ class SmallTraderOnlineCashPilotSmokeTest {
 
             val freshReceipt = when (freshResult) {
                 is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess -> freshResult.receipt
-                is OnlineCashOrchestrationResult.PostedWithoutPaymentReference -> freshResult.receipt
+                is OnlineCashOrchestrationResult.PostedWithoutPaymentReference -> {
+                    throw AssertionError("Fresh commit returned PostedWithoutPaymentReference: cash pilot strictly requires ConfirmedFinancialSuccess with non-null payment reference")
+                }
                 else -> throw AssertionError("Fresh commit failed: $freshResult")
             }
             require(!freshReceipt.wasReplay) { "Fresh commit must not report replay" }
+            require(freshReceipt.paymentId != null) {
+                "Fresh commit must return non-null canonical payment reference for full cash sale"
+            }
+            require(freshReceipt.companyId == config.serverContext.companyId) {
+                "Fresh commit companyId mismatch: expected ${config.serverContext.companyId}, got ${freshReceipt.companyId}"
+            }
+            require(freshReceipt.clientEventId == preparedIntent.clientEventId) {
+                "Fresh commit clientEventId mismatch: expected ${preparedIntent.clientEventId}, got ${freshReceipt.clientEventId}"
+            }
+            require(freshReceipt.payloadDigest == preparedIntent.expectedNormativeProfileDigest) {
+                "Fresh commit payloadDigest mismatch: expected ${preparedIntent.expectedNormativeProfileDigest}, got ${freshReceipt.payloadDigest}"
+            }
+            require(freshReceipt.grandTotal.toPlainString() == preparedIntent.profile.payment.amount.toPlainString()) {
+                "Fresh commit grandTotal mismatch: expected ${preparedIntent.profile.payment.amount.toPlainString()}, got ${freshReceipt.grandTotal.toPlainString()}"
+            }
 
             scenarios.add(
                 ScenarioEvidence(
@@ -290,12 +322,38 @@ class SmallTraderOnlineCashPilotSmokeTest {
 
             val replayReceipt = when (replayResult) {
                 is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess -> replayResult.receipt
-                is OnlineCashOrchestrationResult.PostedWithoutPaymentReference -> replayResult.receipt
+                is OnlineCashOrchestrationResult.PostedWithoutPaymentReference -> {
+                    throw AssertionError("Idempotent replay returned PostedWithoutPaymentReference: cash pilot strictly requires ConfirmedFinancialSuccess")
+                }
                 else -> throw AssertionError("Idempotent replay failed: $replayResult")
             }
             require(replayReceipt.wasReplay) { "Replay must report wasReplay == true" }
+            require(replayReceipt.companyId == freshReceipt.companyId) {
+                "Replay companyId mismatch: expected ${freshReceipt.companyId}, got ${replayReceipt.companyId}"
+            }
+            require(replayReceipt.clientEventId == freshReceipt.clientEventId) {
+                "Replay clientEventId mismatch: expected ${freshReceipt.clientEventId}, got ${replayReceipt.clientEventId}"
+            }
+            require(replayReceipt.payloadDigest == freshReceipt.payloadDigest) {
+                "Replay payloadDigest mismatch: expected ${freshReceipt.payloadDigest}, got ${replayReceipt.payloadDigest}"
+            }
+            require(replayReceipt.invoiceId == freshReceipt.invoiceId) {
+                "Replay invoice ID mismatch: expected ${freshReceipt.invoiceId}, got ${replayReceipt.invoiceId}"
+            }
             require(replayReceipt.invoiceNumber == freshReceipt.invoiceNumber) {
                 "Replay invoice number mismatch: expected ${freshReceipt.invoiceNumber}, got ${replayReceipt.invoiceNumber}"
+            }
+            require(replayReceipt.paymentId != null) {
+                "Replay must return non-null payment reference"
+            }
+            require(replayReceipt.paymentId == freshReceipt.paymentId) {
+                "Replay payment ID mismatch: expected ${freshReceipt.paymentId}, got ${replayReceipt.paymentId}"
+            }
+            require(replayReceipt.paymentReceiptNumber == freshReceipt.paymentReceiptNumber) {
+                "Replay payment receipt number mismatch: expected ${freshReceipt.paymentReceiptNumber}, got ${replayReceipt.paymentReceiptNumber}"
+            }
+            require(replayReceipt.grandTotal.toPlainString() == freshReceipt.grandTotal.toPlainString()) {
+                "Replay grandTotal mismatch: expected ${freshReceipt.grandTotal.toPlainString()}, got ${replayReceipt.grandTotal.toPlainString()}"
             }
 
             scenarios.add(
@@ -319,11 +377,38 @@ class SmallTraderOnlineCashPilotSmokeTest {
 
             when (statusResult) {
                 is OnlineCashStatusResult.Posted -> {
-                    require(statusResult.response.status == "posted") {
-                        "Expected status 'posted', got '${statusResult.response.status}'"
+                    val statusResp = statusResult.response
+                    require(statusResp.status == "posted") {
+                        "Expected status 'posted', got '${statusResp.status}'"
                     }
-                    require(statusResult.response.officialInvoice?.invoiceNumber == freshReceipt.invoiceNumber) {
-                        "Status invoice number mismatch: expected ${freshReceipt.invoiceNumber}, got ${statusResult.response.officialInvoice?.invoiceNumber}"
+                    require(statusResp.companyId == config.serverContext.companyId) {
+                        "Status companyId mismatch: expected ${config.serverContext.companyId}, got ${statusResp.companyId}"
+                    }
+                    require(statusResp.clientEventId == preparedIntent.clientEventId) {
+                        "Status clientEventId mismatch: expected ${preparedIntent.clientEventId}, got ${statusResp.clientEventId}"
+                    }
+                    require(statusResp.payloadDigest == preparedIntent.expectedNormativeProfileDigest) {
+                        "Status payloadDigest mismatch: expected ${preparedIntent.expectedNormativeProfileDigest}, got ${statusResp.payloadDigest}"
+                    }
+                    val official = statusResp.officialInvoice
+                        ?: throw AssertionError("Status query missing official invoice in posted status")
+                    require(official.invoiceId == freshReceipt.invoiceId) {
+                        "Status invoice ID mismatch: expected ${freshReceipt.invoiceId}, got ${official.invoiceId}"
+                    }
+                    require(official.invoiceNumber == freshReceipt.invoiceNumber) {
+                        "Status invoice number mismatch: expected ${freshReceipt.invoiceNumber}, got ${official.invoiceNumber}"
+                    }
+                    require(official.paymentId != null) {
+                        "Status official invoice missing paymentId: pilot requires non-null payment reference"
+                    }
+                    require(official.paymentId == freshReceipt.paymentId) {
+                        "Status payment ID mismatch: expected ${freshReceipt.paymentId}, got ${official.paymentId}"
+                    }
+                    require(official.paymentReceiptNumber == freshReceipt.paymentReceiptNumber) {
+                        "Status payment receipt number mismatch: expected ${freshReceipt.paymentReceiptNumber}, got ${official.paymentReceiptNumber}"
+                    }
+                    require(official.grandTotal.toPlainString() == freshReceipt.grandTotal.toPlainString()) {
+                        "Status grand total mismatch: expected ${freshReceipt.grandTotal.toPlainString()}, got ${official.grandTotal.toPlainString()}"
                     }
                     scenarios.add(
                         ScenarioEvidence(
@@ -331,7 +416,7 @@ class SmallTraderOnlineCashPilotSmokeTest {
                             status = "PASS",
                             httpStatusCode = 200,
                             latencyMs = statusLatency,
-                            details = "Offline event status query confirmed 'posted' status with authoritative invoice"
+                            details = "Offline event status query confirmed 'posted' status with authoritative invoice and matching payment reference"
                         )
                     )
                 }
@@ -461,5 +546,37 @@ class SmallTraderOnlineCashPilotSmokeTest {
         rootProps["lines"] = StrictJsonArray(modifiedLines)
         rootProps["payment"] = StrictJsonObject(paymentProps)
         return StrictJsonObject(rootProps)
+    }
+
+    @Test
+    fun testNullPaymentReferenceNeverAcceptedAsPilotFinancialSuccess() {
+        val syntheticReceipt = OnlineCashSaleReceipt(
+            companyId = ServerUlid.parse("01M7CZPF6TP283F3ZRXF5P8GT2"),
+            clientEventId = ClientUuid.parse("c0686be5-888f-4890-90bf-1f05f416a19a"),
+            payloadDigest = PayloadDigest.parse("sha256:0847e10d89777e103252ebfa2d27f89a95832a5d70e01af57afe6423f703c630"),
+            invoiceId = ServerUlid.parse("01M7CZPF6TP283F3ZRXF5P8GT9"),
+            invoiceNumber = "INV-2026-00099",
+            paymentId = null,
+            paymentReceiptNumber = null,
+            grandTotal = MoneyAmount.fromNonnegativeString("58.000000"),
+            postedAt = "2026-11-14T12:00:00Z",
+            wasReplay = false
+        )
+
+        val unconfirmedResult: OnlineCashOrchestrationResult =
+            OnlineCashOrchestrationResult.PostedWithoutPaymentReference(syntheticReceipt)
+
+        // Pilot acceptance invariant: ONLY ConfirmedFinancialSuccess is acceptable as PASS.
+        // PostedWithoutPaymentReference must fail closed and never pass pilot acceptance.
+        val acceptedAsPilotPass = when (unconfirmedResult) {
+            is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess -> true
+            is OnlineCashOrchestrationResult.PostedWithoutPaymentReference -> false
+            else -> false
+        }
+
+        assertFalse(
+            "PostedWithoutPaymentReference must NEVER pass pilot financial acceptance",
+            acceptedAsPilotPass
+        )
     }
 }
