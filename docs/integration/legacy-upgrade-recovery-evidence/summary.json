@@ -1,119 +1,67 @@
 {
-  "suites": 15,
-  "totals": {
-    "tests": 167,
-    "failures": 0,
-    "errors": 0,
-    "skipped": 0
-  },
   "suite_counts": [
     {
       "name": "com.example.data.mobile.integration.AuthDenialOutboxLockIntegrationTest",
-      "tests": 3,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 0
+      "tests": 3
     },
     {
       "name": "com.example.data.mobile.outbox.EncryptedOutboxTest",
-      "tests": 30,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 0
+      "tests": 30
     },
     {
       "name": "com.example.data.mobile.outbox.OutboxAuthDenialPreservationTest",
-      "tests": 2,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 0
+      "tests": 2
     },
     {
       "name": "com.example.data.mobile.outbox.OutboxBackupPolicyTest",
-      "tests": 1,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 0
+      "tests": 1
     },
     {
       "name": "com.example.data.mobile.outbox.OutboxClaimCasAndStaleRecoveryTest",
-      "tests": 5,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 0
+      "tests": 5
     },
     {
       "name": "com.example.data.mobile.outbox.OutboxConfirmationVerificationTest",
-      "tests": 11,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 0
+      "tests": 11
     },
     {
       "name": "com.example.data.mobile.outbox.OutboxDurabilityReopenTest",
-      "tests": 2,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 0
+      "tests": 2
     },
     {
       "name": "com.example.data.mobile.outbox.OutboxHealthGateTest",
-      "tests": 30,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 0
+      "tests": 31
     },
     {
       "name": "com.example.data.mobile.outbox.OutboxIdempotencyAndConflictTest",
-      "tests": 5,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 0
+      "tests": 5
     },
     {
       "name": "com.example.data.mobile.outbox.OutboxTenantIsolationTest",
-      "tests": 5,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 0
+      "tests": 5
     },
     {
       "name": "com.example.data.mobile.outbox.OutboxTransactionRollbackTest",
-      "tests": 2,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 0
+      "tests": 2
     },
     {
       "name": "com.example.data.mobile.outbox.OutboxV2DurableStorageTest",
-      "tests": 23,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 0
+      "tests": 23
     },
     {
       "name": "com.example.ui.staff.StaffOutboxRecoveryComposeTest",
-      "tests": 16,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 0
+      "tests": 16
     },
     {
       "name": "com.example.ui.staff.StaffWorkspaceComposeTest",
-      "tests": 8,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 0
+      "tests": 8
     },
     {
       "name": "com.example.ui.staff.StaffWorkspaceViewModelTest",
-      "tests": 24,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 0
+      "tests": 24
     }
   ],
-  "note": "Historical saved passes (140) from prior qualified execution vs current unexecuted source inventory (167). Zero current execution claimed in this source correction turn while backend PR 95 holds exclusive heavy lease.",
+  "note": "Current inventory is unexecuted, not a pass claim. Historical XML entered PR22 at 3f04edb; it is not PR21 health-gate evidence.",
   "historical_saved_passes": {
     "suites": 15,
     "tests": 140,
@@ -123,7 +71,7 @@
   },
   "current_inventory": {
     "suites": 15,
-    "tests": 167,
+    "tests": 168,
     "current_execution_claimed": 0,
     "status": "awaiting_qa_rerun"
   }

@@ -880,7 +880,7 @@ class OutboxHealthGateTest {
 
         assertEquals(OutboxHealthStatus.AUTH_BLOCKED, result.status)
         assertEquals(3, result.totalEvents)
-        assertEquals(3, result.probedCount)
+        assertEquals(0, result.probedCount)
         assertTrue(result.isScopeLocked)
         assertFalse("Locked populated queue must not be operational", result.isOperational)
         assertFalse("Locked populated queue must not be queue processing ready", result.isQueueProcessingReady)
@@ -1498,4 +1498,68 @@ class OutboxHealthGateTest {
 
         db.close()
     }
+
+    @Test
+    fun snapshotInspection_serializesSeparateWriter_afterPageCache() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val file = File(context.filesDir, "snapshot-writer-${UUID.randomUUID()}.db")
+        val reader = OutboxDatabase.buildDatabase(context, file.path, true)
+        val writer = OutboxDatabase.buildDatabase(context, file.path, true)
+        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val crypto = JvmOutboxCrypto()
+        val cipher = OutboxPayloadCipher(crypto)
+        val event = OutboxTestFixtures.createSampleEvent(
+            clientEventId = ClientUuid.random(),
+            companyId = ServerUlid.parse(defaultCompanyId),
+            actorId = ServerUlid.parse(defaultActorId),
+            deviceId = ClientUuid.parse(defaultDeviceId)
+        )
+        var pendingWrite: java.util.concurrent.Future<*>? = null
+        try {
+            OutboxRepositoryImpl(reader, payloadCipher = cipher).captureSale(event)
+            // Open the second connection before contention, so database initialization
+            // cannot be mistaken for the write waiting behind the inspection transaction.
+            executor.submit<Int> { writer.outboxDao().eventCount() }
+                .get(5, java.util.concurrent.TimeUnit.SECONDS)
+            val inspector = DefaultOutboxHealthInspector(reader, cipher, Dispatchers.IO,
+                onPageReadHook = { page ->
+                    if (page == 0) {
+                        val attemptingWrite = java.util.concurrent.CountDownLatch(1)
+                        pendingWrite = executor.submit {
+                            attemptingWrite.countDown()
+                            writer.outboxDao().replacePayloadForConversion(
+                                defaultCompanyId, event.clientEventId.value,
+                                "STO\u0001corrupt-replacement".toByteArray()
+                            )
+                        }
+                        assertTrue(attemptingWrite.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                        try {
+                            pendingWrite!!.get(250, java.util.concurrent.TimeUnit.MILLISECONDS)
+                            fail("Writer committed while inspection still held its snapshot transaction")
+                        } catch (_: java.util.concurrent.TimeoutException) {
+                            // Release the inspection before waiting for this writer to finish.
+                        }
+                    }
+                })
+            val beforeWrite = inspector.inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+            assertEquals(OutboxHealthStatus.HEALTHY, beforeWrite.status)
+            pendingWrite!!.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            assertEquals(1, reader.outboxDao().eventCount())
+            val afterWrite = DefaultOutboxHealthInspector(reader, cipher, Dispatchers.IO)
+                .inspectHealth(defaultCompanyId, defaultActorId, defaultDeviceId)
+            assertEquals(OutboxHealthStatus.CORRUPT, afterWrite.status)
+            assertFalse(afterWrite.isOperational)
+        } finally {
+            // The inspection has returned or unwound before any join/connection close.
+            try {
+                pendingWrite?.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            } finally {
+                executor.shutdownNow()
+                assertTrue(executor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS))
+                writer.close()
+                reader.close()
+            }
+        }
+    }
+
 }

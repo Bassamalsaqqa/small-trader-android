@@ -30,7 +30,7 @@ This slice resolves GitHub PR 21 review `5895663783` and independent review `589
    - **Bounded Cancellable Paged Verification across ALL Scoped Rows**:
      - Resolves P1 stall where queues with 11+ valid records were permanently stuck in `PARTIAL_UNCHECKED`.
      - Implements cursor-based keyset pagination on `(captured_at, client_event_id)` in bounded chunks (`DEFAULT_PAGE_SIZE = 10`), avoiding oversized memory allocations.
-     - Verifies 11/100+ clean rows, detects late corrupt/legacy rows, supports graceful cancellation mid-scan, and detects scan mutations (fails closed as `PARTIAL_UNCHECKED` when concurrent insertions occur, resuming to `HEALTHY` on subsequent retry).
+     - Verifies 11/100+ clean rows, detects late corrupt/legacy rows, supports cooperative cancellation between blocking SQLite/crypto operations, within one transaction. Concurrent writers serialize after inspection; a coherent pre-write result is valid. Readiness is a snapshot, not a permanent authorization or production drain gate.
    - **Global Key Capability Parity Across Tenants**:
      - Resolves P1 inconsistency where Company B claimed `NEW_EMPTY` (operational) in a database containing Company A's legacy records without a keystore key.
      - Since repository capture requires an existing retained key when `eventCount() > 0`, the inspector verifies `payloadCipher.prepare(true)` before granting `NEW_EMPTY`.
@@ -44,11 +44,11 @@ This slice resolves GitHub PR 21 review `5895663783` and independent review `589
    - Room v1 identity hash `6eddfecc8dabbb7ec370b858ec36714a` remains strictly intact with zero schema diff.
 
 ## Test Summary & Verification Status
-- **Historical Saved Verification (PR21 baseline)**:
+- **Historical Saved Verification (artifacts entered PR22 at `3f04edb`)**:
   - Saved XML test artifacts report 15 suites, 140 tests passed (0 failures, 0 errors, 0 skipped).
   - Historical health gate suite: 10 tests; historical recovery compose suite: 9 tests; durable outbox suites: 121 tests.
 - **Current Source Inventory (Expanded Coverage)**:
-  - 15 suites, 167 source tests in inventory (incorporates 30 tests in `OutboxHealthGateTest` and 16 tests in `StaffOutboxRecoveryComposeTest`).
+  - 15 suites, 168 source tests in inventory (incorporates 31 tests in `OutboxHealthGateTest` and 16 tests in `StaffOutboxRecoveryComposeTest`).
   - Added regressions: same-count corrupt payload replacement (`pagedVerification_sameCountCorruptPayloadReplacement_failsClosedAsCorrupt`), empty queue auth lock mutation (`emptyScopeWithAuthLockAndCorruptRow_returnsAuthBlocked_neverNewEmptyReady`), keyset pagination across 11 and 100+ rows, late corrupt/legacy rows, cancellation propagation, and SQLite writer serialization.
 - **Current Execution Status**:
   - **Zero Current Execution**: 0 tests are claimed as executed in this source-only turn. Source invariants and snapshot coherence have been corrected in code; execution remains strictly pending QA rerun.
@@ -57,7 +57,9 @@ This slice resolves GitHub PR 21 review `5895663783` and independent review `589
 - **On-Device Blockers**: Real Android Keystore, device process kill, instrumentation, and actual transfer/restore remain **BLOCKED / UNVERIFIED** (no approved device host).
 
 ## Files in this Directory
-- `summary.json`: Test suite names and updated test counts (15 suites, 165 tests).
+- `summary.json`: Test suite names and updated test counts (15 suites, 168 source tests; unexecuted).
 - `python-normal.log`: Python mobile contract validator output (normal: 303 passed).
 - `python-optimized.log`: Python mobile contract validator output (-O: 303 passed).
 - `lint-results-debug.xml`: Android lint results baseline.
+
+Supervisor follow-up adds a separate-connection writer barrier after page caching, with bounded joins outside inspection. This test and removal-of-transaction sensitivity still require execution; source inspection alone is not race qualification. Auth-blocked queues now assert zero decrypt probes.
