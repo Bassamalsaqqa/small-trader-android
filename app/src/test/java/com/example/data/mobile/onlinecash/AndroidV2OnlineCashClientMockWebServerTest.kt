@@ -432,4 +432,77 @@ class AndroidV2OnlineCashClientMockWebServerTest {
         assertEquals(clientEventId, ack.clientEventId)
         assertEquals("01JCV8X9ME7890123456789ABC", ack.invoiceUlid.value)
     }
+
+    @Test
+    fun testSubmitAuthoritativeSyntheticTemplateWirePayload() {
+        val authCompanyId = ServerUlid.parse("01M7CZPF6TP283F3ZRXF5P8GT2")
+        val authEventId = ClientUuid.parse("c0686be5-888f-4890-90bf-1f05f416a19a")
+        val authDigest = PayloadDigest.parse("sha256:0847e10d89777e103252ebfa2d27f89a95832a5d70e01af57afe6423f703c630")
+
+        val rawWirePayload = """{
+            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+            "device_id": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
+            "customer_id": "01M7CZPF6TP283F3ZRXF5P8GT3",
+            "warehouse_id": "01M7CZPF6TP283F3ZRXF5P8GT4",
+            "currency": "ILS",
+            "lines": [
+                {
+                    "product_id": "01M7CZPF6TP283F3ZRXF5P8GT5",
+                    "product_unit_id": "01M7CZPF6TP283F3ZRXF5P8GT6",
+                    "conversion_to_base": "1.000000",
+                    "quantity": "1.000000",
+                    "unit_price": "50.000000",
+                    "tax_rate_id": "01M7CZPF6TP283F3ZRXF5P8GT7",
+                    "tax_rate": "16.000000",
+                    "tax_inclusive": false
+                }
+            ],
+            "payment": {
+                "settlement_mode": "full",
+                "payment_method": "cash",
+                "cash_account_id": "01M7CZPF6TP283F3ZRXF5P8GT8",
+                "amount": "58.000000"
+            }
+        }""".toByteArray(Charsets.UTF_8)
+
+        val commitJson = """{
+            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+            "status": "posted",
+            "invoice_id": "01M7CZPF6TP283F3ZRXF5P8GT9",
+            "invoice_number": "INV-2026-00099",
+            "payment_id": "01M7CZPF6TP283F3ZRXF5P8GTA",
+            "payment_receipt_number": "RCT-2026-00099",
+            "grand_total": "58.000000",
+            "amount_paid": "58.000000",
+            "change_returned": "0.000000",
+            "posted_at": "2026-11-14T12:00:00Z"
+        }"""
+
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(201)
+                .setHeader("Content-Type", "application/json")
+                .setBody(commitJson)
+        )
+
+        val client = createClient()
+        val result = client.submitSale(
+            token = validToken,
+            companyId = authCompanyId,
+            clientEventId = authEventId,
+            expectedPayloadDigest = authDigest,
+            canonicalBytes = rawWirePayload
+        )
+
+        assertTrue("Expected Created outcome", result is OnlineCashSubmitResult.Created)
+        val created = (result as OnlineCashSubmitResult.Created).response
+        assertEquals(authEventId, created.clientEventId)
+        assertEquals("01M7CZPF6TP283F3ZRXF5P8GT9", created.invoiceId.value)
+        assertEquals("58.000000", created.grandTotal.toPlainString())
+
+        val recorded = server!!.takeRequest(1, TimeUnit.SECONDS)
+        assertNotNull(recorded)
+        assertEquals("POST", recorded!!.method)
+        assertEquals("/api/mobile/v2/companies/01M7CZPF6TP283F3ZRXF5P8GT2/sales/online-cash", recorded.path)
+    }
 }
