@@ -14,6 +14,7 @@ import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.contract.StrictJsonString
 import com.example.data.mobile.contract.v2.OnlineSaleContext
 import com.example.data.mobile.contract.v2.OnlineSaleIntentProfile
+import com.example.data.mobile.readclient.EndpointSecurity
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.net.HttpURLConnection
@@ -74,7 +75,10 @@ data class CashPilotEndpoints(
     val onlineCashSaleRoute: String,
     val offlineEventStatusRoute: String,
     val readinessProbeRoute: String
-)
+) {
+    val bareOrigin: String
+        get() = CashPilotHandoffConfig.deriveBareOrigin(baseUrl)
+}
 
 /**
  * Exact retained raw wire sample and integrity hash.
@@ -160,6 +164,9 @@ class CashPilotHandoffConfig private constructor(
     val isFinancialApproved: Boolean,
     val baseUrl: String
 ) {
+    val bareOrigin: String
+        get() = endpoints.bareOrigin
+
     override fun toString(): String =
         "CashPilotHandoffConfig(schemaVersion='$schemaVersion', scope='$handoffScope', " +
                 "lifecyclePhase='$lifecyclePhase', baseUrl='$baseUrl', " +
@@ -456,6 +463,92 @@ class CashPilotHandoffConfig private constructor(
             require(path.isEmpty() || path == "/" || path == "/api/mobile/v2" || path == "/_harness/readiness") {
                 "Prohibited unexpected path in base URL: '$path'"
             }
+        }
+
+        /**
+         * Validates an endpoint base URL and extracts its bare origin (scheme://host[:port]).
+         *
+         * Enforces:
+         * - Must be a valid absolute URI.
+         * - Scheme must strictly be HTTPS (case-insensitive). Plain HTTP is strictly prohibited.
+         * - Must specify a non-empty host.
+         * - Userinfo credentials are strictly prohibited.
+         * - Query parameters are strictly prohibited.
+         * - Fragment identifiers are strictly prohibited.
+         * - Port, if present, must be strictly in 1..65535.
+         * - Path segment must be either:
+         *     a) empty or "/" (bare origin already), or
+         *     b) the actual handoff API prefix "/api/mobile/v2" or "/api/mobile/v2/".
+         *   Arbitrary invalid or unknown path segments are strictly REJECTED (never silently stripped).
+         * - Returns canonical bare origin: "https://<host>[:<port>]" with no trailing slash or path segment.
+         */
+        fun deriveBareOrigin(rawEndpointUrl: String): String {
+            require(rawEndpointUrl.isNotBlank()) {
+                "Endpoint base URL must not be blank"
+            }
+            val trimmed = rawEndpointUrl.trim()
+            val uri = try {
+                URI(trimmed)
+            } catch (e: Exception) {
+                throw IllegalArgumentException("Malformed endpoint base URL: '$trimmed'", e)
+            }
+
+            require(uri.isAbsolute) {
+                "Endpoint base URL must be an absolute URI, got '$trimmed'"
+            }
+
+            val scheme = uri.scheme?.lowercase(Locale.ROOT)
+            require(scheme == "https") {
+                "Endpoint base URL must use HTTPS scheme; got '$scheme' in '$trimmed'"
+            }
+
+            val host = uri.host
+            require(!host.isNullOrBlank()) {
+                "Endpoint base URL must specify a non-empty host, got '$trimmed'"
+            }
+
+            require(uri.rawUserInfo == null && uri.userInfo == null) {
+                "Endpoint base URL must not contain userinfo credentials"
+            }
+
+            require(uri.rawQuery == null && uri.query == null) {
+                "Endpoint base URL must not contain query parameters"
+            }
+
+            require(uri.rawFragment == null && uri.fragment == null) {
+                "Endpoint base URL must not contain a fragment identifier"
+            }
+
+            val port = uri.port
+            val authority = uri.rawAuthority ?: ""
+            if (authority.contains(":")) {
+                val portStr = authority.substringAfterLast(":")
+                val parsedPort = portStr.toIntOrNull()
+                require(parsedPort != null && parsedPort in 1..65535) {
+                    "Malformed or out-of-range port in endpoint base URL: '$trimmed'"
+                }
+            } else if (port != -1) {
+                require(port in 1..65535) {
+                    "Invalid port $port in endpoint base URL. Port must be between 1 and 65535."
+                }
+            }
+
+            val rawPath = uri.rawPath ?: ""
+            val cleanPath = rawPath.trimEnd('/')
+            val isBareOrigin = cleanPath.isEmpty()
+            val isV2Prefix = cleanPath == "/api/mobile/v2"
+
+            require(isBareOrigin || isV2Prefix) {
+                "Unsupported path segment in endpoint base URL: '$rawPath'. Only bare origin or '/api/mobile/v2' prefix is allowed."
+            }
+
+            val canonicalHost = host.lowercase(Locale.ROOT)
+            val bareOrigin = if (port != -1) "$scheme://$canonicalHost:$port" else "$scheme://$canonicalHost"
+
+            // Double check that EndpointSecurity accepts this bare origin
+            EndpointSecurity.validateBaseOrigin(bareOrigin, allowHttpLoopback = false)
+
+            return bareOrigin
         }
 
         fun fromFile(
