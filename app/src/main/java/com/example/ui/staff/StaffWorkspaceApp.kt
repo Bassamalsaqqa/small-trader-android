@@ -112,7 +112,11 @@ fun StaffWorkspaceApp(
                         onLogout = { viewModel.logout() },
                         onToggleLanguage = { viewModel.toggleLanguage() },
                         onToggleTheme = { viewModel.toggleTheme() },
-                        onRetryOutboxHealth = { viewModel.retryOutboxHealth() }
+                        onRetryOutboxHealth = { viewModel.retryOutboxHealth() },
+                        onUpdateSaleLineQuantity = { lineId, qty -> viewModel.updateDraftLineQuantity(lineId, qty) },
+                        onRemoveSaleLine = { lineId -> viewModel.removeDraftLine(lineId) },
+                        onClearSaleDraft = { viewModel.clearSaleDraft() },
+                        onSubmitSale = { viewModel.submitOnlineCashSale() }
                     )
                 }
                 StaffWorkspacePhase.LOCKED -> {

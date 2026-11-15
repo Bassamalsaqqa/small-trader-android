@@ -42,10 +42,12 @@ android {
 
     val staffReadWorkspace = project.findProperty("smalltrader.staffReadWorkspace")?.toString()?.toBoolean() ?: false
     val staffWorkspaceOrigin = project.findProperty("smalltrader.staffWorkspaceOrigin")?.toString() ?: ""
+    val staffOnlineCashEnabled = project.findProperty("smalltrader.staffOnlineCashEnabled")?.toString()?.toBoolean() ?: false
 
     buildConfigField("boolean", "STAFF_READ_WORKSPACE", staffReadWorkspace.toString())
     buildConfigField("String", "STAFF_WORKSPACE_ORIGIN", escapeJavaStringLiteral(staffWorkspaceOrigin))
     buildConfigField("boolean", "STAFF_ALLOW_HTTP_LOOPBACK", "false")
+    buildConfigField("boolean", "STAFF_ONLINE_CASH_ENABLED", staffOnlineCashEnabled.toString())
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,

@@ -29,10 +29,13 @@ import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Warning
+import com.example.BuildConfig
+import com.example.data.mobile.contract.PositiveDecimalQuantity
 import com.example.data.mobile.outbox.OutboxHealthResult
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -63,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.ProductCatalogItem
 import com.example.model.AppLanguage
+import com.example.ui.staff.sale.StaffOnlineSaleView
 import com.example.ui.theme.PrimaryBlueLight
 
 /**
@@ -86,9 +90,14 @@ fun StaffWorkspaceScreen(
     onToggleLanguage: () -> Unit,
     onToggleTheme: () -> Unit,
     onRetryOutboxHealth: () -> Unit = {},
+    onUpdateSaleLineQuantity: (String, PositiveDecimalQuantity) -> Unit = { _, _ -> },
+    onRemoveSaleLine: (String) -> Unit = {},
+    onClearSaleDraft: () -> Unit = {},
+    onSubmitSale: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val lang = uiState.language
+    val isCashEnabled = BuildConfig.STAFF_ONLINE_CASH_ENABLED || uiState.isOnlineCashEnabled
 
     Column(
         modifier = modifier
@@ -119,9 +128,15 @@ fun StaffWorkspaceScreen(
             )
         }
 
-        // Navigation Tabs: Products / Customers
+        // Navigation Tabs: Products / Customers / Cash Sale (gated)
+        val selectedIndex = when (uiState.selectedTab) {
+            StaffWorkspaceTab.PRODUCTS -> 0
+            StaffWorkspaceTab.CUSTOMERS -> 1
+            StaffWorkspaceTab.CASH_SALE -> if (isCashEnabled) 2 else 0
+        }
+
         TabRow(
-            selectedTabIndex = if (uiState.selectedTab == StaffWorkspaceTab.PRODUCTS) 0 else 1,
+            selectedTabIndex = selectedIndex,
             containerColor = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.primary,
             modifier = Modifier.fillMaxWidth()
@@ -170,6 +185,30 @@ fun StaffWorkspaceScreen(
                     }
                 }
             )
+            if (isCashEnabled) {
+                Tab(
+                    selected = uiState.selectedTab == StaffWorkspaceTab.CASH_SALE,
+                    onClick = { onSelectTab(StaffWorkspaceTab.CASH_SALE) },
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("staff_tab_cash_sale"),
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.PointOfSale,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = lang.tr("بيع نقدي", "Cash Sale"),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                )
+            }
         }
 
         // Active Tab Content
@@ -206,6 +245,18 @@ fun StaffWorkspaceScreen(
                         onSearchChange = onSearchCustomers,
                         onRefresh = onRefreshCustomers,
                         onLoadMore = onLoadMoreCustomers
+                    )
+                }
+                StaffWorkspaceTab.CASH_SALE -> {
+                    StaffOnlineSaleView(
+                        draft = uiState.saleDraft,
+                        authority = uiState.saleAuthority,
+                        currencyCode = uiState.activeCompany?.currency ?: "USD",
+                        lang = lang,
+                        onUpdateLineQuantity = onUpdateSaleLineQuantity,
+                        onRemoveLine = onRemoveSaleLine,
+                        onClearDraft = onClearSaleDraft,
+                        onSubmitSale = onSubmitSale
                     )
                 }
             }

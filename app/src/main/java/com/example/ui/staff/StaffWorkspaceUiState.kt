@@ -4,6 +4,8 @@ import com.example.data.mobile.outbox.OutboxHealthResult
 import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.ProductCatalogItem
 import com.example.model.AppLanguage
+import com.example.ui.staff.sale.StaffOnlineSaleAuthorityResolution
+import com.example.ui.staff.sale.StaffOnlineSaleDraft
 
 /**
  * Safe presentation view data for an authenticated staff actor.
@@ -60,7 +62,8 @@ enum class StaffWorkspacePhase {
  */
 enum class StaffWorkspaceTab {
     PRODUCTS,
-    CUSTOMERS
+    CUSTOMERS,
+    CASH_SALE
 }
 
 /**
@@ -106,7 +109,12 @@ data class StaffWorkspaceUiState(
 
     // Presentation preferences
     val language: AppLanguage = AppLanguage.AR,
-    val isDarkTheme: Boolean = false
+    val isDarkTheme: Boolean = false,
+
+    // Online Cash Sale Draft state
+    val saleDraft: StaffOnlineSaleDraft = StaffOnlineSaleDraft(),
+    val saleAuthority: StaffOnlineSaleAuthorityResolution? = null,
+    val isOnlineCashEnabled: Boolean = false
 ) {
     val isQueueProcessingReady: Boolean
         get() = outboxHealthResult?.isOperational == true
