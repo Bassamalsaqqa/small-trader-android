@@ -306,7 +306,8 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
     private val storageFile: File,
     private val cryptoEngine: SessionCryptoEngine,
     private val packageName: String,
-    internal var directorySyncEngine: DirectorySyncEngine = AndroidPlatformDirectorySyncEngine
+    internal var directorySyncEngine: DirectorySyncEngine = AndroidPlatformDirectorySyncEngine,
+    internal var maxFileBytes: Long = MAX_FILE_BYTES
 ) : DurableOnlineSaleRecoveryStore {
 
     internal var renameOperation: (File, File) -> Boolean = { src, dst -> src.renameTo(dst) }
@@ -473,9 +474,9 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
 
         val aad = buildAad(packageName)
         val plaintext = DurableOnlineSaleRecoveryWireFormat.serialize(records)
-        if (plaintext.size > MAX_FILE_BYTES) {
+        if (plaintext.size > maxFileBytes) {
             throw OnlineSaleRecoveryException(
-                "Recovery envelope exceeds maximum storage bound ($MAX_FILE_BYTES bytes): actual=${plaintext.size}"
+                "Recovery envelope exceeds maximum storage bound ($maxFileBytes bytes): actual=${plaintext.size}"
             )
         }
 
@@ -486,9 +487,9 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
         }
 
         val envelopeBytes = buildEnvelope(iv, ciphertext)
-        if (envelopeBytes.size > MAX_FILE_BYTES) {
+        if (envelopeBytes.size > maxFileBytes) {
             throw OnlineSaleRecoveryException(
-                "Recovery envelope exceeds maximum storage bound ($MAX_FILE_BYTES bytes): actual=${envelopeBytes.size}"
+                "Recovery envelope exceeds maximum storage bound ($maxFileBytes bytes): actual=${envelopeBytes.size}"
             )
         }
 
@@ -505,8 +506,8 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
                 fos.flush()
                 fos.fd.sync()
             }
-            if (tempFile.length() > MAX_FILE_BYTES) {
-                throw OnlineSaleRecoveryException("Temp file length exceeds maximum allowable $MAX_FILE_BYTES bytes")
+            if (tempFile.length() > maxFileBytes) {
+                throw OnlineSaleRecoveryException("Temp file length exceeds maximum allowable $maxFileBytes bytes")
             }
             if (!renameOperation(tempFile, storageFile)) {
                 throw OnlineSaleRecoveryException("Failed to atomically replace recovery file")
@@ -532,7 +533,7 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
         if (!storageFile.exists()) return emptyList()
 
         val envelopeBytes = try {
-            BoundedStreamReader.readBounded(storageFile, MAX_FILE_BYTES.toInt())
+            BoundedStreamReader.readBounded(storageFile, maxFileBytes.toInt())
         } catch (e: Exception) {
             throw OnlineSaleRecoveryException("Failed to read bounded recovery file from disk", e)
         }
@@ -620,7 +621,7 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
                 ((bytes[ivEnd + 2].toInt() and 0xFF) shl 8) or
                 (bytes[ivEnd + 3].toInt() and 0xFF)
 
-        if (payloadLen <= 0 || payloadLen > MAX_FILE_BYTES) return null
+        if (payloadLen <= 0 || payloadLen > maxFileBytes) return null
 
         val ciphertextStart = ivEnd + 4
         if (bytes.size != ciphertextStart + payloadLen) return null

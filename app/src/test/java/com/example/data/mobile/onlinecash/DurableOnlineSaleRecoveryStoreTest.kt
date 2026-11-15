@@ -322,8 +322,13 @@ class DurableOnlineSaleRecoveryStoreTest {
 
     @Test
     fun testEnvelope_nearLimit_succeeds() {
-        // Generate a ~110 KB valid canonical payload with 500 lines (well within 1 MiB limit)
-        val record = createSampleRecord(lineCount = 500)
+        // Valid canonical record within line limit (lineCount = 10 <= 100 max)
+        val record = createSampleRecord(lineCount = 10)
+        val plaintext = DurableOnlineSaleRecoveryWireFormat.serialize(listOf(record))
+        // Exact envelope overhead: 4 (magic) + 1 (ivLen) + 12 (iv) + 4 (payloadLen) + plaintext.size + 16 (GCM tag) = plaintext.size + 37
+        val exactEnvelopeBytes = plaintext.size + 37
+        recoveryStore.maxFileBytes = exactEnvelopeBytes.toLong()
+
         recoveryStore.savePendingSale(record)
 
         val retrieved = recoveryStore.getPendingSale(companyId, actorId, deviceId, baseOrigin)
@@ -335,8 +340,13 @@ class DurableOnlineSaleRecoveryStoreTest {
 
     @Test
     fun testEnvelope_overflow_throwsException() {
-        // Generate an oversized valid canonical payload with 4764 lines (wire ~1048410 B <= 1 MiB, but envelope exceeds 1 MiB MAX_FILE_BYTES)
-        val record = createSampleRecord(lineCount = 4764)
+        // Valid canonical record within line limit (lineCount = 10 <= 100 max)
+        val record = createSampleRecord(lineCount = 10)
+        val plaintext = DurableOnlineSaleRecoveryWireFormat.serialize(listOf(record))
+        val exactEnvelopeBytes = plaintext.size + 37
+        // Set maxFileBytes 1 byte smaller than exact envelope requirement
+        recoveryStore.maxFileBytes = (exactEnvelopeBytes - 1).toLong()
+
         try {
             recoveryStore.savePendingSale(record)
             fail("Expected OnlineSaleRecoveryException on oversized envelope")
