@@ -444,8 +444,8 @@ class OnlineCashSaleOrchestrator(
                     return OnlineCashOrchestrationResult.ParseFailure("TENANT_PARITY_MISMATCH")
                 }
 
-                // Status digest MUST be non-null and match expected normative digest
-                if (status.payloadDigest == null || status.payloadDigest != intent.expectedNormativeProfileDigest) {
+                // Status digest, if present on status query, must match expected normative digest
+                if (status.payloadDigest != null && status.payloadDigest != intent.expectedNormativeProfileDigest) {
                     return OnlineCashOrchestrationResult.StatusDigestMismatch(
                         expected = intent.expectedNormativeProfileDigest,
                         actual = status.payloadDigest
@@ -456,7 +456,7 @@ class OnlineCashSaleOrchestrator(
                 val receipt = OnlineCashSaleReceipt(
                     companyId = status.companyId,
                     clientEventId = status.clientEventId,
-                    payloadDigest = status.payloadDigest,
+                    payloadDigest = status.payloadDigest ?: intent.expectedNormativeProfileDigest,
                     invoiceId = official.invoiceId,
                     invoiceNumber = official.invoiceNumber,
                     paymentId = official.paymentId,

@@ -424,7 +424,9 @@ class StaffWorkspaceViewModel(
                         companyId = companyId,
                         actorId = ready.session.actorUlid,
                         deviceId = ready.session.deviceUuid,
-                        deniedAt = java.time.Instant.now().toString()
+                        deniedAt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
+                            timeZone = java.util.TimeZone.getTimeZone("UTC")
+                        }.format(java.util.Date())
                     )
                 )
             }
