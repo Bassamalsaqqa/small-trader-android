@@ -37,7 +37,7 @@ class DurableOnlineSaleRecoveryStoreTest {
     private val clientEventId = ClientUuid.parse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
     // Valid canonical RFC 8785 JSON wire payload matching raw 7 keys
-    private val sampleRawWireJson = """{"client_event_id":"6ba7b810-9dad-11d1-80b4-00c04fd430c8","currency":"USD","customer_id":"01ARZ3NDEKTSV4RRFFQ69G5FA4","device_id":"550e8400-e29b-41d4-a716-446655440000","lines":[{"conversion_to_base":"1","product_id":"01ARZ3NDEKTSV4RRFFQ69G5FA5","product_unit_id":"01ARZ3NDEKTSV4RRFFQ69G5FA6","quantity":"1","tax_inclusive":true,"tax_rate":"0","tax_rate_id":null,"unit_price":"20.000000"}],"payment":{"amount":"20.00","cash_account_id":"01ARZ3NDEKTSV4RRFFQ69G5FA3","payment_method":"cash","settlement_mode":"full"},"warehouse_id":"01ARZ3NDEKTSV4RRFFQ69G5FA2"}"""
+    private val sampleRawWireJson = """{"client_event_id":"6ba7b810-9dad-11d1-80b4-00c04fd430c8","currency":"USD","customer_id":"01ARZ3NDEKTSV4RRFFQ69G5FA4","device_id":"550e8400-e29b-41d4-a716-446655440000","lines":[{"conversion_to_base":"1","product_id":"01ARZ3NDEKTSV4RRFFQ69G5FA5","product_unit_id":"01ARZ3NDEKTSV4RRFFQ69G5FA6","quantity":"1","tax_inclusive":false,"tax_rate":"0.000000","tax_rate_id":null,"unit_price":"20.000000"}],"payment":{"amount":"20.00","cash_account_id":"01ARZ3NDEKTSV4RRFFQ69G5FA3","payment_method":"cash","settlement_mode":"full"},"warehouse_id":"01ARZ3NDEKTSV4RRFFQ69G5FA2"}"""
     private val sampleRawWireBytes = sampleRawWireJson.toByteArray(Charsets.UTF_8)
 
     @Before
@@ -70,7 +70,7 @@ class DurableOnlineSaleRecoveryStoreTest {
         }
 
         val linesJson = (0 until lineCount).joinToString(",") {
-            """{"conversion_to_base":"1","product_id":"01ARZ3NDEKTSV4RRFFQ69G5FA5","product_unit_id":"01ARZ3NDEKTSV4RRFFQ69G5FA6","quantity":"1","tax_inclusive":true,"tax_rate":"0","tax_rate_id":null,"unit_price":"$unitPrice"}"""
+            """{"conversion_to_base":"1","product_id":"01ARZ3NDEKTSV4RRFFQ69G5FA5","product_unit_id":"01ARZ3NDEKTSV4RRFFQ69G5FA6","quantity":"1","tax_inclusive":false,"tax_rate":"0.000000","tax_rate_id":null,"unit_price":"$unitPrice"}"""
         }
 
         val rawWireJson = """{"client_event_id":"${eventId.value}","currency":"$currency","customer_id":"01ARZ3NDEKTSV4RRFFQ69G5FA4","device_id":"${device.value}","lines":[$linesJson],"payment":{"amount":"$totalAmount","cash_account_id":"01ARZ3NDEKTSV4RRFFQ69G5FA3","payment_method":"cash","settlement_mode":"full"},"warehouse_id":"01ARZ3NDEKTSV4RRFFQ69G5FA2"}"""
@@ -335,8 +335,8 @@ class DurableOnlineSaleRecoveryStoreTest {
 
     @Test
     fun testEnvelope_overflow_throwsException() {
-        // Generate an oversized valid canonical payload with 5000 lines (~1.1 MB, exceeding 1 MiB MAX_FILE_BYTES)
-        val record = createSampleRecord(lineCount = 5000)
+        // Generate an oversized valid canonical payload with 4764 lines (wire ~1048410 B <= 1 MiB, but envelope exceeds 1 MiB MAX_FILE_BYTES)
+        val record = createSampleRecord(lineCount = 4764)
         try {
             recoveryStore.savePendingSale(record)
             fail("Expected OnlineSaleRecoveryException on oversized envelope")

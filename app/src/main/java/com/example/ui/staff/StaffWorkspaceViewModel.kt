@@ -363,9 +363,13 @@ class StaffWorkspaceViewModel(
      */
     fun selectTab(tab: StaffWorkspaceTab) {
         _uiState.update { it.copy(selectedTab = tab) }
-        if (tab == StaffWorkspaceTab.CASH_SALE && _uiState.value.saleAuthority == null) {
-            (coordinator?.authState as? StaffAuthState.ReadReady)?.let {
-                updateSaleAuthorityOnReadReady(it)
+        if (tab == StaffWorkspaceTab.CASH_SALE) {
+            (coordinator?.authState as? StaffAuthState.ReadReady)?.let { readyState ->
+                if (_uiState.value.saleAuthority == null) {
+                    updateSaleAuthorityOnReadReady(readyState)
+                } else {
+                    loadDurableRecoveryIfPending(readyState)
+                }
             }
         }
     }
@@ -474,16 +478,22 @@ class StaffWorkspaceViewModel(
                     )
                 }
             } else {
-                // If there was previously a storage error hold with no retained intent, clear hold upon verified empty store
-                if (_uiState.value.saleDraft.isPaymentUnverifiedHold && _uiState.value.saleDraft.preparedIntent == null) {
-                    _uiState.update { s ->
-                        s.copy(
-                            saleDraft = s.saleDraft.copy(
-                                isPaymentUnverifiedHold = false,
-                                isSubmitting = false,
-                                submissionError = null
+                // If there was a hold from a different company or a storage error hold with no retained intent, clear hold for clean company
+                if (_uiState.value.saleDraft.isPaymentUnverifiedHold) {
+                    val existingCompany = _uiState.value.saleDraft.preparedIntent?.context?.companyId
+                    if (existingCompany != currentCompany || _uiState.value.saleDraft.preparedIntent == null) {
+                        _uiState.update { s ->
+                            s.copy(
+                                saleDraft = s.saleDraft.copy(
+                                    isPaymentUnverifiedHold = false,
+                                    isSubmitting = false,
+                                    preparedIntent = null,
+                                    submissionError = null,
+                                    lines = emptyList(),
+                                    cashTendered = null
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
@@ -912,22 +922,6 @@ class StaffWorkspaceViewModel(
                         }
                         return@launch
                     }
-                    val recoveryRecord = DurableOnlineSaleRecoveryRecord(
-                        clientEventId = preparedIntent.clientEventId,
-                        expectedNormativeProfileDigest = preparedIntent.expectedNormativeProfileDigest,
-                        companyId = targetCompanyId,
-                        actorId = readyState.session.actorUlid,
-                        deviceId = targetDeviceId,
-                        baseOrigin = origin,
-                        currency = targetCurrency,
-                        currencyMinorUnits = preparedIntent.context.currencyMinorUnits,
-                        amount = preparedIntent.profile.payment.amount,
-                        rawWireBytes = preparedIntent.rawWireBytes,
-                        createdAt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
-                            timeZone = java.util.TimeZone.getTimeZone("UTC")
-                        }.format(java.util.Date())
-                    )
-                    store.savePendingSale(recoveryRecord)
                 } catch (e: Exception) {
                     _uiState.update { s ->
                         s.copy(
@@ -1070,6 +1064,14 @@ class StaffWorkspaceViewModel(
                     }
                 }
                 is OnlineCashOrchestrationResult.LocalTokenUnavailable -> {
+                    if (canonicalOrigin != null && store != null) {
+                        try {
+                            val currentPending = store.getPendingSale(targetCompanyId, readyState.session.actorUlid, targetDeviceId, canonicalOrigin)
+                            if (currentPending?.clientEventId == preparedIntent.clientEventId) {
+                                store.clearPendingSale(preparedIntent.clientEventId, targetCompanyId, readyState.session.actorUlid, targetDeviceId, canonicalOrigin)
+                            }
+                        } catch (_: Exception) {}
+                    }
                     _uiState.update { s ->
                         s.copy(
                             saleDraft = s.saleDraft.copy(

@@ -1973,18 +1973,17 @@ class StaffOnlineSaleViewModelTest {
                         {
                             "client_event_id": "$eventId",
                             "status": "posted",
-                            "official_invoice": {
-                                "company_id": "${companyUlid.value}",
-                                "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5999",
-                                "invoice_number": "INV-UNVERIFIED-1",
-                                "payment_id": null,
-                                "payment_receipt_number": null,
-                                "grand_total": "20.00",
-                                "posted_at": "2026-11-15T12:00:00Z"
-                            }
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5999",
+                            "invoice_number": "INV-UNVERIFIED-1",
+                            "payment_id": null,
+                            "payment_receipt_number": null,
+                            "grand_total": "20.00",
+                            "amount_paid": "0.00",
+                            "change_returned": "0.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
                         }
                     """.trimIndent()
-                    return TransportResponse(200, emptyMap(), unverifiedJson)
+                    return TransportResponse(201, emptyMap(), unverifiedJson)
                 } else if (request.method == HttpMethod.GET) {
                     getStatusCount++
                     val eventId = capturedEventId.get() ?: "00000000-0000-0000-0000-000000000000"
@@ -1996,14 +1995,15 @@ class StaffOnlineSaleViewModelTest {
                             "status": "posted",
                             "payload_digest": "$digest",
                             "official_invoice": {
-                                "company_id": "${companyUlid.value}",
                                 "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5999",
                                 "invoice_number": "INV-CONFIRMED-1",
                                 "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5888",
                                 "payment_receipt_number": "REC-9999",
                                 "grand_total": "20.00",
                                 "posted_at": "2026-11-15T12:05:00Z"
-                            }
+                            },
+                            "conflict": null,
+                            "queried_at": "2026-11-15T12:05:00Z"
                         }
                     """.trimIndent()
                     return TransportResponse(200, emptyMap(), statusJson)
@@ -2296,14 +2296,15 @@ class StaffOnlineSaleViewModelTest {
                         "status": "posted",
                         "payload_digest": "${wrongDigest.value}",
                         "official_invoice": {
-                            "company_id": "${companyUlid.value}",
                             "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5999",
                             "invoice_number": "INV-WRONG-DIGEST",
                             "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5888",
                             "payment_receipt_number": "REC-WRONG",
                             "grand_total": "20.00",
                             "posted_at": "2026-11-15T12:00:00Z"
-                        }
+                        },
+                        "conflict": null,
+                        "queried_at": "2026-11-15T12:05:00Z"
                     }
                 """.trimIndent()
                 return TransportResponse(200, emptyMap(), responseJson)
@@ -2428,6 +2429,7 @@ class StaffOnlineSaleViewModelTest {
                 baseOrigin = "https://small-trader.example.com"
             ),
             tokenProvider = { "token" },
+            scopeGenerationProvider = { 1L },
             recoveryStore = null,
             requireRecoveryStore = true
         )
@@ -2439,7 +2441,7 @@ class StaffOnlineSaleViewModelTest {
     fun testCurrentGenerationReauth_rebindsPreparedIntentToNewGeneration() = runTest(testDispatcher) {
         val sharedStore = InMemoryDurableOnlineSaleRecoveryStore()
         val eventId = ClientUuid.random()
-        val rawWireJson = """{"client_event_id":"$eventId","currency":"USD","customer_id":"${walkInUlid.value}","device_id":"${deviceUuid.value}","lines":[{"conversion_to_base":"1","product_id":"${productUlid.value}","product_unit_id":"${unitUlid.value}","quantity":"1","tax_inclusive":true,"tax_rate":"0","tax_rate_id":null,"unit_price":"20.000000"}],"payment":{"amount":"20.00","cash_account_id":"${cashAccountUlid.value}","payment_method":"cash","settlement_mode":"full"},"warehouse_id":"${warehouseUlid.value}"}"""
+        val rawWireJson = """{"client_event_id":"$eventId","currency":"USD","customer_id":"${walkInUlid.value}","device_id":"${deviceUuid.value}","lines":[{"conversion_to_base":"1","product_id":"${productUlid.value}","product_unit_id":"${unitUlid.value}","quantity":"1","tax_inclusive":false,"tax_rate":"0.000000","tax_rate_id":null,"unit_price":"20.000000"}],"payment":{"amount":"20.00","cash_account_id":"${cashAccountUlid.value}","payment_method":"cash","settlement_mode":"full"},"warehouse_id":"${warehouseUlid.value}"}"""
         val rawWireBytes = rawWireJson.toByteArray(Charsets.UTF_8)
         val context = OnlineSaleContext(actorId = actorUlid, companyId = companyUlid, currencyMinorUnits = 2)
         val initialIntent = PreparedOnlineSaleIntent.prepare(context = context, rawWireBytes = rawWireBytes, scopeGeneration = 1L)
@@ -2508,7 +2510,7 @@ class StaffOnlineSaleViewModelTest {
         // Storage recovers and now contains a pending sale
         failingStore.throwOnGet = false
         val eventId = ClientUuid.random()
-        val rawWireJson = """{"client_event_id":"$eventId","currency":"USD","customer_id":"${walkInUlid.value}","device_id":"${deviceUuid.value}","lines":[{"conversion_to_base":"1","product_id":"${productUlid.value}","product_unit_id":"${unitUlid.value}","quantity":"1","tax_inclusive":true,"tax_rate":"0","tax_rate_id":null,"unit_price":"20.000000"}],"payment":{"amount":"20.00","cash_account_id":"${cashAccountUlid.value}","payment_method":"cash","settlement_mode":"full"},"warehouse_id":"${warehouseUlid.value}"}"""
+        val rawWireJson = """{"client_event_id":"$eventId","currency":"USD","customer_id":"${walkInUlid.value}","device_id":"${deviceUuid.value}","lines":[{"conversion_to_base":"1","product_id":"${productUlid.value}","product_unit_id":"${unitUlid.value}","quantity":"1","tax_inclusive":false,"tax_rate":"0.000000","tax_rate_id":null,"unit_price":"20.000000"}],"payment":{"amount":"20.00","cash_account_id":"${cashAccountUlid.value}","payment_method":"cash","settlement_mode":"full"},"warehouse_id":"${warehouseUlid.value}"}"""
         val rawWireBytes = rawWireJson.toByteArray(Charsets.UTF_8)
         val context = OnlineSaleContext(actorId = actorUlid, companyId = companyUlid, currencyMinorUnits = 2)
         val intent = PreparedOnlineSaleIntent.prepare(context = context, rawWireBytes = rawWireBytes, scopeGeneration = 1L)

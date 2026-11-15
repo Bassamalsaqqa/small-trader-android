@@ -474,7 +474,9 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
         val aad = buildAad(packageName)
         val plaintext = DurableOnlineSaleRecoveryWireFormat.serialize(records)
         if (plaintext.size > MAX_FILE_BYTES) {
-            throw OnlineSaleRecoveryException("Recovery record payload exceeds max size limit ($MAX_FILE_BYTES bytes)")
+            throw OnlineSaleRecoveryException(
+                "Recovery envelope exceeds maximum storage bound ($MAX_FILE_BYTES bytes): actual=${plaintext.size}"
+            )
         }
 
         val (iv, ciphertext) = try {
