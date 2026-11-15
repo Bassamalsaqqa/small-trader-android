@@ -51,6 +51,9 @@ data class OnlineCashSaleReceipt(
  * - Sanitized toString() prevents credential or raw unvalidated wire leaks.
  */
 sealed class OnlineCashOrchestrationResult {
+    /** Durable recovery store write or crypto failure; zero HTTP requests dispatched */
+    data class StorageFailure(val message: String) : OnlineCashOrchestrationResult()
+
     /** Confirmed financial success with verified non-null server payment reference */
     data class ConfirmedFinancialSuccess(val receipt: OnlineCashSaleReceipt) : OnlineCashOrchestrationResult()
 
@@ -119,7 +122,8 @@ class OnlineCashSaleOrchestrator(
     private val tokenProvider: () -> String?,
     private val scopeGenerationProvider: () -> Long = { 0L },
     private val onAuthDeniedLockScope: ((scopeGeneration: Long, error: ReadClientErrorResponse) -> Unit)? = null,
-    private val activeScopeSupplier: (() -> OnlineSaleScope?)? = null
+    private val activeScopeSupplier: (() -> OnlineSaleScope?)? = null,
+    private val recoveryStore: DurableOnlineSaleRecoveryStore? = null
 ) {
 
     private fun isScopeMatching(
@@ -182,6 +186,34 @@ class OnlineCashSaleOrchestrator(
             )
         }
 
+        // 3.5. Durable recovery record persistence BEFORE network dispatch (fail-closed on crypto/write failure)
+        if (recoveryStore != null) {
+            val baseOrigin = client.validatedBaseOrigin
+            val record = DurableOnlineSaleRecoveryRecord(
+                clientEventId = intent.clientEventId,
+                expectedNormativeProfileDigest = intent.expectedNormativeProfileDigest,
+                companyId = targetCompanyId,
+                actorId = intent.context.actorId,
+                deviceId = targetDeviceId,
+                baseOrigin = baseOrigin,
+                currency = targetCurrency,
+                currencyMinorUnits = intent.context.currencyMinorUnits,
+                amount = intent.profile.payment.amount,
+                grandTotal = intent.profile.grandTotal,
+                rawWireBytes = intent.rawWireBytes,
+                createdAt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
+                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }.format(java.util.Date())
+            )
+            try {
+                recoveryStore.savePendingSale(record)
+            } catch (e: Exception) {
+                return OnlineCashOrchestrationResult.StorageFailure(
+                    "Failed to persist durable recovery record before network dispatch: ${e.message}"
+                )
+            }
+        }
+
         // 4. Dispatch via V2 Online Cash Client with Lost-ACK recovery and active scope guard
         val isScopeActive = {
             val currentGen = scopeGenerationProvider()
@@ -213,7 +245,7 @@ class OnlineCashSaleOrchestrator(
         }
 
         // 6. Evaluate execution result with strict financial consistency and schema honesty
-        return when (executionResult) {
+        val finalResult = when (executionResult) {
             is OnlineCashExecutionResult.Success -> {
                 if (executionResult.commitResponse != null) {
                     val commit = executionResult.commitResponse
@@ -358,6 +390,15 @@ class OnlineCashSaleOrchestrator(
                 )
             }
         }
+
+        if (finalResult is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess) {
+            try {
+                recoveryStore?.clearPendingSale(intent.clientEventId)
+            } catch (_: Exception) {
+            }
+        }
+
+        return finalResult
     }
 
     /**
@@ -431,7 +472,7 @@ class OnlineCashSaleOrchestrator(
         }
 
         // 6. Evaluate status response with strict financial consistency and schema honesty
-        return when (statusResult) {
+        val finalResult = when (statusResult) {
             is OnlineCashStatusResult.Posted -> {
                 val status = statusResult.response
                 val official = status.officialInvoice
@@ -526,5 +567,14 @@ class OnlineCashSaleOrchestrator(
                 )
             }
         }
+
+        if (finalResult is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess) {
+            try {
+                recoveryStore?.clearPendingSale(intent.clientEventId)
+            } catch (_: Exception) {
+            }
+        }
+
+        return finalResult
     }
 }

@@ -87,6 +87,23 @@ class PreparedOnlineSaleIntent private constructor(
         return result
     }
 
+    /**
+     * Rebinds this immutable prepared online sale intent to a new session [scopeGeneration]
+     * after identity and scope verification.
+     */
+    fun rebindGeneration(newScopeGeneration: Long): PreparedOnlineSaleIntent {
+        return PreparedOnlineSaleIntent(
+            context = context,
+            clientEventId = clientEventId,
+            deviceId = deviceId,
+            currency = currency,
+            expectedNormativeProfileDigest = expectedNormativeProfileDigest,
+            profile = profile,
+            rawWireBytes = defensiveWireBytes,
+            scopeGeneration = newScopeGeneration
+        )
+    }
+
     override fun toString(): String =
         "PreparedOnlineSaleIntent(companyId=${context.companyId}, clientEventId=$clientEventId, " +
                 "deviceId=$deviceId, currency='$currency', digest=$expectedNormativeProfileDigest, " +

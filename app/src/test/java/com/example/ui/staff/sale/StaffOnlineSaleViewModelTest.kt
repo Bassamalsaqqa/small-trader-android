@@ -8,6 +8,9 @@ import com.example.data.mobile.contract.PositiveDecimalQuantity
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.TaxPercentage
 import com.example.data.mobile.onlinecash.AndroidV2OnlineCashClient
+import com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryRecord
+import com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStore
+import com.example.data.mobile.onlinecash.OnlineSaleRecoveryException
 import com.example.data.mobile.onlinecash.OnlineCashOrchestrationResult
 import com.example.data.mobile.onlinecash.OnlineCashSaleOrchestrator
 import com.example.data.mobile.onlinecash.OnlineCashSaleReceipt
@@ -1854,6 +1857,476 @@ class StaffOnlineSaleViewModelTest {
         assertFalse(vm.uiState.value.saleDraft.isSubmitting)
         assertEquals(originalIntent, vm.uiState.value.saleDraft.preparedIntent)
     }
+
+    @Test
+    fun testDurableRecovery_writeFailure_zeroPost() = runTest(testDispatcher) {
+        var postCount = 0
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST) {
+                    postCount++
+                }
+                return TransportResponse(201, emptyMap(), "{}")
+            }
+        }
+
+        val failingRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore(throwOnSave = true)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = failingRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = failingRecoveryStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        // Write failure MUST fail-closed with ZERO network POST
+        assertEquals("Zero HTTP POST calls permitted when recovery persistence fails", 0, postCount)
+        assertFalse(vm.uiState.value.saleDraft.isSubmitting)
+        assertNotNull(vm.uiState.value.saleDraft.submissionError)
+        assertTrue(vm.uiState.value.saleDraft.submissionError!!.contains("storage error", ignoreCase = true) ||
+                vm.uiState.value.saleDraft.submissionError!!.contains("write failure", ignoreCase = true))
+    }
+
+    @Test
+    fun testDurableRecovery_processRecreate_lostAck_recoversHoldViaGetOnly() = runTest(testDispatcher) {
+        val sharedRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore()
+        var postCount = 0
+        var getStatusCount = 0
+        val capturedEventId = AtomicReference<String>()
+        val capturedDigest = AtomicReference<String>()
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST) {
+                    postCount++
+                    val obj = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                    val eventId = obj.require("client_event_id").asString()
+                    capturedEventId.set(eventId)
+                    // Return unverified payment (posted without payment reference) to simulate lost-ack hold
+                    val unverifiedJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "status": "posted",
+                            "official_invoice": {
+                                "company_id": "${companyUlid.value}",
+                                "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5999",
+                                "invoice_number": "INV-UNVERIFIED-1",
+                                "payment_id": null,
+                                "payment_receipt_number": null,
+                                "grand_total": "20.00",
+                                "posted_at": "2026-11-15T12:00:00Z"
+                            }
+                        }
+                    """.trimIndent()
+                    return TransportResponse(200, emptyMap(), unverifiedJson)
+                } else if (request.method == HttpMethod.GET) {
+                    getStatusCount++
+                    val eventId = capturedEventId.get() ?: "00000000-0000-0000-0000-000000000000"
+                    val digest = capturedDigest.get() ?: ""
+                    val statusJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "company_id": "${companyUlid.value}",
+                            "status": "posted",
+                            "payload_digest": "$digest",
+                            "official_invoice": {
+                                "company_id": "${companyUlid.value}",
+                                "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5999",
+                                "invoice_number": "INV-CONFIRMED-1",
+                                "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5888",
+                                "payment_receipt_number": "REC-9999",
+                                "grand_total": "20.00",
+                                "posted_at": "2026-11-15T12:05:00Z"
+                            }
+                        }
+                    """.trimIndent()
+                    return TransportResponse(200, emptyMap(), statusJson)
+                }
+                throw IllegalStateException("Unexpected request")
+            }
+        }
+
+        fun createVm(): StaffWorkspaceViewModel {
+            return StaffWorkspaceViewModel(
+                coordinator = fakeCoordinator,
+                configuredOrigin = "https://small-trader.example.com",
+                ioDispatcher = testDispatcher,
+                onlineCashEnabled = true,
+                currencyMinorUnitsOverride = 2,
+                recoveryStore = sharedRecoveryStore,
+                orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+                    val client = AndroidV2OnlineCashClient(
+                        transport = testTransport,
+                        baseOrigin = "https://small-trader.example.com"
+                    )
+                    OnlineCashSaleOrchestrator(
+                        client = client,
+                        tokenProvider = tokenProvider,
+                        scopeGenerationProvider = scopeGenProvider,
+                        onAuthDeniedLockScope = lockHook,
+                        activeScopeSupplier = scopeSupplier,
+                        recoveryStore = sharedRecoveryStore
+                    )
+                }
+            )
+        }
+
+        // 1. Process 1: Submit sale, enters unverified hold
+        val vm1 = createVm()
+        advanceUntilIdle()
+
+        vm1.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm1.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertEquals(1, postCount)
+        assertTrue(vm1.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNotNull(vm1.uiState.value.saleDraft.preparedIntent)
+        capturedDigest.set(vm1.uiState.value.saleDraft.preparedIntent!!.expectedNormativeProfileDigest.value)
+
+        // Durable store has pending record persisted BEFORE post
+        val stored = sharedRecoveryStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+        assertNotNull(stored)
+        assertEquals(capturedEventId.get(), stored!!.clientEventId.value)
+
+        // 2. Process Recreation: Simulate app killed / new VM instantiated
+        fakeCoordinator.currentGeneration = 5L // session generation advanced across restart
+        val vm2 = createVm()
+        advanceUntilIdle()
+
+        // Startup restores same-identity HOLD, rebinding to new generation 5L
+        assertTrue(vm2.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNotNull(vm2.uiState.value.saleDraft.preparedIntent)
+        assertEquals(5L, vm2.uiState.value.saleDraft.preparedIntent!!.scopeGeneration)
+        assertEquals(stored.clientEventId, vm2.uiState.value.saleDraft.preparedIntent!!.clientEventId)
+
+        // New sales are blocked while in HOLD
+        val product = createSampleProduct()
+        vm2.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        // Basket modifications are blocked
+        assertTrue(vm2.uiState.value.saleDraft.lines.isEmpty())
+
+        // 3. Status check recovers confirmed receipt via GET-ONLY (ZERO additional POSTs)
+        vm2.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        assertEquals("No additional POST calls allowed during status check", 1, postCount)
+        assertEquals("GET status check must be invoked", 1, getStatusCount)
+        assertFalse(vm2.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNotNull(vm2.uiState.value.saleDraft.receipt)
+        assertEquals("REC-9999", vm2.uiState.value.saleDraft.receipt!!.paymentReceiptNumber)
+
+        // Durable recovery record cleared from store on ConfirmedFinancialSuccess
+        assertNull(sharedRecoveryStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com"))
+    }
+
+    @Test
+    fun testDurableRecovery_companySwitch_isolation() = runTest(testDispatcher) {
+        val sharedRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore()
+        val companyA = companyUlid
+        val companyB = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5888")
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedRecoveryStore
+        )
+        advanceUntilIdle()
+
+        // Setup pending record for Company A
+        val eventA = ClientUuid.random()
+        val draft = StaffOnlineSaleDraft(
+            lines = listOf(
+                StaffOnlineSaleDraftLine(
+                    product = createSampleProduct(),
+                    productUnitId = unitUlid,
+                    conversionToBase = NonnegativeDecimalQuantity.of(1),
+                    quantity = PositiveDecimalQuantity.of(1),
+                    unitPrice = MoneyAmount("20.000000"),
+                    taxRateId = null,
+                    taxRate = TaxPercentage.ZERO,
+                    taxInclusive = true
+                )
+            )
+        )
+        val authorityA = StaffOnlineSaleAuthorityResolution.resolve(
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).bootstrap,
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).session,
+            currencyMinorUnitsOverride = 2
+        )
+        val intentA = StaffOnlineSaleRequestBuilder.prepareIntent(draft, authorityA, fakeCoordinator.currentGeneration, eventA)
+
+        val recordA = DurableOnlineSaleRecoveryRecord(
+            clientEventId = eventA,
+            expectedNormativeProfileDigest = intentA.expectedNormativeProfileDigest,
+            companyId = companyA,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            baseOrigin = "https://small-trader.example.com",
+            currency = "USD",
+            currencyMinorUnits = 2,
+            amount = MoneyAmount("20.00"),
+            grandTotal = MoneyAmount("20.00"),
+            rawWireBytes = intentA.rawWireBytes,
+            createdAt = "2026-11-15T12:00:00Z"
+        )
+        sharedRecoveryStore.savePendingSale(recordA)
+
+        // Trigger load for Company A -> restores HOLD
+        val ready = fakeCoordinator.authState as StaffAuthState.ReadReady
+        fakeCoordinator.authState = ready.copy(session = ready.session.copy(selectedCompanyId = companyA))
+        vm.selectTab(StaffWorkspaceTab.CASH_SALE)
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertEquals(eventA, vm.uiState.value.saleDraft.preparedIntent?.clientEventId)
+
+        // Switch to Company B
+        val readyB = ready.copy(
+            session = ready.session.copy(selectedCompanyId = companyB),
+            bootstrap = ready.bootstrap.copy(companyId = companyB)
+        )
+        fakeCoordinator.authState = readyB
+        vm.switchCompany(companyB.value)
+        advanceUntilIdle()
+
+        // Company B MUST NOT see Company A's pending hold!
+        assertFalse(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNull(vm.uiState.value.saleDraft.preparedIntent)
+
+        // Switch back to Company A
+        fakeCoordinator.authState = ready.copy(session = ready.session.copy(selectedCompanyId = companyA))
+        vm.switchCompany(companyA.value)
+        advanceUntilIdle()
+
+        // Company A pending HOLD restored cleanly!
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertEquals(eventA, vm.uiState.value.saleDraft.preparedIntent?.clientEventId)
+    }
+
+    @Test
+    fun testDurableRecovery_logoutAndAuthLock_preservesRecord() = runTest(testDispatcher) {
+        val sharedRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore()
+        val eventId = ClientUuid.random()
+
+        val draft = StaffOnlineSaleDraft(
+            lines = listOf(
+                StaffOnlineSaleDraftLine(
+                    product = createSampleProduct(),
+                    productUnitId = unitUlid,
+                    conversionToBase = NonnegativeDecimalQuantity.of(1),
+                    quantity = PositiveDecimalQuantity.of(1),
+                    unitPrice = MoneyAmount("20.000000"),
+                    taxRateId = null,
+                    taxRate = TaxPercentage.ZERO,
+                    taxInclusive = true
+                )
+            )
+        )
+        val authority = StaffOnlineSaleAuthorityResolution.resolve(
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).bootstrap,
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).session,
+            currencyMinorUnitsOverride = 2
+        )
+        val intent = StaffOnlineSaleRequestBuilder.prepareIntent(draft, authority, 1L, eventId)
+
+        val record = DurableOnlineSaleRecoveryRecord(
+            clientEventId = eventId,
+            expectedNormativeProfileDigest = intent.expectedNormativeProfileDigest,
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            baseOrigin = "https://small-trader.example.com",
+            currency = "USD",
+            currencyMinorUnits = 2,
+            amount = MoneyAmount("20.00"),
+            grandTotal = MoneyAmount("20.00"),
+            rawWireBytes = intent.rawWireBytes,
+            createdAt = "2026-11-15T12:00:00Z"
+        )
+        sharedRecoveryStore.savePendingSale(record)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedRecoveryStore
+        )
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+
+        // Logout
+        vm.logout()
+        advanceUntilIdle()
+
+        // In-memory UI state is cleared
+        assertEquals(StaffWorkspacePhase.SIGN_IN, vm.uiState.value.phase)
+        assertFalse(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+
+        // Record in durable storage remains preserved!
+        val preserved = sharedRecoveryStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+        assertNotNull(preserved)
+        assertEquals(eventId, preserved!!.clientEventId)
+    }
+
+    @Test
+    fun testDurableRecovery_clearConfirmed_doesNotEraseMismatchedEvent() {
+        val sharedRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore()
+        val eventA = ClientUuid.random()
+        val eventB = ClientUuid.random()
+
+        val recordA = DurableOnlineSaleRecoveryRecord(
+            clientEventId = eventA,
+            expectedNormativeProfileDigest = PayloadDigest.parse("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            baseOrigin = "https://small-trader.example.com",
+            currency = "USD",
+            currencyMinorUnits = 2,
+            amount = MoneyAmount("10.00"),
+            grandTotal = MoneyAmount("10.00"),
+            rawWireBytes = byteArrayOf(1, 2, 3),
+            createdAt = "2026-11-15T12:00:00Z"
+        )
+        sharedRecoveryStore.savePendingSale(recordA)
+
+        // Clearing non-matching eventB does not erase recordA
+        sharedRecoveryStore.clearPendingSale(eventB)
+
+        assertNotNull(sharedRecoveryStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com"))
+        assertEquals(1, sharedRecoveryStore.listAllRecords().size)
+    }
+
+    @Test
+    fun testDurableRecovery_restoredHold_postedWrongDigest_staysHold() = runTest(testDispatcher) {
+        val sharedRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore()
+        val eventId = ClientUuid.random()
+
+        val draft = StaffOnlineSaleDraft(
+            lines = listOf(
+                StaffOnlineSaleDraftLine(
+                    product = createSampleProduct(),
+                    productUnitId = unitUlid,
+                    conversionToBase = NonnegativeDecimalQuantity.of(1),
+                    quantity = PositiveDecimalQuantity.of(1),
+                    unitPrice = MoneyAmount("20.000000"),
+                    taxRateId = null,
+                    taxRate = TaxPercentage.ZERO,
+                    taxInclusive = true
+                )
+            )
+        )
+        val authority = StaffOnlineSaleAuthorityResolution.resolve(
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).bootstrap,
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).session,
+            currencyMinorUnitsOverride = 2
+        )
+        val intent = StaffOnlineSaleRequestBuilder.prepareIntent(draft, authority, 1L, eventId)
+
+        val record = DurableOnlineSaleRecoveryRecord(
+            clientEventId = eventId,
+            expectedNormativeProfileDigest = intent.expectedNormativeProfileDigest,
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            baseOrigin = "https://small-trader.example.com",
+            currency = "USD",
+            currencyMinorUnits = 2,
+            amount = MoneyAmount("20.00"),
+            grandTotal = MoneyAmount("20.00"),
+            rawWireBytes = intent.rawWireBytes,
+            createdAt = "2026-11-15T12:00:00Z"
+        )
+        sharedRecoveryStore.savePendingSale(record)
+
+        val wrongDigest = PayloadDigest.parse("sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                // Server returns official invoice with mismatched digest
+                val responseJson = """
+                    {
+                        "client_event_id": "${eventId.value}",
+                        "company_id": "${companyUlid.value}",
+                        "status": "posted",
+                        "payload_digest": "${wrongDigest.value}",
+                        "official_invoice": {
+                            "company_id": "${companyUlid.value}",
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5999",
+                            "invoice_number": "INV-WRONG-DIGEST",
+                            "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5888",
+                            "payment_receipt_number": "REC-WRONG",
+                            "grand_total": "20.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        }
+                    }
+                """.trimIndent()
+                return TransportResponse(200, emptyMap(), responseJson)
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = sharedRecoveryStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        // Check status with mismatched digest
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        // Mismatched digest MUST preserve HOLD and keep record in recovery store
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertFalse(vm.uiState.value.saleDraft.isSubmitting)
+        assertNotNull(vm.uiState.value.saleDraft.submissionError)
+        assertTrue(vm.uiState.value.saleDraft.submissionError!!.contains("mismatch", ignoreCase = true))
+        assertNotNull(sharedRecoveryStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com"))
+    }
 }
 
 /**
@@ -1971,3 +2444,39 @@ private class TestStaffCoordinator(
         )
     }
 }
+
+/**
+ * Hermetic in-memory implementation of DurableOnlineSaleRecoveryStore for testing.
+ */
+private class InMemoryDurableOnlineSaleRecoveryStore(
+    var throwOnSave: Boolean = false
+) : DurableOnlineSaleRecoveryStore {
+    private val records = mutableMapOf<ClientUuid, DurableOnlineSaleRecoveryRecord>()
+
+    override fun savePendingSale(record: DurableOnlineSaleRecoveryRecord) {
+        if (throwOnSave) {
+            throw OnlineSaleRecoveryException("Simulated disk write failure")
+        }
+        records[record.clientEventId] = record
+    }
+
+    override fun getPendingSale(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        baseOrigin: String
+    ): DurableOnlineSaleRecoveryRecord? {
+        return records.values.firstOrNull {
+            it.companyId == companyId && it.actorId == actorId && it.deviceId == deviceId && it.baseOrigin == baseOrigin
+        }
+    }
+
+    override fun clearPendingSale(clientEventId: ClientUuid) {
+        records.remove(clientEventId)
+    }
+
+    override fun listAllRecords(): List<DurableOnlineSaleRecoveryRecord> {
+        return records.values.toList()
+    }
+}
+
