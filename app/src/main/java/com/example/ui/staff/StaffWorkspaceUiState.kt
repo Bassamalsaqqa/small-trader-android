@@ -114,6 +114,7 @@ data class StaffWorkspaceUiState(
     // Online Cash Sale Draft state
     val saleDraft: StaffOnlineSaleDraft = StaffOnlineSaleDraft(),
     val saleAuthority: StaffOnlineSaleAuthorityResolution? = null,
+    val availableTaxes: List<com.example.data.mobile.readclient.BootstrapTax> = emptyList(),
     val isOnlineCashEnabled: Boolean = false
 ) {
     val isQueueProcessingReady: Boolean

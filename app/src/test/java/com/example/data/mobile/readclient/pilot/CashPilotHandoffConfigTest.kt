@@ -1,8 +1,17 @@
 package com.example.data.mobile.readclient.pilot
 import com.example.data.mobile.contract.ClientUuid
+import com.example.data.mobile.contract.PayloadDigest
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.contract.StrictJsonNull
+import com.example.data.mobile.onlinecash.AndroidV2OnlineCashClient
+import com.example.data.mobile.onlinecash.OnlineCashStatusResult
+import com.example.data.mobile.onlinecash.OnlineCashSubmitResult
+import com.example.data.mobile.readclient.EndpointSecurity
+import com.example.data.mobile.readclient.HttpMethod
+import com.example.data.mobile.readclient.ReadClientTransport
+import com.example.data.mobile.readclient.TransportRequest
+import com.example.data.mobile.readclient.TransportResponse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -1542,5 +1551,279 @@ class CashPilotHandoffConfigTest {
             wrapperFile.parentFile?.mkdirs()
             wrapperFile.writeText(wrapperContent, Charsets.UTF_8)
         }
+    }
+
+    @Test
+    fun testDeriveBareOrigin_validApiBasePathAndBareOrigins() {
+        // 1. With actual handoff API prefix and port
+        assertEquals("https://127.0.0.1:18443", CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:18443/api/mobile/v2"))
+        assertEquals("https://127.0.0.1:18443", CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:18443/api/mobile/v2/"))
+        assertEquals("https://staging.smalltrader.example:8443", CashPilotHandoffConfig.deriveBareOrigin("https://staging.smalltrader.example:8443/api/mobile/v2"))
+        assertEquals("https://staging.smalltrader.example:8443", CashPilotHandoffConfig.deriveBareOrigin("https://staging.smalltrader.example:8443/api/mobile/v2/"))
+
+        // 2. With actual handoff API prefix without port
+        assertEquals("https://staging.smalltrader.example", CashPilotHandoffConfig.deriveBareOrigin("https://staging.smalltrader.example/api/mobile/v2"))
+        assertEquals("https://staging.smalltrader.example", CashPilotHandoffConfig.deriveBareOrigin("https://staging.smalltrader.example/api/mobile/v2/"))
+
+        // 3. Already bare origin with port
+        assertEquals("https://127.0.0.1:18443", CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:18443"))
+        assertEquals("https://127.0.0.1:18443", CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:18443/"))
+        assertEquals("https://staging.smalltrader.example:8443", CashPilotHandoffConfig.deriveBareOrigin("https://staging.smalltrader.example:8443"))
+        assertEquals("https://staging.smalltrader.example:8443", CashPilotHandoffConfig.deriveBareOrigin("https://staging.smalltrader.example:8443/"))
+
+        // 4. Already bare origin without port
+        assertEquals("https://staging.smalltrader.example", CashPilotHandoffConfig.deriveBareOrigin("https://staging.smalltrader.example"))
+        assertEquals("https://staging.smalltrader.example", CashPilotHandoffConfig.deriveBareOrigin("https://staging.smalltrader.example/"))
+
+        // 5. Scheme and host case insensitivity normalization
+        assertEquals("https://staging.smalltrader.example:8443", CashPilotHandoffConfig.deriveBareOrigin("HTTPS://Staging.SmallTrader.Example:8443/api/mobile/v2"))
+        assertEquals("https://staging.smalltrader.example:8443", CashPilotHandoffConfig.deriveBareOrigin("Https://STAGING.SMALLTRADER.EXAMPLE:8443/api/mobile/v2/"))
+    }
+
+    @Test
+    fun testDeriveBareOrigin_rejectsNegativeInputs() {
+        // Insecure HTTP prohibited
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("http://127.0.0.1:18443/api/mobile/v2")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("http://staging.smalltrader.example/api/mobile/v2")
+        }
+
+        // Userinfo prohibited
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("https://user:secret@127.0.0.1:18443/api/mobile/v2")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("https://user@127.0.0.1:18443/api/mobile/v2")
+        }
+
+        // Query parameters prohibited
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:18443/api/mobile/v2?query=1")
+        }
+
+        // Fragment identifier prohibited
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:18443/api/mobile/v2#fragment")
+        }
+
+        // Arbitrary / wrong path prefixes prohibited (never silently stripped)
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:18443/api/v1")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:18443/api/mobile/v1")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:18443/api/mobile/v3")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:18443/api/mobile/v2/extra")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:18443/sales/commit")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:18443/unknown/prefix")
+        }
+
+        // Malformed / invalid ports
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:0/api/mobile/v2")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:65536/api/mobile/v2")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:70000/api/mobile/v2")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("https://127.0.0.1:notaport/api/mobile/v2")
+        }
+
+        // Blank and malformed URI
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("   ")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CashPilotHandoffConfig.deriveBareOrigin("not-a-valid-uri")
+        }
+    }
+
+    @Test
+    fun testEndpointSecurity_directlyRejectsPathSegments_invariantPreserved() {
+        // Direct EndpointSecurity.validateBaseOrigin must still reject any base origin with a path segment
+        val ex1 = assertThrows(IllegalArgumentException::class.java) {
+            EndpointSecurity.validateBaseOrigin("https://127.0.0.1:18443/api/mobile/v2")
+        }
+        assertTrue("Expected path segment rejection message", ex1.message?.contains("path segment") == true)
+
+        val ex2 = assertThrows(IllegalArgumentException::class.java) {
+            EndpointSecurity.validateBaseOrigin("https://staging.smalltrader.example/api/mobile/v2")
+        }
+        assertTrue("Expected path segment rejection message", ex2.message?.contains("path segment") == true)
+
+        // Bare origin passes cleanly through EndpointSecurity
+        val validBare = EndpointSecurity.validateBaseOrigin("https://127.0.0.1:18443")
+        assertEquals("https://127.0.0.1:18443", validBare)
+    }
+
+    @Test
+    fun testReadClientTransport_requestCapture_verifiesSinglePostAndGet_noDuplicatedPrefix() {
+        val testCompanyId = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789A")
+        val testClientEventId = ClientUuid.parse("3fa85f64-5717-4562-b3fc-2c963f66afa6")
+        val testDigest = PayloadDigest.parse("sha256:d442ce49a7609a9a42bb5165990d481d1c7c563cb8030403487099a9919728d9")
+        val testToken = "st_m_test_valid_session_token_1234567890"
+        val testCanonicalBytes = """{"client_event_id":"3fa85f64-5717-4562-b3fc-2c963f66afa6","currency":"ILS"}""".toByteArray(Charsets.UTF_8)
+
+        val commitJsonResponse = """{
+            "client_event_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "status": "posted",
+            "invoice_id": "01JCV8X9ME7890123456789ABC",
+            "invoice_number": "INV-2026-00042",
+            "payment_id": "01JCV8X9MFGHJKMNPQRSTVWXYZ",
+            "payment_receipt_number": "RCT-2026-00042",
+            "grand_total": "58.000000",
+            "amount_paid": "58.000000",
+            "change_returned": "0.000000",
+            "posted_at": "2026-11-10T12:01:05Z"
+        }""".trimIndent()
+
+        val statusJsonResponse = """{
+            "client_event_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "company_id": "01JCV8X9M2NQW3TYZ4R5S6789A",
+            "status": "posted",
+            "payload_digest": "sha256:d442ce49a7609a9a42bb5165990d481d1c7c563cb8030403487099a9919728d9",
+            "official_invoice": {
+                "invoice_id": "01JCV8X9ME7890123456789ABC",
+                "invoice_number": "INV-2026-00042",
+                "payment_id": "01JCV8X9MFGHJKMNPQRSTVWXYZ",
+                "payment_receipt_number": "RCT-2026-00042",
+                "grand_total": "58.000000",
+                "posted_at": "2026-11-10T12:01:05Z"
+            },
+            "conflict": null,
+            "queried_at": "2026-11-10T12:05:00Z"
+        }""".trimIndent()
+
+        // --- SUB-SCENARIO A: Derived from endpoint URL with API base path (/api/mobile/v2) ---
+        val rawEndpointWithPrefix = "https://127.0.0.1:18443/api/mobile/v2"
+        val derivedOrigin = CashPilotHandoffConfig.deriveBareOrigin(rawEndpointWithPrefix)
+        assertEquals("https://127.0.0.1:18443", derivedOrigin)
+
+        val capturedRequests = mutableListOf<TransportRequest>()
+        val capturingTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                capturedRequests.add(request)
+                return when (request.method) {
+                    HttpMethod.POST -> TransportResponse(
+                        statusCode = 201,
+                        headers = mapOf("Content-Type" to "application/json"),
+                        body = commitJsonResponse
+                    )
+                    HttpMethod.GET -> TransportResponse(
+                        statusCode = 200,
+                        headers = mapOf("Content-Type" to "application/json"),
+                        body = statusJsonResponse
+                    )
+                }
+            }
+        }
+
+        val client = AndroidV2OnlineCashClient(
+            transport = capturingTransport,
+            baseOrigin = derivedOrigin,
+            allowHttpLoopback = false
+        )
+
+        // 1. Submit online cash sale: verifies POST /api/mobile/v2/companies/{id}/sales/online-cash exactly once
+        val submitResult = client.submitSale(
+            token = testToken,
+            companyId = testCompanyId,
+            clientEventId = testClientEventId,
+            expectedPayloadDigest = testDigest,
+            canonicalBytes = testCanonicalBytes
+        )
+        assertTrue("Submit sale failed: $submitResult", submitResult is OnlineCashSubmitResult.Created)
+        assertEquals(1, capturedRequests.size)
+
+        val postRequest = capturedRequests[0]
+        assertEquals(HttpMethod.POST, postRequest.method)
+        assertEquals("/api/mobile/v2/companies/${testCompanyId.value}/sales/online-cash", postRequest.path)
+        assertFalse("Path must not contain duplicated prefix", postRequest.path.contains("/api/mobile/v2/api/mobile/v2"))
+        assertEquals("https://127.0.0.1:18443", postRequest.baseOrigin)
+
+        // 2. Check offline event status: verifies GET /api/mobile/v2/companies/{id}/offline-events/{id}/status exactly once
+        val statusResult = client.checkStatus(
+            token = testToken,
+            companyId = testCompanyId,
+            clientEventId = testClientEventId
+        )
+        assertTrue("Status check failed: $statusResult", statusResult is OnlineCashStatusResult.Posted)
+        assertEquals(2, capturedRequests.size)
+
+        val getRequest = capturedRequests[1]
+        assertEquals(HttpMethod.GET, getRequest.method)
+        assertEquals("/api/mobile/v2/companies/${testCompanyId.value}/offline-events/${testClientEventId.value}/status", getRequest.path)
+        assertFalse("Path must not contain duplicated prefix", getRequest.path.contains("/api/mobile/v2/api/mobile/v2"))
+        assertEquals("https://127.0.0.1:18443", getRequest.baseOrigin)
+
+        // --- SUB-SCENARIO B: Derived from already bare origin (https://127.0.0.1:18443) ---
+        val alreadyBareUrl = "https://127.0.0.1:18443"
+        val derivedFromBare = CashPilotHandoffConfig.deriveBareOrigin(alreadyBareUrl)
+        assertEquals("https://127.0.0.1:18443", derivedFromBare)
+
+        val capturedRequestsBare = mutableListOf<TransportRequest>()
+        val capturingTransportBare = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                capturedRequestsBare.add(request)
+                return when (request.method) {
+                    HttpMethod.POST -> TransportResponse(
+                        statusCode = 201,
+                        headers = mapOf("Content-Type" to "application/json"),
+                        body = commitJsonResponse
+                    )
+                    HttpMethod.GET -> TransportResponse(
+                        statusCode = 200,
+                        headers = mapOf("Content-Type" to "application/json"),
+                        body = statusJsonResponse
+                    )
+                }
+            }
+        }
+
+        val clientBare = AndroidV2OnlineCashClient(
+            transport = capturingTransportBare,
+            baseOrigin = derivedFromBare,
+            allowHttpLoopback = false
+        )
+
+        val submitResultBare = clientBare.submitSale(
+            token = testToken,
+            companyId = testCompanyId,
+            clientEventId = testClientEventId,
+            expectedPayloadDigest = testDigest,
+            canonicalBytes = testCanonicalBytes
+        )
+        assertTrue("Bare submit failed: $submitResultBare", submitResultBare is OnlineCashSubmitResult.Created)
+        assertEquals(1, capturedRequestsBare.size)
+        assertEquals(HttpMethod.POST, capturedRequestsBare[0].method)
+        assertEquals("/api/mobile/v2/companies/${testCompanyId.value}/sales/online-cash", capturedRequestsBare[0].path)
+        assertEquals("https://127.0.0.1:18443", capturedRequestsBare[0].baseOrigin)
+
+        val statusResultBare = clientBare.checkStatus(
+            token = testToken,
+            companyId = testCompanyId,
+            clientEventId = testClientEventId
+        )
+        assertTrue("Bare status failed: $statusResultBare", statusResultBare is OnlineCashStatusResult.Posted)
+        assertEquals(2, capturedRequestsBare.size)
+        assertEquals(HttpMethod.GET, capturedRequestsBare[1].method)
+        assertEquals("/api/mobile/v2/companies/${testCompanyId.value}/offline-events/${testClientEventId.value}/status", capturedRequestsBare[1].path)
+        assertEquals("https://127.0.0.1:18443", capturedRequestsBare[1].baseOrigin)
     }
 }

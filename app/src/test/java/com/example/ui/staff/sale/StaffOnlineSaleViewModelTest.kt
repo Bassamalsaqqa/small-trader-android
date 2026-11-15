@@ -8,7 +8,11 @@ import com.example.data.mobile.contract.PositiveDecimalQuantity
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.TaxPercentage
 import com.example.data.mobile.onlinecash.AndroidV2OnlineCashClient
+import com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryRecord
+import com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStore
+import com.example.data.mobile.onlinecash.OnlineSaleRecoveryException
 import com.example.data.mobile.onlinecash.OnlineCashOrchestrationResult
+import com.example.data.mobile.contract.v2.OnlineSaleContext
 import com.example.data.mobile.onlinecash.OnlineCashSaleOrchestrator
 import com.example.data.mobile.onlinecash.OnlineCashSaleReceipt
 import com.example.data.mobile.onlinecash.OnlineSaleScope
@@ -56,6 +60,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -76,10 +81,12 @@ class StaffOnlineSaleViewModelTest {
     private val unitUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5FA6")
 
     private lateinit var fakeCoordinator: TestStaffCoordinator
+    private lateinit var defaultRecoveryStore: InMemoryDurableOnlineSaleRecoveryStore
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        defaultRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore()
         fakeCoordinator = TestStaffCoordinator(
             companyId = companyUlid,
             actorId = actorUlid,
@@ -124,7 +131,8 @@ class StaffOnlineSaleViewModelTest {
             configuredOrigin = "https://small-trader.example.com",
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
-            currencyMinorUnitsOverride = 2
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore
         )
         advanceUntilIdle()
 
@@ -194,7 +202,8 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -204,7 +213,9 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -263,7 +274,8 @@ class StaffOnlineSaleViewModelTest {
             authDenialListener = authDenialListener,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 lockHookCaptured = lockHook
                 val dummyClient = AndroidV2OnlineCashClient(
                     transport = object : ReadClientTransport {
@@ -278,7 +290,9 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -307,7 +321,8 @@ class StaffOnlineSaleViewModelTest {
             configuredOrigin = "https://small-trader.example.com",
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
-            currencyMinorUnitsOverride = 2
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore
         )
         advanceUntilIdle()
 
@@ -341,7 +356,8 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -351,7 +367,9 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -400,7 +418,8 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -410,7 +429,9 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -481,7 +502,8 @@ class StaffOnlineSaleViewModelTest {
             authDenialListener = authDenialListener,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -491,7 +513,9 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -537,7 +561,8 @@ class StaffOnlineSaleViewModelTest {
             authDenialListener = authDenialListener,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -547,7 +572,9 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -598,7 +625,8 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -608,7 +636,9 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -684,7 +714,8 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -694,7 +725,9 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = { if (tokenAvailable) tokenProvider() else null },
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -761,7 +794,8 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -771,7 +805,9 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -789,6 +825,2532 @@ class StaffOnlineSaleViewModelTest {
         assertNotNull(vm.uiState.value.saleDraft.receipt)
         assertEquals("INV-2026-003", vm.uiState.value.saleDraft.receipt?.invoiceNumber)
     }
+
+    @Test
+    fun testSetLineTax_validatesCurrentBootstrapTaxes() = runTest(testDispatcher) {
+        val taxId1 = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5TX1")
+        val validTax = BootstrapTax(
+            id = taxId1,
+            code = "VAT15",
+            name = "VAT 15%",
+            rate = TaxPercentage("15.000000"),
+            calculation = "exclusive",
+            isDefault = true
+        )
+        val coordinatorWithTax = TestStaffCoordinator(
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            warehouseId = warehouseUlid,
+            cashAccountId = cashAccountUlid,
+            walkInId = walkInUlid,
+            taxes = listOf(validTax)
+        )
+        val vm = StaffWorkspaceViewModel(
+            coordinator = coordinatorWithTax,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore
+        )
+        advanceUntilIdle()
+
+        // Verify available taxes populated in UI state
+        assertEquals(1, vm.uiState.value.availableTaxes.size)
+        assertEquals(validTax, vm.uiState.value.availableTaxes[0])
+
+        // Add product without tax assignment (explicitNoTax = false)
+        val product = createSampleProduct(unitPrice = "40.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = false)
+        assertEquals(1, vm.uiState.value.saleDraft.lines.size)
+        val line = vm.uiState.value.saleDraft.lines[0]
+        assertNull("Unassigned tax must be null, never automatically zero", line.taxRate)
+        assertNull(line.taxRateId)
+        assertNull(line.taxInclusive)
+        assertTrue("Unassigned line must have unresolved tax contract", line.hasUnresolvedTaxContract)
+
+        // Set valid tax from current bootstrap
+        vm.setLineTax(line.lineId, validTax)
+        val updatedLine = vm.uiState.value.saleDraft.lines[0]
+        assertEquals(validTax.id, updatedLine.taxRateId)
+        assertEquals(validTax.rate, updatedLine.taxRate)
+        assertEquals(false, updatedLine.taxInclusive)
+        assertFalse(updatedLine.hasUnresolvedTaxContract)
+
+        // Attempt setting foreign tax not in bootstrap -> must be rejected
+        val foreignTax = BootstrapTax(
+            id = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5TX9"),
+            code = "FOREIGN",
+            name = "Foreign Tax",
+            rate = TaxPercentage("10.000000"),
+            calculation = "exclusive",
+            isDefault = false
+        )
+        vm.setLineTax(line.lineId, foreignTax)
+        val lineAfterForeign = vm.uiState.value.saleDraft.lines[0]
+        assertEquals(validTax.id, lineAfterForeign.taxRateId)
+        assertEquals(validTax.rate, lineAfterForeign.taxRate)
+
+        // Attempt setting tax with mismatched rate/calculation -> must be rejected
+        val mismatchedTax = validTax.copy(rate = TaxPercentage("5.000000"))
+        vm.setLineTax(line.lineId, mismatchedTax)
+        val lineAfterMismatched = vm.uiState.value.saleDraft.lines[0]
+        assertEquals(validTax.id, lineAfterMismatched.taxRateId)
+        assertEquals(validTax.rate, lineAfterMismatched.taxRate)
+    }
+
+    @Test
+    fun testSetLineExplicitNoTax_setsCanonicalZeroTax() = runTest(testDispatcher) {
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "20.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = false)
+        val line = vm.uiState.value.saleDraft.lines[0]
+        assertNull(line.taxRate)
+        assertTrue(line.hasUnresolvedTaxContract)
+
+        // Explicitly set No Tax control
+        vm.setLineExplicitNoTax(line.lineId)
+        val noTaxLine = vm.uiState.value.saleDraft.lines[0]
+        assertNull(noTaxLine.taxRateId)
+        assertEquals("0.000000", noTaxLine.taxRate?.value?.toPlainString())
+        assertEquals(false, noTaxLine.taxInclusive)
+        assertFalse(noTaxLine.hasUnresolvedTaxContract)
+    }
+
+    @Test
+    fun testPaymentUnverifiedHold_checkPaymentStatus_recoversWhenPaymentConfirmed() = runTest(testDispatcher) {
+        var statusCheckCount = 0
+        val capturedRequests = mutableListOf<TransportRequest>()
+        var statusResponseDigest: String? = null
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                capturedRequests.add(request)
+                if (request.method == HttpMethod.POST) {
+                    val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                    val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                    val unverifiedJson = """
+                        {
+                            "client_event_id": "$clientEventId",
+                            "status": "posted",
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                            "invoice_number": "INV-HOLD-01",
+                            "payment_id": null,
+                            "payment_receipt_number": null,
+                            "grand_total": "25.00",
+                            "amount_paid": "0.00",
+                            "change_returned": "0.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(201, emptyMap(), unverifiedJson)
+                } else if (request.method == HttpMethod.GET) {
+                    statusCheckCount++
+                    val parts = request.path.split("/")
+                    val eventId = parts[parts.size - 2]
+                    val digestValue = statusResponseDigest
+                        ?: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                    val statusJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "company_id": "${companyUlid.value}",
+                            "status": "posted",
+                            "payload_digest": "$digestValue",
+                            "official_invoice": {
+                                "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                                "invoice_number": "INV-HOLD-01",
+                                "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5PA1",
+                                "payment_receipt_number": "RCT-001",
+                                "grand_total": "25.00",
+                                "posted_at": "2026-11-15T12:00:00Z"
+                            },
+                            "conflict": null,
+                            "queried_at": "2026-11-15T12:05:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(200, emptyMap(), statusJson)
+                }
+                throw IllegalStateException("Unexpected request: ${request.method} ${request.path}")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "25.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+
+        // 1. Submit -> enters PaymentUnverifiedHold
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNull(vm.uiState.value.saleDraft.receipt)
+        assertNotNull(vm.uiState.value.saleDraft.unverifiedReceipt)
+        val expectedDigest = vm.uiState.value.saleDraft.preparedIntent!!.expectedNormativeProfileDigest.value
+        statusResponseDigest = expectedDigest
+
+        // 2. Trigger checkOnlineCashSaleStatus() -> GET request confirms payment with matching non-null digest
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        assertEquals(1, statusCheckCount)
+        val draft = vm.uiState.value.saleDraft
+        assertFalse("Hold must be released", draft.isPaymentUnverifiedHold)
+        assertFalse(draft.isSubmitting)
+        assertNull(draft.unverifiedReceipt)
+        assertNotNull("Confirmed receipt must be set", draft.receipt)
+        assertEquals("INV-HOLD-01", draft.receipt?.invoiceNumber)
+        assertEquals("01ARZ3NDEKTSV4RRFFQ69G5PA1", draft.receipt?.paymentId?.value)
+        assertEquals("RCT-001", draft.receipt?.paymentReceiptNumber)
+        assertTrue("Basket lines must be cleared on confirmed payment", draft.lines.isEmpty())
+        assertNull(draft.preparedIntent)
+    }
+
+    @Test
+    fun testPaymentUnverifiedHold_checkPaymentStatus_staysOnHoldWhenPaymentStillNull() = runTest(testDispatcher) {
+        val capturedRequests = mutableListOf<TransportRequest>()
+        var statusResponseDigest: String? = null
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                capturedRequests.add(request)
+                if (request.method == HttpMethod.POST) {
+                    val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                    val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                    val unverifiedJson = """
+                        {
+                            "client_event_id": "$clientEventId",
+                            "status": "posted",
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                            "invoice_number": "INV-HOLD-02",
+                            "payment_id": null,
+                            "payment_receipt_number": null,
+                            "grand_total": "30.00",
+                            "amount_paid": "0.00",
+                            "change_returned": "0.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(201, emptyMap(), unverifiedJson)
+                } else if (request.method == HttpMethod.GET) {
+                    val parts = request.path.split("/")
+                    val eventId = parts[parts.size - 2]
+                    val digestValue = statusResponseDigest
+                        ?: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                    val statusJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "company_id": "${companyUlid.value}",
+                            "status": "posted",
+                            "payload_digest": "$digestValue",
+                            "official_invoice": {
+                                "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                                "invoice_number": "INV-HOLD-02",
+                                "payment_id": null,
+                                "payment_receipt_number": null,
+                                "grand_total": "30.00",
+                                "posted_at": "2026-11-15T12:00:00Z"
+                            },
+                            "conflict": null,
+                            "queried_at": "2026-11-15T12:05:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(200, emptyMap(), statusJson)
+                }
+                throw IllegalStateException("Unexpected request: ${request.method} ${request.path}")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "30.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        val originalIntent = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(originalIntent)
+        statusResponseDigest = originalIntent!!.expectedNormativeProfileDigest.value
+
+        // Status check -> still null payment
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        val draft = vm.uiState.value.saleDraft
+        assertTrue("Must remain on hold when payment still unverified", draft.isPaymentUnverifiedHold)
+        assertFalse(draft.isSubmitting)
+        assertNull("Confirmed receipt must still be null", draft.receipt)
+        assertNotNull(draft.unverifiedReceipt)
+        assertEquals(1, draft.lines.size)
+        assertEquals(originalIntent, draft.preparedIntent)
+    }
+
+    @Test
+    fun testPaymentUnverifiedHold_checkPaymentStatus_neverPostsOrGeneratesNewUuid() = runTest(testDispatcher) {
+        val capturedRequests = mutableListOf<TransportRequest>()
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                capturedRequests.add(request)
+                if (request.method == HttpMethod.POST) {
+                    val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                    val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                    val unverifiedJson = """
+                        {
+                            "client_event_id": "$clientEventId",
+                            "status": "posted",
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                            "invoice_number": "INV-HOLD-03",
+                            "payment_id": null,
+                            "payment_receipt_number": null,
+                            "grand_total": "15.00",
+                            "amount_paid": "0.00",
+                            "change_returned": "0.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(201, emptyMap(), unverifiedJson)
+                } else if (request.method == HttpMethod.GET) {
+                    val parts = request.path.split("/")
+                    val eventId = parts[parts.size - 2]
+                    val statusJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "company_id": "${companyUlid.value}",
+                            "status": "unknown",
+                            "payload_digest": null,
+                            "official_invoice": null,
+                            "conflict": null,
+                            "queried_at": "2026-11-15T12:05:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(200, emptyMap(), statusJson)
+                }
+                throw IllegalStateException("Unexpected request: ${request.method} ${request.path}")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "15.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        val postRequestsBefore = capturedRequests.filter { it.method == HttpMethod.POST }.size
+        assertEquals(1, postRequestsBefore)
+        val originalClientEventId = vm.uiState.value.saleDraft.preparedIntent!!.clientEventId
+
+        // Call checkOnlineCashSaleStatus multiple times
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        // Verify ZERO additional POSTs occurred
+        val postRequestsAfter = capturedRequests.filter { it.method == HttpMethod.POST }.size
+        assertEquals("checkOnlineCashSaleStatus must NEVER send POST requests", 1, postRequestsAfter)
+
+        // Verify GET requests were sent for status lookup with exact retained clientEventId
+        val getRequests = capturedRequests.filter { it.method == HttpMethod.GET }
+        assertEquals(2, getRequests.size)
+        getRequests.forEach { req ->
+            assertTrue(
+                "GET request path must contain original clientEventId ${originalClientEventId.value}",
+                req.path.contains(originalClientEventId.value)
+            )
+        }
+
+        // Verify clientEventId is identical
+        assertEquals(originalClientEventId, vm.uiState.value.saleDraft.preparedIntent!!.clientEventId)
+    }
+
+    @Test
+    fun testOnCleared_cancelsSaleJobAndClearsCachedOrchestrator() = runTest(testDispatcher) {
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore
+        )
+        advanceUntilIdle()
+
+        // Populate orchestrator cache
+        val orch = vm.getOrchestrator()
+        assertNotNull(orch)
+        assertTrue(vm.hasCachedOrchestratorForTesting())
+
+        // Clear view model
+        vm.performOnClearedForTesting()
+
+        // Cached orchestrator must be null and sale job not active
+        assertFalse(vm.hasCachedOrchestratorForTesting())
+        assertFalse(vm.isSaleJobActiveForTesting())
+    }
+
+    @Test
+    fun testAuthoritativeBootstrapCurrencyMinorUnitsTakesPrecedenceOverOverride() = runTest(testDispatcher) {
+        val coordinatorWithCurrency = TestStaffCoordinator(
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            warehouseId = warehouseUlid,
+            cashAccountId = cashAccountUlid,
+            walkInId = walkInUlid,
+            currencyMinorUnits = 3
+        )
+        val vm = StaffWorkspaceViewModel(
+            coordinator = coordinatorWithCurrency,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore
+        )
+        advanceUntilIdle()
+
+        val authority = vm.uiState.value.saleAuthority
+        assertNotNull(authority)
+        assertEquals("Authoritative bootstrap currency minor units must take precedence", 3, authority!!.currencyMinorUnits)
+    }
+
+    @Test
+    fun testPaymentUnverifiedHold_checkPaymentStatus_postedNullDigest_neverConfirmedHoldKept() = runTest(testDispatcher) {
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST) {
+                    val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                    val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                    val unverifiedJson = """
+                        {
+                            "client_event_id": "$clientEventId",
+                            "status": "posted",
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                            "invoice_number": "INV-HOLD-N1",
+                            "payment_id": null,
+                            "payment_receipt_number": null,
+                            "grand_total": "20.00",
+                            "amount_paid": "0.00",
+                            "change_returned": "0.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(201, emptyMap(), unverifiedJson)
+                } else if (request.method == HttpMethod.GET) {
+                    val parts = request.path.split("/")
+                    val eventId = parts[parts.size - 2]
+                    // Server returns posted with official invoice and payment, but NULL payload_digest
+                    val statusJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "company_id": "${companyUlid.value}",
+                            "status": "posted",
+                            "payload_digest": null,
+                            "official_invoice": {
+                                "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                                "invoice_number": "INV-HOLD-N1",
+                                "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5PA1",
+                                "payment_receipt_number": "RCT-001",
+                                "grand_total": "20.00",
+                                "posted_at": "2026-11-15T12:00:00Z"
+                            },
+                            "conflict": null,
+                            "queried_at": "2026-11-15T12:05:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(200, emptyMap(), statusJson)
+                }
+                throw IllegalStateException("Unexpected request: ${request.method} ${request.path}")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        val originalIntent = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(originalIntent)
+
+        // GET status query with null digest MUST fail closed
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        val draft = vm.uiState.value.saleDraft
+        assertTrue("Hold must be KEPT when posted digest is null", draft.isPaymentUnverifiedHold)
+        assertFalse(draft.isSubmitting)
+        assertNull("Confirmed receipt must NEVER be produced when server returns null digest", draft.receipt)
+        assertNotNull("Unverified receipt preserved", draft.unverifiedReceipt)
+        assertEquals(1, draft.lines.size)
+        assertEquals(originalIntent, draft.preparedIntent)
+        assertTrue(draft.submissionError?.contains("digest mismatch", ignoreCase = true) == true)
+    }
+
+    @Test
+    fun testPaymentUnverifiedHold_checkPaymentStatus_postedWrongDigest_neverConfirmedHoldKept() = runTest(testDispatcher) {
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST) {
+                    val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                    val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                    val unverifiedJson = """
+                        {
+                            "client_event_id": "$clientEventId",
+                            "status": "posted",
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                            "invoice_number": "INV-HOLD-W1",
+                            "payment_id": null,
+                            "payment_receipt_number": null,
+                            "grand_total": "20.00",
+                            "amount_paid": "0.00",
+                            "change_returned": "0.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(201, emptyMap(), unverifiedJson)
+                } else if (request.method == HttpMethod.GET) {
+                    val parts = request.path.split("/")
+                    val eventId = parts[parts.size - 2]
+                    // Server returns posted with official invoice and payment, but WRONG payload_digest
+                    val statusJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "company_id": "${companyUlid.value}",
+                            "status": "posted",
+                            "payload_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                            "official_invoice": {
+                                "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                                "invoice_number": "INV-HOLD-W1",
+                                "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5PA1",
+                                "payment_receipt_number": "RCT-001",
+                                "grand_total": "20.00",
+                                "posted_at": "2026-11-15T12:00:00Z"
+                            },
+                            "conflict": null,
+                            "queried_at": "2026-11-15T12:05:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(200, emptyMap(), statusJson)
+                }
+                throw IllegalStateException("Unexpected request: ${request.method} ${request.path}")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        val originalIntent = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(originalIntent)
+
+        // GET status query with wrong digest MUST fail closed
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        val draft = vm.uiState.value.saleDraft
+        assertTrue("Hold must be KEPT when posted digest is mismatched", draft.isPaymentUnverifiedHold)
+        assertFalse(draft.isSubmitting)
+        assertNull("Confirmed receipt must NEVER be produced on digest mismatch", draft.receipt)
+        assertNotNull("Unverified receipt preserved", draft.unverifiedReceipt)
+        assertEquals(1, draft.lines.size)
+        assertEquals(originalIntent, draft.preparedIntent)
+        assertTrue(draft.submissionError?.contains("digest mismatch", ignoreCase = true) == true)
+    }
+
+    @Test
+    fun testPaymentUnverifiedHold_checkPaymentStatus_postedMatchingDigest_succeedsConfirmedFinancialSuccess() = runTest(testDispatcher) {
+        var statusResponseDigest: String? = null
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST) {
+                    val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                    val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                    val unverifiedJson = """
+                        {
+                            "client_event_id": "$clientEventId",
+                            "status": "posted",
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                            "invoice_number": "INV-HOLD-M1",
+                            "payment_id": null,
+                            "payment_receipt_number": null,
+                            "grand_total": "20.00",
+                            "amount_paid": "0.00",
+                            "change_returned": "0.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(201, emptyMap(), unverifiedJson)
+                } else if (request.method == HttpMethod.GET) {
+                    val parts = request.path.split("/")
+                    val eventId = parts[parts.size - 2]
+                    val digestValue = statusResponseDigest
+                        ?: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                    val statusJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "company_id": "${companyUlid.value}",
+                            "status": "posted",
+                            "payload_digest": "$digestValue",
+                            "official_invoice": {
+                                "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                                "invoice_number": "INV-HOLD-M1",
+                                "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5PA1",
+                                "payment_receipt_number": "RCT-001",
+                                "grand_total": "20.00",
+                                "posted_at": "2026-11-15T12:00:00Z"
+                            },
+                            "conflict": null,
+                            "queried_at": "2026-11-15T12:05:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(200, emptyMap(), statusJson)
+                }
+                throw IllegalStateException("Unexpected request: ${request.method} ${request.path}")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        val expectedDigest = vm.uiState.value.saleDraft.preparedIntent!!.expectedNormativeProfileDigest.value
+        statusResponseDigest = expectedDigest
+
+        // GET status query with MATCHING non-null digest succeeds
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        val draft = vm.uiState.value.saleDraft
+        assertFalse("Hold must be released on matching digest and confirmed payment", draft.isPaymentUnverifiedHold)
+        assertFalse(draft.isSubmitting)
+        assertNull(draft.unverifiedReceipt)
+        assertNotNull("Confirmed receipt must be present", draft.receipt)
+        assertEquals("INV-HOLD-M1", draft.receipt?.invoiceNumber)
+        assertEquals("RCT-001", draft.receipt?.paymentReceiptNumber)
+        assertEquals(expectedDigest, draft.receipt?.payloadDigest?.value)
+        assertTrue("Basket lines must be cleared", draft.lines.isEmpty())
+        assertNull(draft.preparedIntent)
+    }
+
+    @Test
+    fun testPaymentUnverifiedHold_checkPaymentStatus_unknownNullableDigest_remainsUnknownHold() = runTest(testDispatcher) {
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST) {
+                    val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                    val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                    val unverifiedJson = """
+                        {
+                            "client_event_id": "$clientEventId",
+                            "status": "posted",
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                            "invoice_number": "INV-HOLD-U1",
+                            "payment_id": null,
+                            "payment_receipt_number": null,
+                            "grand_total": "20.00",
+                            "amount_paid": "0.00",
+                            "change_returned": "0.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(201, emptyMap(), unverifiedJson)
+                } else if (request.method == HttpMethod.GET) {
+                    val parts = request.path.split("/")
+                    val eventId = parts[parts.size - 2]
+                    // Unknown status allows nullable payload_digest
+                    val statusJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "company_id": "${companyUlid.value}",
+                            "status": "unknown",
+                            "payload_digest": null,
+                            "official_invoice": null,
+                            "conflict": null,
+                            "queried_at": "2026-11-15T12:05:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(200, emptyMap(), statusJson)
+                }
+                throw IllegalStateException("Unexpected request: ${request.method} ${request.path}")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        val originalIntent = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(originalIntent)
+
+        // Status check -> unknown returns indeterminate transient, hold preserved
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        val draft = vm.uiState.value.saleDraft
+        assertNull("Confirmed receipt must still be null on unknown", draft.receipt)
+        assertEquals(1, draft.lines.size)
+        assertEquals(originalIntent, draft.preparedIntent)
+    }
+
+    @Test
+    fun testPaymentUnverifiedHold_checkPaymentStatus_recoversEvenWhenNewSaleAuthorityInvalid() = runTest(testDispatcher) {
+        var postCount = 0
+        var getCount = 0
+        var statusResponseDigest: String? = null
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST) {
+                    postCount++
+                    val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                    val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                    val unverifiedJson = """
+                        {
+                            "client_event_id": "$clientEventId",
+                            "status": "posted",
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                            "invoice_number": "INV-HOLD-AUTHDISABLED-1",
+                            "payment_id": null,
+                            "payment_receipt_number": null,
+                            "grand_total": "20.00",
+                            "amount_paid": "0.00",
+                            "change_returned": "0.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(201, emptyMap(), unverifiedJson)
+                } else if (request.method == HttpMethod.GET) {
+                    getCount++
+                    val parts = request.path.split("/")
+                    val eventId = parts[parts.size - 2]
+                    val digestValue = statusResponseDigest
+                        ?: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                    val statusJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "company_id": "${companyUlid.value}",
+                            "status": "posted",
+                            "payload_digest": "$digestValue",
+                            "official_invoice": {
+                                "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                                "invoice_number": "INV-HOLD-AUTHDISABLED-1",
+                                "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5PA1",
+                                "payment_receipt_number": "RCT-AUTH-RECOVERED-01",
+                                "grand_total": "20.00",
+                                "posted_at": "2026-11-15T12:00:00Z"
+                            },
+                            "conflict": null,
+                            "queried_at": "2026-11-15T12:05:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(200, emptyMap(), statusJson)
+                }
+                throw IllegalStateException("Unexpected request: ${request.method} ${request.path}")
+            }
+        }
+
+        fakeCoordinator = TestStaffCoordinator(
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            warehouseId = warehouseUlid,
+            cashAccountId = cashAccountUlid,
+            walkInId = walkInUlid,
+            currencyMinorUnits = 2
+        )
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = null,
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertEquals(1, postCount)
+        assertEquals(0, getCount)
+
+        val originalIntent = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(originalIntent)
+        val expectedDigest = originalIntent!!.expectedNormativeProfileDigest.value
+        statusResponseDigest = expectedDigest
+
+        // Mutate coordinator bootstrap: changed warehouse, changed cash account, and unavailable minor units
+        val currentReady = fakeCoordinator.authState as StaffAuthState.ReadReady
+        val changedWarehouse = DefaultWarehouse(ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5999"), "WH-02", "Changed Warehouse")
+        val changedCashAccount = ApprovedCashAccount(ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5888"), "CASH-02", "Changed Cash", "USD")
+        val brokenBootstrap = currentReady.bootstrap.copy(
+            defaultWarehouse = changedWarehouse,
+            approvedCashAccount = changedCashAccount,
+            currencyMinorUnits = null
+        )
+        fakeCoordinator.authState = currentReady.copy(bootstrap = brokenBootstrap)
+
+        // Read-only GET status query must NOT be blocked by missing new-sale authority
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        assertEquals(1, postCount) // ZERO new POSTs
+        assertEquals(1, getCount) // Exactly 1 GET query
+
+        val draft = vm.uiState.value.saleDraft
+        assertFalse("Hold must be released on matching digest and confirmed payment", draft.isPaymentUnverifiedHold)
+        assertFalse(draft.isSubmitting)
+        assertNull(draft.unverifiedReceipt)
+        assertNotNull("Confirmed receipt must be present", draft.receipt)
+        assertEquals("INV-HOLD-AUTHDISABLED-1", draft.receipt?.invoiceNumber)
+        assertEquals("RCT-AUTH-RECOVERED-01", draft.receipt?.paymentReceiptNumber)
+        assertEquals(expectedDigest, draft.receipt?.payloadDigest?.value)
+        assertTrue("Basket lines must be cleared", draft.lines.isEmpty())
+        assertNull(draft.preparedIntent)
+    }
+
+    @Test
+    fun testPaymentUnverifiedHold_checkPaymentStatus_wrongSessionScope_refusesZeroHttpPreservesHold() = runTest(testDispatcher) {
+        var httpCallCount = 0
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                httpCallCount++
+                if (request.method == HttpMethod.POST) {
+                    val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                    val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                    val unverifiedJson = """
+                        {
+                            "client_event_id": "$clientEventId",
+                            "status": "posted",
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                            "invoice_number": "INV-HOLD-WRONGSCOPE-1",
+                            "payment_id": null,
+                            "payment_receipt_number": null,
+                            "grand_total": "20.00",
+                            "amount_paid": "0.00",
+                            "change_returned": "0.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(201, emptyMap(), unverifiedJson)
+                }
+                throw IllegalStateException("Unexpected request: ${request.method} ${request.path}")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        val originalIntent = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(originalIntent)
+        assertEquals(1, httpCallCount) // initial POST only
+
+        val ready = fakeCoordinator.authState as StaffAuthState.ReadReady
+
+        // 1. Wrong company ID -> zero HTTP, preserves hold
+        val wrongCompany = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5999")
+        fakeCoordinator.authState = ready.copy(session = ready.session.copy(selectedCompanyId = wrongCompany))
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        assertEquals("No HTTP calls allowed on company mismatch", 1, httpCallCount)
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertFalse(vm.uiState.value.saleDraft.isSubmitting)
+        assertEquals(originalIntent, vm.uiState.value.saleDraft.preparedIntent)
+        assertTrue(vm.uiState.value.saleDraft.submissionError?.contains("Active session scope does not match retained sale intent scope") == true)
+
+        // 2. Wrong actor ID -> zero HTTP, preserves hold
+        val wrongActor = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5888")
+        fakeCoordinator.authState = ready.copy(session = ready.session.copy(actorUlid = wrongActor))
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        assertEquals("No HTTP calls allowed on actor mismatch", 1, httpCallCount)
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertFalse(vm.uiState.value.saleDraft.isSubmitting)
+        assertEquals(originalIntent, vm.uiState.value.saleDraft.preparedIntent)
+
+        // 3. Wrong device ID -> zero HTTP, preserves hold
+        val wrongDevice = ClientUuid.random()
+        fakeCoordinator.authState = ready.copy(session = ready.session.copy(deviceUuid = wrongDevice))
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        assertEquals("No HTTP calls allowed on device mismatch", 1, httpCallCount)
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertFalse(vm.uiState.value.saleDraft.isSubmitting)
+        assertEquals(originalIntent, vm.uiState.value.saleDraft.preparedIntent)
+
+        // 4. Stale generation -> zero HTTP, preserves hold
+        fakeCoordinator.authState = ready
+        fakeCoordinator.currentGeneration = 99L
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        assertEquals("No HTTP calls allowed on generation mismatch", 1, httpCallCount)
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertFalse(vm.uiState.value.saleDraft.isSubmitting)
+        assertEquals(originalIntent, vm.uiState.value.saleDraft.preparedIntent)
+    }
+
+    @Test
+    fun testDurableRecovery_writeFailure_zeroPost() = runTest(testDispatcher) {
+        var postCount = 0
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST) {
+                    postCount++
+                }
+                return TransportResponse(201, emptyMap(), "{}")
+            }
+        }
+
+        val failingRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore(throwOnSave = true)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = failingRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        // Write failure MUST fail-closed with ZERO network POST
+        assertEquals("Zero HTTP POST calls permitted when recovery persistence fails", 0, postCount)
+        assertFalse(vm.uiState.value.saleDraft.isSubmitting)
+        assertNotNull(vm.uiState.value.saleDraft.submissionError)
+        assertTrue(vm.uiState.value.saleDraft.submissionError!!.contains("storage error", ignoreCase = true) ||
+                vm.uiState.value.saleDraft.submissionError!!.contains("write failure", ignoreCase = true))
+    }
+
+    @Test
+    fun testDurableRecovery_processRecreate_lostAck_recoversHoldViaGetOnly() = runTest(testDispatcher) {
+        val sharedRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore()
+        var postCount = 0
+        var getStatusCount = 0
+        val capturedEventId = AtomicReference<String>()
+        val capturedDigest = AtomicReference<String>()
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST) {
+                    postCount++
+                    val obj = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                    val eventId = obj.require("client_event_id").asString()
+                    capturedEventId.set(eventId)
+                    // Return unverified payment (posted without payment reference) to simulate lost-ack hold
+                    val unverifiedJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "status": "posted",
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5999",
+                            "invoice_number": "INV-UNVERIFIED-1",
+                            "payment_id": null,
+                            "payment_receipt_number": null,
+                            "grand_total": "20.00",
+                            "amount_paid": "0.00",
+                            "change_returned": "0.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(201, emptyMap(), unverifiedJson)
+                } else if (request.method == HttpMethod.GET) {
+                    getStatusCount++
+                    val eventId = capturedEventId.get() ?: "00000000-0000-0000-0000-000000000000"
+                    val digest = capturedDigest.get() ?: ""
+                    val statusJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "company_id": "${companyUlid.value}",
+                            "status": "posted",
+                            "payload_digest": "$digest",
+                            "official_invoice": {
+                                "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5999",
+                                "invoice_number": "INV-CONFIRMED-1",
+                                "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5888",
+                                "payment_receipt_number": "REC-9999",
+                                "grand_total": "20.00",
+                                "posted_at": "2026-11-15T12:05:00Z"
+                            },
+                            "conflict": null,
+                            "queried_at": "2026-11-15T12:05:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(200, emptyMap(), statusJson)
+                }
+                throw IllegalStateException("Unexpected request")
+            }
+        }
+
+        fun createVm(): StaffWorkspaceViewModel {
+            return StaffWorkspaceViewModel(
+                coordinator = fakeCoordinator,
+                configuredOrigin = "https://small-trader.example.com",
+                ioDispatcher = testDispatcher,
+                onlineCashEnabled = true,
+                currencyMinorUnitsOverride = 2,
+                recoveryStore = sharedRecoveryStore,
+                orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                    val client = AndroidV2OnlineCashClient(
+                        transport = testTransport,
+                        baseOrigin = "https://small-trader.example.com"
+                    )
+                    OnlineCashSaleOrchestrator(
+                        client = client,
+                        tokenProvider = tokenProvider,
+                        scopeGenerationProvider = scopeGenProvider,
+                        onAuthDeniedLockScope = lockHook,
+                        activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                    )
+                }
+            )
+        }
+
+        // 1. Process 1: Submit sale, enters unverified hold
+        val vm1 = createVm()
+        advanceUntilIdle()
+
+        vm1.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm1.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertEquals(1, postCount)
+        assertTrue(vm1.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNotNull(vm1.uiState.value.saleDraft.preparedIntent)
+        capturedDigest.set(vm1.uiState.value.saleDraft.preparedIntent!!.expectedNormativeProfileDigest.value)
+
+        // Durable store has pending record persisted BEFORE post
+        val stored = sharedRecoveryStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+        assertNotNull(stored)
+        assertEquals(capturedEventId.get(), stored!!.clientEventId.value)
+
+        // 2. Process Recreation: Simulate app killed / new VM instantiated
+        fakeCoordinator.currentGeneration = 5L // session generation advanced across restart
+        val vm2 = createVm()
+        advanceUntilIdle()
+
+        // Startup restores same-identity HOLD, rebinding to new generation 5L
+        assertTrue(vm2.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNotNull(vm2.uiState.value.saleDraft.preparedIntent)
+        assertEquals(5L, vm2.uiState.value.saleDraft.preparedIntent!!.scopeGeneration)
+        assertEquals(stored.clientEventId, vm2.uiState.value.saleDraft.preparedIntent!!.clientEventId)
+
+        // New sales are blocked while in HOLD
+        val product = createSampleProduct()
+        vm2.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        // Basket modifications are blocked
+        assertTrue(vm2.uiState.value.saleDraft.lines.isEmpty())
+
+        // 3. Status check recovers confirmed receipt via GET-ONLY (ZERO additional POSTs)
+        vm2.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        assertEquals("No additional POST calls allowed during status check", 1, postCount)
+        assertEquals("GET status check must be invoked", 1, getStatusCount)
+        assertFalse(vm2.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNotNull(vm2.uiState.value.saleDraft.receipt)
+        assertEquals("REC-9999", vm2.uiState.value.saleDraft.receipt!!.paymentReceiptNumber)
+
+        // Durable recovery record cleared from store on ConfirmedFinancialSuccess
+        assertNull(sharedRecoveryStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com"))
+    }
+
+    @Test
+    fun testDurableRecovery_companySwitch_isolation() = runTest(testDispatcher) {
+        val sharedRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore()
+        val companyA = companyUlid
+        val companyB = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5888")
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedRecoveryStore
+        )
+        advanceUntilIdle()
+
+        // Setup pending record for Company A
+        val eventA = ClientUuid.random()
+        val draft = StaffOnlineSaleDraft(
+            lines = listOf(StaffOnlineSaleDraftLine.fromProduct(product = createSampleProduct(), explicitNoTax = true))
+        )
+        val authorityA = StaffOnlineSaleAuthorityResolution.resolve(
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).bootstrap,
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).session,
+            currencyMinorUnitsOverride = 2
+        )
+        val intentA = StaffOnlineSaleRequestBuilder.prepareIntent(draft, authorityA, fakeCoordinator.currentGeneration, eventA)
+
+        val recordA = DurableOnlineSaleRecoveryRecord(
+            clientEventId = eventA,
+            expectedNormativeProfileDigest = intentA.expectedNormativeProfileDigest,
+            companyId = companyA,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            baseOrigin = "https://small-trader.example.com",
+            currency = "USD",
+            currencyMinorUnits = 2,
+            amount = MoneyAmount("20.00"),
+            rawWireBytes = intentA.rawWireBytes,
+            createdAt = "2026-11-15T12:00:00Z"
+        )
+        sharedRecoveryStore.savePendingSale(recordA)
+
+        // Trigger load for Company A -> restores HOLD
+        val ready = fakeCoordinator.authState as StaffAuthState.ReadReady
+        fakeCoordinator.authState = ready.copy(session = ready.session.copy(selectedCompanyId = companyA))
+        vm.selectTab(StaffWorkspaceTab.CASH_SALE)
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertEquals(eventA, vm.uiState.value.saleDraft.preparedIntent?.clientEventId)
+
+        // Switch to Company B
+        val readyB = ready.copy(
+            session = ready.session.copy(selectedCompanyId = companyB),
+            bootstrap = ready.bootstrap.copy(companyId = companyB)
+        )
+        fakeCoordinator.authState = readyB
+        vm.switchCompany(companyB.value)
+        advanceUntilIdle()
+
+        // Company B MUST NOT see Company A's pending hold!
+        assertFalse(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNull(vm.uiState.value.saleDraft.preparedIntent)
+
+        // Switch back to Company A
+        fakeCoordinator.authState = ready.copy(session = ready.session.copy(selectedCompanyId = companyA))
+        vm.switchCompany(companyA.value)
+        advanceUntilIdle()
+
+        // Company A pending HOLD restored cleanly!
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertEquals(eventA, vm.uiState.value.saleDraft.preparedIntent?.clientEventId)
+    }
+
+    @Test
+    fun testDurableRecovery_logoutAndAuthLock_preservesRecord() = runTest(testDispatcher) {
+        val sharedRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore()
+        val eventId = ClientUuid.random()
+
+        val draft = StaffOnlineSaleDraft(
+            lines = listOf(StaffOnlineSaleDraftLine.fromProduct(product = createSampleProduct(), explicitNoTax = true))
+        )
+        val authority = StaffOnlineSaleAuthorityResolution.resolve(
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).bootstrap,
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).session,
+            currencyMinorUnitsOverride = 2
+        )
+        val intent = StaffOnlineSaleRequestBuilder.prepareIntent(draft, authority, 1L, eventId)
+
+        val record = DurableOnlineSaleRecoveryRecord(
+            clientEventId = eventId,
+            expectedNormativeProfileDigest = intent.expectedNormativeProfileDigest,
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            baseOrigin = "https://small-trader.example.com",
+            currency = "USD",
+            currencyMinorUnits = 2,
+            amount = MoneyAmount("20.00"),
+            rawWireBytes = intent.rawWireBytes,
+            createdAt = "2026-11-15T12:00:00Z"
+        )
+        sharedRecoveryStore.savePendingSale(record)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedRecoveryStore
+        )
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+
+        // Logout
+        vm.logout()
+        advanceUntilIdle()
+
+        // In-memory UI state is cleared
+        assertEquals(StaffWorkspacePhase.SIGN_IN, vm.uiState.value.phase)
+        assertFalse(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+
+        // Record in durable storage remains preserved!
+        val preserved = sharedRecoveryStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+        assertNotNull(preserved)
+        assertEquals(eventId, preserved!!.clientEventId)
+    }
+
+    @Test
+    fun testDurableRecovery_clearConfirmed_doesNotEraseMismatchedEvent() {
+        val sharedRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore()
+        val eventA = ClientUuid.random()
+        val eventB = ClientUuid.random()
+
+        val draft = StaffOnlineSaleDraft(
+            lines = listOf(StaffOnlineSaleDraftLine.fromProduct(product = createSampleProduct(), explicitNoTax = true))
+        )
+        val authority = StaffOnlineSaleAuthorityResolution.resolve(
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).bootstrap,
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).session,
+            currencyMinorUnitsOverride = 2
+        )
+        val intentA = StaffOnlineSaleRequestBuilder.prepareIntent(draft, authority, 1L, eventA)
+
+        val recordA = DurableOnlineSaleRecoveryRecord(
+            clientEventId = eventA,
+            expectedNormativeProfileDigest = intentA.expectedNormativeProfileDigest,
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            baseOrigin = "https://small-trader.example.com",
+            currency = "USD",
+            currencyMinorUnits = 2,
+            amount = MoneyAmount("20.00"),
+            rawWireBytes = intentA.rawWireBytes,
+            createdAt = "2026-11-15T12:00:00Z"
+        )
+        sharedRecoveryStore.savePendingSale(recordA)
+
+        // Clearing non-matching eventB does not erase recordA
+        sharedRecoveryStore.clearPendingSale(eventB)
+
+        assertNotNull(sharedRecoveryStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com"))
+        assertEquals(1, sharedRecoveryStore.listAllRecords().size)
+    }
+
+    @Test
+    fun testDurableRecovery_restoredHold_postedWrongDigest_staysHold() = runTest(testDispatcher) {
+        val sharedRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore()
+        val eventId = ClientUuid.random()
+
+        val draft = StaffOnlineSaleDraft(
+            lines = listOf(StaffOnlineSaleDraftLine.fromProduct(product = createSampleProduct(), explicitNoTax = true))
+        )
+        val authority = StaffOnlineSaleAuthorityResolution.resolve(
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).bootstrap,
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).session,
+            currencyMinorUnitsOverride = 2
+        )
+        val intent = StaffOnlineSaleRequestBuilder.prepareIntent(draft, authority, 1L, eventId)
+
+        val record = DurableOnlineSaleRecoveryRecord(
+            clientEventId = eventId,
+            expectedNormativeProfileDigest = intent.expectedNormativeProfileDigest,
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            baseOrigin = "https://small-trader.example.com",
+            currency = "USD",
+            currencyMinorUnits = 2,
+            amount = MoneyAmount("20.00"),
+            rawWireBytes = intent.rawWireBytes,
+            createdAt = "2026-11-15T12:00:00Z"
+        )
+        sharedRecoveryStore.savePendingSale(record)
+
+        val wrongDigest = PayloadDigest.parse("sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                // Server returns official invoice with mismatched digest
+                val responseJson = """
+                    {
+                        "client_event_id": "${eventId.value}",
+                        "company_id": "${companyUlid.value}",
+                        "status": "posted",
+                        "payload_digest": "${wrongDigest.value}",
+                        "official_invoice": {
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5999",
+                            "invoice_number": "INV-WRONG-DIGEST",
+                            "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5888",
+                            "payment_receipt_number": "REC-WRONG",
+                            "grand_total": "20.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        },
+                        "conflict": null,
+                        "queried_at": "2026-11-15T12:05:00Z"
+                    }
+                """.trimIndent()
+                return TransportResponse(200, emptyMap(), responseJson)
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        // Check status with mismatched digest
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        // Mismatched digest MUST preserve HOLD and keep record in recovery store
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertFalse(vm.uiState.value.saleDraft.isSubmitting)
+        assertNotNull(vm.uiState.value.saleDraft.submissionError)
+        assertTrue(vm.uiState.value.saleDraft.submissionError!!.contains("mismatch", ignoreCase = true))
+        assertNotNull(sharedRecoveryStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com"))
+    }
+
+    @Test
+    fun testDurableRecovery_loadPendingFailure_locksUiWithBlockingHold() = runTest(testDispatcher) {
+        val failingRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore(throwOnGet = true)
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = failingRecoveryStore
+        )
+        advanceUntilIdle()
+
+        // Read/load failure MUST lock the UI in blocking payment hold
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertFalse(vm.uiState.value.saleDraft.isSubmitting)
+        assertNotNull(vm.uiState.value.saleDraft.submissionError)
+        assertTrue(vm.uiState.value.saleDraft.submissionError!!.contains("blocked", ignoreCase = true) ||
+                vm.uiState.value.saleDraft.submissionError!!.contains("failed", ignoreCase = true))
+
+        // Adding product or submitting new sale MUST be rejected
+        vm.addProductToSaleDraft(createSampleProduct(), quantity = PositiveDecimalQuantity.of(1))
+        assertTrue(vm.uiState.value.saleDraft.lines.isEmpty())
+    }
+
+    @Test
+    fun testDurableRecovery_missingStore_onlineCashActive_locksUiWithBlockingHold() = runTest(testDispatcher) {
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = null,
+            allowRecoveryBypassForTesting = false
+        )
+        advanceUntilIdle()
+
+        // Missing store with online cash enabled MUST lock UI in blocking hold
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNotNull(vm.uiState.value.saleDraft.submissionError)
+        assertTrue(vm.uiState.value.saleDraft.submissionError!!.contains("unavailable", ignoreCase = true))
+
+        // Product addition is blocked
+        vm.addProductToSaleDraft(createSampleProduct(), quantity = PositiveDecimalQuantity.of(1))
+        assertTrue(vm.uiState.value.saleDraft.lines.isEmpty())
+    }
+
+    @Test
+    fun testDurableRecovery_missingStore_submitBlockedWithHold() = runTest(testDispatcher) {
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = null,
+            allowRecoveryBypassForTesting = true // Allow startup without hold
+        )
+        advanceUntilIdle()
+
+        // Add product succeeds when bypass was enabled at startup
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        assertEquals(1, vm.uiState.value.saleDraft.lines.size)
+
+        // When orchestrator requires recovery store and store is null, dispatch returns StorageFailure
+        val draft = vm.uiState.value.saleDraft
+        val ready = fakeCoordinator.authState as StaffAuthState.ReadReady
+        val authority = StaffOnlineSaleAuthorityResolution.resolve(ready.bootstrap, ready.session, 2)
+        val intent = StaffOnlineSaleRequestBuilder.prepareIntent(draft, authority, 1L, ClientUuid.random())
+
+        // Explicit orchestrator dispatch with requireRecoveryStore = true fails closed
+        val strictOrchestrator = OnlineCashSaleOrchestrator(
+            client = AndroidV2OnlineCashClient(
+                transport = object : ReadClientTransport {
+                    override fun execute(request: TransportRequest): TransportResponse {
+                        throw AssertionError("HTTP POST must not be called")
+                    }
+                },
+                baseOrigin = "https://small-trader.example.com"
+            ),
+            tokenProvider = { "valid_test_token_1234567890" },
+            scopeGenerationProvider = { 1L },
+            recoveryStore = null,
+            requireRecoveryStore = true
+        )
+        val result = strictOrchestrator.dispatchOnlineCashSale(intent, companyUlid, deviceUuid, "USD")
+        assertTrue(result is OnlineCashOrchestrationResult.StorageFailure)
+    }
+
+    @Test
+    fun testCurrentGenerationReauth_rebindsPreparedIntentToNewGeneration() = runTest(testDispatcher) {
+        val sharedStore = InMemoryDurableOnlineSaleRecoveryStore()
+        val eventId = ClientUuid.random()
+        val rawWireJson = """{"client_event_id":"$eventId","currency":"USD","customer_id":"${walkInUlid.value}","device_id":"${deviceUuid.value}","lines":[{"conversion_to_base":"1","product_id":"${productUlid.value}","product_unit_id":"${unitUlid.value}","quantity":"1","tax_inclusive":false,"tax_rate":"0.000000","tax_rate_id":null,"unit_price":"20.000000"}],"payment":{"amount":"20.00","cash_account_id":"${cashAccountUlid.value}","payment_method":"cash","settlement_mode":"full"},"warehouse_id":"${warehouseUlid.value}"}"""
+        val rawWireBytes = rawWireJson.toByteArray(Charsets.UTF_8)
+        val context = OnlineSaleContext(actorId = actorUlid, companyId = companyUlid, currencyMinorUnits = 2)
+        val initialIntent = PreparedOnlineSaleIntent.prepare(context = context, rawWireBytes = rawWireBytes, scopeGeneration = 1L)
+        val initialRecord = DurableOnlineSaleRecoveryRecord(
+            clientEventId = eventId,
+            expectedNormativeProfileDigest = initialIntent.expectedNormativeProfileDigest,
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            baseOrigin = "https://small-trader.example.com",
+            currency = "USD",
+            currencyMinorUnits = 2,
+            amount = MoneyAmount("20.00"),
+            rawWireBytes = rawWireBytes,
+            createdAt = "2026-11-15T12:00:00Z"
+        )
+        sharedStore.savePendingSale(initialRecord)
+
+        fakeCoordinator.currentGeneration = 10L
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedStore
+        )
+        advanceUntilIdle()
+
+        // Reconstituted prepared intent MUST be rebound to active generation 10L
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        val rebound = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(rebound)
+        assertEquals(10L, rebound!!.scopeGeneration)
+        assertEquals(eventId, rebound.clientEventId)
+
+        // Session lock/reauth: generation advances to 11L, retryLoadDurableRecovery rebinds to 11L
+        fakeCoordinator.currentGeneration = 11L
+        vm.retryLoadDurableRecovery()
+        advanceUntilIdle()
+
+        val updated = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(updated)
+        assertEquals(11L, updated!!.scopeGeneration)
+    }
+
+    @Test
+    fun testRetryLoadDurableRecovery_unusableStorage_thenRecovers() = runTest(testDispatcher) {
+        val failingStore = InMemoryDurableOnlineSaleRecoveryStore(throwOnGet = true)
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = failingStore
+        )
+        advanceUntilIdle()
+
+        // Initially in blocking hold with error and null intent
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNull(vm.uiState.value.saleDraft.preparedIntent)
+        assertTrue(vm.uiState.value.saleDraft.submissionError!!.contains("storage error", ignoreCase = true) ||
+                vm.uiState.value.saleDraft.submissionError!!.contains("read failure", ignoreCase = true))
+
+        // Storage recovers and now contains a pending sale
+        failingStore.throwOnGet = false
+        val eventId = ClientUuid.random()
+        val rawWireJson = """{"client_event_id":"$eventId","currency":"USD","customer_id":"${walkInUlid.value}","device_id":"${deviceUuid.value}","lines":[{"conversion_to_base":"1","product_id":"${productUlid.value}","product_unit_id":"${unitUlid.value}","quantity":"1","tax_inclusive":false,"tax_rate":"0.000000","tax_rate_id":null,"unit_price":"20.000000"}],"payment":{"amount":"20.00","cash_account_id":"${cashAccountUlid.value}","payment_method":"cash","settlement_mode":"full"},"warehouse_id":"${warehouseUlid.value}"}"""
+        val rawWireBytes = rawWireJson.toByteArray(Charsets.UTF_8)
+        val context = OnlineSaleContext(actorId = actorUlid, companyId = companyUlid, currencyMinorUnits = 2)
+        val intent = PreparedOnlineSaleIntent.prepare(context = context, rawWireBytes = rawWireBytes, scopeGeneration = 1L)
+        val record = DurableOnlineSaleRecoveryRecord(
+            clientEventId = eventId,
+            expectedNormativeProfileDigest = intent.expectedNormativeProfileDigest,
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            baseOrigin = "https://small-trader.example.com",
+            currency = "USD",
+            currencyMinorUnits = 2,
+            amount = MoneyAmount("20.00"),
+            rawWireBytes = rawWireBytes,
+            createdAt = "2026-11-15T12:00:00Z"
+        )
+        failingStore.savePendingSale(record)
+
+        // Read-only retry
+        vm.retryLoadDurableRecovery()
+        advanceUntilIdle()
+
+        // Restores prepared intent under active generation
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNotNull(vm.uiState.value.saleDraft.preparedIntent)
+        assertEquals(eventId, vm.uiState.value.saleDraft.preparedIntent!!.clientEventId)
+    }
+
+    @Test
+    fun testRetryLoadDurableRecovery_cleanStore_clearsHold() = runTest(testDispatcher) {
+        val failingStore = InMemoryDurableOnlineSaleRecoveryStore(throwOnGet = true)
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = failingStore
+        )
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+
+        // Storage recovers and is clean (zero pending records)
+        failingStore.throwOnGet = false
+        vm.retryLoadDurableRecovery()
+        advanceUntilIdle()
+
+        // Hold is cleared, error is reset, normal draft actions permitted
+        assertFalse(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNull(vm.uiState.value.saleDraft.submissionError)
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        assertEquals(1, vm.uiState.value.saleDraft.lines.size)
+    }
+
+    @Test
+    fun testLostAck_tokenLoss_preservesRecordIdentity_zeroPostNewUuid() = runTest(testDispatcher) {
+        val capturedRequests = mutableListOf<TransportRequest>()
+        var tokenAvailable = true
+        val sharedStore = InMemoryDurableOnlineSaleRecoveryStore()
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                capturedRequests.add(request)
+                if (request.method == HttpMethod.POST) {
+                    throw IOException("Network timeout during POST transport")
+                }
+                throw IllegalStateException("Unexpected GET during first submit")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = { if (tokenAvailable) tokenProvider() else null },
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "35.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+
+        // 1. Initial submit: POST network timeout produces Indeterminate / PaymentUnverifiedHold with durable record saved
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        val originalIntent = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(originalIntent)
+        val originalEventId = originalIntent!!.clientEventId
+
+        // Verify durable record exists in store
+        val storedBeforeTokenLoss = sharedStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+        assertNotNull(storedBeforeTokenLoss)
+        assertEquals(originalEventId, storedBeforeTokenLoss!!.clientEventId)
+
+        // 2. Token becomes unavailable (lost token on retry / session expiration)
+        tokenAvailable = false
+
+        // Attempt submit while token is unavailable -> produces LocalTokenUnavailable
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        // Critical assertions:
+        // Hold MUST NOT be released!
+        assertTrue("Hold must remain active despite token loss", vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        // Prepared intent MUST NOT be cleared or re-minted!
+        assertNotNull("Prepared intent must be preserved", vm.uiState.value.saleDraft.preparedIntent)
+        assertEquals(originalEventId, vm.uiState.value.saleDraft.preparedIntent!!.clientEventId)
+
+        // Durable record MUST NOT be deleted from store!
+        val storedAfterTokenLoss = sharedStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+        assertNotNull("Durable record must NEVER be deleted on lost-ACK token loss", storedAfterTokenLoss)
+        assertEquals(originalEventId, storedAfterTokenLoss!!.clientEventId)
+
+        // No new HTTP POST request was made (total POST requests remains exactly 1 from original dispatch)
+        val postRequests = capturedRequests.filter { it.method == HttpMethod.POST }
+        assertEquals(1, postRequests.size)
+
+        // 3. Recreate ViewModel (simulate app restart) on same scope
+        val recreatedVm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedStore
+        )
+        advanceUntilIdle()
+
+        // Recreated VM must restore hold and the exact same event ID
+        assertTrue(recreatedVm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        val restoredIntent = recreatedVm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(restoredIntent)
+        assertEquals(originalEventId, restoredIntent!!.clientEventId)
+    }
+
+    @Test
+    fun testFreshDraft_tokenLoss_zeroDurableWrite_allowsEditing() = runTest(testDispatcher) {
+        val capturedRequests = mutableListOf<TransportRequest>()
+        val sharedStore = InMemoryDurableOnlineSaleRecoveryStore()
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                capturedRequests.add(request)
+                throw AssertionError("No transport should be called when token is unavailable")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = { null }, // token unavailable immediately on fresh draft
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "20.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+
+        // Submit fresh draft with token unavailable
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        // Assert zero durable writes occurred
+        val storedRecord = sharedStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+        assertNull("Zero durable writes must occur on fresh draft token unavailability", storedRecord)
+
+        // Assert hold is false, preparedIntent is null, and error is set
+        val draft = vm.uiState.value.saleDraft
+        assertFalse(draft.isPaymentUnverifiedHold)
+        assertFalse(draft.isSubmitting)
+        assertNull(draft.preparedIntent)
+        assertNotNull(draft.submissionError)
+
+        // Zero transport requests dispatched
+        assertTrue(capturedRequests.isEmpty())
+
+        // Editing draft succeeds
+        val lineId = draft.lines.first().lineId
+        vm.updateDraftLineQuantity(lineId, PositiveDecimalQuantity.of(3))
+        assertEquals("3", vm.uiState.value.saleDraft.lines.first().quantity.toPlainString())
+    }
+
+    @Test
+    fun testCustomFactory_withRecoveryStore_storageFailure_zeroPost() = runTest(testDispatcher) {
+        val capturedRequests = mutableListOf<TransportRequest>()
+        val failingStore = InMemoryDurableOnlineSaleRecoveryStore(throwOnSave = false, throwOnGet = false)
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                capturedRequests.add(request)
+                throw AssertionError("Transport must NEVER be called when storage fails")
+            }
+        }
+
+        var factoryReceivedStore: DurableOnlineSaleRecoveryStore? = null
+        var factoryReceivedRequirePolicy: Boolean? = null
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = failingStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                factoryReceivedStore = store
+                factoryReceivedRequirePolicy = requireStore
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "40.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+
+        // Inject WRITE failure after healthy initialization, before dispatch
+        failingStore.throwOnSave = true
+
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        // Verify factory received the injected non-null store and requireStore == true upon orchestrator creation
+        assertSame(failingStore, factoryReceivedStore)
+        assertEquals(true, factoryReceivedRequirePolicy)
+
+        // Zero HTTP POST requests made
+        assertEquals(0, capturedRequests.size)
+
+        // UI transitioned to blocking hold with storage failure
+        val draft = vm.uiState.value.saleDraft
+        assertFalse(draft.isSubmitting)
+        assertTrue(draft.isPaymentUnverifiedHold)
+        assertNotNull(draft.submissionError)
+        assertTrue(draft.submissionError!!.contains("Storage failure") || draft.submissionError!!.contains("disk write failure"))
+    }
+
+    @Test
+    fun testStartupReadFailure_blocksAndZeroPost() = runTest(testDispatcher) {
+        val failingStore = InMemoryDurableOnlineSaleRecoveryStore(throwOnGet = true)
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = failingStore
+        )
+        advanceUntilIdle()
+
+        val draft = vm.uiState.value.saleDraft
+        assertTrue("Storage read failure on startup must enter unverified hold", draft.isPaymentUnverifiedHold)
+        assertFalse(draft.isSubmitting)
+        assertNull("No intent can be fabricated on startup read failure", draft.preparedIntent)
+        assertNotNull(draft.submissionError)
+        assertTrue(draft.submissionError!!.contains("Storage error") || draft.submissionError!!.contains("disk read failure"))
+    }
+
+    @Test
+    fun testCustomFactory_activeToken_writeHappensBeforeTransport() = runTest(testDispatcher) {
+        val sharedStore = InMemoryDurableOnlineSaleRecoveryStore()
+        var recordPresentAtTransportTime = false
+        var capturedEventId: ClientUuid? = null
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                val eventIdStr = parsedBody.properties["client_event_id"]!!.asString()
+                capturedEventId = ClientUuid.parse(eventIdStr)
+
+                // Check store at the exact moment transport executes
+                val pending = sharedStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+                recordPresentAtTransportTime = (pending != null && pending.clientEventId == capturedEventId)
+
+                val commitJson = """
+                    {
+                        "client_event_id": "$eventIdStr",
+                        "status": "posted",
+                        "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                        "invoice_number": "INV-ORDER-001",
+                        "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5PA1",
+                        "payment_receipt_number": "RCT-ORDER-001",
+                        "grand_total": "18.00",
+                        "amount_paid": "18.00",
+                        "change_returned": "0.00",
+                        "posted_at": "2026-11-15T12:00:00Z"
+                    }
+                """.trimIndent()
+                return TransportResponse(201, emptyMap(), commitJson)
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "18.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        // Verified: durable record was written BEFORE network transport executed
+        assertTrue("Durable record must be written to recovery store before HTTP POST transport executes", recordPresentAtTransportTime)
+        assertNotNull(capturedEventId)
+
+        // After successful commit, receipt is set and lines are cleared
+        val receipt = vm.uiState.value.saleDraft.receipt
+        assertNotNull(receipt)
+        assertEquals("INV-ORDER-001", receipt?.invoiceNumber)
+    }
+
+    @Test
+    fun testValidationFailed_freshDispatch_clearsReservation_allowsEditing() = runTest(testDispatcher) {
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                return TransportResponse(
+                    statusCode = 422,
+                    headers = emptyMap(),
+                    body = """{"error":"VALIDATION_FAILED","message":"Line item validation rejected"}"""
+                )
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "22.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+
+        // Fresh dispatch fails with 422
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        // 422 on fresh dispatch cleans reservation and clears volatile preparedIntent to allow editing
+        val draft = vm.uiState.value.saleDraft
+        assertFalse(draft.isPaymentUnverifiedHold)
+        assertFalse(draft.isSubmitting)
+        assertNull(draft.preparedIntent)
+        assertNotNull(draft.submissionError)
+        assertTrue(draft.submissionError!!.contains("422"))
+
+        // Durable reservation in store must be cleared
+        val stored = defaultRecoveryStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+        assertNull("Durable reservation must be cleared on definitive fresh 422", stored)
+
+        // Editing draft succeeds
+        val lineId = draft.lines.first().lineId
+        vm.updateDraftLineQuantity(lineId, PositiveDecimalQuantity.of(2))
+        assertEquals("2", vm.uiState.value.saleDraft.lines.first().quantity.toPlainString())
+    }
+
+    @Test
+    fun testValidationFailed_lostAckRetainedDispatch_preservesRecordAndHold() = runTest(testDispatcher) {
+        var postAttempt = 0
+        var getAttempt = 0
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST) {
+                    postAttempt++
+                    if (postAttempt == 1) {
+                        throw IOException("Network socket timeout on first POST dispatch")
+                    } else {
+                        return TransportResponse(
+                            statusCode = 422,
+                            headers = mapOf("Content-Type" to "application/json"),
+                            body = """{"error":"VALIDATION_FAILED","message":"Contract state changed on retry"}"""
+                        )
+                    }
+                }
+                if (request.method == HttpMethod.GET) {
+                    getAttempt++
+                    assertTrue("GET must query offline event status path", request.path.contains("/offline-events/"))
+                    if (getAttempt == 1) {
+                        // In first dispatch lost-ACK, status check also encounters transient failure
+                        throw IOException("Network socket timeout on initial status lookup")
+                    } else {
+                        // Real status recovery: supply valid unknown GET response
+                        val eventIdFromPath = request.path.substringAfter("/offline-events/").substringBefore("/")
+                        return TransportResponse(
+                            statusCode = 200,
+                            headers = mapOf("Content-Type" to "application/json"),
+                            body = """{
+                                "client_event_id": "$eventIdFromPath",
+                                "company_id": "${companyUlid.value}",
+                                "status": "unknown",
+                                "payload_digest": null,
+                                "official_invoice": null,
+                                "conflict": null,
+                                "queried_at": "2026-11-15T12:00:00Z"
+                            }"""
+                        )
+                    }
+                }
+                throw IllegalStateException("Unexpected request: ${request.method}")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "30.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+
+        // 1. First dispatch: lost-ACK timeout produces typed Indeterminate state with durable store write
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertEquals(1, postAttempt)
+        assertEquals(1, getAttempt)
+        assertTrue(vm.uiState.value.saleDraft.isIndeterminate)
+        assertFalse(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        val originalEventId = vm.uiState.value.saleDraft.preparedIntent!!.clientEventId
+        val storedRecord = defaultRecoveryStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+        assertNotNull(storedRecord)
+        assertEquals(originalEventId, storedRecord!!.clientEventId)
+
+        // 2. Retry dispatch on retained event returns 422: transitions to hold and preserves durable record
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertEquals(2, postAttempt)
+        // MUST NOT delete durable record on retained dispatch 422! Keep exact event & hold intact
+        val recordAfter422 = defaultRecoveryStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+        assertNotNull("Durable record must NEVER be deleted on retained dispatch 422", recordAfter422)
+        assertEquals(originalEventId, recordAfter422!!.clientEventId)
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertFalse(vm.uiState.value.saleDraft.isIndeterminate)
+        assertNotNull(vm.uiState.value.saleDraft.preparedIntent)
+        assertEquals(originalEventId, vm.uiState.value.saleDraft.preparedIntent!!.clientEventId)
+
+        // 3. Status check via GET queries real recovery status and receives valid unknown GET response
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        assertEquals(2, getAttempt)
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNotNull(defaultRecoveryStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com"))
+        assertEquals(originalEventId, vm.uiState.value.saleDraft.preparedIntent!!.clientEventId)
+    }
+
+    @Test
+    fun testValidationFailed_freshDispatch_cleanupFailure_keepsHold() = runTest(testDispatcher) {
+        val failingStore = InMemoryDurableOnlineSaleRecoveryStore(throwOnClear = true)
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                return TransportResponse(
+                    statusCode = 422,
+                    headers = emptyMap(),
+                    body = """{"error":"VALIDATION_FAILED","message":"Syntax validation error"}"""
+                )
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = failingStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "28.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+
+        // Submit fresh dispatch -> 422 -> store.clearPendingSale throws
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        // Cleanup failure MUST keep hold and visible error, NEVER allow edit
+        val draft = vm.uiState.value.saleDraft
+        assertTrue("Cleanup failure must maintain hold", draft.isPaymentUnverifiedHold)
+        assertFalse(draft.isSubmitting)
+        assertNotNull("Prepared intent must not be discarded when cleanup fails", draft.preparedIntent)
+        assertNotNull(draft.submissionError)
+        assertTrue(draft.submissionError!!.contains("Failed to clear durable reservation"))
+    }
+
+    @Test
+    fun testScopeSwitch_companyActorDevice_resetsPresentationWithoutLeakingOldUI_restoresOnReturn() = runTest(testDispatcher) {
+        val sharedStore = InMemoryDurableOnlineSaleRecoveryStore()
+
+        // Seed a durable pending sale for Scope 1 on disk
+        val eventId = ClientUuid.random()
+        val rawWireJson = """{"client_event_id":"$eventId","currency":"USD","customer_id":"${walkInUlid.value}","device_id":"${deviceUuid.value}","lines":[{"conversion_to_base":"1","product_id":"${productUlid.value}","product_unit_id":"${unitUlid.value}","quantity":"1","tax_inclusive":false,"tax_rate":"0.000000","tax_rate_id":null,"unit_price":"20.000000"}],"payment":{"amount":"20.00","cash_account_id":"${cashAccountUlid.value}","payment_method":"cash","settlement_mode":"full"},"warehouse_id":"${warehouseUlid.value}"}"""
+        val rawWireBytes = rawWireJson.toByteArray(Charsets.UTF_8)
+        val context = OnlineSaleContext(actorId = actorUlid, companyId = companyUlid, currencyMinorUnits = 2)
+        val intent = PreparedOnlineSaleIntent.prepare(context = context, rawWireBytes = rawWireBytes, scopeGeneration = 1L)
+        val recordScope1 = DurableOnlineSaleRecoveryRecord(
+            clientEventId = eventId,
+            expectedNormativeProfileDigest = intent.expectedNormativeProfileDigest,
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            baseOrigin = "https://small-trader.example.com",
+            currency = "USD",
+            currencyMinorUnits = 2,
+            amount = MoneyAmount("20.00"),
+            rawWireBytes = rawWireBytes,
+            createdAt = "2026-11-15T12:00:00Z"
+        )
+        sharedStore.savePendingSale(recordScope1)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedStore
+        )
+        advanceUntilIdle()
+
+        // Scope 1 starts with pending hold reconstituted
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertEquals(eventId, vm.uiState.value.saleDraft.preparedIntent?.clientEventId)
+
+        // Switch session to Scope 2 (different company, actor, and device) with zero pending records in store
+        val otherCompany = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5999")
+        val otherActor = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5888")
+        val otherDevice = ClientUuid.parse("990e8400-e29b-41d4-a716-446655440099")
+
+        val sessionScope2 = StaffSessionRecord(
+            token = "valid_session_token_scope_2_12345",
+            actorUlid = otherActor,
+            deviceUuid = otherDevice,
+            passwordEpoch = "epoch_2",
+            expiresAt = "2026-11-15T23:59:59Z",
+            selectedCompanyId = otherCompany,
+            roleLabel = "Cashier",
+            actorName = "Actor 2",
+            actorEmail = "actor2@example.com",
+            createdAt = "2026-11-15T00:00:00Z"
+        )
+        val bootstrapScope2 = BootstrapResponse(
+            companyId = otherCompany,
+            companyName = "Other Company",
+            baseCurrency = "USD",
+            walkInCustomerId = walkInUlid,
+            staff = BootstrapStaff(otherActor, "Actor 2", "actor2@example.com", listOf("cashier")),
+            deviceLease = null,
+            defaultWarehouse = DefaultWarehouse(warehouseUlid, "WH-02", "Warehouse 2"),
+            approvedCashAccount = ApprovedCashAccount(cashAccountUlid, "CASH-02", "Cash 2", "USD"),
+            units = emptyList(),
+            taxes = emptyList(),
+            currencyMinorUnits = 2,
+            offlinePolicy = OfflinePolicyDisabled(),
+            catalogSnapshotVersion = "v2"
+        )
+        fakeCoordinator.authState = StaffAuthState.ReadReady(sessionScope2, bootstrapScope2)
+        fakeCoordinator.currentGeneration = 2L
+
+        // Trigger scope check for Scope 2
+        vm.selectTab(StaffWorkspaceTab.CASH_SALE)
+        advanceUntilIdle()
+
+        // Assert zero presentation leaks: all tenant-scoped basket, customer, tender, hold reset to clean
+        val draftScope2 = vm.uiState.value.saleDraft
+        assertFalse(draftScope2.isPaymentUnverifiedHold)
+        assertFalse(draftScope2.isSubmitting)
+        assertNull(draftScope2.preparedIntent)
+        assertNull(draftScope2.submissionError)
+        assertTrue(draftScope2.lines.isEmpty())
+        assertNull(draftScope2.selectedCustomer)
+        assertNull(draftScope2.cashTendered)
+
+        // Assert Scope 1's record remains encrypted on disk untouched
+        val onDiskRecordScope1 = sharedStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+        assertNotNull("Scope 1 encrypted record must remain on disk", onDiskRecordScope1)
+        assertEquals(eventId, onDiskRecordScope1?.clientEventId)
+
+        // Switch session back to Scope 1
+        val sessionScope1 = StaffSessionRecord(
+            token = "valid_session_token_scope_1_12345",
+            actorUlid = actorUlid,
+            deviceUuid = deviceUuid,
+            passwordEpoch = "epoch_1",
+            expiresAt = "2026-11-15T23:59:59Z",
+            selectedCompanyId = companyUlid,
+            roleLabel = "Cashier",
+            actorName = "Test Actor",
+            actorEmail = "actor@example.com",
+            createdAt = "2026-11-15T00:00:00Z"
+        )
+        val bootstrapScope1 = BootstrapResponse(
+            companyId = companyUlid,
+            companyName = "Test Company",
+            baseCurrency = "USD",
+            walkInCustomerId = walkInUlid,
+            staff = BootstrapStaff(actorUlid, "Test Actor", "actor@example.com", listOf("cashier")),
+            deviceLease = null,
+            defaultWarehouse = DefaultWarehouse(warehouseUlid, "WH-01", "Default Warehouse"),
+            approvedCashAccount = ApprovedCashAccount(cashAccountUlid, "CASH-01", "Main Cash", "USD"),
+            units = emptyList(),
+            taxes = emptyList(),
+            currencyMinorUnits = 2,
+            offlinePolicy = OfflinePolicyDisabled(),
+            catalogSnapshotVersion = "v1"
+        )
+        fakeCoordinator.authState = StaffAuthState.ReadReady(sessionScope1, bootstrapScope1)
+        fakeCoordinator.currentGeneration = 3L
+
+        vm.selectTab(StaffWorkspaceTab.CASH_SALE)
+        advanceUntilIdle()
+
+        // Exact record for Scope 1 is restored under new generation 3L
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertEquals(eventId, vm.uiState.value.saleDraft.preparedIntent?.clientEventId)
+        assertEquals(3L, vm.uiState.value.saleDraft.preparedIntent?.scopeGeneration)
+    }
+
+    @Test
+    fun testLocalTokenUnavailable_unreadableStorage_keepsHoldAndIntent() = runTest(testDispatcher) {
+        val store = InMemoryDurableOnlineSaleRecoveryStore(throwOnGet = false)
+
+        // 1. Healthy store + real existing intent/reservation first
+        val eventId = ClientUuid.random()
+        val rawWireJson = """{"client_event_id":"$eventId","currency":"USD","customer_id":"${walkInUlid.value}","device_id":"${deviceUuid.value}","lines":[{"conversion_to_base":"1","product_id":"${productUlid.value}","product_unit_id":"${unitUlid.value}","quantity":"1","tax_inclusive":false,"tax_rate":"0.000000","tax_rate_id":null,"unit_price":"20.000000"}],"payment":{"amount":"20.00","cash_account_id":"${cashAccountUlid.value}","payment_method":"cash","settlement_mode":"full"},"warehouse_id":"${warehouseUlid.value}"}"""
+        val rawWireBytes = rawWireJson.toByteArray(Charsets.UTF_8)
+        val context = OnlineSaleContext(actorId = actorUlid, companyId = companyUlid, currencyMinorUnits = 2)
+        val intent = PreparedOnlineSaleIntent.prepare(context = context, rawWireBytes = rawWireBytes, scopeGeneration = 1L)
+        val record = DurableOnlineSaleRecoveryRecord(
+            clientEventId = eventId,
+            expectedNormativeProfileDigest = intent.expectedNormativeProfileDigest,
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            baseOrigin = "https://small-trader.example.com",
+            currency = "USD",
+            currencyMinorUnits = 2,
+            amount = MoneyAmount("20.00"),
+            rawWireBytes = rawWireBytes,
+            createdAt = "2026-11-15T12:00:00Z"
+        )
+        store.savePendingSale(record)
+
+        var tokenAvailable = true
+        var transportCalled = false
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = store,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, s, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = object : ReadClientTransport {
+                        override fun execute(request: TransportRequest): TransportResponse {
+                            transportCalled = true
+                            throw AssertionError("Transport must not be called when token is unavailable")
+                        }
+                    },
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = { if (tokenAvailable) tokenProvider() else null },
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = s,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        // Reconstituted on startup from healthy store
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertEquals(eventId, vm.uiState.value.saleDraft.preparedIntent?.clientEventId)
+
+        // 2. Make storage read fail and token unavailable
+        store.throwOnGet = true
+        tokenAvailable = false
+
+        // Attempt status check with unreadable storage and unavailable token
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        // Unreadable storage MUST preserve original intent & hold; zero POST dispatched!
+        assertFalse("Transport must never be called", transportCalled)
+        val draft = vm.uiState.value.saleDraft
+        assertTrue("Hold must remain active when storage is unreadable", draft.isPaymentUnverifiedHold)
+        assertFalse(draft.isSubmitting)
+        assertNotNull("Prepared intent must be preserved", draft.preparedIntent)
+        assertEquals("Exact original event ID must be preserved", eventId, draft.preparedIntent!!.clientEventId)
+        assertNotNull(draft.submissionError)
+    }
 }
 
 /**
@@ -800,7 +3362,9 @@ private class TestStaffCoordinator(
     val deviceId: ClientUuid,
     val warehouseId: ServerUlid,
     val cashAccountId: ServerUlid,
-    val walkInId: ServerUlid
+    val walkInId: ServerUlid,
+    val taxes: List<BootstrapTax> = emptyList(),
+    val currencyMinorUnits: Int? = null
 ) : StaffSessionCoordinator {
 
     override var currentGeneration: Long = 1L
@@ -829,7 +3393,8 @@ private class TestStaffCoordinator(
         defaultWarehouse = DefaultWarehouse(warehouseId, "WH-01", "Default Warehouse"),
         approvedCashAccount = ApprovedCashAccount(cashAccountId, "CASH-01", "Main Cash", "USD"),
         units = emptyList(),
-        taxes = emptyList(),
+        taxes = taxes,
+        currencyMinorUnits = currencyMinorUnits,
         offlinePolicy = OfflinePolicyDisabled(),
         catalogSnapshotVersion = "v1"
     )
@@ -903,3 +3468,91 @@ private class TestStaffCoordinator(
         )
     }
 }
+
+/**
+ * Hermetic in-memory implementation of DurableOnlineSaleRecoveryStore for testing.
+ */
+private class InMemoryDurableOnlineSaleRecoveryStore(
+    var throwOnSave: Boolean = false,
+    var throwOnGet: Boolean = false,
+    var throwOnClear: Boolean = false
+) : DurableOnlineSaleRecoveryStore {
+    private val records = mutableMapOf<ClientUuid, DurableOnlineSaleRecoveryRecord>()
+
+    override fun savePendingSale(record: DurableOnlineSaleRecoveryRecord) {
+        record.validateConsistency()
+        if (throwOnSave) {
+            throw OnlineSaleRecoveryException("Simulated disk write failure")
+        }
+        val canonical = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(record.baseOrigin)
+        val normalized = if (record.baseOrigin == canonical) record else record.copy(baseOrigin = canonical)
+        val existing = records[normalized.clientEventId]
+        if (existing != null) {
+            val isSameScope = existing.companyId == normalized.companyId &&
+                    existing.actorId == normalized.actorId &&
+                    existing.deviceId == normalized.deviceId &&
+                    existing.baseOrigin == normalized.baseOrigin
+            if (!isSameScope) {
+                throw OnlineSaleRecoveryException("Global event UUID collision across identity scopes")
+            }
+            if (existing.expectedNormativeProfileDigest != normalized.expectedNormativeProfileDigest ||
+                !existing.rawWireBytes.contentEquals(normalized.rawWireBytes)
+            ) {
+                throw OnlineSaleRecoveryException("Cannot overwrite pending event with different payload bytes")
+            }
+            return
+        }
+        records[normalized.clientEventId] = normalized
+    }
+
+    override fun getPendingSale(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        baseOrigin: String
+    ): DurableOnlineSaleRecoveryRecord? {
+        if (throwOnGet) {
+            throw OnlineSaleRecoveryException("Simulated disk read failure")
+        }
+        val canonical = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(baseOrigin)
+        val found = records.values.firstOrNull {
+            it.companyId == companyId && it.actorId == actorId && it.deviceId == deviceId && it.baseOrigin == canonical
+        }
+        found?.validateConsistency()
+        return found
+    }
+
+    override fun clearPendingSale(
+        clientEventId: ClientUuid,
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        baseOrigin: String
+    ) {
+        if (throwOnClear) {
+            throw OnlineSaleRecoveryException("Simulated disk clear failure")
+        }
+        val canonical = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(baseOrigin)
+        val existing = records[clientEventId]
+        if (existing != null &&
+            existing.companyId == companyId &&
+            existing.actorId == actorId &&
+            existing.deviceId == deviceId &&
+            existing.baseOrigin == canonical
+        ) {
+            records.remove(clientEventId)
+        }
+    }
+
+    override fun clearPendingSale(clientEventId: ClientUuid) {
+        if (throwOnClear) {
+            throw OnlineSaleRecoveryException("Simulated disk clear failure")
+        }
+        records.remove(clientEventId)
+    }
+
+    override fun listAllRecords(): List<DurableOnlineSaleRecoveryRecord> {
+        return records.values.toList()
+    }
+}
+

@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" tests="26" skipped="0" failures="2" errors="0" timestamp="2026-11-15T16:28:19.089Z" hostname="pasta-hp-worker" time="0.297">
+  <properties/>
+  <testcase name="testSaveAndGet_roundTrip_exactParity" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.027"/>
+  <testcase name="testConsistency_inconsistentAmount_rejectedOnSave" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.003"/>
+  <testcase name="testScopedClearPendingSale_onlyClearsMatchingScope" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.009"/>
+  <testcase name="testTenantIsolation_matchesExactScopeOnly" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.011"/>
+  <testcase name="testConsistency_inconsistentDeviceId_rejectedOnSave" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.003"/>
+  <testcase name="testCorruptedCiphertext_throwsRecoveryException" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.008"/>
+  <testcase name="testGlobalEventUuidCollision_acrossScopes_rejected" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.005"/>
+  <testcase name="testReboundIntent_reconstitutesValidPreparedOnlineSaleIntent" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.002"/>
+  <testcase name="testTruncatedEnvelope_throwsRecoveryException" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.001"/>
+  <testcase name="testCanonicalizeOrigin_normalizesTrailingSlashAndCase" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.001"/>
+  <testcase name="testConsistency_inconsistentDigest_rejectedOnSave" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.002"/>
+  <testcase name="testEnvelope_nearLimit_succeeds" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.028">
+    <failure message="com.example.data.mobile.contract.v2.IntentProfileValidationError: Online intent profile exceeds line limit" type="com.example.data.mobile.contract.v2.IntentProfileValidationError">com.example.data.mobile.contract.v2.IntentProfileValidationError: Online intent profile exceeds line limit
+	at com.example.data.mobile.contract.v2.OnlineSaleIntentProfile.&lt;init&gt;(OnlineSaleIntentProfile.kt:211)
+	at com.example.data.mobile.contract.v2.OnlineSaleIntentProfile$Companion.fromContextAndRequest(OnlineSaleIntentProfile.kt:478)
+	at com.example.data.mobile.onlinecash.PreparedOnlineSaleIntent$Companion.prepare(PreparedOnlineSaleIntent.kt:183)
+	at com.example.data.mobile.onlinecash.PreparedOnlineSaleIntent$Companion.prepare$default(PreparedOnlineSaleIntent.kt:133)
+	at com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest.createSampleRecord(DurableOnlineSaleRecoveryStoreTest.kt:84)
+	at com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest.createSampleRecord$default(DurableOnlineSaleRecoveryStoreTest.kt:55)
+	at com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest.testEnvelope_nearLimit_succeeds(DurableOnlineSaleRecoveryStoreTest.kt:326)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.internal.runners.statements.RunBefores.evaluate(RunBefores.java:26)
+	at org.junit.rules.ExternalResource$1.evaluate(ExternalResource.java:54)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.runRequest(JUnitTestExecutor.java:175)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.accept(JUnitTestExecutor.java:84)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.accept(JUnitTestExecutor.java:47)
+	at org.gradle.api.internal.tasks.testing.junit.AbstractJUnitTestDefinitionProcessor.processTestDefinition(AbstractJUnitTestDefinitionProcessor.java:65)
+	at org.gradle.api.internal.tasks.testing.SuiteTestDefinitionProcessor.processTestDefinition(SuiteTestDefinitionProcessor.java:54)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.gradle.internal.dispatch.MethodInvocation.invokeOn(MethodInvocation.java:77)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:28)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:19)
+	at org.gradle.internal.dispatch.ContextClassLoaderDispatch.dispatch(ContextClassLoaderDispatch.java:33)
+	at org.gradle.internal.dispatch.ProxyDispatchAdapter$DispatchingInvocationHandler.invoke(ProxyDispatchAdapter.java:88)
+	at jdk.proxy1/jdk.proxy1.$Proxy4.processTestDefinition(Unknown Source)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker$2.run(TestWorker.java:178)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.executeAndMaintainThreadName(TestWorker.java:126)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:103)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:63)
+	at org.gradle.process.internal.worker.child.ActionExecutionWorker.execute(ActionExecutionWorker.java:56)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:122)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:72)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.run(GradleWorkerMain.java:69)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.main(GradleWorkerMain.java:74)
+</failure>
+  </testcase>
+  <testcase name="testConsistency_inconsistentActorId_rejectedOnSave" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.003"/>
+  <testcase name="testConsistency_inconsistentCurrency_rejectedOnSave" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.002"/>
+  <testcase name="testDurabilitySyncFailure_propagatesRecoveryExceptionBeforePost" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.004"/>
+  <testcase name="testEnvelope_overflow_throwsException" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.146">
+    <failure message="com.example.data.mobile.contract.v2.IntentProfileValidationError: Online intent profile exceeds line limit" type="com.example.data.mobile.contract.v2.IntentProfileValidationError">com.example.data.mobile.contract.v2.IntentProfileValidationError: Online intent profile exceeds line limit
+	at com.example.data.mobile.contract.v2.OnlineSaleIntentProfile.&lt;init&gt;(OnlineSaleIntentProfile.kt:211)
+	at com.example.data.mobile.contract.v2.OnlineSaleIntentProfile$Companion.fromContextAndRequest(OnlineSaleIntentProfile.kt:478)
+	at com.example.data.mobile.onlinecash.PreparedOnlineSaleIntent$Companion.prepare(PreparedOnlineSaleIntent.kt:183)
+	at com.example.data.mobile.onlinecash.PreparedOnlineSaleIntent$Companion.prepare$default(PreparedOnlineSaleIntent.kt:133)
+	at com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest.createSampleRecord(DurableOnlineSaleRecoveryStoreTest.kt:84)
+	at com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest.createSampleRecord$default(DurableOnlineSaleRecoveryStoreTest.kt:55)
+	at com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest.testEnvelope_overflow_throwsException(DurableOnlineSaleRecoveryStoreTest.kt:339)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.internal.runners.statements.RunBefores.evaluate(RunBefores.java:26)
+	at org.junit.rules.ExternalResource$1.evaluate(ExternalResource.java:54)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.runRequest(JUnitTestExecutor.java:175)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.accept(JUnitTestExecutor.java:84)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.accept(JUnitTestExecutor.java:47)
+	at org.gradle.api.internal.tasks.testing.junit.AbstractJUnitTestDefinitionProcessor.processTestDefinition(AbstractJUnitTestDefinitionProcessor.java:65)
+	at org.gradle.api.internal.tasks.testing.SuiteTestDefinitionProcessor.processTestDefinition(SuiteTestDefinitionProcessor.java:54)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.gradle.internal.dispatch.MethodInvocation.invokeOn(MethodInvocation.java:77)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:28)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:19)
+	at org.gradle.internal.dispatch.ContextClassLoaderDispatch.dispatch(ContextClassLoaderDispatch.java:33)
+	at org.gradle.internal.dispatch.ProxyDispatchAdapter$DispatchingInvocationHandler.invoke(ProxyDispatchAdapter.java:88)
+	at jdk.proxy1/jdk.proxy1.$Proxy4.processTestDefinition(Unknown Source)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker$2.run(TestWorker.java:178)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.executeAndMaintainThreadName(TestWorker.java:126)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:103)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:63)
+	at org.gradle.process.internal.worker.child.ActionExecutionWorker.execute(ActionExecutionWorker.java:56)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:122)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:72)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.run(GradleWorkerMain.java:69)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.main(GradleWorkerMain.java:74)
+</failure>
+  </testcase>
+  <testcase name="testCanonicalizeOrigin_normalizesDefaultPorts" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.001"/>
+  <testcase name="testConsistency_corruptedDuplicateOnDisk_readFailsClosed" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.004"/>
+  <testcase name="testCompareAndSet_blocksMutationOfExistingEventWithDifferentPayload" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.005"/>
+  <testcase name="testClearPendingSale_onlyClearsMatchingEventId" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.01"/>
+  <testcase name="testCanonicalizeOrigin_strictValidation_failsClosedOnInvalid" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.001"/>
+  <testcase name="testConsistency_inconsistentEventId_rejectedOnSave" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.002"/>
+  <testcase name="testConsistency_inconsistentCompanyId_rejectedOnSave" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.001"/>
+  <testcase name="testCompareAndSet_allowsIdempotentResaveOfExactSameRecord" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.005"/>
+  <testcase name="testClearPendingSale_nonMatchingEventId_isNoOp" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.004"/>
+  <testcase name="testCompareAndSet_blocksSecondEventWhilePriorPending" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.005"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

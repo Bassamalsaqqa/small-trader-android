@@ -1,0 +1,36 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+Calculating task graph as no cached configuration is available for tasks: :app:cleanTestDebugUnitTest :app:testDebugUnitTest --tests com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest --tests com.example.ui.staff.sale.StaffOnlineSaleViewModelTest --tests com.example.ui.staff.StaffWorkspaceComposeTest --tests com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest
+> Task :app:cleanTestDebugUnitTest UP-TO-DATE
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:processDebugGoogleServices UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:kspDebugKotlin
+> Task :app:compileDebugKotlin
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:407:34 Unresolved reference 'baseOrigin'.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/ui/staff/StaffWorkspaceViewModel.kt:914:42 Unresolved reference 'DurableOnlineSaleRecoveryRecord'.
+
+> Task :app:compileDebugKotlin FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileDebugKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 55s
+10 actionable tasks: 2 executed, 8 up-to-date
+Configuration cache entry stored.

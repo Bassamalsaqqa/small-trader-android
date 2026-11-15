@@ -19,6 +19,7 @@ import com.example.data.mobile.contract.PositiveDecimalQuantity
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.TaxPercentage
 import com.example.data.mobile.onlinecash.OnlineCashSaleReceipt
+import com.example.data.mobile.readclient.BootstrapTax
 import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.ProductBaseUnit
 import com.example.data.mobile.readclient.ProductCatalogItem
@@ -34,8 +35,10 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], qualifiers = "w393dp-h852dp-xxhdpi")
 class StaffWorkspaceComposeTest {
 
     @get:Rule
@@ -599,14 +602,14 @@ class StaffWorkspaceComposeTest {
         )
         val line = StaffOnlineSaleDraftLine.fromProduct(product = product, explicitNoTax = true)
         val unverifiedReceipt = OnlineCashSaleReceipt(
+            companyId = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789A"),
             clientEventId = com.example.data.mobile.contract.ClientUuid.random(),
+            payloadDigest = com.example.data.mobile.contract.PayloadDigest.fromBytes("test".toByteArray()),
             invoiceId = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789G"),
             invoiceNumber = "INV-HOLD-999",
             paymentId = null,
             paymentReceiptNumber = null,
             grandTotal = MoneyAmount.fromNonnegativeString("30.000000"),
-            amountPaid = MoneyAmount.ZERO,
-            changeReturned = MoneyAmount.ZERO,
             postedAt = "2026-11-15T12:00:00Z",
             wasReplay = false
         )
@@ -616,6 +619,8 @@ class StaffWorkspaceComposeTest {
             unverifiedReceipt = unverifiedReceipt
         )
 
+        var checkStatusClicked = false
+        var retryRecoveryClicked = false
         val uiState = StaffWorkspaceUiState(
             phase = StaffWorkspacePhase.READ_READY,
             selectedTab = StaffWorkspaceTab.CASH_SALE,
@@ -639,7 +644,9 @@ class StaffWorkspaceComposeTest {
                     onSwitchCompany = {},
                     onLogout = {},
                     onToggleLanguage = {},
-                    onToggleTheme = {}
+                    onToggleTheme = {},
+                    onCheckPaymentStatus = { checkStatusClicked = true },
+                    onRetryRecovery = { retryRecoveryClicked = true }
                 )
             }
         }
@@ -652,5 +659,115 @@ class StaffWorkspaceComposeTest {
         // 2. Clear and submit buttons are disabled (frozen)
         composeTestRule.onNodeWithTag("staff_sale_clear_button").assertIsNotEnabled()
         composeTestRule.onNodeWithTag("staff_sale_submit_button").assertIsNotEnabled()
+
+        // 3. Check status button is displayed and clickable
+        val checkStatusBtn = composeTestRule.onNodeWithTag("staff_sale_check_payment_status_button")
+        checkStatusBtn.assertIsDisplayed()
+        checkStatusBtn.performClick()
+        composeTestRule.waitForIdle()
+        assertTrue("Check status callback must fire on click", checkStatusClicked)
+
+        // 4. Retry recovery button is displayed and clickable
+        val retryRecoveryBtn = composeTestRule.onNodeWithTag("staff_sale_retry_recovery_button")
+        retryRecoveryBtn.assertIsDisplayed()
+        retryRecoveryBtn.performClick()
+        composeTestRule.waitForIdle()
+        assertTrue("Retry recovery callback must fire on click", retryRecoveryClicked)
+    }
+
+    @Test
+    fun cashSaleScreen_rendersDraftLineTaxChoices_andSelectsTaxAndNoTax() {
+        val baseUnit = ProductBaseUnit(ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789D"), "PCS", "Pieces")
+        val defaultUnit = ProductDefaultUnit(
+            unitId = baseUnit.id,
+            productUnitId = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789E"),
+            conversionToBase = PositiveDecimalQuantity.of(1),
+            salePrice = MoneyAmount.fromNonnegativeString("50.000000")
+        )
+        val product = ProductCatalogItem(
+            id = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789F"),
+            sku = "SKU-TAX-01",
+            barcode = null,
+            name = "Tax Test Item",
+            unitPrice = MoneyAmount.fromNonnegativeString("50.000000"),
+            taxRate = null,
+            taxRateId = null,
+            isTracked = true,
+            availableQuantity = NonnegativeDecimalQuantity.fromNonnegativeString("10.000000"),
+            baseUnit = baseUnit,
+            defaultUnit = defaultUnit,
+            units = emptyList()
+        )
+        val line = StaffOnlineSaleDraftLine.fromProduct(product = product, explicitNoTax = false)
+        val draft = StaffOnlineSaleDraft(lines = listOf(line))
+
+        val tax1 = BootstrapTax(
+            id = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789T"),
+            code = "VAT16",
+            name = "ضريبة القيمة المضافة 16%",
+            rate = TaxPercentage("16.000000"),
+            calculation = "exclusive",
+            isDefault = true
+        )
+
+        var selectedTaxLineId = ""
+        var selectedTax: BootstrapTax? = null
+        var explicitNoTaxLineId = ""
+
+        val uiState = StaffWorkspaceUiState(
+            phase = StaffWorkspacePhase.READ_READY,
+            selectedTab = StaffWorkspaceTab.CASH_SALE,
+            activeCompany = SafeCompanyViewData("01JCV8X9M2NQW3TYZ4R5S6789A", "معصرة الزيتون", currency = "USD"),
+            saleDraft = draft,
+            availableTaxes = listOf(tax1),
+            isOnlineCashEnabled = true,
+            language = AppLanguage.AR
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffWorkspaceScreen(
+                    uiState = uiState,
+                    onSelectTab = {},
+                    onLoadMoreProducts = {},
+                    onRefreshProducts = {},
+                    onSearchProducts = {},
+                    onLoadMoreCustomers = {},
+                    onRefreshCustomers = {},
+                    onSearchCustomers = {},
+                    onSwitchCompany = {},
+                    onLogout = {},
+                    onToggleLanguage = {},
+                    onToggleTheme = {},
+                    onSetSaleLineTax = { lineId, tax ->
+                        selectedTaxLineId = lineId
+                        selectedTax = tax
+                    },
+                    onSetSaleLineExplicitNoTax = { lineId ->
+                        explicitNoTaxLineId = lineId
+                    }
+                )
+            }
+        }
+
+        // 1. Tax choice group is displayed
+        composeTestRule.onNodeWithTag("staff_sale_line_tax_choices_${line.lineId}").assertIsDisplayed()
+
+        // 2. Click specific bootstrap tax button
+        val taxButton = composeTestRule.onNodeWithTag("staff_sale_line_tax_${tax1.id.value}_${line.lineId}")
+        taxButton.assertIsDisplayed()
+        taxButton.performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(line.lineId, selectedTaxLineId)
+        assertEquals(tax1, selectedTax)
+
+        // 3. Click explicit No Tax button
+        val noTaxButton = composeTestRule.onNodeWithTag("staff_sale_line_notax_${line.lineId}")
+        noTaxButton.assertIsDisplayed()
+        noTaxButton.performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(line.lineId, explicitNoTaxLineId)
     }
 }

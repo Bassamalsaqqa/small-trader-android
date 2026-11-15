@@ -1,0 +1,9 @@
+ce068d8b3ca3d7aa4e2d9f37d658389c18891ed3b3964f0b46d6ba7f686dc675  docs/evidence/pr24-bootstrap-tax-status-recovery/test-results/TEST-com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest.xml
+7414413c0f7c167cc14e7197cad4de36c86a3bd5ed0a940077f512d10d036e12  docs/evidence/pr24-bootstrap-tax-status-recovery/test-results/TEST-com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest.xml
+3bd07e36c34bdc75c126d1b2d2608d1e098842dad79bb9605102fa053811d364  docs/evidence/pr24-bootstrap-tax-status-recovery/test-results/TEST-com.example.data.mobile.session.SecureStaffSessionStoreTest.xml
+e1a080be3d0790e38d2b690d5bf86a07ca0c804018f1e00f08eb4e8f547f8086  docs/evidence/pr24-bootstrap-tax-status-recovery/test-results/TEST-com.example.data.mobile.session.StaffSessionCoordinatorTest.xml
+c828db725cee531ae55f6249781932a35fed8ba04afebb795bdd60dacb2873f0  docs/evidence/pr24-bootstrap-tax-status-recovery/test-results/TEST-com.example.ui.navigation.AppLaunchTargetResolverTest.xml
+4805738c24e583861d9dce9a1c09a89cbbf965112aef8b660fdcb04f727a521c  docs/evidence/pr24-bootstrap-tax-status-recovery/test-results/TEST-com.example.ui.staff.sale.StaffOnlineSaleDraftTest.xml
+fcc3d44bdac817c5578701aae10d7fa72e25ac775ab98aa51480f68a29ca939c  docs/evidence/pr24-bootstrap-tax-status-recovery/test-results/TEST-com.example.ui.staff.sale.StaffOnlineSaleViewModelTest.xml
+3d7a0a0184995d98b783b798104faca00a377a0f55b4cceb6e367c6be5baa7ae  docs/evidence/pr24-bootstrap-tax-status-recovery/test-results/TEST-com.example.ui.staff.StaffWorkspaceComposeTest.xml
+7cd8d2c8825b5ff90b9ec57b9ed2329a79e60525f2735f1f9f5bf779118bf4c3  docs/evidence/pr24-bootstrap-tax-status-recovery/test-results/TEST-com.example.ui.staff.StaffWorkspaceViewModelTest.xml

@@ -94,6 +94,10 @@ fun StaffWorkspaceScreen(
     onSelectCustomerForSale: (CustomerDirectoryItem) -> Unit = {},
     onUpdateSaleLineQuantity: (String, PositiveDecimalQuantity) -> Unit = { _, _ -> },
     onRemoveSaleLine: (String) -> Unit = {},
+    onSetSaleLineTax: (String, com.example.data.mobile.readclient.BootstrapTax) -> Unit = { _, _ -> },
+    onSetSaleLineExplicitNoTax: (String) -> Unit = {},
+    onCheckPaymentStatus: () -> Unit = {},
+    onRetryRecovery: () -> Unit = {},
     onClearSaleDraft: () -> Unit = {},
     onSubmitSale: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -257,10 +261,15 @@ fun StaffWorkspaceScreen(
                     StaffOnlineSaleView(
                         draft = uiState.saleDraft,
                         authority = uiState.saleAuthority,
+                        availableTaxes = uiState.availableTaxes,
                         currencyCode = uiState.activeCompany?.currency ?: "USD",
                         lang = lang,
                         onUpdateLineQuantity = onUpdateSaleLineQuantity,
                         onRemoveLine = onRemoveSaleLine,
+                        onSetLineTax = onSetSaleLineTax,
+                        onSetLineExplicitNoTax = onSetSaleLineExplicitNoTax,
+                        onCheckPaymentStatus = onCheckPaymentStatus,
+                        onRetryRecovery = onRetryRecovery,
                         onClearDraft = onClearSaleDraft,
                         onSubmitSale = onSubmitSale
                     )

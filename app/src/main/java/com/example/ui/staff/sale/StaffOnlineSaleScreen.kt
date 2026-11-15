@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -34,6 +35,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,6 +44,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import com.example.data.mobile.readclient.BootstrapTax
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -79,10 +82,15 @@ import java.math.BigDecimal
 fun StaffOnlineSaleView(
     draft: StaffOnlineSaleDraft,
     authority: StaffOnlineSaleAuthorityResolution?,
+    availableTaxes: List<BootstrapTax> = emptyList(),
     currencyCode: String,
     lang: AppLanguage,
     onUpdateLineQuantity: (lineId: String, newQuantity: PositiveDecimalQuantity) -> Unit,
     onRemoveLine: (lineId: String) -> Unit,
+    onSetLineTax: (lineId: String, tax: BootstrapTax) -> Unit = { _, _ -> },
+    onSetLineExplicitNoTax: (lineId: String) -> Unit = {},
+    onCheckPaymentStatus: () -> Unit = {},
+    onRetryRecovery: () -> Unit = {},
     onClearDraft: () -> Unit,
     onSubmitSale: () -> Unit,
     modifier: Modifier = Modifier
@@ -233,6 +241,48 @@ fun StaffOnlineSaleView(
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = onCheckPaymentStatus,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("staff_sale_check_payment_status_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError
+                        ),
+                        enabled = !draft.isSubmitting
+                    ) {
+                        if (draft.isSubmitting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = MaterialTheme.colorScheme.onError,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Text(
+                            text = lang.tr("التحقق من حالة الدفع", "Check Payment Status"),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onRetryRecovery,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("staff_sale_retry_recovery_button"),
+                        enabled = !draft.isSubmitting
+                    ) {
+                        Text(
+                            text = lang.tr("إعادة محاولة الاسترداد", "Retry Recovery"),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
@@ -448,11 +498,14 @@ fun StaffOnlineSaleView(
                     items(draft.lines, key = { it.lineId }) { line ->
                         SaleDraftLineCard(
                             line = line,
+                            availableTaxes = availableTaxes,
                             currencyCode = currencyCode,
                             lang = lang,
                             isFrozen = draft.isIndeterminate || draft.isPaymentUnverifiedHold,
                             onUpdateQuantity = { qty -> onUpdateLineQuantity(line.lineId, qty) },
-                            onRemove = { onRemoveLine(line.lineId) }
+                            onRemove = { onRemoveLine(line.lineId) },
+                            onSetTax = { tax -> onSetLineTax(line.lineId, tax) },
+                            onSetExplicitNoTax = { onSetLineExplicitNoTax(line.lineId) }
                         )
                     }
                 }
@@ -649,11 +702,14 @@ fun StaffOnlineSaleView(
 @Composable
 private fun SaleDraftLineCard(
     line: StaffOnlineSaleDraftLine,
+    availableTaxes: List<BootstrapTax> = emptyList(),
     currencyCode: String,
     lang: AppLanguage,
     isFrozen: Boolean,
     onUpdateQuantity: (PositiveDecimalQuantity) -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onSetTax: (BootstrapTax) -> Unit = {},
+    onSetExplicitNoTax: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier
@@ -767,6 +823,66 @@ private fun SaleDraftLineCard(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
+                }
+            }
+
+            // Tax Choice Controls: Active Bootstrap Taxes + Explicit No Tax (48dp touch targets, EN/AR bilingual)
+            if (availableTaxes.isNotEmpty() || line.hasUnresolvedTaxContract) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = lang.tr("اختيار الضريبة:", "Select Tax:"),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("staff_sale_line_tax_choices_${line.lineId}"),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Explicit No Tax (0%) control
+                    item {
+                        val isNoTaxSelected = line.taxRateId == null &&
+                                line.taxRate?.toPlainString() == "0.000000" &&
+                                line.taxInclusive == false
+                        FilterChip(
+                            selected = isNoTaxSelected,
+                            onClick = onSetExplicitNoTax,
+                            label = {
+                                Text(
+                                    text = lang.tr("إعفاء ضريبي (0%)", "No Tax (0%)"),
+                                    fontSize = 12.sp
+                                )
+                            },
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("staff_sale_line_notax_${line.lineId}"),
+                            enabled = !isFrozen
+                        )
+                    }
+
+                    // Active Bootstrap Taxes
+                    items(availableTaxes.size) { idx ->
+                        val tax = availableTaxes[idx]
+                        val isTaxSelected = line.taxRateId == tax.id
+                        FilterChip(
+                            selected = isTaxSelected,
+                            onClick = { onSetTax(tax) },
+                            label = {
+                                Text(
+                                    text = "${tax.code} (${tax.rate.toPlainString()}%)",
+                                    fontSize = 12.sp
+                                )
+                            },
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("staff_sale_line_tax_${tax.id.value}_${line.lineId}"),
+                            enabled = !isFrozen
+                        )
+                    }
                 }
             }
 

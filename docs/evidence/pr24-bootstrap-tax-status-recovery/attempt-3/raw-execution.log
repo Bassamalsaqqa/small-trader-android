@@ -1,0 +1,154 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+Reusing configuration cache.
+> Task :app:cleanTestDebugUnitTest UP-TO-DATE
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:processDebugGoogleServices UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:kspDebugKotlin UP-TO-DATE
+> Task :app:compileDebugKotlin UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:bundleDebugClassesToRuntimeJar UP-TO-DATE
+> Task :app:bundleDebugClassesToCompileJar UP-TO-DATE
+> Task :app:kspDebugUnitTestKotlin
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:compileDebugUnitTestKotlin
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/test/java/com/example/data/mobile/onlinecash/DurableOnlineSaleRecoveryStoreTest.kt:166:23 'fun clearPendingSale(clientEventId: ClientUuid): Unit' is deprecated. Test-only; production callers must use scoped clearPendingSale.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/test/java/com/example/data/mobile/onlinecash/DurableOnlineSaleRecoveryStoreTest.kt:173:23 'fun clearPendingSale(clientEventId: ClientUuid): Unit' is deprecated. Test-only; production callers must use scoped clearPendingSale.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/test/java/com/example/data/mobile/onlinecash/DurableOnlineSaleRecoveryStoreTest.kt:183:23 'fun clearPendingSale(clientEventId: ClientUuid): Unit' is deprecated. Test-only; production callers must use scoped clearPendingSale.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/test/java/com/example/data/mobile/outbox/EncryptedOutboxTest.kt:1558:50 'val id: Long' is deprecated. Deprecated in Java.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/test/java/com/example/data/mobile/outbox/EncryptedOutboxTest.kt:1560:44 'val id: Long' is deprecated. Deprecated in Java.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:2755:18 This declaration overrides a deprecated member but is not marked as deprecated itself. Add the '@Deprecated' annotation or suppress the diagnostic.
+
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:packageDebugUnitTestForUnitTest UP-TO-DATE
+> Task :app:processDebugUnitTestManifest UP-TO-DATE
+> Task :app:generateDebugUnitTestConfig UP-TO-DATE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+
+> Task :app:testDebugUnitTest
+
+DurableOnlineSaleRecoveryStoreTest > testSaveAndGet_roundTrip_exactParity FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testConsistency_inconsistentAmount_rejectedOnSave FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testScopedClearPendingSale_onlyClearsMatchingScope FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testTenantIsolation_matchesExactScopeOnly FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testConsistency_inconsistentDeviceId_rejectedOnSave FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testCorruptedCiphertext_throwsRecoveryException FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testGlobalEventUuidCollision_acrossScopes_rejected FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testReboundIntent_reconstitutesValidPreparedOnlineSaleIntent FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testConsistency_inconsistentDigest_rejectedOnSave FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testEnvelope_nearLimit_succeeds FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testConsistency_inconsistentActorId_rejectedOnSave FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testConsistency_inconsistentCurrency_rejectedOnSave FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testDurabilitySyncFailure_propagatesRecoveryExceptionBeforePost FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testEnvelope_overflow_throwsException FAILED
+    java.lang.IllegalArgumentException at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testConsistency_corruptedDuplicateOnDisk_readFailsClosed FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testCompareAndSet_blocksMutationOfExistingEventWithDifferentPayload FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testClearPendingSale_onlyClearsMatchingEventId FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testConsistency_inconsistentEventId_rejectedOnSave FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testConsistency_inconsistentCompanyId_rejectedOnSave FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testCompareAndSet_allowsIdempotentResaveOfExactSameRecord FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testClearPendingSale_nonMatchingEventId_isNoOp FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+DurableOnlineSaleRecoveryStoreTest > testCompareAndSet_blocksSecondEventWhilePriorPending FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at DurableOnlineSaleRecoveryStoreTest.kt:84
+
+StaffOnlineSaleViewModelTest > testDurableRecovery_companySwitch_isolation FAILED
+    java.lang.AssertionError at StaffOnlineSaleViewModelTest.kt:2090
+
+StaffOnlineSaleViewModelTest > testCurrentGenerationReauth_rebindsPreparedIntentToNewGeneration FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at StaffOnlineSaleViewModelTest.kt:2439
+
+StaffOnlineSaleViewModelTest > testDurableRecovery_restoredHold_postedWrongDigest_staysHold FAILED
+    java.lang.AssertionError at StaffOnlineSaleViewModelTest.kt:2259
+
+StaffOnlineSaleViewModelTest > testLocalTokenUnavailable_allowsEditing_invalidatesPreparedIntent FAILED
+    java.lang.AssertionError at StaffOnlineSaleViewModelTest.kt:678
+
+StaffOnlineSaleViewModelTest > testRetryLoadDurableRecovery_unusableStorage_thenRecovers FAILED
+    com.example.data.mobile.contract.v2.IntentProfileValidationError at StaffOnlineSaleViewModelTest.kt:2490
+
+StaffOnlineSaleViewModelTest > testDurableRecovery_missingStore_submitBlockedWithHold FAILED
+    java.lang.AssertionError at StaffOnlineSaleViewModelTest.kt:2398
+
+StaffOnlineSaleViewModelTest > testDurableRecovery_processRecreate_lostAck_recoversHoldViaGetOnly FAILED
+    java.lang.AssertionError at StaffOnlineSaleViewModelTest.kt:1957
+
+114 tests completed, 29 failed
+
+> Task :app:testDebugUnitTest FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/build/reports/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+BUILD FAILED in 1m 12s
+34 actionable tasks: 3 executed, 31 up-to-date
+Configuration cache entry reused.

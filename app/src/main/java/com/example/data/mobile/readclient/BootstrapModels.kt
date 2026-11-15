@@ -405,15 +405,37 @@ class BootstrapResponse(
                 "catalogSnapshotVersion='$catalogSnapshotVersion', currencyMinorUnits=$currencyMinorUnits)"
 
     companion object {
-        private val ALLOWED_KEYS = setOf(
+        /** Strict 12-key set for DEFAULT bootstrap calls (no include param). */
+        private val ALLOWED_KEYS_DEFAULT = setOf(
+            "company_id", "company_name", "base_currency", "walk_in_customer_id",
+            "staff", "device_lease", "default_warehouse", "approved_cash_account",
+            "units", "taxes", "offline_policy", "catalog_snapshot_version"
+        )
+
+        /** Strict 13-key set for REQUESTED bootstrap calls (include=currency_minor_units). */
+        private val ALLOWED_KEYS_WITH_CURRENCY = setOf(
             "company_id", "company_name", "base_currency", "walk_in_customer_id",
             "staff", "device_lease", "default_warehouse", "approved_cash_account",
             "units", "taxes", "offline_policy", "catalog_snapshot_version",
             "currency_minor_units"
         )
 
-        fun fromStrictJson(obj: StrictJsonObject): BootstrapResponse {
-            checkAllowedKeys(obj, ALLOWED_KEYS, "BootstrapResponse")
+        /**
+         * Parses a [BootstrapResponse] from strict JSON.
+         *
+         * @param obj The strict JSON object to parse.
+         * @param includeCurrencyMinorUnits Whether the caller requested `currency_minor_units`
+         *   via the `include=currency_minor_units` query parameter. When false (DEFAULT mode),
+         *   the response MUST NOT contain `currency_minor_units` — its presence is rejected as
+         *   a strict-12 schema violation. When true (REQUESTED mode), the field MUST be present
+         *   and contain a valid integer in [0..6].
+         */
+        fun fromStrictJson(
+            obj: StrictJsonObject,
+            includeCurrencyMinorUnits: Boolean = false
+        ): BootstrapResponse {
+            val allowedKeys = if (includeCurrencyMinorUnits) ALLOWED_KEYS_WITH_CURRENCY else ALLOWED_KEYS_DEFAULT
+            checkAllowedKeys(obj, allowedKeys, "BootstrapResponse")
 
             val offlinePolicyObj = requireObject(obj, "offline_policy")
             val offlineEnabled = requireBoolean(offlinePolicyObj, "enabled")
@@ -451,9 +473,18 @@ class BootstrapResponse(
                 BootstrapTax.fromStrictJson(tObj)
             }
 
-            val currencyMinorUnits = if (obj.properties.containsKey("currency_minor_units")) {
+            // REQUESTED mode: field must be present and valid 0..6.
+            // DEFAULT mode: field must not be present (already enforced by checkAllowedKeys above).
+            val currencyMinorUnits = if (includeCurrencyMinorUnits) {
+                if (!obj.properties.containsKey("currency_minor_units")) {
+                    throw CanonicalSerializationException(
+                        "currency_minor_units was requested (include=currency_minor_units) but is absent from server response"
+                    )
+                }
                 requireInt(obj, "currency_minor_units", min = 0, max = 6)
-            } else null
+            } else {
+                null
+            }
 
             return BootstrapResponse(
                 companyId = requireUlid(obj, "company_id"),

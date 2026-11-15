@@ -1680,5 +1680,60 @@ class StaffSessionCoordinatorTest {
         }
     }
 
+    @Test
+    fun coordinatorOptInCurrencyMinorUnits_passesIncludeQueryAndParses13Fields() {
+        var capturedIncludeParam: String? = null
+        val golden = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val parsedJson = StrictJsonParser.parse(golden).asObject()
+        val propsWithCmu = parsedJson.properties.toMutableMap()
+        propsWithCmu["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber("2", isInt = true)
+        val json13Fields = CanonicalJsonSerializer.serialize(com.example.data.mobile.contract.StrictJsonObject(propsWithCmu))
+
+        transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = { request ->
+            capturedIncludeParam = request.queryParams["include"]
+            TransportResponse(200, body = json13Fields)
+        }
+
+        val optInCoordinator = DefaultStaffSessionCoordinator(
+            readClient = readClient,
+            sessionStore = sessionStore,
+            clock = testClock,
+            includeCurrencyMinorUnits = true
+        )
+
+        optInCoordinator.requestChallenge(appVersion)
+        val loginResult = optInCoordinator.login("cashier@smalltrader.example", "password", "Test device")
+        assertTrue("Login must succeed with 13-field bootstrap", loginResult is CoordinatorResult.Success)
+        val ready = optInCoordinator.authState as StaffAuthState.ReadReady
+        assertEquals("currency_minor_units", capturedIncludeParam)
+        assertEquals(2, ready.bootstrap.currencyMinorUnits)
+    }
+
+    @Test
+    fun coordinatorDefault_passesNoIncludeQuery_andRejects13Fields() {
+        var capturedIncludeParam: String? = null
+        val golden = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val parsedJson = StrictJsonParser.parse(golden).asObject()
+        val propsWithCmu = parsedJson.properties.toMutableMap()
+        propsWithCmu["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber("2", isInt = true)
+        val json13Fields = CanonicalJsonSerializer.serialize(com.example.data.mobile.contract.StrictJsonObject(propsWithCmu))
+
+        transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = { request ->
+            capturedIncludeParam = request.queryParams["include"]
+            TransportResponse(200, body = json13Fields)
+        }
+
+        val defaultCoordinator = DefaultStaffSessionCoordinator(
+            readClient = readClient,
+            sessionStore = sessionStore,
+            clock = testClock,
+            includeCurrencyMinorUnits = false
+        )
+
+        defaultCoordinator.requestChallenge(appVersion)
+        val loginResult = defaultCoordinator.login("cashier@smalltrader.example", "password", "Test device")
+        assertNull("Default must not pass include query param", capturedIncludeParam)
+        assertTrue("Default 12-key strict must reject 13-field response with currency_minor_units", loginResult is CoordinatorResult.Error)
+    }
 }
 

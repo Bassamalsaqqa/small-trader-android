@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.ui.navigation.AppLaunchTargetResolverTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-11-15T09:35:59.255Z" hostname="pasta-hp-worker" time="0.007">
+  <properties/>
+  <testcase name="testHttpLoopbackAllowedInDebugOnlyWhenExplicitlyFlagged" classname="com.example.ui.navigation.AppLaunchTargetResolverTest" time="0.001"/>
+  <testcase name="testNonDebugPolicyDemoRefusedEvenWithOptIn" classname="com.example.ui.navigation.AppLaunchTargetResolverTest" time="0.001"/>
+  <testcase name="testNonLoopbackHttpRefusedInAllVariants" classname="com.example.ui.navigation.AppLaunchTargetResolverTest" time="0.0"/>
+  <testcase name="testBlankOriginNoDemoFallbackInDebugWithoutOptIn" classname="com.example.ui.navigation.AppLaunchTargetResolverTest" time="0.0"/>
+  <testcase name="testIsValidOriginDirectContract" classname="com.example.ui.navigation.AppLaunchTargetResolverTest" time="0.001"/>
+  <testcase name="testExistingStaffReadWorkspacePilotConfigBackcompatWithBlankOriginRefusesDemo" classname="com.example.ui.navigation.AppLaunchTargetResolverTest" time="0.0"/>
+  <testcase name="testReleaseDemoRefusedEvenWithOptIn" classname="com.example.ui.navigation.AppLaunchTargetResolverTest" time="0.0"/>
+  <testcase name="testBlankOriginNoDemoFallbackInRelease" classname="com.example.ui.navigation.AppLaunchTargetResolverTest" time="0.0"/>
+  <testcase name="testMalformedAndInsecureOriginsRefused" classname="com.example.ui.navigation.AppLaunchTargetResolverTest" time="0.001"/>
+  <testcase name="testDebugExplicitDemoAllowed" classname="com.example.ui.navigation.AppLaunchTargetResolverTest" time="0.0"/>
+  <testcase name="testValidOriginTakesPrecedenceOverDemoOptInInDebug" classname="com.example.ui.navigation.AppLaunchTargetResolverTest" time="0.0"/>
+  <testcase name="testExistingStaffReadWorkspacePilotConfigBackcompatWithValidOrigin" classname="com.example.ui.navigation.AppLaunchTargetResolverTest" time="0.0"/>
+  <testcase name="testValidOriginRoutesToStaffWorkspaceInRelease" classname="com.example.ui.navigation.AppLaunchTargetResolverTest" time="0.001"/>
+  <testcase name="testValidOriginRoutesToStaffWorkspaceInDebug" classname="com.example.ui.navigation.AppLaunchTargetResolverTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

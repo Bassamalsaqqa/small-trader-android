@@ -1,0 +1,15 @@
+Execution failed for task ':app:compileDebugKotlin'.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/MainActivity.kt:234:87 Unresolved reference 'MerchantAction'.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/MainActivity.kt:343:71 Unresolved reference 'MerchantAction'.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/MainActivity.kt:448:71 Unresolved reference 'MerchantAction'.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/MainActivity.kt:464:72 Unresolved reference 'MerchantAction'.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/MainActivity.kt:514:44 Unresolved reference 'MerchantAction'.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/MainActivity.kt:514:93 Unresolved reference 'MerchantAction'.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/MainActivity.kt:519:56 Unresolved reference 'MerchantAction'.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/MainActivity.kt:527:45 Unresolved reference 'MerchantAction'.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/MainActivity.kt:531:88 Unresolved reference 'MerchantAction'.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/MainActivity.kt:562:84 Unresolved reference 'MerchantAction'.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:502:21 No parameter with name 'evidence' found.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/data/mobile/readclient/BootstrapModels.kt:505:1 Syntax error: Expecting a top level declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/data/mobile/readclient/SmallTraderReadClient.kt:184:46 Unresolved reference 'fromStrictJson'.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/ui/staff/StaffWorkspaceViewModel.kt:1115:116 Unresolved reference 'field'.

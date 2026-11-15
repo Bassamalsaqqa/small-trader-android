@@ -244,13 +244,14 @@ class SmallTraderOnlineCashPilotSmokeTest {
             // STEP 4: FINANCIAL_PAIRED_RUN Execution via OnlineCashSaleOrchestrator
             // NOTE: Standalone pilot harness only. Orchestrator uses synthetic tokenProvider and default
             // generation 0; this does NOT wire into normal app UI or persisted outbox workflow.
+            val derivedOrigin = CashPilotHandoffConfig.deriveBareOrigin(config.baseUrl)
             val transport = OkHttpTransport(
-                configuredOrigin = config.baseUrl,
+                configuredOrigin = derivedOrigin,
                 allowHttpLoopback = false
             )
             val cashClient = AndroidV2OnlineCashClient(
                 transport = transport,
-                baseOrigin = config.baseUrl,
+                baseOrigin = derivedOrigin,
                 allowHttpLoopback = false
             )
             val orchestrator = OnlineCashSaleOrchestrator(

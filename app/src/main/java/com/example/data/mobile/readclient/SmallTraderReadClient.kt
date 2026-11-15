@@ -181,7 +181,7 @@ class SmallTraderReadClient(
             )
         )
         return executeRequest(transportRequest) { obj ->
-            val response = BootstrapResponse.fromStrictJson(obj)
+            val response = BootstrapResponse.fromStrictJson(obj, includeCurrencyMinorUnits = includeCurrencyMinorUnits)
             if (response.companyId != companyId) {
                 throw CanonicalSerializationException("Tenant mismatch: response company_id does not match requested companyId")
             }
