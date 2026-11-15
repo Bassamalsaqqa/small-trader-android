@@ -921,19 +921,29 @@ class StaffWorkspaceViewModel(
             return
         }
 
-        val authority = currentState.saleAuthority ?: StaffOnlineSaleAuthorityResolution.resolve(
-            readyState.bootstrap,
-            readyState.session,
-            currencyMinorUnitsOverride
-        )
+        val currentCompany = readyState.session.selectedCompanyId
+        val currentActor = readyState.session.actorUlid
+        val currentDevice = readyState.session.deviceUuid
+        val currentGen = coord.currentGeneration
 
-        if (!authority.isDispatchPermitted) {
-            val missing = authority.missingContracts.joinToString("; ")
-            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Authority resolution failed: $missing")) }
+        if (currentCompany != preparedIntent.context.companyId ||
+            currentActor != preparedIntent.context.actorId ||
+            currentDevice != preparedIntent.deviceId ||
+            currentGen != preparedIntent.scopeGeneration ||
+            !coord.isScopeActive(preparedIntent.scopeGeneration, preparedIntent.context.companyId)
+        ) {
+            _uiState.update { s ->
+                s.copy(
+                    saleDraft = s.saleDraft.copy(
+                        isSubmitting = false,
+                        submissionError = "Active session scope does not match retained sale intent scope"
+                    )
+                )
+            }
             return
         }
 
-        val generation = coord.currentGeneration
+        val generation = currentGen
         val thisIntent = ++activeIntentSeq
 
         _uiState.update { s ->
@@ -947,9 +957,9 @@ class StaffWorkspaceViewModel(
 
         saleJob?.cancel()
         saleJob = viewModelScope.launch {
-            val targetCompanyId = authority.companyId!!
-            val targetDeviceId = authority.deviceId!!
-            val targetCurrency = authority.currency!!
+            val targetCompanyId = preparedIntent.context.companyId
+            val targetDeviceId = preparedIntent.deviceId
+            val targetCurrency = preparedIntent.currency
 
             val result = try {
                 withContext(ioDispatcher) {
