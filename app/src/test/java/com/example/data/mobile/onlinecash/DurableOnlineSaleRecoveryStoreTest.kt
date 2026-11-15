@@ -423,7 +423,7 @@ class DurableOnlineSaleRecoveryStoreTest {
     @Test
     fun testConsistency_inconsistentDigest_rejectedOnSave() {
         val valid = createSampleRecord()
-        val inconsistent = valid.copy(expectedNormativeProfileDigest = PayloadDigest.fromSha256HexString("0".repeat(64)))
+        val inconsistent = valid.copy(expectedNormativeProfileDigest = PayloadDigest("sha256:" + "0".repeat(64)))
         try {
             recoveryStore.savePendingSale(inconsistent)
             fail("Expected OnlineSaleRecoveryException for inconsistent digest")
@@ -524,7 +524,7 @@ class DurableOnlineSaleRecoveryStoreTest {
                 cipher.doFinal(ciphertextWithTag)
             } catch (e: Exception) {
                 throw com.example.data.mobile.session.SessionStorageException(
-                    com.example.data.mobile.session.SessionStorageError.DecryptionFailed(e.message ?: "Decryption error")
+                    com.example.data.mobile.session.SessionStorageError.Corrupt(e.message ?: "Decryption error")
                 )
             }
         }

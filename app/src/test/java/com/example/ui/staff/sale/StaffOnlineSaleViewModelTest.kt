@@ -12,6 +12,7 @@ import com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryRecord
 import com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStore
 import com.example.data.mobile.onlinecash.OnlineSaleRecoveryException
 import com.example.data.mobile.onlinecash.OnlineCashOrchestrationResult
+import com.example.data.mobile.contract.v2.OnlineSaleContext
 import com.example.data.mobile.onlinecash.OnlineCashSaleOrchestrator
 import com.example.data.mobile.onlinecash.OnlineCashSaleReceipt
 import com.example.data.mobile.onlinecash.OnlineSaleScope
@@ -2104,18 +2105,7 @@ class StaffOnlineSaleViewModelTest {
         // Setup pending record for Company A
         val eventA = ClientUuid.random()
         val draft = StaffOnlineSaleDraft(
-            lines = listOf(
-                StaffOnlineSaleDraftLine(
-                    product = createSampleProduct(),
-                    productUnitId = unitUlid,
-                    conversionToBase = NonnegativeDecimalQuantity.of(1),
-                    quantity = PositiveDecimalQuantity.of(1),
-                    unitPrice = MoneyAmount("20.000000"),
-                    taxRateId = null,
-                    taxRate = TaxPercentage.ZERO,
-                    taxInclusive = true
-                )
-            )
+            lines = listOf(StaffOnlineSaleDraftLine.fromProduct(product = createSampleProduct(), explicitNoTax = true))
         )
         val authorityA = StaffOnlineSaleAuthorityResolution.resolve(
             (fakeCoordinator.authState as StaffAuthState.ReadReady).bootstrap,
@@ -2177,18 +2167,7 @@ class StaffOnlineSaleViewModelTest {
         val eventId = ClientUuid.random()
 
         val draft = StaffOnlineSaleDraft(
-            lines = listOf(
-                StaffOnlineSaleDraftLine(
-                    product = createSampleProduct(),
-                    productUnitId = unitUlid,
-                    conversionToBase = NonnegativeDecimalQuantity.of(1),
-                    quantity = PositiveDecimalQuantity.of(1),
-                    unitPrice = MoneyAmount("20.000000"),
-                    taxRateId = null,
-                    taxRate = TaxPercentage.ZERO,
-                    taxInclusive = true
-                )
-            )
+            lines = listOf(StaffOnlineSaleDraftLine.fromProduct(product = createSampleProduct(), explicitNoTax = true))
         )
         val authority = StaffOnlineSaleAuthorityResolution.resolve(
             (fakeCoordinator.authState as StaffAuthState.ReadReady).bootstrap,
@@ -2245,18 +2224,7 @@ class StaffOnlineSaleViewModelTest {
         val eventB = ClientUuid.random()
 
         val draft = StaffOnlineSaleDraft(
-            lines = listOf(
-                StaffOnlineSaleDraftLine(
-                    product = createSampleProduct(),
-                    productUnitId = unitUlid,
-                    conversionToBase = NonnegativeDecimalQuantity.of(1),
-                    quantity = PositiveDecimalQuantity.of(1),
-                    unitPrice = MoneyAmount("20.000000"),
-                    taxRateId = null,
-                    taxRate = TaxPercentage.ZERO,
-                    taxInclusive = true
-                )
-            )
+            lines = listOf(StaffOnlineSaleDraftLine.fromProduct(product = createSampleProduct(), explicitNoTax = true))
         )
         val authority = StaffOnlineSaleAuthorityResolution.resolve(
             (fakeCoordinator.authState as StaffAuthState.ReadReady).bootstrap,
@@ -2293,18 +2261,7 @@ class StaffOnlineSaleViewModelTest {
         val eventId = ClientUuid.random()
 
         val draft = StaffOnlineSaleDraft(
-            lines = listOf(
-                StaffOnlineSaleDraftLine(
-                    product = createSampleProduct(),
-                    productUnitId = unitUlid,
-                    conversionToBase = NonnegativeDecimalQuantity.of(1),
-                    quantity = PositiveDecimalQuantity.of(1),
-                    unitPrice = MoneyAmount("20.000000"),
-                    taxRateId = null,
-                    taxRate = TaxPercentage.ZERO,
-                    taxInclusive = true
-                )
-            )
+            lines = listOf(StaffOnlineSaleDraftLine.fromProduct(product = createSampleProduct(), explicitNoTax = true))
         )
         val authority = StaffOnlineSaleAuthorityResolution.resolve(
             (fakeCoordinator.authState as StaffAuthState.ReadReady).bootstrap,
