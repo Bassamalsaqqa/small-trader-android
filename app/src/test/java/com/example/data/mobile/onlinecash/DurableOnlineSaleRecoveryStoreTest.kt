@@ -47,7 +47,8 @@ class DurableOnlineSaleRecoveryStoreTest {
         recoveryStore = DefaultDurableOnlineSaleRecoveryStore(
             storageFile = storageFile,
             cryptoEngine = fakeCryptoEngine,
-            packageName = "com.example.smalltrader"
+            packageName = "com.example.smalltrader",
+            directorySyncEngine = DirectorySyncEngine { /* no-op in test */ }
         )
     }
 
@@ -261,6 +262,117 @@ class DurableOnlineSaleRecoveryStoreTest {
     fun testCanonicalizeOrigin_normalizesTrailingSlashAndCase() {
         val canonical = DurableOnlineSaleRecoveryStore.canonicalizeOrigin("HTTPS://SMALL-TRADER.EXAMPLE.COM///")
         assertEquals("https://small-trader.example.com", canonical)
+    }
+
+    @Test
+    fun testCanonicalizeOrigin_strictValidation_failsClosedOnInvalid() {
+        try {
+            DurableOnlineSaleRecoveryStore.canonicalizeOrigin("ftp://small-trader.example.com")
+            fail("Expected IllegalArgumentException for non-http/https scheme")
+        } catch (_: IllegalArgumentException) {}
+
+        try {
+            DurableOnlineSaleRecoveryStore.canonicalizeOrigin("javascript:alert(1)")
+            fail("Expected IllegalArgumentException for javascript URI")
+        } catch (_: IllegalArgumentException) {}
+    }
+
+    @Test
+    fun testCanonicalizeOrigin_normalizesDefaultPorts() {
+        val httpsDefault = DurableOnlineSaleRecoveryStore.canonicalizeOrigin("https://small-trader.example.com:443")
+        assertEquals("https://small-trader.example.com", httpsDefault)
+
+        val httpDefault = DurableOnlineSaleRecoveryStore.canonicalizeOrigin("http://127.0.0.1:80", allowHttpLoopback = true)
+        assertEquals("http://127.0.0.1", httpDefault)
+
+        val nonDefault = DurableOnlineSaleRecoveryStore.canonicalizeOrigin("https://small-trader.example.com:8443")
+        assertEquals("https://small-trader.example.com:8443", nonDefault)
+    }
+
+    @Test
+    fun testDurabilitySyncFailure_propagatesRecoveryExceptionBeforePost() {
+        recoveryStore.directorySyncEngine = DirectorySyncEngine {
+            throw java.io.IOException("Simulated POSIX fsync failure")
+        }
+        val record = createSampleRecord()
+        try {
+            recoveryStore.savePendingSale(record)
+            fail("Expected OnlineSaleRecoveryException when directory sync fails")
+        } catch (e: OnlineSaleRecoveryException) {
+            assertTrue(e.message!!.contains("Directory durability fsync failed", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun testEnvelope_nearLimit_succeeds() {
+        // Generate a 100 KB payload (well within 1 MiB limit)
+        val largeBytes = ByteArray(100 * 1024) { (it % 256).toByte() }
+        val record = createSampleRecord().copy(rawWireBytes = largeBytes)
+        recoveryStore.savePendingSale(record)
+
+        val retrieved = recoveryStore.getPendingSale(companyId, actorId, deviceId, baseOrigin)
+        assertNotNull(retrieved)
+        assertEquals(largeBytes.size, retrieved!!.rawWireBytes.size)
+        assertTrue(largeBytes.contentEquals(retrieved.rawWireBytes))
+    }
+
+    @Test
+    fun testEnvelope_overflow_throwsException() {
+        // Generate an oversized payload exceeding 1 MiB
+        val oversizedBytes = ByteArray(1024 * 1024 + 100) { 0x41 }
+        val record = createSampleRecord().copy(rawWireBytes = oversizedBytes)
+        try {
+            recoveryStore.savePendingSale(record)
+            fail("Expected OnlineSaleRecoveryException on oversized envelope")
+        } catch (e: OnlineSaleRecoveryException) {
+            assertTrue(
+                e.message!!.contains("exceeds maximum storage bound", ignoreCase = true) ||
+                        e.message!!.contains("exceeds maximum allowable", ignoreCase = true)
+            )
+        }
+    }
+
+    @Test
+    fun testGlobalEventUuidCollision_acrossScopes_rejected() {
+        val sharedEventId = ClientUuid.random()
+        val recordA = createSampleRecord(eventId = sharedEventId, company = companyId)
+        recoveryStore.savePendingSale(recordA)
+
+        val otherCompany = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5999")
+        val recordB = createSampleRecord(eventId = sharedEventId, company = otherCompany)
+        try {
+            recoveryStore.savePendingSale(recordB)
+            fail("Expected OnlineSaleRecoveryException on global event UUID collision across different companies")
+        } catch (e: OnlineSaleRecoveryException) {
+            assertTrue(e.message!!.contains("collision across identity scopes", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun testScopedClearPendingSale_onlyClearsMatchingScope() {
+        val recordA = createSampleRecord(eventId = ClientUuid.random(), company = companyId)
+        recoveryStore.savePendingSale(recordA)
+
+        val nonMatchingCompany = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5999")
+        // Calling scoped clear with non-matching company must NOT delete the record
+        recoveryStore.clearPendingSale(
+            clientEventId = recordA.clientEventId,
+            companyId = nonMatchingCompany,
+            actorId = actorId,
+            deviceId = deviceId,
+            baseOrigin = baseOrigin
+        )
+        assertNotNull(recoveryStore.getPendingSale(companyId, actorId, deviceId, baseOrigin))
+
+        // Calling scoped clear with exact matching parameters succeeds and deletes the record
+        recoveryStore.clearPendingSale(
+            clientEventId = recordA.clientEventId,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            baseOrigin = baseOrigin
+        )
+        assertNull(recoveryStore.getPendingSale(companyId, actorId, deviceId, baseOrigin))
     }
 
     /**

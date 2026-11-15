@@ -23,6 +23,7 @@ import java.io.DataOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.net.URI
 import java.util.Locale
 import java.util.UUID
 import kotlin.concurrent.withLock
@@ -32,6 +33,30 @@ import kotlin.concurrent.withLock
  * Guarantees fail-closed behavior before any network dispatch.
  */
 class OnlineSaleRecoveryException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
+ * Injectable platform I/O seam for directory durability fsync.
+ */
+fun interface DirectorySyncEngine {
+    @Throws(Exception::class)
+    fun syncDirectory(dir: File)
+}
+
+/**
+ * Standard Android POSIX directory fsync implementation using android.system.Os (minSdk 24).
+ * Opens directory with O_RDONLY, calls fsync(fd), and guarantees fd closure.
+ */
+object AndroidPlatformDirectorySyncEngine : DirectorySyncEngine {
+    override fun syncDirectory(dir: File) {
+        if (!dir.exists() || !dir.isDirectory) return
+        val fd = android.system.Os.open(dir.absolutePath, android.system.OsConstants.O_RDONLY, 0)
+        try {
+            android.system.Os.fsync(fd)
+        } finally {
+            android.system.Os.close(fd)
+        }
+    }
+}
 
 /**
  * Immutable durable online sale recovery record.
@@ -143,10 +168,11 @@ data class DurableOnlineSaleRecoveryRecord(
 interface DurableOnlineSaleRecoveryStore {
     /**
      * Atomically encrypts and persists [record] to disk BEFORE network dispatch.
-     * Enforces compare-and-set reservation at the store boundary:
-     * - Rejects attempts to overwrite with a different event while an unverified sale is pending.
-     * - Rejects attempts to modify the payload bytes or digest of an existing event ID.
-     * Throws [OnlineSaleRecoveryException] on conflict, write, or crypto failure.
+     * Enforces compare-and-set reservation and global event UUID uniqueness:
+     * - Rejects attempts to save an event ID already present under a different identity scope.
+     * - Rejects attempts to overwrite with a different event while an unverified sale is pending for this scope.
+     * - Rejects attempts to modify payload bytes or digest of an existing event ID.
+     * Throws [OnlineSaleRecoveryException] on conflict, write, crypto, or durability sync failure.
      */
     fun savePendingSale(record: DurableOnlineSaleRecoveryRecord)
 
@@ -163,8 +189,19 @@ interface DurableOnlineSaleRecoveryStore {
     ): DurableOnlineSaleRecoveryRecord?
 
     /**
-     * Crash-safely clears the recovery record matching [clientEventId].
-     * If the stored record does not match [clientEventId], this is an idempotent no-op (never erases another event).
+     * Crash-safely clears the recovery record matching [clientEventId] AND the exact authenticated identity scope.
+     * Prevents cross-scope erasure: if the stored record does not match all scope parameters, it is preserved.
+     */
+    fun clearPendingSale(
+        clientEventId: ClientUuid,
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        baseOrigin: String
+    )
+
+    /**
+     * Convenience unscoped clear. Fails if multiple records match across scopes.
      */
     fun clearPendingSale(clientEventId: ClientUuid)
 
@@ -178,26 +215,33 @@ interface DurableOnlineSaleRecoveryStore {
         const val KEY_ALIAS = "small_trader_online_sale_recovery_v1"
 
         /**
-         * Normalizes base origin identically across persistence and retrieval paths
-         * to prevent case or trailing-slash discrepancies from hiding pending records.
+         * Normalizes base origin identically across persistence and retrieval paths.
+         * Validates origin policy strictly with NO fail-open fallback:
+         * normalizes scheme, host, and default ports (:443/:80) while preserving distinct ports.
          */
         fun canonicalizeOrigin(origin: String, allowHttpLoopback: Boolean = false): String {
             val trimmed = origin.trim().trimEnd('/')
-            return try {
-                EndpointSecurity.validateBaseOrigin(trimmed, allowHttpLoopback)
-            } catch (_: Exception) {
-                trimmed.lowercase(Locale.ROOT)
-            }
+            val validated = EndpointSecurity.validateBaseOrigin(trimmed, allowHttpLoopback)
+            val uri = URI(validated)
+            val scheme = uri.scheme.lowercase(Locale.ROOT)
+            val host = uri.host.lowercase(Locale.ROOT)
+            val port = uri.port
+            val isDefaultPort = (scheme == "https" && port == 443) || (scheme == "http" && port == 80) || port == -1
+            return if (isDefaultPort) "$scheme://$host" else "$scheme://$host:$port"
         }
 
-        fun create(context: Context): DurableOnlineSaleRecoveryStore {
+        fun create(
+            context: Context,
+            directorySyncEngine: DirectorySyncEngine = AndroidPlatformDirectorySyncEngine
+        ): DurableOnlineSaleRecoveryStore {
             val noBackupDir = context.noBackupFilesDir
             val file = File(noBackupDir, FILE_NAME)
             val cryptoEngine = AndroidKeyStoreCryptoEngine(KEY_ALIAS)
             return DefaultDurableOnlineSaleRecoveryStore(
                 storageFile = file,
                 cryptoEngine = cryptoEngine,
-                packageName = context.packageName
+                packageName = context.packageName,
+                directorySyncEngine = directorySyncEngine
             )
         }
     }
@@ -213,7 +257,8 @@ interface DurableOnlineSaleRecoveryStore {
 class DefaultDurableOnlineSaleRecoveryStore internal constructor(
     private val storageFile: File,
     private val cryptoEngine: SessionCryptoEngine,
-    private val packageName: String
+    private val packageName: String,
+    internal var directorySyncEngine: DirectorySyncEngine = AndroidPlatformDirectorySyncEngine
 ) : DurableOnlineSaleRecoveryStore {
 
     internal var renameOperation: (File, File) -> Boolean = { src, dst -> src.renameTo(dst) }
@@ -226,33 +271,46 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
         lock.withLock {
             val existingRecords = readRecordsInternal()
 
-            // Compare-and-set reservation: check if an event already exists for this exact identity scope
+            // 1. Global event UUID uniqueness across all identity scopes
+            val existingSameEvent = existingRecords.firstOrNull { it.clientEventId == normalizedRecord.clientEventId }
+            if (existingSameEvent != null) {
+                val isSameScope = existingSameEvent.companyId == normalizedRecord.companyId &&
+                        existingSameEvent.actorId == normalizedRecord.actorId &&
+                        existingSameEvent.deviceId == normalizedRecord.deviceId &&
+                        existingSameEvent.baseOrigin == normalizedRecord.baseOrigin
+
+                if (!isSameScope) {
+                    throw OnlineSaleRecoveryException(
+                        "Global event UUID collision across identity scopes for event ${normalizedRecord.clientEventId}: " +
+                                "existing scope (${existingSameEvent.companyId}, ${existingSameEvent.actorId}) vs " +
+                                "new scope (${normalizedRecord.companyId}, ${normalizedRecord.actorId})"
+                    )
+                }
+
+                // Same scope: enforce byte and digest immutability
+                if (existingSameEvent.expectedNormativeProfileDigest != normalizedRecord.expectedNormativeProfileDigest ||
+                    !existingSameEvent.rawWireBytes.contentEquals(normalizedRecord.rawWireBytes)
+                ) {
+                    throw OnlineSaleRecoveryException(
+                        "Cannot overwrite pending event ${normalizedRecord.clientEventId} with different payload bytes or digest"
+                    )
+                }
+                // Idempotent re-save of exact same event
+                return@withLock
+            }
+
+            // 2. Identity scope reservation: block new event while prior unverified event is pending
             val existingForIdentity = existingRecords.firstOrNull {
                 it.companyId == normalizedRecord.companyId &&
                         it.actorId == normalizedRecord.actorId &&
                         it.deviceId == normalizedRecord.deviceId &&
                         it.baseOrigin == normalizedRecord.baseOrigin
             }
-
             if (existingForIdentity != null) {
-                if (existingForIdentity.clientEventId == normalizedRecord.clientEventId) {
-                    // Same event ID: enforce byte and digest immutability
-                    if (existingForIdentity.expectedNormativeProfileDigest != normalizedRecord.expectedNormativeProfileDigest ||
-                        !existingForIdentity.rawWireBytes.contentEquals(normalizedRecord.rawWireBytes)
-                    ) {
-                        throw OnlineSaleRecoveryException(
-                            "Cannot overwrite pending event ${normalizedRecord.clientEventId} with different payload bytes or digest"
-                        )
-                    }
-                    // Idempotent re-save of exact same event
-                    return@withLock
-                } else {
-                    // Different event ID: block new event while prior unverified event is pending
-                    throw OnlineSaleRecoveryException(
-                        "Cannot save new event ${normalizedRecord.clientEventId}: pending unverified event " +
-                                "${existingForIdentity.clientEventId} already exists for this scope"
-                    )
-                }
+                throw OnlineSaleRecoveryException(
+                    "Cannot save new event ${normalizedRecord.clientEventId}: pending unverified event " +
+                            "${existingForIdentity.clientEventId} already exists for this scope"
+                )
             }
 
             val updated = existingRecords + normalizedRecord
@@ -280,15 +338,59 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
         }
     }
 
+    override fun clearPendingSale(
+        clientEventId: ClientUuid,
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        baseOrigin: String
+    ) {
+        val canonicalOrigin = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(baseOrigin)
+        val lock = SessionProcessLocks.getFileLock(storageFile)
+        lock.withLock {
+            if (!storageFile.exists()) return@withLock
+            val records = readRecordsInternal()
+            val filtered = records.filterNot {
+                it.clientEventId == clientEventId &&
+                        it.companyId == companyId &&
+                        it.actorId == actorId &&
+                        it.deviceId == deviceId &&
+                        it.baseOrigin == canonicalOrigin
+            }
+            if (filtered.size == records.size) {
+                // No matching record found for this exact identity scope; idempotent no-op (never cross-scope erase!)
+                return@withLock
+            }
+            if (filtered.isEmpty()) {
+                if (!storageFile.delete()) {
+                    throw OnlineSaleRecoveryException("Failed to delete empty recovery file")
+                }
+                syncDirectory(storageFile.parentFile)
+            } else {
+                writeRecordsInternal(filtered)
+            }
+        }
+    }
+
     override fun clearPendingSale(clientEventId: ClientUuid) {
         val lock = SessionProcessLocks.getFileLock(storageFile)
         lock.withLock {
             if (!storageFile.exists()) return@withLock
             val records = readRecordsInternal()
-            val filtered = records.filterNot { it.clientEventId == clientEventId }
-            if (filtered.size == records.size) {
-                // No matching record found; do not erase another event (idempotent success)
-                return@withLock
+            val matching = records.filter { it.clientEventId == clientEventId }
+            if (matching.isEmpty()) return@withLock
+            if (matching.size > 1) {
+                throw OnlineSaleRecoveryException(
+                    "Ambiguous unscoped clear: multiple records found with event ID $clientEventId. Scoped clear required."
+                )
+            }
+            val target = matching.first()
+            val filtered = records.filterNot {
+                it.clientEventId == target.clientEventId &&
+                        it.companyId == target.companyId &&
+                        it.actorId == target.actorId &&
+                        it.deviceId == target.deviceId &&
+                        it.baseOrigin == target.baseOrigin
             }
             if (filtered.isEmpty()) {
                 if (!storageFile.delete()) {
@@ -330,6 +432,12 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
         }
 
         val envelopeBytes = buildEnvelope(iv, ciphertext)
+        if (envelopeBytes.size > MAX_FILE_BYTES) {
+            throw OnlineSaleRecoveryException(
+                "Recovery envelope exceeds maximum storage bound ($MAX_FILE_BYTES bytes): actual=${envelopeBytes.size}"
+            )
+        }
+
         val parent = storageFile.parentFile ?: File(".")
         if (!parent.exists()) {
             parent.mkdirs()
@@ -343,6 +451,9 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
                 fos.flush()
                 fos.fd.sync()
             }
+            if (tempFile.length() > MAX_FILE_BYTES) {
+                throw OnlineSaleRecoveryException("Temp file length exceeds maximum allowable $MAX_FILE_BYTES bytes")
+            }
             if (!renameOperation(tempFile, storageFile)) {
                 throw OnlineSaleRecoveryException("Failed to atomically replace recovery file")
             }
@@ -354,7 +465,11 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
         } finally {
             if (!writeSuccess && tempFile.exists()) {
                 tempFile.delete()
-                syncDirectory(parent)
+                try {
+                    syncDirectory(parent)
+                } catch (_: Exception) {
+                    // Suppress secondary cleanup sync failure
+                }
             }
         }
     }
@@ -392,11 +507,9 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
     private fun syncDirectory(dir: File?) {
         if (dir == null || !dir.exists() || !dir.isDirectory) return
         try {
-            FileInputStream(dir).use { fis ->
-                fis.channel.force(true)
-            }
-        } catch (_: Exception) {
-            // Directory fsync is best-effort across various Android storage providers / sandboxes
+            directorySyncEngine.syncDirectory(dir)
+        } catch (e: Exception) {
+            throw OnlineSaleRecoveryException("Directory durability fsync failed for ${dir.absolutePath}", e)
         }
     }
 

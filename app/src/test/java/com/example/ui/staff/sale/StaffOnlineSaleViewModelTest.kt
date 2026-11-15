@@ -79,10 +79,12 @@ class StaffOnlineSaleViewModelTest {
     private val unitUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5FA6")
 
     private lateinit var fakeCoordinator: TestStaffCoordinator
+    private lateinit var defaultRecoveryStore: InMemoryDurableOnlineSaleRecoveryStore
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        defaultRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore()
         fakeCoordinator = TestStaffCoordinator(
             companyId = companyUlid,
             actorId = actorUlid,
@@ -127,7 +129,8 @@ class StaffOnlineSaleViewModelTest {
             configuredOrigin = "https://small-trader.example.com",
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
-            currencyMinorUnitsOverride = 2
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore
         )
         advanceUntilIdle()
 
@@ -197,6 +200,7 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -207,7 +211,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -266,6 +271,7 @@ class StaffOnlineSaleViewModelTest {
             authDenialListener = authDenialListener,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 lockHookCaptured = lockHook
                 val dummyClient = AndroidV2OnlineCashClient(
@@ -281,7 +287,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -310,7 +317,8 @@ class StaffOnlineSaleViewModelTest {
             configuredOrigin = "https://small-trader.example.com",
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
-            currencyMinorUnitsOverride = 2
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore
         )
         advanceUntilIdle()
 
@@ -344,6 +352,7 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -354,7 +363,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -403,6 +413,7 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -413,7 +424,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -484,6 +496,7 @@ class StaffOnlineSaleViewModelTest {
             authDenialListener = authDenialListener,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -494,7 +507,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -540,6 +554,7 @@ class StaffOnlineSaleViewModelTest {
             authDenialListener = authDenialListener,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -550,7 +565,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -601,6 +617,7 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -611,7 +628,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -687,6 +705,7 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -697,7 +716,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = { if (tokenAvailable) tokenProvider() else null },
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -764,6 +784,7 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -774,7 +795,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -818,7 +840,8 @@ class StaffOnlineSaleViewModelTest {
             configuredOrigin = "https://small-trader.example.com",
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
-            currencyMinorUnitsOverride = 2
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore
         )
         advanceUntilIdle()
 
@@ -873,7 +896,8 @@ class StaffOnlineSaleViewModelTest {
             configuredOrigin = "https://small-trader.example.com",
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
-            currencyMinorUnitsOverride = 2
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore
         )
         advanceUntilIdle()
 
@@ -955,6 +979,7 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -965,7 +990,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -1062,6 +1088,7 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -1072,7 +1099,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -1151,6 +1179,7 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -1161,7 +1190,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -1206,7 +1236,8 @@ class StaffOnlineSaleViewModelTest {
             configuredOrigin = "https://small-trader.example.com",
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
-            currencyMinorUnitsOverride = 2
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore
         )
         advanceUntilIdle()
 
@@ -1239,7 +1270,8 @@ class StaffOnlineSaleViewModelTest {
             configuredOrigin = "https://small-trader.example.com",
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
-            currencyMinorUnitsOverride = 2
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore
         )
         advanceUntilIdle()
 
@@ -1304,6 +1336,7 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -1314,7 +1347,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -1398,6 +1432,7 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -1408,7 +1443,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -1494,6 +1530,7 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -1504,7 +1541,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -1583,6 +1621,7 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -1593,7 +1632,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -1690,6 +1730,7 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = null,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -1700,7 +1741,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -1785,6 +1827,7 @@ class StaffOnlineSaleViewModelTest {
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
+            recoveryStore = defaultRecoveryStore,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -1795,7 +1838,8 @@ class StaffOnlineSaleViewModelTest {
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = defaultRecoveryStore
                 )
             }
         )
@@ -2412,6 +2456,135 @@ class StaffOnlineSaleViewModelTest {
         val result = strictOrchestrator.dispatchOnlineCashSale(intent, companyUlid, deviceUuid, "USD")
         assertTrue(result is OnlineCashOrchestrationResult.StorageFailure)
     }
+
+    @Test
+    fun testCurrentGenerationReauth_rebindsPreparedIntentToNewGeneration() = runTest(testDispatcher) {
+        val sharedStore = InMemoryDurableOnlineSaleRecoveryStore()
+        val eventId = ClientUuid.random()
+        val rawWireJson = """{"client_event_id":"$eventId","currency":"USD","customer_id":"${walkInUlid.value}","device_id":"${deviceUuid.value}","lines":[{"conversion_to_base":"1","product_id":"${productUlid.value}","product_unit_id":"${unitUlid.value}","quantity":"1","tax_inclusive":true,"tax_rate":"0","tax_rate_id":null,"unit_price":"20.000000"}],"payment":{"amount":"20.00","cash_account_id":"${cashAccountUlid.value}","payment_method":"cash","settlement_mode":"full"},"warehouse_id":"${warehouseUlid.value}"}"""
+        val rawWireBytes = rawWireJson.toByteArray(Charsets.UTF_8)
+        val context = OnlineSaleContext(actorId = actorUlid, companyId = companyUlid, currencyMinorUnits = 2)
+        val initialIntent = PreparedOnlineSaleIntent.prepare(context = context, rawWireBytes = rawWireBytes, scopeGeneration = 1L)
+        val initialRecord = DurableOnlineSaleRecoveryRecord(
+            clientEventId = eventId,
+            expectedNormativeProfileDigest = initialIntent.expectedNormativeProfileDigest,
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            baseOrigin = "https://small-trader.example.com",
+            currency = "USD",
+            currencyMinorUnits = 2,
+            amount = MoneyAmount("20.00"),
+            rawWireBytes = rawWireBytes,
+            createdAt = "2026-11-15T12:00:00Z"
+        )
+        sharedStore.savePendingSale(initialRecord)
+
+        fakeCoordinator.currentGeneration = 10L
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedStore
+        )
+        advanceUntilIdle()
+
+        // Reconstituted prepared intent MUST be rebound to active generation 10L
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        val rebound = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(rebound)
+        assertEquals(10L, rebound!!.scopeGeneration)
+        assertEquals(eventId, rebound.clientEventId)
+
+        // Session lock/reauth: generation advances to 11L, retryLoadDurableRecovery rebinds to 11L
+        fakeCoordinator.currentGeneration = 11L
+        vm.retryLoadDurableRecovery()
+        advanceUntilIdle()
+
+        val updated = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(updated)
+        assertEquals(11L, updated!!.scopeGeneration)
+    }
+
+    @Test
+    fun testRetryLoadDurableRecovery_unusableStorage_thenRecovers() = runTest(testDispatcher) {
+        val failingStore = InMemoryDurableOnlineSaleRecoveryStore(throwOnGet = true)
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = failingStore
+        )
+        advanceUntilIdle()
+
+        // Initially in blocking hold with error and null intent
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNull(vm.uiState.value.saleDraft.preparedIntent)
+        assertTrue(vm.uiState.value.saleDraft.submissionError!!.contains("storage error", ignoreCase = true) ||
+                vm.uiState.value.saleDraft.submissionError!!.contains("read failure", ignoreCase = true))
+
+        // Storage recovers and now contains a pending sale
+        failingStore.throwOnGet = false
+        val eventId = ClientUuid.random()
+        val rawWireJson = """{"client_event_id":"$eventId","currency":"USD","customer_id":"${walkInUlid.value}","device_id":"${deviceUuid.value}","lines":[{"conversion_to_base":"1","product_id":"${productUlid.value}","product_unit_id":"${unitUlid.value}","quantity":"1","tax_inclusive":true,"tax_rate":"0","tax_rate_id":null,"unit_price":"20.000000"}],"payment":{"amount":"20.00","cash_account_id":"${cashAccountUlid.value}","payment_method":"cash","settlement_mode":"full"},"warehouse_id":"${warehouseUlid.value}"}"""
+        val rawWireBytes = rawWireJson.toByteArray(Charsets.UTF_8)
+        val context = OnlineSaleContext(actorId = actorUlid, companyId = companyUlid, currencyMinorUnits = 2)
+        val intent = PreparedOnlineSaleIntent.prepare(context = context, rawWireBytes = rawWireBytes, scopeGeneration = 1L)
+        val record = DurableOnlineSaleRecoveryRecord(
+            clientEventId = eventId,
+            expectedNormativeProfileDigest = intent.expectedNormativeProfileDigest,
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            baseOrigin = "https://small-trader.example.com",
+            currency = "USD",
+            currencyMinorUnits = 2,
+            amount = MoneyAmount("20.00"),
+            rawWireBytes = rawWireBytes,
+            createdAt = "2026-11-15T12:00:00Z"
+        )
+        failingStore.savePendingSale(record)
+
+        // Read-only retry
+        vm.retryLoadDurableRecovery()
+        advanceUntilIdle()
+
+        // Restores prepared intent under active generation
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNotNull(vm.uiState.value.saleDraft.preparedIntent)
+        assertEquals(eventId, vm.uiState.value.saleDraft.preparedIntent!!.clientEventId)
+    }
+
+    @Test
+    fun testRetryLoadDurableRecovery_cleanStore_clearsHold() = runTest(testDispatcher) {
+        val failingStore = InMemoryDurableOnlineSaleRecoveryStore(throwOnGet = true)
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = failingStore
+        )
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+
+        // Storage recovers and is clean (zero pending records)
+        failingStore.throwOnGet = false
+        vm.retryLoadDurableRecovery()
+        advanceUntilIdle()
+
+        // Hold is cleared, error is reset, normal draft actions permitted
+        assertFalse(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNull(vm.uiState.value.saleDraft.submissionError)
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        assertEquals(1, vm.uiState.value.saleDraft.lines.size)
+    }
 }
 
 /**
@@ -2545,6 +2718,22 @@ private class InMemoryDurableOnlineSaleRecoveryStore(
         }
         val canonical = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(record.baseOrigin)
         val normalized = if (record.baseOrigin == canonical) record else record.copy(baseOrigin = canonical)
+        val existing = records[normalized.clientEventId]
+        if (existing != null) {
+            val isSameScope = existing.companyId == normalized.companyId &&
+                    existing.actorId == normalized.actorId &&
+                    existing.deviceId == normalized.deviceId &&
+                    existing.baseOrigin == normalized.baseOrigin
+            if (!isSameScope) {
+                throw OnlineSaleRecoveryException("Global event UUID collision across identity scopes")
+            }
+            if (existing.expectedNormativeProfileDigest != normalized.expectedNormativeProfileDigest ||
+                !existing.rawWireBytes.contentEquals(normalized.rawWireBytes)
+            ) {
+                throw OnlineSaleRecoveryException("Cannot overwrite pending event with different payload bytes")
+            }
+            return
+        }
         records[normalized.clientEventId] = normalized
     }
 
@@ -2560,6 +2749,25 @@ private class InMemoryDurableOnlineSaleRecoveryStore(
         val canonical = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(baseOrigin)
         return records.values.firstOrNull {
             it.companyId == companyId && it.actorId == actorId && it.deviceId == deviceId && it.baseOrigin == canonical
+        }
+    }
+
+    override fun clearPendingSale(
+        clientEventId: ClientUuid,
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        baseOrigin: String
+    ) {
+        val canonical = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(baseOrigin)
+        val existing = records[clientEventId]
+        if (existing != null &&
+            existing.companyId == companyId &&
+            existing.actorId == actorId &&
+            existing.deviceId == deviceId &&
+            existing.baseOrigin == canonical
+        ) {
+            records.remove(clientEventId)
         }
     }
 

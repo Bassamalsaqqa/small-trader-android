@@ -399,7 +399,13 @@ class OnlineCashSaleOrchestrator(
 
         if (finalResult is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess) {
             try {
-                recoveryStore?.clearPendingSale(intent.clientEventId)
+                recoveryStore?.clearPendingSale(
+                    clientEventId = intent.clientEventId,
+                    companyId = targetCompanyId,
+                    actorId = intent.context.actorId,
+                    deviceId = targetDeviceId,
+                    baseOrigin = baseOrigin
+                )
             } catch (_: Exception) {
             }
         }
@@ -576,7 +582,14 @@ class OnlineCashSaleOrchestrator(
 
         if (finalResult is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess) {
             try {
-                recoveryStore?.clearPendingSale(intent.clientEventId)
+                val baseOrigin = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(client.validatedBaseOrigin)
+                recoveryStore?.clearPendingSale(
+                    clientEventId = intent.clientEventId,
+                    companyId = targetCompanyId,
+                    actorId = intent.context.actorId,
+                    deviceId = targetDeviceId,
+                    baseOrigin = baseOrigin
+                )
             } catch (_: Exception) {
             }
         }

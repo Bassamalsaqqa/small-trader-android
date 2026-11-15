@@ -404,6 +404,12 @@ class StaffWorkspaceViewModel(
     private fun loadDurableRecoveryIfPending(state: StaffAuthState.ReadReady) {
         val isOnlineCashActive = onlineCashEnabled || BuildConfig.STAFF_ONLINE_CASH_ENABLED
         val store = recoveryStore
+        val currentCompany = state.session.selectedCompanyId ?: state.bootstrap.companyId
+        val currentActor = state.session.actorUlid
+        val currentDevice = state.session.deviceUuid
+        val coord = coordinator ?: return
+        val currentGen = coord.currentGeneration
+
         if (store == null) {
             if (isOnlineCashActive && !allowRecoveryBypassForTesting) {
                 _uiState.update { s ->
@@ -415,16 +421,36 @@ class StaffWorkspaceViewModel(
                         )
                     )
                 }
+            } else {
+                // If in-memory hold exists from testing bypass, rebind generation safely if authenticated identity matches
+                val existing = _uiState.value.saleDraft.preparedIntent
+                if (existing != null && _uiState.value.saleDraft.isPaymentUnverifiedHold &&
+                    existing.context.companyId == currentCompany &&
+                    existing.context.actorId == currentActor &&
+                    existing.deviceId == currentDevice
+                ) {
+                    _uiState.update { s ->
+                        s.copy(saleDraft = s.saleDraft.copy(preparedIntent = existing.rebindGeneration(currentGen)))
+                    }
+                }
             }
             return
         }
 
-        val currentCompany = state.session.selectedCompanyId ?: state.bootstrap.companyId
-        val currentActor = state.session.actorUlid
-        val currentDevice = state.session.deviceUuid
-        val coord = coordinator ?: return
-        val currentGen = coord.currentGeneration
-        val origin = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(configuredOrigin, allowHttpLoopback)
+        val origin = try {
+            DurableOnlineSaleRecoveryStore.canonicalizeOrigin(configuredOrigin, allowHttpLoopback)
+        } catch (e: Exception) {
+            _uiState.update { s ->
+                s.copy(
+                    saleDraft = s.saleDraft.copy(
+                        isPaymentUnverifiedHold = true,
+                        isSubmitting = false,
+                        submissionError = "Configured origin violates security policy: ${e.message}"
+                    )
+                )
+            }
+            return
+        }
 
         try {
             val record = store.getPendingSale(
@@ -432,19 +458,33 @@ class StaffWorkspaceViewModel(
                 actorId = currentActor,
                 deviceId = currentDevice,
                 baseOrigin = origin
-            ) ?: return
+            )
 
-            val reboundIntent = record.toPreparedOnlineSaleIntent(currentGen)
-
-            _uiState.update { s ->
-                s.copy(
-                    saleDraft = s.saleDraft.copy(
-                        isPaymentUnverifiedHold = true,
-                        isSubmitting = false,
-                        preparedIntent = reboundIntent,
-                        submissionError = "Pending unverified sale detected for this company. Sale is held in read-only status until confirmed."
+            if (record != null) {
+                val reboundIntent = record.toPreparedOnlineSaleIntent(currentGen)
+                _uiState.update { s ->
+                    s.copy(
+                        saleDraft = s.saleDraft.copy(
+                            isPaymentUnverifiedHold = true,
+                            isSubmitting = false,
+                            preparedIntent = reboundIntent,
+                            submissionError = "Pending unverified sale detected for this company. Sale is held in read-only status until confirmed."
+                        )
                     )
-                )
+                }
+            } else {
+                // If there was previously a storage error hold with no retained intent, clear hold upon verified empty store
+                if (_uiState.value.saleDraft.isPaymentUnverifiedHold && _uiState.value.saleDraft.preparedIntent == null) {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isPaymentUnverifiedHold = false,
+                                isSubmitting = false,
+                                submissionError = null
+                            )
+                        )
+                    }
+                }
             }
         } catch (e: Exception) {
             _uiState.update { s ->
@@ -457,6 +497,20 @@ class StaffWorkspaceViewModel(
                 )
             }
         }
+    }
+
+    /**
+     * Explicit read-only retry action for loading durable recovery state when storage was previously unusable.
+     * Retries reading encrypted storage WITHOUT modifying, deleting, or re-initializing ciphertext.
+     * If pending sale is found, reconstitutes prepared intent so GET status check can proceed.
+     * If storage is verified clean (zero pending records), clears blocking hold and allows normal operations.
+     */
+    fun retryLoadDurableRecovery() {
+        val readyState = (coordinator?.authState as? StaffAuthState.ReadReady) ?: run {
+            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Session is not ready")) }
+            return
+        }
+        loadDurableRecoveryIfPending(readyState)
     }
 
     private var cachedOrchestrator: OnlineCashSaleOrchestrator? = null
@@ -833,14 +887,16 @@ class StaffWorkspaceViewModel(
                 }
                 return@launch
             }
+            var canonicalOrigin: String? = null
             if (store != null) {
                 try {
-                    val canonicalOrigin = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(configuredOrigin, allowHttpLoopback)
+                    val origin = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(configuredOrigin, allowHttpLoopback)
+                    canonicalOrigin = origin
                     val pending = store.getPendingSale(
                         companyId = targetCompanyId,
                         actorId = readyState.session.actorUlid,
                         deviceId = targetDeviceId,
-                        baseOrigin = canonicalOrigin
+                        baseOrigin = origin
                     )
                     if (pending != null && pending.clientEventId != preparedIntent.clientEventId) {
                         _uiState.update { s ->
@@ -855,6 +911,22 @@ class StaffWorkspaceViewModel(
                         }
                         return@launch
                     }
+                    val recoveryRecord = DurableOnlineSaleRecoveryRecord(
+                        clientEventId = preparedIntent.clientEventId,
+                        expectedNormativeProfileDigest = preparedIntent.expectedNormativeProfileDigest,
+                        companyId = targetCompanyId,
+                        actorId = readyState.session.actorUlid,
+                        deviceId = targetDeviceId,
+                        baseOrigin = origin,
+                        currency = targetCurrency,
+                        currencyMinorUnits = preparedIntent.context.currencyMinorUnits,
+                        amount = preparedIntent.profile.payment.amount,
+                        rawWireBytes = preparedIntent.rawWireBytes,
+                        createdAt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
+                            timeZone = java.util.TimeZone.getTimeZone("UTC")
+                        }.format(java.util.Date())
+                    )
+                    store.savePendingSale(recoveryRecord)
                 } catch (e: Exception) {
                     _uiState.update { s ->
                         s.copy(
@@ -905,7 +977,20 @@ class StaffWorkspaceViewModel(
             when (result) {
                 is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess -> {
                     try {
-                        recoveryStore?.clearPendingSale(result.receipt.clientEventId)
+                        val originToUse = canonicalOrigin ?: try {
+                            DurableOnlineSaleRecoveryStore.canonicalizeOrigin(configuredOrigin, allowHttpLoopback)
+                        } catch (_: Exception) { null }
+                        if (originToUse != null) {
+                            recoveryStore?.clearPendingSale(
+                                clientEventId = result.receipt.clientEventId,
+                                companyId = targetCompanyId,
+                                actorId = readyState.session.actorUlid,
+                                deviceId = targetDeviceId,
+                                baseOrigin = originToUse
+                            )
+                        } else {
+                            recoveryStore?.clearPendingSale(result.receipt.clientEventId)
+                        }
                     } catch (_: Exception) {}
                     _uiState.update { s ->
                         s.copy(
@@ -1060,7 +1145,7 @@ class StaffWorkspaceViewModel(
             return
         }
 
-        val currentCompany = readyState.session.selectedCompanyId
+        val currentCompany = readyState.session.selectedCompanyId ?: readyState.bootstrap.companyId
         val currentActor = readyState.session.actorUlid
         val currentDevice = readyState.session.deviceUuid
         val currentGen = coord.currentGeneration
@@ -1135,7 +1220,20 @@ class StaffWorkspaceViewModel(
             when (result) {
                 is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess -> {
                     try {
-                        recoveryStore?.clearPendingSale(result.receipt.clientEventId)
+                        val originToUse = try {
+                            DurableOnlineSaleRecoveryStore.canonicalizeOrigin(configuredOrigin, allowHttpLoopback)
+                        } catch (_: Exception) { null }
+                        if (originToUse != null) {
+                            recoveryStore?.clearPendingSale(
+                                clientEventId = result.receipt.clientEventId,
+                                companyId = targetCompanyId,
+                                actorId = readyState.session.actorUlid,
+                                deviceId = targetDeviceId,
+                                baseOrigin = originToUse
+                            )
+                        } else {
+                            recoveryStore?.clearPendingSale(result.receipt.clientEventId)
+                        }
                     } catch (_: Exception) {}
                     _uiState.update { s ->
                         s.copy(
