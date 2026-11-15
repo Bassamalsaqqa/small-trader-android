@@ -4,7 +4,7 @@
   "pull_request": "https://github.com/Bassamalsaqqa/small-trader-android/pull/24",
   "toolchain": {
     "jdk": "OpenJDK 21.0.13+9",
-    "android_sdk": "API 35 (compileSdk 35, minSdk 24, targetSdk 35)",
+    "android_sdk": "compileSdk 36, minSdk 24, targetSdk 36 (local SDK API 35 installed)",
     "gradle_constraints": {
       "workers_max": 1,
       "jvmargs": "-Xmx1536m -XX:ActiveProcessorCount=2 -XX:+UseSerialGC",
@@ -14,12 +14,14 @@
     }
   },
   "runtime_configuration": {
-    "configured_origin_protocol": "HTTPS",
+    "configured_origin_policy": "HTTPS source policy enforced; actual configuredOrigin is default blank / UNCONFIGURED in repository source; cannot call working deployed app without runtime origin configuration.",
     "demo_fallback_permitted": false,
-    "default_online_cash_feature": "OFF",
+    "default_online_cash_feature": "OFF (default false in build.gradle.kts STAFF_ONLINE_CASH_ENABLED)",
     "signature_custody": {
-      "status": "SECURE_CUSTODY_PRESERVED",
-      "device_keystore_notes": "Cryptographic keys and tokens are stored in hardware-backed KeyStore/EncryptedSharedPreferences; no secrets read or exposed in source or logs."
+      "storage_architecture": "AndroidKeyStore encrypted private storage (custom AES-GCM in SecureStaffSessionStore / EncryptedOutbox)",
+      "hardware_backed_strongbox": "UNKNOWN / unverified on actual physical hardware",
+      "key_material_exposure": "NONE (zero key material read or exposed in source or logs)",
+      "custody_proof": "UNVERIFIED (custody proof requires physical hardware audit; no invented custody claims)"
     }
   },
   "qa_status": {
@@ -32,8 +34,14 @@
       "StaffOnlineSaleViewModelTest (24)",
       "StaffWorkspaceComposeTest (14)"
     ],
-    "lint_status": "PASS (lintDebug)",
-    "xml_provenance_directory": "docs/evidence/pr24-bootstrap-tax-status-recovery/test-results-approved-maxworkers1/"
+    "lint_status": "PASS (0 errors, 63 warnings in retained lint-results-debug.txt; task executed out-of-scope without approval; see QA-EVIDENCE.md)",
+    "xml_provenance_directory": "docs/evidence/pr24-bootstrap-tax-status-recovery/test-results-approved-maxworkers1/",
+    "source_hashes_at_execution": {
+      "app/build.gradle.kts": "92e77c2786f4f4cb7c49d0fcf35400b9f9aa95bb845e73220d9cc594344b89df",
+      "app/src/main/java/com/example/ui/staff/StaffWorkspaceViewModel.kt": "b2f5e4c5872ae771e87fadefeb887479ae7c56bb04c2a35628992a7e5f3f46c9",
+      "app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt": "5c6f4b9ab89becca5bee935fe314033b886b473fe7af7eee60329ec47789c46d",
+      "app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt": "20d367fead4463b0dbadfea736dfe0fc49a0135e4326086a5d662d416fe6802a"
+    }
   },
   "deployment_stages": {
     "signed_apk_build": "NOT_RUN",
