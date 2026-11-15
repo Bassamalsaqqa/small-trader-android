@@ -137,6 +137,11 @@ class StaffWorkspaceViewModel(
     private var activeScopeActorId: String? = null
     private var activeScopeDeviceId: String? = null
 
+    // Last observed sale scope for cross-tenant presentation resetting
+    private var lastSaleScopeCompanyId: ServerUlid? = null
+    private var lastSaleScopeActorId: ServerUlid? = null
+    private var lastSaleScopeDeviceId: ClientUuid? = null
+
     init {
         if (coordinator != null && configuredOrigin.isNotBlank() && _uiState.value.phase == StaffWorkspacePhase.INITIALIZING) {
             restoreSession()
@@ -476,31 +481,47 @@ class StaffWorkspaceViewModel(
                         saleDraft = s.saleDraft.copy(
                             isPaymentUnverifiedHold = true,
                             isSubmitting = false,
+                            isIndeterminate = false,
                             preparedIntent = reboundIntent,
+                            lines = emptyList(),
+                            selectedCustomer = null,
+                            cashTendered = null,
+                            receipt = null,
+                            unverifiedReceipt = null,
                             submissionError = "Pending unverified sale detected for this company. Sale is held in read-only status until confirmed."
                         )
                     )
                 }
             } else {
-                // If there was a hold from a different identity scope or a storage error hold with no retained intent, clear hold for clean scope
-                if (_uiState.value.saleDraft.isPaymentUnverifiedHold) {
-                    val existingIntent = _uiState.value.saleDraft.preparedIntent
-                    val isDifferentScope = existingIntent != null && (
-                        existingIntent.context.companyId != currentCompany ||
-                        existingIntent.context.actorId != currentActor ||
-                        existingIntent.deviceId != currentDevice
-                    )
-                    if (isDifferentScope || existingIntent == null) {
-                        _uiState.update { s ->
-                            s.copy(
-                                saleDraft = s.saleDraft.copy(
-                                    isPaymentUnverifiedHold = false,
-                                    isSubmitting = false,
-                                    preparedIntent = if (isDifferentScope) null else s.saleDraft.preparedIntent,
-                                    submissionError = if (isDifferentScope || s.saleDraft.preparedIntent == null) null else s.saleDraft.submissionError
-                                )
+                val existingIntent = _uiState.value.saleDraft.preparedIntent
+                val isDifferentScope = (existingIntent != null && (
+                    existingIntent.context.companyId != currentCompany ||
+                    existingIntent.context.actorId != currentActor ||
+                    existingIntent.deviceId != currentDevice
+                )) || (lastSaleScopeCompanyId != null && (
+                    lastSaleScopeCompanyId != currentCompany ||
+                    lastSaleScopeActorId != currentActor ||
+                    lastSaleScopeDeviceId != currentDevice
+                ))
+
+                if (isDifferentScope) {
+                    // Reset all tenant-scoped presentation basket/customer/tender/receipt when identity differs
+                    // while leaving any old encrypted record on disk untouched
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = StaffOnlineSaleDraft()
+                        )
+                    }
+                } else if (_uiState.value.saleDraft.isPaymentUnverifiedHold && existingIntent == null) {
+                    // Storage error hold with no retained intent recovered clean on same scope
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isPaymentUnverifiedHold = false,
+                                isSubmitting = false,
+                                submissionError = null
                             )
-                        }
+                        )
                     }
                 }
             }
@@ -514,6 +535,10 @@ class StaffWorkspaceViewModel(
                     )
                 )
             }
+        } finally {
+            lastSaleScopeCompanyId = currentCompany
+            lastSaleScopeActorId = currentActor
+            lastSaleScopeDeviceId = currentDevice
         }
     }
 
@@ -864,6 +889,11 @@ class StaffWorkspaceViewModel(
         val generation = coord.currentGeneration
 
         // P1 IDEMPOTENCY:
+        // Track whether this dispatch is on a retained draft/hold vs a fresh draft
+        val wasRetainedIntent = draft.preparedIntent != null ||
+                draft.isPaymentUnverifiedHold ||
+                draft.isIndeterminate
+
         // If draft already has a preparedIntent (e.g. from an indeterminate transient attempt),
         // RETAIN AND REUSE the EXACT same preparedIntent (same clientEventId, same wire bytes)!
         val preparedIntent = draft.preparedIntent ?: run {
@@ -1079,13 +1109,36 @@ class StaffWorkspaceViewModel(
                     }
                 }
                 is OnlineCashOrchestrationResult.LocalTokenUnavailable -> {
-                    val hasDurableRecord = store != null && canonicalOrigin != null && try {
-                        store.getPendingSale(targetCompanyId, readyState.session.actorUlid, targetDeviceId, canonicalOrigin)?.clientEventId == preparedIntent.clientEventId
-                    } catch (_: Exception) { false }
                     val wasHold = _uiState.value.saleDraft.isPaymentUnverifiedHold
+                    val wasIndeterminate = _uiState.value.saleDraft.isIndeterminate
 
-                    if (hasDurableRecord || wasHold) {
-                        // Lost ACK or existing pending sale under re-auth: NEVER discard possibly committed record/identity! Keep exact event & HOLD intact.
+                    val pendingStatus = if (store == null || canonicalOrigin == null) {
+                        if (isOnlineCashActive && !allowRecoveryBypassForTesting) {
+                            PendingRecordStatus.UNREADABLE
+                        } else {
+                            PendingRecordStatus.ABSENT
+                        }
+                    } else {
+                        try {
+                            val currentPending = store.getPendingSale(
+                                targetCompanyId,
+                                readyState.session.actorUlid,
+                                targetDeviceId,
+                                canonicalOrigin
+                            )
+                            if (currentPending != null) {
+                                PendingRecordStatus.PRESENT
+                            } else {
+                                PendingRecordStatus.ABSENT
+                            }
+                        } catch (e: Exception) {
+                            PendingRecordStatus.UNREADABLE
+                        }
+                    }
+
+                    if (pendingStatus != PendingRecordStatus.ABSENT || wasHold || wasIndeterminate || wasRetainedIntent) {
+                        // Storage is unreadable, record is present, or was previously held/indeterminate:
+                        // MUST preserve exact intent/HOLD + visible error, NEVER claim proven zero-dispatch!
                         _uiState.update { s ->
                             s.copy(
                                 saleDraft = s.saleDraft.copy(
@@ -1096,7 +1149,8 @@ class StaffWorkspaceViewModel(
                             )
                         }
                     } else {
-                        // Proven zero-dispatch on fresh uncommitted draft: clear volatile prepared intent to permit editing
+                        // Proven zero-dispatch on fresh uncommitted draft with verified ABSENT storage:
+                        // Safe to clear volatile prepared intent to permit editing
                         _uiState.update { s ->
                             s.copy(
                                 saleDraft = s.saleDraft.copy(
@@ -1110,25 +1164,61 @@ class StaffWorkspaceViewModel(
                     }
                 }
                 is OnlineCashOrchestrationResult.ValidationFailed -> {
-                    if (canonicalOrigin != null && store != null) {
-                        try {
-                            store.clearPendingSale(
-                                preparedIntent.clientEventId,
-                                targetCompanyId,
-                                readyState.session.actorUlid,
-                                targetDeviceId,
-                                canonicalOrigin
+                    if (wasRetainedIntent) {
+                        // Retained lost-ACK event: a 422 does NOT prove zero commit on original dispatch!
+                        // MUST NOT delete durable record; keep exact event & HOLD intact for status check.
+                        _uiState.update { s ->
+                            s.copy(
+                                saleDraft = s.saleDraft.copy(
+                                    isSubmitting = false,
+                                    isPaymentUnverifiedHold = true,
+                                    submissionError = "Validation failed (422): ${result.error.message}"
+                                )
                             )
-                        } catch (_: Exception) {}
-                    }
-                    _uiState.update { s ->
-                        s.copy(
-                            saleDraft = s.saleDraft.copy(
-                                isSubmitting = false,
-                                preparedIntent = null,
-                                submissionError = "Validation failed (422): ${result.error.message}"
-                            )
-                        )
+                        }
+                    } else {
+                        // First fresh dispatch: definitive 422 rejects the transaction at the gate.
+                        var cleanupFailure: String? = null
+                        if (canonicalOrigin != null && store != null) {
+                            try {
+                                store.clearPendingSale(
+                                    preparedIntent.clientEventId,
+                                    targetCompanyId,
+                                    readyState.session.actorUlid,
+                                    targetDeviceId,
+                                    canonicalOrigin
+                                )
+                            } catch (e: Exception) {
+                                cleanupFailure = "Failed to clear durable reservation after validation rejection: ${e.message}"
+                            }
+                        } else if (store != null) {
+                            cleanupFailure = "Canonical origin unavailable to clear durable reservation"
+                        }
+
+                        if (cleanupFailure != null) {
+                            // Cleanup failed: MUST keep hold and visible error, NEVER allow edit!
+                            _uiState.update { s ->
+                                s.copy(
+                                    saleDraft = s.saleDraft.copy(
+                                        isSubmitting = false,
+                                        isPaymentUnverifiedHold = true,
+                                        submissionError = cleanupFailure
+                                    )
+                                )
+                            }
+                        } else {
+                            // First fresh dispatch with verified cleanup: safe to allow editing
+                            _uiState.update { s ->
+                                s.copy(
+                                    saleDraft = s.saleDraft.copy(
+                                        isSubmitting = false,
+                                        isPaymentUnverifiedHold = false,
+                                        preparedIntent = null,
+                                        submissionError = "Validation failed (422): ${result.error.message}"
+                                    )
+                                )
+                            }
+                        }
                     }
                 }
                 is OnlineCashOrchestrationResult.StorageFailure -> {
@@ -2283,6 +2373,9 @@ class StaffWorkspaceViewModel(
         cachedHealthCompanyId = null
         cachedHealthActorId = null
         cachedHealthDeviceId = null
+        lastSaleScopeCompanyId = null
+        lastSaleScopeActorId = null
+        lastSaleScopeDeviceId = null
 
         clearTransientCredentials()
         clearListsImmediately()
@@ -2953,4 +3046,10 @@ class StaffWorkspaceViewModel(
             ) as T
         }
     }
+}
+
+private enum class PendingRecordStatus {
+    PRESENT,
+    ABSENT,
+    UNREADABLE
 }
