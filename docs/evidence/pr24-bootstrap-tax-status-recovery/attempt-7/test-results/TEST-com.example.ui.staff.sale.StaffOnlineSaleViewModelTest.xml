@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" tests="46" skipped="0" failures="0" errors="0" timestamp="2026-11-15T17:05:10.233Z" hostname="pasta-hp-worker" time="0.53">
+  <properties/>
+  <testcase name="testDurableRecovery_loadPendingFailure_locksUiWithBlockingHold" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.134"/>
+  <testcase name="testDurableRecovery_companySwitch_isolation" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.013"/>
+  <testcase name="testAuthDeniedActiveScopeLocksPhaseAndClearsLists" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.017"/>
+  <testcase name="testLostAck_tokenLoss_preservesRecordIdentity_zeroPostNewUuid" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.019"/>
+  <testcase name="testValidationFailed_freshDispatch_cleanupFailure_keepsHold" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.008"/>
+  <testcase name="testPostedWithoutPaymentReference_holdsBasketAndPreservesPreparedIntent" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.009"/>
+  <testcase name="testPaymentUnverifiedHold_checkPaymentStatus_postedWrongDigest_neverConfirmedHoldKept" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.01"/>
+  <testcase name="testCurrentGenerationReauth_rebindsPreparedIntentToNewGeneration" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.008"/>
+  <testcase name="testSessionScopedOrchestratorDispatchesActiveGenerationAndToken" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.007"/>
+  <testcase name="testPaymentUnverifiedHold_checkPaymentStatus_unknownNullableDigest_remainsUnknownHold" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.007"/>
+  <testcase name="testPaymentUnverifiedHold_checkPaymentStatus_wrongSessionScope_refusesZeroHttpPreservesHold" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.006"/>
+  <testcase name="testStaleAuthDeniedDoesNotLockCurrentScope" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.006"/>
+  <testcase name="testDurableRecovery_restoredHold_postedWrongDigest_staysHold" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.009"/>
+  <testcase name="testDurableRecovery_logoutAndAuthLock_preservesRecord" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.014"/>
+  <testcase name="testIndeterminateTransientRetainsSamePreparedIntentAndEventIdOnRetry" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.007"/>
+  <testcase name="testLocalTokenUnavailable_allowsEditing_invalidatesPreparedIntent" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.007"/>
+  <testcase name="testLocalTokenUnavailable_unreadableStorage_keepsHoldAndIntent" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.009"/>
+  <testcase name="testRetryLoadDurableRecovery_unusableStorage_thenRecovers" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.004"/>
+  <testcase name="testPaymentUnverifiedHold_checkPaymentStatus_recoversEvenWhenNewSaleAuthorityInvalid" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.008"/>
+  <testcase name="testDurableRecovery_writeFailure_zeroPost" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.008"/>
+  <testcase name="testDurableRecovery_clearConfirmed_doesNotEraseMismatchedEvent" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.002"/>
+  <testcase name="testCoherentCancellationOnLogout" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.005"/>
+  <testcase name="testPaymentUnverifiedHold_checkPaymentStatus_postedNullDigest_neverConfirmedHoldKept" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.007"/>
+  <testcase name="testAuthoritativeBootstrapCurrencyMinorUnitsTakesPrecedenceOverOverride" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.003"/>
+  <testcase name="testDraftLineAdditionAndQuantityModification" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.003"/>
+  <testcase name="testValidationFailed_lostAckRetainedDispatch_preservesRecordAndHold" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.011"/>
+  <testcase name="testCustomFactory_activeToken_writeHappensBeforeTransport" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.008"/>
+  <testcase name="testSetLineTax_validatesCurrentBootstrapTaxes" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.004"/>
+  <testcase name="testPaymentUnverifiedHold_checkPaymentStatus_staysOnHoldWhenPaymentStillNull" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.007"/>
+  <testcase name="testAuthDenialNotifiesListenerWithExactScope" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.003"/>
+  <testcase name="testDraftMutationsFrozenWhileIndeterminate" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.006"/>
+  <testcase name="testDurableRecovery_missingStore_submitBlockedWithHold" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.005"/>
+  <testcase name="testFreshDraft_tokenLoss_zeroDurableWrite_allowsEditing" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.004"/>
+  <testcase name="testScopeSwitch_companyActorDevice_resetsPresentationWithoutLeakingOldUI_restoresOnReturn" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.006"/>
+  <testcase name="testPaymentUnverifiedHold_checkPaymentStatus_neverPostsOrGeneratesNewUuid" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.015"/>
+  <testcase name="testDurableRecovery_missingStore_onlineCashActive_locksUiWithBlockingHold" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.003"/>
+  <testcase name="testStartupReadFailure_blocksAndZeroPost" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.003"/>
+  <testcase name="testSetLineExplicitNoTax_setsCanonicalZeroTax" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.003"/>
+  <testcase name="testValidationFailed_freshDispatch_clearsReservation_allowsEditing" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.006"/>
+  <testcase name="testOnCleared_cancelsSaleJobAndClearsCachedOrchestrator" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.058"/>
+  <testcase name="testPaymentUnverifiedHold_checkPaymentStatus_recoversWhenPaymentConfirmed" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.007"/>
+  <testcase name="testCustomFactory_withRecoveryStore_storageFailure_zeroPost" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.013"/>
+  <testcase name="testRetryLoadDurableRecovery_cleanStore_clearsHold" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.003"/>
+  <testcase name="testConcurrentSubmit_executesSingleRequest" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.008"/>
+  <testcase name="testDurableRecovery_processRecreate_lostAck_recoversHoldViaGetOnly" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.012"/>
+  <testcase name="testPaymentUnverifiedHold_checkPaymentStatus_postedMatchingDigest_succeedsConfirmedFinancialSuccess" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.009"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

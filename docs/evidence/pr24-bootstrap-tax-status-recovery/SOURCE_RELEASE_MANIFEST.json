@@ -2,7 +2,7 @@
   "release_type": "source_only_qualified_review",
   "branch": "t3/android-bootstrap-tax-status-recovery",
   "pull_request": "https://github.com/Bassamalsaqqa/small-trader-android/pull/24",
-  "head_commit": "0eff096ca080aa44e424388e28438e105d967252",
+  "head_commit": "5f382ba77d5fa9dd87606c8f0bb9be31a4861f36",
   "toolchain": {
     "jdk": "OpenJDK 21.0.13+9 (/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9)",
     "android_sdk": "compileSdk 36, minSdk 24, targetSdk 36 (local SDK /home/t3dev/.local/share/android-toolchain/sdk)",
@@ -26,23 +26,29 @@
     }
   },
   "qa_status": {
-    "execution_summary": "124 tests executed across 4 focused classes: 121 passed, 3 failed (exit code 1). Bounded single-invocation QA completed. Lease explicitly released.",
-    "unit_tests_passed": 121,
-    "unit_tests_failed": 3,
+    "execution_summary": "124 tests executed across 4 focused classes: 124 passed, 0 failed, 0 errors, 0 skipped (exit code 0, 100% PASS). Unit and MockWebServer test qualification passed. Real Android OS durability, fsync/power-loss survival, and hardware-backed Keystore custody UNVERIFIED.",
+    "unit_tests_passed": 124,
+    "unit_tests_failed": 0,
     "suites": [
       "AndroidV2OnlineCashClientMockWebServerTest (38 passed, 0 failed)",
       "DurableOnlineSaleRecoveryStoreTest (26 passed, 0 failed)",
       "StaffWorkspaceComposeTest (14 passed, 0 failed)",
-      "StaffOnlineSaleViewModelTest (43 passed, 3 failed)"
+      "StaffOnlineSaleViewModelTest (46 passed, 0 failed)"
     ],
     "lint_status": "NOT_RUN (explicitly excluded by targeted QA lease)",
+    "qualification_boundary": {
+      "scope": "Unit, Robolectric Compose, and OkHttp MockWebServer tests ONLY.",
+      "durability_verification": "Tested through injected DirectorySyncEngine seam; actual Android OS fsync, sudden power loss survival, and hardware-backed Keystore custody UNVERIFIED.",
+      "acceptance_claims": "No financial release, paired hardware, or physical UI device acceptance claim."
+    },
     "attempt_artifacts": {
       "attempt_1": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-1/",
       "attempt_2": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-2/",
       "attempt_3": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-3/",
       "attempt_4": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-4/",
       "attempt_5": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-5/",
-      "attempt_6": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-6/"
+      "attempt_6": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-6/",
+      "attempt_7": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-7/"
     },
     "source_hashes_at_execution": {
       "app/build.gradle.kts": "92e77c2786f4f4cb7c49d0fcf35400b9f9aa95bb845e73220d9cc594344b89df",
@@ -50,10 +56,10 @@
       "app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt": "7a8804558248675c9d94a7d6669c4d2d38ba70ac15f0f73e6122bfdff2ed7302",
       "app/src/main/java/com/example/ui/staff/StaffWorkspaceApp.kt": "534f566e46736dc3d5be892edb59dda95207d00bce5b83c77d139d64d5869f14",
       "app/src/main/java/com/example/ui/staff/StaffWorkspaceScreen.kt": "e5075915f07cde9ba382f1f821634003f1aaf01fa2de5850fc8365fa4af6e607",
-      "app/src/main/java/com/example/ui/staff/StaffWorkspaceViewModel.kt": "5bfbbb1bc1f88de289febc40b5906b0b653b5767acc2a2df6214965d94081073",
+      "app/src/main/java/com/example/ui/staff/StaffWorkspaceViewModel.kt": "3d31bd210b0af4dea358d750a057398e21bf47362fbfa05a7e080eb1a23b5c22",
       "app/src/main/java/com/example/ui/staff/sale/StaffOnlineSaleScreen.kt": "03312ce32a6156d72e14fabb3e1ef9168fb3bed546cec4971ffa4317c87298d4",
       "app/src/test/java/com/example/data/mobile/onlinecash/DurableOnlineSaleRecoveryStoreTest.kt": "5b80be60504626e36ebbcd7d1cbae197a26d7f641475ce27eb8e1906152e0564",
-      "app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt": "92b22e71b4b064adbed27969333766311b938d0fb9a8c1b92de7e5dd54946025",
+      "app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt": "fea427a0e3d3ccdbb24b2ac8fae1c0c5ac806e0dc16dabb22a1ea123a78f525c",
       "app/src/test/java/com/example/ui/staff/StaffWorkspaceComposeTest.kt": "59c84c0a4caf7e159ac6ece132293794a8e5f50274145d3ae5b049f364fc78f1"
     }
   },
