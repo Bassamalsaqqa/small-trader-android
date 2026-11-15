@@ -97,6 +97,7 @@ fun StaffWorkspaceScreen(
     onSetSaleLineTax: (String, com.example.data.mobile.readclient.BootstrapTax) -> Unit = { _, _ -> },
     onSetSaleLineExplicitNoTax: (String) -> Unit = {},
     onCheckPaymentStatus: () -> Unit = {},
+    onRetryRecovery: () -> Unit = {},
     onClearSaleDraft: () -> Unit = {},
     onSubmitSale: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -268,6 +269,7 @@ fun StaffWorkspaceScreen(
                         onSetLineTax = onSetSaleLineTax,
                         onSetLineExplicitNoTax = onSetSaleLineExplicitNoTax,
                         onCheckPaymentStatus = onCheckPaymentStatus,
+                        onRetryRecovery = onRetryRecovery,
                         onClearDraft = onClearSaleDraft,
                         onSubmitSale = onSubmitSale
                     )

@@ -241,7 +241,9 @@ interface DurableOnlineSaleRecoveryStore {
 
     /**
      * Convenience unscoped clear. Fails if multiple records match across scopes.
+     * Retained for test backward compatibility; production callers must use scoped [clearPendingSale].
      */
+    @Deprecated("Test-only; production callers must use scoped clearPendingSale")
     fun clearPendingSale(clientEventId: ClientUuid)
 
     /**
@@ -421,6 +423,7 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
         }
     }
 
+    @Deprecated("Test-only; production callers must use scoped clearPendingSale")
     override fun clearPendingSale(clientEventId: ClientUuid) {
         val lock = SessionProcessLocks.getFileLock(storageFile)
         lock.withLock {

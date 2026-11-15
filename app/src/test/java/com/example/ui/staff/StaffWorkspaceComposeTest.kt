@@ -620,6 +620,7 @@ class StaffWorkspaceComposeTest {
         )
 
         var checkStatusClicked = false
+        var retryRecoveryClicked = false
         val uiState = StaffWorkspaceUiState(
             phase = StaffWorkspacePhase.READ_READY,
             selectedTab = StaffWorkspaceTab.CASH_SALE,
@@ -644,7 +645,8 @@ class StaffWorkspaceComposeTest {
                     onLogout = {},
                     onToggleLanguage = {},
                     onToggleTheme = {},
-                    onCheckPaymentStatus = { checkStatusClicked = true }
+                    onCheckPaymentStatus = { checkStatusClicked = true },
+                    onRetryRecovery = { retryRecoveryClicked = true }
                 )
             }
         }
@@ -664,6 +666,13 @@ class StaffWorkspaceComposeTest {
         checkStatusBtn.performClick()
         composeTestRule.waitForIdle()
         assertTrue("Check status callback must fire on click", checkStatusClicked)
+
+        // 4. Retry recovery button is displayed and clickable
+        val retryRecoveryBtn = composeTestRule.onNodeWithTag("staff_sale_retry_recovery_button")
+        retryRecoveryBtn.assertIsDisplayed()
+        retryRecoveryBtn.performClick()
+        composeTestRule.waitForIdle()
+        assertTrue("Retry recovery callback must fire on click", retryRecoveryClicked)
     }
 
     @Test

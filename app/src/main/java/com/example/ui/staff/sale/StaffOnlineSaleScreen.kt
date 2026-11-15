@@ -90,6 +90,7 @@ fun StaffOnlineSaleView(
     onSetLineTax: (lineId: String, tax: BootstrapTax) -> Unit = { _, _ -> },
     onSetLineExplicitNoTax: (lineId: String) -> Unit = {},
     onCheckPaymentStatus: () -> Unit = {},
+    onRetryRecovery: () -> Unit = {},
     onClearDraft: () -> Unit,
     onSubmitSale: () -> Unit,
     modifier: Modifier = Modifier
@@ -265,6 +266,21 @@ fun StaffOnlineSaleView(
                         }
                         Text(
                             text = lang.tr("التحقق من حالة الدفع", "Check Payment Status"),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onRetryRecovery,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("staff_sale_retry_recovery_button"),
+                        enabled = !draft.isSubmitting
+                    ) {
+                        Text(
+                            text = lang.tr("إعادة محاولة الاسترداد", "Retry Recovery"),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )

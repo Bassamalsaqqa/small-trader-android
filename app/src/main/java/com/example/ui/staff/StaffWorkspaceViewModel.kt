@@ -976,6 +976,7 @@ class StaffWorkspaceViewModel(
 
             when (result) {
                 is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess -> {
+                    var cleanupError: String? = null
                     try {
                         val originToUse = canonicalOrigin ?: try {
                             DurableOnlineSaleRecoveryStore.canonicalizeOrigin(configuredOrigin, allowHttpLoopback)
@@ -988,10 +989,12 @@ class StaffWorkspaceViewModel(
                                 deviceId = targetDeviceId,
                                 baseOrigin = originToUse
                             )
-                        } else {
-                            recoveryStore?.clearPendingSale(result.receipt.clientEventId)
+                        } else if (recoveryStore != null) {
+                            cleanupError = "Failed to resolve verified canonical origin for durable cleanup; record retained"
                         }
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) {
+                        cleanupError = "Failed to clear durable recovery record: ${e.message}"
+                    }
                     _uiState.update { s ->
                         s.copy(
                             saleDraft = s.saleDraft.copy(
@@ -1000,7 +1003,7 @@ class StaffWorkspaceViewModel(
                                 isPaymentUnverifiedHold = false,
                                 receipt = result.receipt,
                                 unverifiedReceipt = null,
-                                submissionError = null,
+                                submissionError = cleanupError,
                                 preparedIntent = null,
                                 lines = emptyList(),
                                 cashTendered = null
@@ -1219,6 +1222,7 @@ class StaffWorkspaceViewModel(
 
             when (result) {
                 is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess -> {
+                    var cleanupError: String? = null
                     try {
                         val originToUse = try {
                             DurableOnlineSaleRecoveryStore.canonicalizeOrigin(configuredOrigin, allowHttpLoopback)
@@ -1231,10 +1235,12 @@ class StaffWorkspaceViewModel(
                                 deviceId = targetDeviceId,
                                 baseOrigin = originToUse
                             )
-                        } else {
-                            recoveryStore?.clearPendingSale(result.receipt.clientEventId)
+                        } else if (recoveryStore != null) {
+                            cleanupError = "Failed to resolve verified canonical origin for durable cleanup; record retained"
                         }
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) {
+                        cleanupError = "Failed to clear durable recovery record: ${e.message}"
+                    }
                     _uiState.update { s ->
                         s.copy(
                             saleDraft = s.saleDraft.copy(
@@ -1243,7 +1249,7 @@ class StaffWorkspaceViewModel(
                                 isPaymentUnverifiedHold = false,
                                 receipt = result.receipt,
                                 unverifiedReceipt = null,
-                                submissionError = null,
+                                submissionError = cleanupError,
                                 preparedIntent = null,
                                 lines = emptyList(),
                                 cashTendered = null
