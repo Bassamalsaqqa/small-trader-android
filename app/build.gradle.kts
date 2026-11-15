@@ -48,6 +48,7 @@ android {
     buildConfigField("String", "STAFF_WORKSPACE_ORIGIN", escapeJavaStringLiteral(staffWorkspaceOrigin))
     buildConfigField("boolean", "STAFF_ALLOW_HTTP_LOOPBACK", "false")
     buildConfigField("boolean", "STAFF_ONLINE_CASH_ENABLED", staffOnlineCashEnabled.toString())
+    buildConfigField("boolean", "DEMO_MODE_ENABLED", "false")
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
@@ -85,12 +86,14 @@ android {
         signingConfigs.getByName("release")
       }
       buildConfigField("boolean", "STAFF_ALLOW_HTTP_LOOPBACK", "false")
+      buildConfigField("boolean", "DEMO_MODE_ENABLED", "false")
     }
     create("benchmark") {
       initWith(getByName("release"))
       matchingFallbacks += listOf("release")
       signingConfig = signingConfigs.getByName("debugConfig")
       buildConfigField("boolean", "STAFF_ALLOW_HTTP_LOOPBACK", "false")
+      buildConfigField("boolean", "DEMO_MODE_ENABLED", "false")
     }
     debug {
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
@@ -98,6 +101,10 @@ android {
       signingConfig = signingConfigs.getByName("debugConfig")
       val staffAllowHttpLoopback = project.findProperty("smalltrader.staffAllowHttpLoopback")?.toString()?.toBoolean() ?: false
       buildConfigField("boolean", "STAFF_ALLOW_HTTP_LOOPBACK", staffAllowHttpLoopback.toString())
+      val demoModeEnabled = project.findProperty("smalltrader.enableDemoMode")?.toString()?.toBoolean()
+        ?: project.findProperty("smalltrader.demoModeEnabled")?.toString()?.toBoolean()
+        ?: false
+      buildConfigField("boolean", "DEMO_MODE_ENABLED", demoModeEnabled.toString())
     }
   }
   compileOptions {

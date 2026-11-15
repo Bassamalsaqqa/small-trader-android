@@ -51,7 +51,10 @@ fun StaffWorkspaceApp(
         ) {
             when (uiState.phase) {
                 StaffWorkspacePhase.UNCONFIGURED -> {
-                    StaffUnconfiguredScreen(lang = uiState.language)
+                    StaffUnconfiguredScreen(
+                        lang = uiState.language,
+                        onToggleLanguage = { viewModel.toggleLanguage() }
+                    )
                 }
                 StaffWorkspacePhase.INITIALIZING -> {
                     Box(

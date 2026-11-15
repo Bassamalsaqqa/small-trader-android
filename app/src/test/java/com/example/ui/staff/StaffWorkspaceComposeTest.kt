@@ -550,4 +550,25 @@ class StaffWorkspaceComposeTest {
         assertEquals(line.lineId, updatedLineId)
         assertEquals("4.5", updatedQuantity?.value?.toPlainString())
     }
+
+    @Test
+    fun unconfiguredScreen_rendersTruthfulSetupNotice_andTogglesLanguage() {
+        var toggled = false
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffUnconfiguredScreen(
+                    lang = AppLanguage.AR,
+                    onToggleLanguage = { toggled = true }
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("staff_unconfigured_screen").assertIsDisplayed()
+        composeTestRule.onNodeWithText("مساحة استعلام الموظفين غير مهيأة").assertIsDisplayed()
+
+        val toggleBtn = composeTestRule.onNodeWithTag("staff_unconfigured_toggle_language_button")
+        toggleBtn.assertIsDisplayed()
+        toggleBtn.performClick()
+        assertTrue("Language toggle callback must fire", toggled)
+    }
 }
