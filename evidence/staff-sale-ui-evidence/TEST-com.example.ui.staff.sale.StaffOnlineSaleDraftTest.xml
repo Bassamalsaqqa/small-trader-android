@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.ui.staff.sale.StaffOnlineSaleDraftTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-11-15T06:49:37.625Z" hostname="pasta-hp-worker" time="0.014">
+  <properties/>
+  <testcase name="testDraftLineUnassignedCatalogTaxPairFailsClosedAsUnresolved" classname="com.example.ui.staff.sale.StaffOnlineSaleDraftTest" time="0.001"/>
+  <testcase name="testDraftUnresolvedTaxContractFailsClosed" classname="com.example.ui.staff.sale.StaffOnlineSaleDraftTest" time="0.001"/>
+  <testcase name="testDraftPreparesExact7KeyWireJsonAndNormativeProfile" classname="com.example.ui.staff.sale.StaffOnlineSaleDraftTest" time="0.008"/>
+  <testcase name="testDefaultUnitResolvesCodeFromBootstrapUnitsWhenDifferentFromBase" classname="com.example.ui.staff.sale.StaffOnlineSaleDraftTest" time="0.001"/>
+  <testcase name="testDraftLineExplicitNoTaxResolvesCleanly" classname="com.example.ui.staff.sale.StaffOnlineSaleDraftTest" time="0.0"/>
+  <testcase name="testSelectedCustomerOverridesWalkIn" classname="com.example.ui.staff.sale.StaffOnlineSaleDraftTest" time="0.0"/>
+  <testcase name="testAuthorityResolutionMissingContractsFailsClosed" classname="com.example.ui.staff.sale.StaffOnlineSaleDraftTest" time="0.001"/>
+  <testcase name="testDraftTotalsExactDecimalWithTax" classname="com.example.ui.staff.sale.StaffOnlineSaleDraftTest" time="0.0"/>
+  <testcase name="testProductUnitIdMapsToUnitPublicIdNotPivot" classname="com.example.ui.staff.sale.StaffOnlineSaleDraftTest" time="0.0"/>
+  <testcase name="testAuthorityResolutionSucceedsWhenContractsResolved" classname="com.example.ui.staff.sale.StaffOnlineSaleDraftTest" time="0.0"/>
+  <testcase name="testDefaultUnitUnresolvableCodeFailsClosedAsUnknownUnit" classname="com.example.ui.staff.sale.StaffOnlineSaleDraftTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

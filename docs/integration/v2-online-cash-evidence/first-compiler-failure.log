@@ -1,0 +1,74 @@
+Starting a Gradle Daemon (subsequent builds will be faster)
+Calculating task graph as no cached configuration is available for tasks: compileDebugUnitTestKotlin
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:processDebugGoogleServices UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:kspDebugKotlin
+> Task :app:compileDebugKotlin
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:30:85 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:30:99 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:30:100 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:30:102 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:30:104 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:17 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:18 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:28 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:29 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:38 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:51 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:52 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:62 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:73 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:74 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:83 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:84 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:96 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:97 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:106 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt:31:107 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:63:68 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:97:48 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:97:57 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:97:58 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:97:67 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:97:68 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:97:98 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:97:100 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:97:102 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:98:17 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:98:18 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:98:24 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:98:26 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:98:44 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:98:45 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:98:49 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:98:50 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:98:61 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:98:62 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:98:77 Syntax error: Expecting member declaration.
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/data/mobile/onlinecash/PreparedOnlineSaleIntent.kt:98:78 Syntax error: Expecting member declaration.
+
+> Task :app:compileDebugKotlin FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileDebugKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 55s
+9 actionable tasks: 2 executed, 7 up-to-date
+Configuration cache entry stored.

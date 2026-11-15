@@ -12,8 +12,15 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.runtime.key
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
-import com.example.ui.navigation.*
+import com.example.data.mobile.integration.OutboxAuthDenialBridge
+import com.example.model.AppLanguage
+import com.example.ui.navigation.AppLaunchTarget
+import com.example.ui.navigation.AppLaunchTargetResolver
+import com.example.ui.navigation.TraderNavigationPolicy
+import com.example.ui.staff.StaffUnconfiguredScreen
+import com.example.ui.staff.StaffWorkspaceApp
 import com.example.ui.shell.QuickActionSheet
 import com.example.ui.screens.PeopleHubScreen
 import com.example.ui.screens.PurchasesScreen
@@ -25,6 +32,9 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -62,18 +72,54 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            if (BuildConfig.STAFF_READ_WORKSPACE) {
-                val context = androidx.compose.ui.platform.LocalContext.current
-                val authDenialListener = androidx.compose.runtime.remember(context) {
-                    com.example.data.mobile.integration.OutboxAuthDenialBridge.create(context.applicationContext)
-                }
-                com.example.ui.staff.StaffWorkspaceApp(
+            val launchTarget = remember {
+                AppLaunchTargetResolver.resolve(
+                    isDebug = BuildConfig.DEBUG,
+                    staffReadWorkspace = BuildConfig.STAFF_READ_WORKSPACE,
                     configuredOrigin = BuildConfig.STAFF_WORKSPACE_ORIGIN,
-                    allowHttpLoopback = BuildConfig.DEBUG && BuildConfig.STAFF_ALLOW_HTTP_LOOPBACK,
-                    authDenialListener = authDenialListener
+                    demoModeOptIn = BuildConfig.DEMO_MODE_ENABLED,
+                    allowHttpLoopback = BuildConfig.STAFF_ALLOW_HTTP_LOOPBACK
                 )
-            } else {
-                SmallTraderApp()
+            }
+
+            when (launchTarget) {
+                AppLaunchTarget.STAFF_WORKSPACE -> {
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val authDenialListener = remember(context) {
+                        OutboxAuthDenialBridge.create(context.applicationContext)
+                    }
+                    StaffWorkspaceApp(
+                        configuredOrigin = BuildConfig.STAFF_WORKSPACE_ORIGIN,
+                        allowHttpLoopback = BuildConfig.DEBUG && BuildConfig.STAFF_ALLOW_HTTP_LOOPBACK,
+                        authDenialListener = authDenialListener
+                    )
+                }
+                AppLaunchTarget.DEMO_TRADER -> {
+                    SmallTraderApp()
+                }
+                AppLaunchTarget.UNCONFIGURED -> {
+                    var currentLanguage by remember {
+                        val isArabic = java.util.Locale.getDefault().language.lowercase().startsWith("ar")
+                        mutableStateOf(
+                            if (isArabic) AppLanguage.AR else AppLanguage.EN
+                        )
+                    }
+                    SmallTraderTheme(
+                        darkTheme = isSystemInDarkTheme(),
+                        isRtl = currentLanguage.isRtl
+                    ) {
+                        StaffUnconfiguredScreen(
+                            lang = currentLanguage,
+                            onToggleLanguage = {
+                                currentLanguage = if (currentLanguage == AppLanguage.AR) {
+                                    AppLanguage.EN
+                                } else {
+                                    AppLanguage.AR
+                                }
+                            }
+                        )
+                    }
+                }
             }
         }
     }

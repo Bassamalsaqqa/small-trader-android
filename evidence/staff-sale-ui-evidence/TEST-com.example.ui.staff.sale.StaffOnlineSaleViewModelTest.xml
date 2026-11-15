@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-11-15T06:49:37.641Z" hostname="pasta-hp-worker" time="0.05">
+  <properties/>
+  <testcase name="testAuthDeniedActiveScopeLocksPhaseAndClearsLists" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.013"/>
+  <testcase name="testSessionScopedOrchestratorDispatchesActiveGenerationAndToken" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.009"/>
+  <testcase name="testStaleAuthDeniedDoesNotLockCurrentScope" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.005"/>
+  <testcase name="testIndeterminateTransientRetainsSamePreparedIntentAndEventIdOnRetry" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.009"/>
+  <testcase name="testCoherentCancellationOnLogout" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.003"/>
+  <testcase name="testDraftLineAdditionAndQuantityModification" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.003"/>
+  <testcase name="testAuthDenialNotifiesListenerWithExactScope" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.004"/>
+  <testcase name="testDraftMutationsFrozenWhileIndeterminate" classname="com.example.ui.staff.sale.StaffOnlineSaleViewModelTest" time="0.004"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

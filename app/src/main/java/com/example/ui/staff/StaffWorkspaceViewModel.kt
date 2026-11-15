@@ -13,13 +13,33 @@ import com.example.data.mobile.readclient.ProductCatalogResponse
 import com.example.data.mobile.outbox.OutboxHealthInspector
 import com.example.data.mobile.outbox.OutboxHealthResult
 import com.example.data.mobile.outbox.OutboxHealthStatus
+import com.example.data.mobile.contract.ClientUuid
+import com.example.data.mobile.contract.MoneyAmount
+import com.example.data.mobile.contract.PositiveDecimalQuantity
+import com.example.data.mobile.onlinecash.AndroidV2OnlineCashClient
+import com.example.data.mobile.onlinecash.OnlineCashSaleOrchestrator
+import com.example.data.mobile.onlinecash.OnlineCashOrchestrationResult
+import com.example.data.mobile.onlinecash.OnlineSaleScope
+import com.example.data.mobile.onlinecash.PreparedOnlineSaleIntent
+import com.example.data.mobile.contract.TaxPercentage
+import com.example.data.mobile.readclient.BootstrapTax
+import com.example.data.mobile.readclient.CustomerDirectoryItem
+import com.example.data.mobile.readclient.ProductCatalogItem
+import com.example.data.mobile.readclient.ProductPackagingUnit
+import com.example.data.mobile.readclient.ReadClientErrorResponse
+import com.example.data.mobile.readclient.http.OkHttpTransport
 import com.example.data.mobile.session.AuthDenialListener
+import com.example.data.mobile.session.AuthDenialScope
 import com.example.data.mobile.session.CoordinatorResult
 import com.example.data.mobile.session.LockReason
 import com.example.data.mobile.session.LogoutResult
 import com.example.data.mobile.session.StaffAuthState
 import com.example.data.mobile.session.StaffSessionCoordinator
 import com.example.model.AppLanguage
+import com.example.ui.staff.sale.StaffOnlineSaleAuthorityResolution
+import com.example.ui.staff.sale.StaffOnlineSaleDraft
+import com.example.ui.staff.sale.StaffOnlineSaleDraftLine
+import com.example.ui.staff.sale.StaffOnlineSaleRequestBuilder
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -55,7 +75,15 @@ class StaffWorkspaceViewModel(
     initialPhase: StaffWorkspacePhase? = null,
     initialStorageError: String? = null,
     private val coordinatorFactory: (() -> StaffSessionCoordinator)? = null,
-    outboxHealthInspector: OutboxHealthInspector? = null
+    outboxHealthInspector: OutboxHealthInspector? = null,
+    private val orchestratorFactory: ((
+        tokenProvider: () -> String?,
+        scopeGenerationProvider: () -> Long,
+        onAuthDeniedLockScope: ((scopeGeneration: Long, error: ReadClientErrorResponse) -> Unit)?,
+        activeScopeSupplier: (() -> OnlineSaleScope?)?
+    ) -> OnlineCashSaleOrchestrator)? = null,
+    private val onlineCashEnabled: Boolean = false,
+    private val currencyMinorUnitsOverride: Int? = null
 ) : ViewModel() {
 
     private val outboxHealthInspector: OutboxHealthInspector =
@@ -82,6 +110,7 @@ class StaffWorkspaceViewModel(
     private var productsJob: Job? = null
     private var customersJob: Job? = null
     private var outboxHealthJob: Job? = null
+    private var saleJob: Job? = null
 
     // Main-thread UI intent sequence to invalidate stale completion handlers
     private var activeIntentSeq: Long = 0L
@@ -326,10 +355,15 @@ class StaffWorkspaceViewModel(
     }
 
     /**
-     * Switches selected read workspace tab (Products / Customers).
+     * Switches selected read workspace tab (Products / Customers / Cash Sale).
      */
     fun selectTab(tab: StaffWorkspaceTab) {
         _uiState.update { it.copy(selectedTab = tab) }
+        if (tab == StaffWorkspaceTab.CASH_SALE && _uiState.value.saleAuthority == null) {
+            (coordinator?.authState as? StaffAuthState.ReadReady)?.let {
+                updateSaleAuthorityOnReadReady(it)
+            }
+        }
     }
 
     /**
@@ -346,6 +380,495 @@ class StaffWorkspaceViewModel(
      */
     fun toggleTheme() {
         _uiState.update { it.copy(isDarkTheme = !it.isDarkTheme) }
+    }
+
+    private fun updateSaleAuthorityOnReadReady(state: StaffAuthState.ReadReady) {
+        val authority = StaffOnlineSaleAuthorityResolution.resolve(
+            bootstrap = state.bootstrap,
+            sessionRecord = state.session,
+            currencyMinorUnitsOverride = currencyMinorUnitsOverride
+        )
+        _uiState.update { s ->
+            s.copy(
+                saleAuthority = authority,
+                isOnlineCashEnabled = onlineCashEnabled || BuildConfig.STAFF_ONLINE_CASH_ENABLED
+            )
+        }
+    }
+
+    private var cachedOrchestrator: OnlineCashSaleOrchestrator? = null
+    private var cachedOrchestratorGeneration: Long? = null
+
+    internal fun getOrchestrator(): OnlineCashSaleOrchestrator {
+        val coord = coordinator ?: throw IllegalStateException("Cannot create orchestrator: coordinator is null")
+        val currentGen = coord.currentGeneration
+        val cached = cachedOrchestrator
+        if (cached != null && cachedOrchestratorGeneration == currentGen) {
+            return cached
+        }
+
+        val factory = orchestratorFactory
+        val tokenProvider: () -> String? = {
+            (coordinator?.authState as? StaffAuthState.ReadReady)?.session?.token
+        }
+        val scopeGenerationProvider: () -> Long = {
+            coordinator?.currentGeneration ?: throw IllegalStateException("Coordinator is unconfigured")
+        }
+        val onAuthDeniedLockScope: ((Long, ReadClientErrorResponse) -> Unit)? = { scopeGen, _ ->
+            val ready = coord.authState as? StaffAuthState.ReadReady
+            val companyId = ready?.session?.selectedCompanyId
+            if (ready != null && companyId != null && coord.isScopeActive(scopeGen, companyId)) {
+                authDenialListener?.onAuthDenied(
+                    AuthDenialScope(
+                        companyId = companyId,
+                        actorId = ready.session.actorUlid,
+                        deviceId = ready.session.deviceUuid,
+                        deniedAt = java.time.Instant.now().toString()
+                    )
+                )
+            }
+        }
+        val activeScopeSupplier: (() -> OnlineSaleScope?)? = {
+            val ready = coord.authState as? StaffAuthState.ReadReady
+            val companyId = ready?.session?.selectedCompanyId
+            if (ready != null && companyId != null) {
+                OnlineSaleScope(
+                    actorId = ready.session.actorUlid,
+                    deviceId = ready.session.deviceUuid,
+                    companyId = companyId,
+                    generation = coord.currentGeneration
+                )
+            } else null
+        }
+
+        val created = if (factory != null) {
+            factory.invoke(tokenProvider, scopeGenerationProvider, onAuthDeniedLockScope, activeScopeSupplier)
+        } else {
+            val transport = OkHttpTransport(configuredOrigin, allowHttpLoopback)
+            val client = AndroidV2OnlineCashClient(transport, configuredOrigin, allowHttpLoopback)
+            OnlineCashSaleOrchestrator(
+                client = client,
+                tokenProvider = tokenProvider,
+                scopeGenerationProvider = scopeGenerationProvider,
+                onAuthDeniedLockScope = onAuthDeniedLockScope,
+                activeScopeSupplier = activeScopeSupplier
+            )
+        }
+        cachedOrchestrator = created
+        cachedOrchestratorGeneration = currentGen
+        return created
+    }
+
+    fun addProductToSaleDraft(
+        product: ProductCatalogItem,
+        packagingUnit: ProductPackagingUnit? = null,
+        quantity: PositiveDecimalQuantity = PositiveDecimalQuantity.of(1),
+        taxInclusiveOverride: Boolean? = null,
+        explicitNoTax: Boolean = false,
+        selectedTax: BootstrapTax? = null
+    ) {
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
+        val readyState = coordinator?.authState as? StaffAuthState.ReadReady
+        val bUnits = readyState?.bootstrap?.units ?: emptyList()
+        val bTaxes = readyState?.bootstrap?.taxes ?: emptyList()
+
+        _uiState.update { s ->
+            val currentLines = s.saleDraft.lines.toMutableList()
+            val targetUnitId = packagingUnit?.unitId ?: product.defaultUnit.unitId
+            val existingIndex = currentLines.indexOfFirst {
+                it.product.id == product.id && it.productUnitId == targetUnitId
+            }
+            if (existingIndex >= 0) {
+                val existing = currentLines[existingIndex]
+                val newQtyBd = existing.quantity.value.add(quantity.value)
+                val updatedLine = existing.copy(
+                    quantity = PositiveDecimalQuantity(newQtyBd.toPlainString())
+                )
+                currentLines[existingIndex] = updatedLine
+            } else {
+                val newLine = StaffOnlineSaleDraftLine.fromProduct(
+                    product = product,
+                    packagingUnit = packagingUnit,
+                    quantity = quantity,
+                    taxInclusiveOverride = taxInclusiveOverride,
+                    explicitNoTax = explicitNoTax,
+                    bootstrapUnits = bUnits,
+                    bootstrapTaxes = bTaxes,
+                    selectedTax = selectedTax
+                )
+                currentLines.add(newLine)
+            }
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    lines = currentLines,
+                    submissionError = null,
+                    preparedIntent = null
+                )
+            )
+        }
+    }
+
+    fun updateDraftLineQuantity(lineId: String, newQuantity: PositiveDecimalQuantity) {
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
+        _uiState.update { s ->
+            val currentLines = s.saleDraft.lines.map { line ->
+                if (line.lineId == lineId) {
+                    line.copy(quantity = newQuantity)
+                } else line
+            }
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    lines = currentLines,
+                    submissionError = null,
+                    preparedIntent = null
+                )
+            )
+        }
+    }
+
+    fun removeDraftLine(lineId: String) {
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
+        _uiState.update { s ->
+            val currentLines = s.saleDraft.lines.filterNot { it.lineId == lineId }
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    lines = currentLines,
+                    submissionError = null,
+                    preparedIntent = null
+                )
+            )
+        }
+    }
+
+    fun setLineTax(lineId: String, tax: BootstrapTax) {
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
+        _uiState.update { s ->
+            val currentLines = s.saleDraft.lines.map { line ->
+                if (line.lineId == lineId) {
+                    line.copy(
+                        taxRateId = tax.id,
+                        taxRate = tax.rate,
+                        taxInclusive = (tax.calculation == "inclusive")
+                    )
+                } else line
+            }
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    lines = currentLines,
+                    submissionError = null,
+                    preparedIntent = null
+                )
+            )
+        }
+    }
+
+    fun setLineExplicitNoTax(lineId: String) {
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
+        _uiState.update { s ->
+            val currentLines = s.saleDraft.lines.map { line ->
+                if (line.lineId == lineId) {
+                    line.copy(
+                        taxRateId = null,
+                        taxRate = TaxPercentage.fromString("0.000000"),
+                        taxInclusive = false
+                    )
+                } else line
+            }
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    lines = currentLines,
+                    submissionError = null,
+                    preparedIntent = null
+                )
+            )
+        }
+    }
+
+    fun selectCustomerForSale(customer: CustomerDirectoryItem?) {
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
+        _uiState.update { s ->
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    selectedCustomer = customer,
+                    submissionError = null,
+                    preparedIntent = null
+                )
+            )
+        }
+    }
+
+    fun updateCashTendered(amount: MoneyAmount?) {
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
+        _uiState.update { s ->
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    cashTendered = amount,
+                    submissionError = null,
+                    preparedIntent = null
+                )
+            )
+        }
+    }
+
+    fun clearSaleDraft() {
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
+        saleJob?.cancel()
+        _uiState.update { s ->
+            s.copy(saleDraft = StaffOnlineSaleDraft())
+        }
+    }
+
+    fun submitOnlineCashSale() {
+        val currentState = _uiState.value
+        // Guard against concurrent submit
+        if (currentState.saleDraft.isSubmitting) return
+
+        // Guard against hold
+        if (currentState.saleDraft.isPaymentUnverifiedHold) return
+
+        if (currentState.phase != StaffWorkspacePhase.READ_READY) {
+            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Staff workspace is not in READ_READY phase")) }
+            return
+        }
+
+        val coord = coordinator ?: run {
+            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Coordinator is unconfigured")) }
+            return
+        }
+
+        val readyState = coord.authState as? StaffAuthState.ReadReady ?: run {
+            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Session is not ready")) }
+            return
+        }
+
+        val authority = currentState.saleAuthority ?: StaffOnlineSaleAuthorityResolution.resolve(
+            readyState.bootstrap,
+            readyState.session,
+            currencyMinorUnitsOverride
+        )
+
+        if (!authority.isDispatchPermitted) {
+            val missing = authority.missingContracts.joinToString("; ")
+            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Authority resolution failed: $missing")) }
+            return
+        }
+
+        val draft = currentState.saleDraft
+        if (draft.lines.isEmpty()) {
+            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Sale basket is empty")) }
+            return
+        }
+
+        if (draft.hasUnresolvedContracts) {
+            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Draft contains lines with unresolved contracts")) }
+            return
+        }
+
+        val generation = coord.currentGeneration
+
+        // P1 IDEMPOTENCY:
+        // If draft already has a preparedIntent (e.g. from an indeterminate transient attempt),
+        // RETAIN AND REUSE the EXACT same preparedIntent (same clientEventId, same wire bytes)!
+        val preparedIntent = draft.preparedIntent ?: run {
+            val clientEventId = ClientUuid.random()
+            try {
+                StaffOnlineSaleRequestBuilder.prepareIntent(
+                    draft = draft,
+                    authority = authority,
+                    scopeGeneration = generation,
+                    clientEventId = clientEventId
+                )
+            } catch (e: Exception) {
+                _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Failed to prepare sale intent: ${e.message}")) }
+                return
+            }
+        }
+
+        val thisIntent = ++activeIntentSeq
+
+        // Set isSubmitting = true and retain preparedIntent idempotently
+        _uiState.update { s ->
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    isSubmitting = true,
+                    submissionError = null,
+                    preparedIntent = preparedIntent
+                )
+            )
+        }
+
+        saleJob?.cancel()
+        saleJob = viewModelScope.launch {
+            val targetCompanyId = authority.companyId!!
+            val targetDeviceId = authority.deviceId!!
+            val targetCurrency = authority.currency!!
+
+            val result = try {
+                withContext(ioDispatcher) {
+                    val orchestrator = getOrchestrator()
+                    orchestrator.dispatchOnlineCashSale(
+                        intent = preparedIntent,
+                        targetCompanyId = targetCompanyId,
+                        targetDeviceId = targetDeviceId,
+                        targetCurrency = targetCurrency
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+
+            if (thisIntent != activeIntentSeq) return@launch
+
+            // Guard against scope change
+            if (!coord.isScopeActive(generation, targetCompanyId)) {
+                _uiState.update { s ->
+                    s.copy(
+                        saleDraft = s.saleDraft.copy(
+                            isSubmitting = false,
+                            submissionError = "Session scope expired during sale dispatch"
+                        )
+                    )
+                }
+                return@launch
+            }
+
+            when (result) {
+                is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                isIndeterminate = false,
+                                isPaymentUnverifiedHold = false,
+                                receipt = result.receipt,
+                                unverifiedReceipt = null,
+                                submissionError = null,
+                                preparedIntent = null,
+                                lines = emptyList(),
+                                cashTendered = null
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.PostedWithoutPaymentReference -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                isIndeterminate = false,
+                                isPaymentUnverifiedHold = true,
+                                unverifiedReceipt = result.receipt,
+                                receipt = null,
+                                submissionError = "Invoice posted (${result.receipt.invoiceNumber}), but payment confirmation is unverified. Sale is held in read-only status."
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.BusinessConflict -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                isIndeterminate = true,
+                                submissionError = "Business conflict (409): event may have committed on server. Status lookup required."
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.AuthDenied -> {
+                    if (coord.isScopeActive(result.scopeGeneration, targetCompanyId)) {
+                        clearListsImmediately()
+                        _uiState.update {
+                            it.copy(
+                                phase = StaffWorkspacePhase.LOCKED,
+                                isSubmitting = false,
+                                lockedReason = "Authentication revoked or invalid (HTTP 401)"
+                            )
+                        }
+                    } else {
+                        _uiState.update { s ->
+                            s.copy(
+                                saleDraft = s.saleDraft.copy(
+                                    isSubmitting = false,
+                                    submissionError = "Stale authentication rejection from prior session ignored"
+                                )
+                            )
+                        }
+                    }
+                }
+                is OnlineCashOrchestrationResult.IndeterminateTransient -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                isIndeterminate = true,
+                                submissionError = "Network timeout or transient failure: ${result.reason}. Retrying will verify status first using same event ID."
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.LocalTokenUnavailable -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                preparedIntent = null,
+                                submissionError = result.reason
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.ValidationFailed -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                preparedIntent = null,
+                                submissionError = "Validation failed (422): ${result.error.message}"
+                            )
+                        )
+                    }
+                }
+                else -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                submissionError = "Sale dispatch failed or indeterminate"
+                            )
+                        )
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -433,6 +956,7 @@ class StaffWorkspaceViewModel(
                                 loadProducts(refresh = true)
                                 loadCustomers(refresh = true)
                                 triggerScopedOutboxHealth()
+                                updateSaleAuthorityOnReadReady(state)
                             } else {
                                 transitionToSignIn()
                             }
@@ -636,6 +1160,7 @@ class StaffWorkspaceViewModel(
                                 loadProducts(refresh = true)
                                 loadCustomers(refresh = true)
                                 triggerScopedOutboxHealth()
+                                updateSaleAuthorityOnReadReady(state)
                             }
                         }
                         is StaffAuthState.MfaRequired -> {
@@ -807,6 +1332,7 @@ class StaffWorkspaceViewModel(
                                 loadProducts(refresh = true)
                                 loadCustomers(refresh = true)
                                 triggerScopedOutboxHealth()
+                                updateSaleAuthorityOnReadReady(state)
                             }
                         }
                         is StaffAuthState.CompanySelectionRequired -> {
@@ -874,6 +1400,9 @@ class StaffWorkspaceViewModel(
      */
     fun openCompanySelection() {
         outboxHealthJob?.cancel()
+        saleJob?.cancel()
+        cachedOrchestrator = null
+        cachedOrchestratorGeneration = null
         ++outboxHealthIntentSeq
         if (_uiState.value.availableCompanies.isNotEmpty()) {
             _uiState.update { it.copy(phase = StaffWorkspacePhase.COMPANY_SELECTION, outboxHealthResult = null, isOutboxRetrying = false) }
@@ -918,6 +1447,9 @@ class StaffWorkspaceViewModel(
                 }
                 if (restoredHealth == null) {
                     triggerScopedOutboxHealth()
+                }
+                (coord.authState as? StaffAuthState.ReadReady)?.let {
+                    updateSaleAuthorityOnReadReady(it)
                 }
                 return
             }
@@ -1010,6 +1542,7 @@ class StaffWorkspaceViewModel(
                         loadProducts(refresh = true)
                         loadCustomers(refresh = true)
                         triggerScopedOutboxHealth()
+                        updateSaleAuthorityOnReadReady(state)
                     }
                 }
                 is CoordinatorResult.AuthDenied -> {
@@ -1116,6 +1649,7 @@ class StaffWorkspaceViewModel(
                         loadProducts(refresh = true)
                         loadCustomers(refresh = true)
                         triggerScopedOutboxHealth()
+                        updateSaleAuthorityOnReadReady(state)
                     }
                 }
                 is CoordinatorResult.AuthDenied -> {
@@ -1565,6 +2099,9 @@ class StaffWorkspaceViewModel(
     private fun clearListsImmediately() {
         productRequestSeq++
         customerRequestSeq++
+        saleJob?.cancel()
+        cachedOrchestrator = null
+        cachedOrchestratorGeneration = null
         _uiState.update {
             it.copy(
                 products = emptyList(),
@@ -1578,7 +2115,9 @@ class StaffWorkspaceViewModel(
                 isCustomersLoadingMore = false,
                 customersNextCursor = null,
                 customersHasMore = false,
-                customersError = null
+                customersError = null,
+                saleDraft = StaffOnlineSaleDraft(),
+                saleAuthority = null
             )
         }
     }
@@ -1672,7 +2211,15 @@ class StaffWorkspaceViewModel(
         private val allowHttpLoopback: Boolean = false,
         private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
         private val authDenialListener: AuthDenialListener? = null,
-        private val outboxHealthInspector: OutboxHealthInspector? = null
+        private val outboxHealthInspector: OutboxHealthInspector? = null,
+        private val orchestratorFactory: ((
+            tokenProvider: () -> String?,
+            scopeGenerationProvider: () -> Long,
+            onAuthDeniedLockScope: ((scopeGeneration: Long, error: ReadClientErrorResponse) -> Unit)?,
+            activeScopeSupplier: (() -> OnlineSaleScope?)?
+        ) -> OnlineCashSaleOrchestrator)? = null,
+        private val onlineCashEnabled: Boolean = false,
+        private val currencyMinorUnitsOverride: Int? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -1693,7 +2240,10 @@ class StaffWorkspaceViewModel(
                     ioDispatcher = ioDispatcher,
                     authDenialListener = authDenialListener,
                     initialPhase = StaffWorkspacePhase.UNCONFIGURED,
-                    outboxHealthInspector = effectiveInspector
+                    outboxHealthInspector = effectiveInspector,
+                    orchestratorFactory = orchestratorFactory,
+                    onlineCashEnabled = onlineCashEnabled,
+                    currencyMinorUnitsOverride = currencyMinorUnitsOverride
                 ) as T
             }
 
@@ -1712,7 +2262,10 @@ class StaffWorkspaceViewModel(
                     ioDispatcher = ioDispatcher,
                     authDenialListener = authDenialListener,
                     initialPhase = StaffWorkspacePhase.UNCONFIGURED,
-                    outboxHealthInspector = effectiveInspector
+                    outboxHealthInspector = effectiveInspector,
+                    orchestratorFactory = orchestratorFactory,
+                    onlineCashEnabled = onlineCashEnabled,
+                    currencyMinorUnitsOverride = currencyMinorUnitsOverride
                 ) as T
             }
 
@@ -1741,7 +2294,10 @@ class StaffWorkspaceViewModel(
                         StaffSessionCoordinator.create(context.applicationContext, configuredOrigin,
                             effectiveLoopback, authDenialListener)
                     },
-                    outboxHealthInspector = effectiveInspector
+                    outboxHealthInspector = effectiveInspector,
+                    orchestratorFactory = orchestratorFactory,
+                    onlineCashEnabled = onlineCashEnabled,
+                    currencyMinorUnitsOverride = currencyMinorUnitsOverride
                 ) as T
             }
 
@@ -1751,7 +2307,10 @@ class StaffWorkspaceViewModel(
                 allowHttpLoopback = effectiveLoopback,
                 ioDispatcher = ioDispatcher,
                 authDenialListener = authDenialListener,
-                outboxHealthInspector = effectiveInspector
+                outboxHealthInspector = effectiveInspector,
+                orchestratorFactory = orchestratorFactory,
+                onlineCashEnabled = onlineCashEnabled,
+                currencyMinorUnitsOverride = currencyMinorUnitsOverride
             ) as T
         }
     }

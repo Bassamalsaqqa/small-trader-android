@@ -1,6 +1,7 @@
 package com.example.ui.staff
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasTestTag
@@ -8,18 +9,23 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import com.example.data.mobile.contract.MoneyAmount
 import com.example.data.mobile.contract.NonnegativeDecimalQuantity
 import com.example.data.mobile.contract.PositiveDecimalQuantity
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.TaxPercentage
+import com.example.data.mobile.onlinecash.OnlineCashSaleReceipt
 import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.ProductBaseUnit
 import com.example.data.mobile.readclient.ProductCatalogItem
 import com.example.data.mobile.readclient.ProductDefaultUnit
 import com.example.model.AppLanguage
+import com.example.ui.staff.sale.StaffOnlineSaleDraft
+import com.example.ui.staff.sale.StaffOnlineSaleDraftLine
 import com.example.ui.theme.SmallTraderTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -360,5 +366,291 @@ class StaffWorkspaceComposeTest {
         }
 
         composeTestRule.onNodeWithText("إلغاء").assertIsDisplayed()
+    }
+
+    @Test
+    fun catalog_whenCashEnabled_rendersAddButton_andInvokesCallbackOnClick() {
+        var addedProduct: ProductCatalogItem? = null
+        val baseUnit = ProductBaseUnit(ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S67891"), "PCS", "قطعة")
+        val defaultUnit = ProductDefaultUnit(
+            unitId = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S67891"),
+            productUnitId = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S67892"),
+            conversionToBase = PositiveDecimalQuantity.of(1),
+            salePrice = MoneyAmount.fromNonnegativeString("25.000000")
+        )
+        val sampleProduct = ProductCatalogItem(
+            id = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S67893"),
+            sku = "SKU-CASH-01",
+            barcode = "9988776655",
+            name = "زيت زيتون بلدي",
+            unitPrice = MoneyAmount.fromNonnegativeString("25.000000"),
+            taxRate = null,
+            taxRateId = null,
+            isTracked = true,
+            availableQuantity = NonnegativeDecimalQuantity.fromNonnegativeString("50.000000"),
+            baseUnit = baseUnit,
+            defaultUnit = defaultUnit,
+            units = emptyList()
+        )
+
+        val uiState = StaffWorkspaceUiState(
+            phase = StaffWorkspacePhase.READ_READY,
+            selectedTab = StaffWorkspaceTab.PRODUCTS,
+            activeCompany = SafeCompanyViewData("01JCV8X9M2NQW3TYZ4R5S6789A", "معصرة الزيتون", currency = "USD"),
+            products = listOf(sampleProduct),
+            isOnlineCashEnabled = true,
+            language = AppLanguage.AR
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffWorkspaceScreen(
+                    uiState = uiState,
+                    onSelectTab = {},
+                    onLoadMoreProducts = {},
+                    onRefreshProducts = {},
+                    onSearchProducts = {},
+                    onLoadMoreCustomers = {},
+                    onRefreshCustomers = {},
+                    onSearchCustomers = {},
+                    onSwitchCompany = {},
+                    onLogout = {},
+                    onToggleLanguage = {},
+                    onToggleTheme = {},
+                    onAddProductToSale = { product -> addedProduct = product }
+                )
+            }
+        }
+
+        // Assert button exists and click it
+        val addButtonNode = composeTestRule.onNodeWithTag("staff_product_add_to_sale_${sampleProduct.id.value}")
+        addButtonNode.performScrollTo().assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+
+        // Verify that onAddProductToSale callback was invoked with the exact product
+        assertEquals(sampleProduct, addedProduct)
+    }
+
+    @Test
+    fun customerDirectory_whenCashEnabled_rendersSelectButton_andInvokesCallbackOnClick() {
+        var selectedCustomer: CustomerDirectoryItem? = null
+        val sampleCustomer = CustomerDirectoryItem(
+            id = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S67894"),
+            code = "CUST-100",
+            name = "أحمد خليل",
+            phone = "0599123456",
+            isWalkIn = false
+        )
+
+        val uiState = StaffWorkspaceUiState(
+            phase = StaffWorkspacePhase.READ_READY,
+            selectedTab = StaffWorkspaceTab.CUSTOMERS,
+            activeCompany = SafeCompanyViewData("01JCV8X9M2NQW3TYZ4R5S6789A", "معصرة الزيتون", currency = "USD"),
+            customers = listOf(sampleCustomer),
+            isOnlineCashEnabled = true,
+            language = AppLanguage.AR
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffWorkspaceScreen(
+                    uiState = uiState,
+                    onSelectTab = {},
+                    onLoadMoreProducts = {},
+                    onRefreshProducts = {},
+                    onSearchProducts = {},
+                    onLoadMoreCustomers = {},
+                    onRefreshCustomers = {},
+                    onSearchCustomers = {},
+                    onSwitchCompany = {},
+                    onLogout = {},
+                    onToggleLanguage = {},
+                    onToggleTheme = {},
+                    onSelectCustomerForSale = { customer -> selectedCustomer = customer }
+                )
+            }
+        }
+
+        // Assert button exists and click it
+        val selectButtonNode = composeTestRule.onNodeWithTag("staff_customer_select_for_sale_${sampleCustomer.id.value}")
+        selectButtonNode.assertIsDisplayed()
+        selectButtonNode.performClick()
+        composeTestRule.waitForIdle()
+
+        // Verify that onSelectCustomerForSale callback was invoked with the exact customer
+        assertEquals(sampleCustomer, selectedCustomer)
+    }
+
+    @Test
+    fun cashSaleScreen_rendersDirectDecimalQuantityInput_andUpdatesQuantityOnInput() {
+        var updatedLineId: String? = null
+        var updatedQuantity: PositiveDecimalQuantity? = null
+
+        val baseUnit = ProductBaseUnit(ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S67891"), "PCS", "قطعة")
+        val defaultUnit = ProductDefaultUnit(
+            unitId = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S67891"),
+            productUnitId = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S67892"),
+            conversionToBase = PositiveDecimalQuantity.of(1),
+            salePrice = MoneyAmount.fromNonnegativeString("10.000000")
+        )
+        val product = ProductCatalogItem(
+            id = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S67893"),
+            sku = "SKU-01",
+            barcode = null,
+            name = "صابون غار",
+            unitPrice = MoneyAmount.fromNonnegativeString("10.000000"),
+            taxRate = null,
+            taxRateId = null,
+            isTracked = true,
+            availableQuantity = NonnegativeDecimalQuantity.fromNonnegativeString("100.000000"),
+            baseUnit = baseUnit,
+            defaultUnit = defaultUnit,
+            units = emptyList()
+        )
+        val line = StaffOnlineSaleDraftLine.fromProduct(product = product, explicitNoTax = true)
+        val draft = StaffOnlineSaleDraft(lines = listOf(line))
+
+        val uiState = StaffWorkspaceUiState(
+            phase = StaffWorkspacePhase.READ_READY,
+            selectedTab = StaffWorkspaceTab.CASH_SALE,
+            activeCompany = SafeCompanyViewData("01JCV8X9M2NQW3TYZ4R5S6789A", "معصرة الزيتون", currency = "USD"),
+            saleDraft = draft,
+            isOnlineCashEnabled = true,
+            language = AppLanguage.AR
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffWorkspaceScreen(
+                    uiState = uiState,
+                    onSelectTab = {},
+                    onLoadMoreProducts = {},
+                    onRefreshProducts = {},
+                    onSearchProducts = {},
+                    onLoadMoreCustomers = {},
+                    onRefreshCustomers = {},
+                    onSearchCustomers = {},
+                    onSwitchCompany = {},
+                    onLogout = {},
+                    onToggleLanguage = {},
+                    onToggleTheme = {},
+                    onUpdateSaleLineQuantity = { id, qty ->
+                        updatedLineId = id
+                        updatedQuantity = qty
+                    }
+                )
+            }
+        }
+
+        // Test direct quantity input field
+        val qtyInputNode = composeTestRule.onNodeWithTag("staff_sale_line_qty_input_${line.lineId}")
+        qtyInputNode.assertExists()
+        qtyInputNode.performTextClearance()
+        qtyInputNode.performTextInput("4.5")
+        composeTestRule.waitForIdle()
+
+        assertEquals(line.lineId, updatedLineId)
+        assertEquals("4.5", updatedQuantity?.value?.toPlainString())
+    }
+
+    @Test
+    fun unconfiguredScreen_rendersTruthfulSetupNotice_andTogglesLanguage() {
+        var toggled = false
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffUnconfiguredScreen(
+                    lang = AppLanguage.AR,
+                    onToggleLanguage = { toggled = true }
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("staff_unconfigured_screen").assertIsDisplayed()
+        composeTestRule.onNodeWithText("مساحة استعلام الموظفين غير مهيأة").assertIsDisplayed()
+
+        val toggleBtn = composeTestRule.onNodeWithTag("staff_unconfigured_toggle_language_button")
+        toggleBtn.assertIsDisplayed()
+        toggleBtn.performClick()
+        assertTrue("Language toggle callback must fire", toggled)
+    }
+
+    @Test
+    fun cashSaleScreen_rendersPaymentUnverifiedHoldCard_andFreezesControls() {
+        val baseUnit = ProductBaseUnit(ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789D"), "PCS", "Pieces")
+        val defaultUnit = ProductDefaultUnit(
+            unitId = baseUnit.id,
+            productUnitId = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789E"),
+            conversionToBase = PositiveDecimalQuantity.of(1),
+            salePrice = MoneyAmount.fromNonnegativeString("30.000000")
+        )
+        val product = ProductCatalogItem(
+            id = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789F"),
+            sku = "SKU-HOLD-01",
+            barcode = null,
+            name = "Hold Test Item",
+            unitPrice = MoneyAmount.fromNonnegativeString("30.000000"),
+            taxRate = null,
+            taxRateId = null,
+            isTracked = true,
+            availableQuantity = NonnegativeDecimalQuantity.fromNonnegativeString("10.000000"),
+            baseUnit = baseUnit,
+            defaultUnit = defaultUnit,
+            units = emptyList()
+        )
+        val line = StaffOnlineSaleDraftLine.fromProduct(product = product, explicitNoTax = true)
+        val unverifiedReceipt = OnlineCashSaleReceipt(
+            clientEventId = com.example.data.mobile.contract.ClientUuid.random(),
+            invoiceId = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789G"),
+            invoiceNumber = "INV-HOLD-999",
+            paymentId = null,
+            paymentReceiptNumber = null,
+            grandTotal = MoneyAmount.fromNonnegativeString("30.000000"),
+            amountPaid = MoneyAmount.ZERO,
+            changeReturned = MoneyAmount.ZERO,
+            postedAt = "2026-11-15T12:00:00Z",
+            wasReplay = false
+        )
+        val draft = StaffOnlineSaleDraft(
+            lines = listOf(line),
+            isPaymentUnverifiedHold = true,
+            unverifiedReceipt = unverifiedReceipt
+        )
+
+        val uiState = StaffWorkspaceUiState(
+            phase = StaffWorkspacePhase.READ_READY,
+            selectedTab = StaffWorkspaceTab.CASH_SALE,
+            activeCompany = SafeCompanyViewData("01JCV8X9M2NQW3TYZ4R5S6789A", "معصرة الزيتون", currency = "USD"),
+            saleDraft = draft,
+            isOnlineCashEnabled = true,
+            language = AppLanguage.AR
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffWorkspaceScreen(
+                    uiState = uiState,
+                    onSelectTab = {},
+                    onLoadMoreProducts = {},
+                    onRefreshProducts = {},
+                    onSearchProducts = {},
+                    onLoadMoreCustomers = {},
+                    onRefreshCustomers = {},
+                    onSearchCustomers = {},
+                    onSwitchCompany = {},
+                    onLogout = {},
+                    onToggleLanguage = {},
+                    onToggleTheme = {}
+                )
+            }
+        }
+
+        // 1. Unverified payment hold card is displayed
+        val holdCard = composeTestRule.onNodeWithTag("staff_sale_unverified_payment_hold_card")
+        holdCard.assertIsDisplayed()
+        composeTestRule.onNodeWithText("INV-HOLD-999", substring = true).assertIsDisplayed()
+
+        // 2. Clear and submit buttons are disabled (frozen)
+        composeTestRule.onNodeWithTag("staff_sale_clear_button").assertIsNotEnabled()
+        composeTestRule.onNodeWithTag("staff_sale_submit_button").assertIsNotEnabled()
     }
 }

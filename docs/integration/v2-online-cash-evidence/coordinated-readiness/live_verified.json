@@ -1,0 +1,26 @@
+{
+  "handoff_path": "/tmp/v2_harness_c8253786b061d82a/runtime_client_handoff.json",
+  "handoff_sha256": "8e48f3692a88f5ac3f333f81536d70eb3541228959968697fda03f68df44befc",
+  "schema_name": "accounting_p8_tmp_84fa14fb4cb2",
+  "temp_dir": "/tmp/v2_harness_c8253786b061d82a",
+  "ca_sha256": "9dde86450a9ccef026bb1ff4c2d6d75cb46ff61729cc008994c5a0d0ac725f72",
+  "probes": [
+    {
+      "method": "GET",
+      "path": "/_harness/readiness",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/_harness/readiness",
+      "status": 405
+    },
+    {
+      "method": "GET",
+      "path": "/_readiness_forbidden_probe",
+      "status": 403
+    }
+  ],
+  "wrong_ca_rejected": true,
+  "verified_at": 1794683562.1636267
+}

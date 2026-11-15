@@ -1,0 +1,163 @@
+{
+  "status": "READINESS_QUALIFIED_FINANCIAL_PILOT_HOLD",
+  "scope": "client_implementation_and_unit_qa",
+  "scopeDetail": {
+    "basicSmoke": "PASS (MockWebServer hermetic fixtures)",
+    "coordinatedReadiness": "PASS (2/2 tests PASS in 13.34s against live disposable backend harness)",
+    "fullPilot": "NOT_RUN (lost-ACK fault injection, stock rollback, and financial transactions pending live authorized window)"
+  },
+  "qualificationNote": "Hermetic client implementation unit qualification under PR #23. Independent publication HEAD (SMALL_TRADER_EXPECTED_CLIENT_SHA) and executable HEAD (SMALL_TRADER_EXPECTED_CLIENT_EXECUTABLE_SHA) pin separation verified with 6 new regression tests. Status recovery economic reconciliation, payment completeness, pilot acceptance enforcement, and exact base MIME validation verified. Source attested at clean commit 78ac443.",
+  "contractEndpointClarification": "Authoritative mobile contract offline-events status endpoint remains /api/mobile/v2/companies/{companyId}/offline-events/{clientEventId}/status. Reviewer suggestion of /v2/sales/events is non-contract and not implemented. No mTLS or TLS client certificate auth required on mobile client.",
+  "pr": 23,
+  "branch": "t3/android-v2-online-cash-client",
+  "sourceCommit": "b7e61eb4ed0aed2f5040d9fc44f9764b310be530",
+  "previousExecutionCommit": "753fb5133e28acb1284370dd7a84e3929e7b1a7d",
+  "totalSuites": 18,
+  "totalTests": 291,
+  "passed": 289,
+  "skipped": 2,
+  "failures": 0,
+  "errors": 0,
+  "executionDuration": "66.37s",
+  "resourceLimits": {
+    "maxWorkers": 1,
+    "activeProcessorCount": 2,
+    "garbageCollector": "SerialGC",
+    "maxHeap": "1536m",
+    "inProcess": true,
+    "noDaemon": true
+  },
+  "lintReport": {
+    "task": ":app:lintDebug",
+    "status": "QUALIFIED_BASELINE_UNCHANGED",
+    "sourceCommit": "753fb5133e28acb1284370dd7a84e3929e7b1a7d",
+    "mainSourceState": "app/src/main/ untouched between 753fb51 and 78ac443",
+    "exitCode": 0,
+    "errors": 0,
+    "warnings": 63,
+    "baselineWarnings": 63,
+    "note": "0 errors, 63 warnings observed on qualified source 753fb51 (app/src/main/ untouched in 78ac443)"
+  },
+  "externalHttpExecution": {
+    "status": "NOT_RUN",
+    "reason": "Hermetic QA lease only; backend readiness worker completed and closed ports; runtime handoff files absent; paired financial smoke skipped"
+  },
+  "remediatedFindings": [
+    "P1: Separated independent client publication HEAD pin (SMALL_TRADER_EXPECTED_CLIENT_SHA) and executable HEAD pin (SMALL_TRADER_EXPECTED_CLIENT_EXECUTABLE_SHA), eliminating client admission failure during coordinated TLS window where publication SHA was checked against executable pin.",
+    "P1: Eliminated false-green in SmallTraderOnlineCashPilotSmokeTest; fresh commit and replay strictly require ConfirmedFinancialSuccess and non-null payment identity.",
+    "P1: Reconciled officialInvoice.grandTotal on status recovery in OnlineCashSaleOrchestrator against prepared online payment amount; wrong total fails closed with FINANCIAL_CONSISTENCY_MISMATCH.",
+    "P1/P2: Aligned full-cash payment reference completeness requiring non-null paymentId and non-blank paymentReceiptNumber across both direct commit and status recovery.",
+    "P2: Extracted authoritative assertCashPilotFinancialSuccess acceptance function used across fresh commit, replay, and unit tests, proving unconfirmed states throw.",
+    "P2: Replaced startsWith('application/json') in executeReadinessProbe with exact case-insensitive base MIME matching before semicolon."
+  ],
+  "historicalSuites": {
+    "historical76": {
+      "commit": "f697451",
+      "suites": 8,
+      "tests": 76,
+      "directory": "historical-76"
+    },
+    "historical171": {
+      "commit": "ddfc75536e647c65a6a7e8868c9336cee93769ec",
+      "suites": 12,
+      "tests": 171,
+      "directory": "historical-171-ddfc"
+    },
+    "historical238": {
+      "commit": "ad10a4ceaa301f7d272cdf4702414f63a69a20c7",
+      "suites": 14,
+      "tests": 238,
+      "directory": "historical-238-ad10"
+    }
+  },
+  "previousDocProvenanceCommit": "824cb7dac1f17a3530f178134f9d9168e7e50b94",
+  "historicalFailedWindow": {
+    "description": "First coordinated TLS window client admission failure before HTTP (wrong pin comparison)",
+    "xmlSha256": "dc2340af6bfabddcef4fd1793a334de2ca5d47686e26b62d9fed1beaaa702e9d",
+    "tests": 2,
+    "passed": 1,
+    "failed": 1,
+    "skipped": 0,
+    "preservationNote": "Preserved historical without modification; failed on local client pin check before network/credentials"
+  },
+  "readinessStatus": "PASS (HTTP 200 loopback probe verified via CA-trusted TLS)",
+  "financialPilotStatus": "Financial scenarios NOT_RUN; safe non-readiness GET returned 403; no authentication or financial HTTP dispatch; parser loaded private runtime credential file locally",
+  "publicationCommit": "653327243b2f5a4541c5fcf8cbe9520769e6be50",
+  "coordinatedReadinessResult": {
+    "verdict": "READINESS_JVM_TESTS_PASS",
+    "backendRuntimeHead": "d7c7324535b1e6586140ab1e3561966342d625d6",
+    "backendSourceHead": "a8540ff83513b49988d90c77cf284831cfd5b2de",
+    "clientPublicationHead": "653327243b2f5a4541c5fcf8cbe9520769e6be50",
+    "clientExecutableHead": "78ac4437e4010b68408278788dc82eb826fe8014",
+    "liveHandoffSha256": "8e48f3692a88f5ac3f333f81536d70eb3541228959968697fda03f68df44befc",
+    "rootOutcomeSha256": "dd267bc4f3a505d1558020758545ac1e40159114eca0b9538fb9f37839aeffe7",
+    "freshXmlSha256": "51e834a7f5d358e0e6544eb03b355e40130e0455d0d2c8de9b7099390b07c6eb",
+    "freshJsonSha256": "0bfaba51e8ab55ae49ab5bf05f374fe4091d48c2a694dd4b810e120049246c5d",
+    "tests": 2,
+    "passed": 2,
+    "financialProbes": "Financial scenarios NOT_RUN; safe non-readiness GET returned 403; no authentication or financial HTTP dispatch; parser loaded private runtime credential file locally",
+    "metadataOmissionDisclosure": "CashPilotEvidence.toJson() emits only clientHead (alias exec 78ac443) and omits separate clientPublicationHead/clientExecutableHead keys. Pub 6533272 and exec 78ac443 verified from root pins."
+  },
+  "failedWindows": {
+    "historicalUnitFailures": [
+      "first-compiler-failure.log",
+      "first-0c0-test-failure.log"
+    ],
+    "failedCoordinatedWindows": [
+      {
+        "window": "Window 1 (Zero JVM - Strict CA Validation Failure)",
+        "location": "/tmp/root-readiness-eb_1btu5",
+        "rootOutcomeSha256": "0eb6a27a628cea8e35cd9526ebdc470502cec33496d9954090ab7e595fe50a53",
+        "outcome": "ROOT_TLS_CA_VALIDATION_FAILED_BEFORE_JVM",
+        "error": "CA cert does not include key usage extension",
+        "androidInvocations": 0,
+        "ownedSchema": "accounting_p8_tmp_a5057b7ce693",
+        "preservationNote": "Pre-flight root TLS CA validation failed before Android JVM invocation; zero private keys read"
+      },
+      {
+        "window": "Window 2 (1 JVM - Client Admission Pin Comparison Failure)",
+        "location": "/tmp/root-readiness-bar7pq1o",
+        "xmlSha256": "dc2340af6bfabddcef4fd1793a334de2ca5d47686e26b62d9fed1beaaa702e9d",
+        "tests": 2,
+        "passed": 1,
+        "failed": 1,
+        "skipped": 0,
+        "outcome": "CLIENT_PIN_MISMATCH_BEFORE_HTTP",
+        "probeVerification": "Safe GET /_readiness_forbidden_probe returned 403; NO financial route / POST tested",
+        "preservationNote": "Failed in CashPilotHandoffConfig.fromFile comparing single pin against executable head before HTTP or credentials dispatch"
+      }
+    ]
+  },
+  "focusedSerializerTest": {
+    "status": "PASS",
+    "suite": "com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest",
+    "tests": 44,
+    "passed": 44,
+    "skipped": 0,
+    "failures": 0,
+    "errors": 0,
+    "executionCommit": "b7e61eb4ed0aed2f5040d9fc44f9764b310be530",
+    "keyAssertions": [
+      "clientPublicationHead explicitly serialized in CashPilotEvidence.toJsonString()",
+      "clientExecutableHead explicitly serialized in CashPilotEvidence.toJsonString()",
+      "legacy clientHead preserved as alias to executable head",
+      "StrictJsonParser roundtrip confirms exact distinct values and null omission",
+      "zero literal NUL bytes and sensitive data redaction preserved"
+    ]
+  },
+  "syntheticGoldenFixture": {
+    "status": "GENERATED_UNIT_TEST_PASS",
+    "qualificationScope": "SYNTHETIC_FIXTURE_ONLY_NOT_FINANCIAL_RUN",
+    "executionCommit": "88d40664272305a0505a4f262e8c47b3d99a80ac",
+    "serializerBlobSha": "edfba4bc03372131a245b1cf1826811fc9066d5a",
+    "goldenWireSha256": "25ae020de247d03c5aa57538592cd82574d62d6e4041e845ad11ea835c7f6aa6",
+    "goldenWrapperSha256": "7458f05b57fe149beec9e26ebec77015b45f2acfcc428687f10c216f80f1592d",
+    "tests": 1,
+    "passed": 1,
+    "skipped": 0,
+    "failures": 0,
+    "errors": 0,
+    "task": "cleanTestDebugUnitTest testDebugUnitTest --tests com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest.testCashPilotEvidenceDeterministicSyntheticFinancialGolden",
+    "directory": "synthetic-golden-fixture"
+  }
+}

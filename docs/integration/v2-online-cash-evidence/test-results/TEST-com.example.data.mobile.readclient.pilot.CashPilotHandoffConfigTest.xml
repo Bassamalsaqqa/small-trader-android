@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" tests="43" skipped="0" failures="0" errors="0" timestamp="2026-11-14T19:00:58.214Z" hostname="pasta-hp-worker" time="0.17">
+  <properties/>
+  <testcase name="testUnexpectedTopLevelSchemaFieldThrows" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.028"/>
+  <testcase name="testCurrent824PublicationAnd753ExecutableRegression" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.008"/>
+  <testcase name="testSourcePinsMismatchThrows" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testStrictLoopbackHttpsOnlyAndGetCap" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.001"/>
+  <testcase name="testZeroExecutedYieldsNotRunTriState" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.007"/>
+  <testcase name="readinessProbe_non200StatusCode_throwsException" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.005"/>
+  <testcase name="readinessProbe_redirectRejection_throwsException" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.007"/>
+  <testcase name="testUnexpectedRuntimePinThrows" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testMissingOrInvalidMinorUnitsThrowsNoDefault" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.004"/>
+  <testcase name="readinessProbe_prefixedNonJsonContentType_throwsException" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testLegacyHandoffScopeRejected" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.003"/>
+  <testcase name="testClientHandoffSchemaHashMismatchThrows" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.005"/>
+  <testcase name="readinessProbe_statusNotReady_throwsException" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testInlineCredentialsForbidden" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testStaleTtlThrows" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.003"/>
+  <testcase name="readinessProbe_invalidJson_throwsException" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.004"/>
+  <testcase name="readinessProbe_nonceMismatch_throwsException" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.003"/>
+  <testcase name="testRawWirePayloadShaVsCanonicalProfileDigestDistinct" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.003"/>
+  <testcase name="runtimeFiles_constantsMatchHarness" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.0"/>
+  <testcase name="testMissingExternalExecutableShaRefusesBeforeCredentialsOrNetwork" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testInvalidRawWirePayloadShaThrows" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.006"/>
+  <testcase name="testSwappedPublicationAndExecutablePinsRefuse" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="readinessProbe_oversizedResponse_throwsException" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.006"/>
+  <testcase name="testMissingRequiredRuntimePinThrows" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testMissingRequiredFixtureFieldThrows" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testWrongExecutableShaRefuses" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testMissingRequiredIndependentEnvThrows" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.001"/>
+  <testcase name="testWrongPublicationShaRefuses" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testDistinctGenuinePubExecSuccess" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.004"/>
+  <testcase name="readinessProbe_caseInsensitiveApplicationJson_succeeds" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="readinessProbe_nonJsonMime_throwsException" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testMissingRequiredTopLevelSchemaFieldThrows" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.001"/>
+  <testcase name="testFinancialGrantRequiresRootApprovalSha" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.008"/>
+  <testcase name="testStartupTlsMandatoryHostAndAndroidReadinessUrls" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.004"/>
+  <testcase name="testExactBackendProvisionSchemaParsesSuccessfully" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.003"/>
+  <testcase name="testCashPilotEvidenceSerializationZeroLiteralNul" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.012"/>
+  <testcase name="testPaymentMustBeFullCashSettlement" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.003"/>
+  <testcase name="testCanonicalByteEqualityViolationThrows" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.003"/>
+  <testcase name="testReadyStateIncompleteThrowsNoDowngrade" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.003"/>
+  <testcase name="readinessProbe_success_200MimeNonceMatching" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testPaymentCashAccountMustBeValidUlidMatchingFixture" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testUnexpectedFixtureFieldThrows" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.002"/>
+  <testcase name="testClientHandoffSchemaHashPinned" classname="com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

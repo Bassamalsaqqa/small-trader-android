@@ -1,0 +1,57 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+Reusing configuration cache.
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig
+> Task :app:generateDebugResources
+
+> Task :app:processDebugGoogleServices
+File google-services.json is missing.
+The Google Services Plugin cannot function without it.
+Searched locations: /home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/debug/google-services.json, /home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/debug/google-services.json, /home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/google-services.json, /home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/debug/google-services.json, /home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/Debug/google-services.json, /home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/google-services.json
+
+> Task :app:packageDebugResources
+> Task :app:processDebugNavigationResources
+> Task :app:parseDebugLocalResources
+> Task :app:generateDebugRFile
+> Task :app:kspDebugKotlin
+> Task :app:compileDebugKotlin
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/ui/screens/HomeScreen.kt:557:77 'val Icons.Filled.MenuBook: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.MenuBook.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/ui/screens/HomeScreen.kt:845:61 'val Icons.Filled.ReceiptLong: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.ReceiptLong.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/main/java/com/example/ui/screens/PurchaseDialogs.kt:558:59 Condition is always 'true'.
+
+> Task :app:javaPreCompileDebug
+> Task :app:compileDebugJavaWithJavac
+> Task :app:checkDebugAarMetadata
+> Task :app:mapDebugSourceSetPaths
+> Task :app:compileDebugNavigationResources
+> Task :app:mergeDebugResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:processDebugManifestForPackage
+> Task :app:processDebugResources
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:kspDebugUnitTestKotlin
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:compileDebugUnitTestKotlin
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/test/java/com/example/data/mobile/outbox/EncryptedOutboxTest.kt:1558:50 'val id: Long' is deprecated. Deprecated in Java.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-55b1ad5f-ee2f6a68e9288ef1/app/src/test/java/com/example/data/mobile/outbox/EncryptedOutboxTest.kt:1560:44 'val id: Long' is deprecated. Deprecated in Java.
+
+> Task :app:javaPreCompileDebugUnitTest
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:packageDebugUnitTestForUnitTest
+> Task :app:processDebugUnitTestManifest
+> Task :app:generateDebugUnitTestConfig
+> Task :app:processDebugJavaRes
+> Task :app:processDebugUnitTestJavaRes
+> Task :app:testDebugUnitTest
+
+BUILD SUCCESSFUL in 2m 19s
+33 actionable tasks: 33 executed
+Configuration cache entry reused.

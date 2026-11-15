@@ -326,12 +326,14 @@ fun StaffOfflineScreen(
 }
 
 /**
- * Screen presented when STAFF_READ_WORKSPACE opt-in is active but STAFF_WORKSPACE_ORIGIN is empty.
+ * Screen presented when backend origin is unconfigured or blank.
+ * Truthfully informs staff that server configuration is required; never falls back to demo data.
  */
 @Composable
 fun StaffUnconfiguredScreen(
     lang: AppLanguage,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onToggleLanguage: (() -> Unit)? = null
 ) {
     Box(
         modifier = modifier
@@ -378,6 +380,23 @@ fun StaffUnconfiguredScreen(
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                if (onToggleLanguage != null) {
+                    Spacer(modifier = Modifier.height(20.dp))
+                    OutlinedButton(
+                        onClick = onToggleLanguage,
+                        modifier = Modifier
+                            .heightIn(min = 44.dp)
+                            .testTag("staff_unconfigured_toggle_language_button"),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(
+                            text = if (lang == AppLanguage.AR) "English (LTR)" else "العربية (RTL)",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
             }
         }
     }

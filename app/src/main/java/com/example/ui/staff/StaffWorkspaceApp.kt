@@ -51,7 +51,10 @@ fun StaffWorkspaceApp(
         ) {
             when (uiState.phase) {
                 StaffWorkspacePhase.UNCONFIGURED -> {
-                    StaffUnconfiguredScreen(lang = uiState.language)
+                    StaffUnconfiguredScreen(
+                        lang = uiState.language,
+                        onToggleLanguage = { viewModel.toggleLanguage() }
+                    )
                 }
                 StaffWorkspacePhase.INITIALIZING -> {
                     Box(
@@ -112,7 +115,19 @@ fun StaffWorkspaceApp(
                         onLogout = { viewModel.logout() },
                         onToggleLanguage = { viewModel.toggleLanguage() },
                         onToggleTheme = { viewModel.toggleTheme() },
-                        onRetryOutboxHealth = { viewModel.retryOutboxHealth() }
+                        onRetryOutboxHealth = { viewModel.retryOutboxHealth() },
+                        onAddProductToSale = { product ->
+                            viewModel.addProductToSaleDraft(product)
+                            viewModel.selectTab(StaffWorkspaceTab.CASH_SALE)
+                        },
+                        onSelectCustomerForSale = { customer ->
+                            viewModel.selectCustomerForSale(customer)
+                            viewModel.selectTab(StaffWorkspaceTab.CASH_SALE)
+                        },
+                        onUpdateSaleLineQuantity = { lineId, qty -> viewModel.updateDraftLineQuantity(lineId, qty) },
+                        onRemoveSaleLine = { lineId -> viewModel.removeDraftLine(lineId) },
+                        onClearSaleDraft = { viewModel.clearSaleDraft() },
+                        onSubmitSale = { viewModel.submitOnlineCashSale() }
                     )
                 }
                 StaffWorkspacePhase.LOCKED -> {

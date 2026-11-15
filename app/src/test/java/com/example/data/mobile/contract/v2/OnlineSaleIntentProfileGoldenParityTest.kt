@@ -166,4 +166,56 @@ class OnlineSaleIntentProfileGoldenParityTest {
             (profile.lines as MutableList).add(line)
         }
     }
+
+    @Test
+    fun testRootValidatedIntegrationManifestAuthoritativeSyntheticTemplateParity() {
+        val rawWirePayloadJson = """{
+            "client_event_id": "c0686be5-888f-4890-90bf-1f05f416a19a",
+            "device_id": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
+            "customer_id": "01M7CZPF6TP283F3ZRXF5P8GT3",
+            "warehouse_id": "01M7CZPF6TP283F3ZRXF5P8GT4",
+            "currency": "ILS",
+            "lines": [
+                {
+                    "product_id": "01M7CZPF6TP283F3ZRXF5P8GT5",
+                    "product_unit_id": "01M7CZPF6TP283F3ZRXF5P8GT6",
+                    "conversion_to_base": "1.000000",
+                    "quantity": "1.000000",
+                    "unit_price": "50.000000",
+                    "tax_rate_id": "01M7CZPF6TP283F3ZRXF5P8GT7",
+                    "tax_rate": "16.000000",
+                    "tax_inclusive": false
+                }
+            ],
+            "payment": {
+                "settlement_mode": "full",
+                "payment_method": "cash",
+                "cash_account_id": "01M7CZPF6TP283F3ZRXF5P8GT8",
+                "amount": "58.000000"
+            }
+        }"""
+
+        val serverSynthesizedContextJson = """{
+            "company_id": "01M7CZPF6TP283F3ZRXF5P8GT2",
+            "actor_id": "01M7CZPF6TP283F3ZRXF5P8GT1",
+            "currency_minor_units": 2
+        }"""
+
+        val expectedDigest = PayloadDigest.parse("sha256:0847e10d89777e103252ebfa2d27f89a95832a5d70e01af57afe6423f703c630")
+        val expectedCanonicalJson = "{\"actor_id\":\"01M7CZPF6TP283F3ZRXF5P8GT1\",\"client_event_id\":\"c0686be5-888f-4890-90bf-1f05f416a19a\",\"company_id\":\"01M7CZPF6TP283F3ZRXF5P8GT2\",\"currency\":\"ILS\",\"currency_minor_units\":2,\"customer_id\":\"01M7CZPF6TP283F3ZRXF5P8GT3\",\"device_id\":\"f81d4fae-7dec-11d0-a765-00a0c91e6bf6\",\"lines\":[{\"conversion_to_base\":\"1.000000\",\"product_id\":\"01M7CZPF6TP283F3ZRXF5P8GT5\",\"product_unit_id\":\"01M7CZPF6TP283F3ZRXF5P8GT6\",\"quantity\":\"1.000000\",\"tax_inclusive\":false,\"tax_rate\":\"16.000000\",\"tax_rate_id\":\"01M7CZPF6TP283F3ZRXF5P8GT7\",\"unit_price\":\"50.000000\"}],\"payment\":{\"amount\":\"58.000000\",\"cash_account_id\":\"01M7CZPF6TP283F3ZRXF5P8GT8\",\"payment_method\":\"cash\",\"settlement_mode\":\"full\"},\"warehouse_id\":\"01M7CZPF6TP283F3ZRXF5P8GT4\"}"
+
+        val context = OnlineSaleContext.fromStrictJson(StrictJsonParser.parse(serverSynthesizedContextJson).asObject())
+        val requestObj = StrictJsonParser.parse(rawWirePayloadJson).asObject()
+
+        val profile = OnlineSaleIntentProfile.fromContextAndRequest(context, requestObj)
+
+        val canonicalJson = CanonicalJsonSerializer.serialize(profile)
+        assertEquals(expectedCanonicalJson, canonicalJson)
+
+        val computedDigest = profile.computePayloadDigest()
+        assertEquals(expectedDigest, computedDigest)
+        assertEquals("sha256:0847e10d89777e103252ebfa2d27f89a95832a5d70e01af57afe6423f703c630", computedDigest.value)
+
+        assertTrue(OnlineSaleIntentProfile.verifyOnlineSaleIntentProfile(profile, expectedDigest))
+    }
 }

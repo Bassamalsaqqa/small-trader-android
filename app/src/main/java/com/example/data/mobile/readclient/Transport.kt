@@ -1,5 +1,6 @@
 package com.example.data.mobile.readclient
 
+import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.ServerUlid
 import java.net.URI
 import java.util.Collections
@@ -135,7 +136,9 @@ object EndpointSecurity {
         Regex("""^/api/mobile/v1/auth/logout$"""),
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/bootstrap$"""),
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/products$"""),
-        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers$""")
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers$"""),
+        Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/online-cash$"""),
+        Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/offline-events/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/status$""")
     )
 
     fun validateBaseOrigin(origin: String, allowHttpLoopback: Boolean = false): String {
@@ -205,20 +208,21 @@ object EndpointSecurity {
     fun validateMethodAndPath(method: HttpMethod, path: String) {
         when (method) {
             HttpMethod.POST -> {
-                require(
-                    path == "/api/mobile/v1/auth/challenge" ||
+                val isV1Auth = path == "/api/mobile/v1/auth/challenge" ||
                     path == "/api/mobile/v1/auth/login" ||
                     path == "/api/mobile/v1/auth/logout"
-                ) {
-                    "Unauthorized POST endpoint: '$path'. Only challenge, login, and logout support POST."
+                val isV2OnlineCash = Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/online-cash$""").matches(path)
+                require(isV1Auth || isV2OnlineCash) {
+                    "Unauthorized POST endpoint: '$path'. Only challenge, login, logout, and v2 online-cash support POST."
                 }
             }
             HttpMethod.GET -> {
                 val isBootstrap = Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/bootstrap$""").matches(path)
                 val isProducts = Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/products$""").matches(path)
                 val isCustomers = Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers$""").matches(path)
-                require(isBootstrap || isProducts || isCustomers) {
-                    "Unauthorized GET endpoint: '$path'. Only bootstrap, products, and customers support GET."
+                val isV2Status = Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/offline-events/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/status$""").matches(path)
+                require(isBootstrap || isProducts || isCustomers || isV2Status) {
+                    "Unauthorized GET endpoint: '$path'. Only bootstrap, products, customers, and v2 status support GET."
                 }
             }
         }
@@ -238,4 +242,6 @@ object EndpointSecurity {
     fun bootstrapPath(companyId: ServerUlid): String = "/api/mobile/v1/companies/${companyId.value}/bootstrap"
     fun productsPath(companyId: ServerUlid): String = "/api/mobile/v1/companies/${companyId.value}/products"
     fun customersPath(companyId: ServerUlid): String = "/api/mobile/v1/companies/${companyId.value}/customers"
+    fun onlineCashSalePath(companyId: ServerUlid): String = "/api/mobile/v2/companies/${companyId.value}/sales/online-cash"
+    fun offlineEventStatusPath(companyId: ServerUlid, clientEventId: ClientUuid): String = "/api/mobile/v2/companies/${companyId.value}/offline-events/${clientEventId.value}/status"
 }

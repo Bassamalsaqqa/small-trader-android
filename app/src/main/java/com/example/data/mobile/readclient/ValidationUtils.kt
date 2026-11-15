@@ -267,6 +267,16 @@ internal object ValidationUtils {
         return MoneyAmount.fromNonnegativeString(s)
     }
 
+    fun requirePositiveMoney(obj: StrictJsonObject, key: String): MoneyAmount {
+        val element = obj.require(key)
+        val s = (element as? StrictJsonString)?.value
+            ?: throw CanonicalSerializationException("Money property '$key' must be a string decimal, got ${element::class.simpleName}")
+        if (!ContractConstants.POSITIVE_DECIMAL_REGEX.matches(s)) {
+            throw CanonicalSerializationException("Money property '$key' has invalid positive decimal lexeme: '$s'")
+        }
+        return MoneyAmount.fromPositiveString(s)
+    }
+
     fun optionalMoney(obj: StrictJsonObject, key: String): MoneyAmount? {
         val element = obj.properties[key] ?: return null
         if (element is StrictJsonNull) return null

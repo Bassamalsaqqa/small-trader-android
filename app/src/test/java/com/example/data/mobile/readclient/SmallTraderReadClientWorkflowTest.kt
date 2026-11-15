@@ -162,7 +162,33 @@ class SmallTraderReadClientWorkflowTest {
         assertEquals(dummyCompanyId, bootstrap.companyId)
         assertFalse(bootstrap.offlinePolicy.enabled)
         assertNull(bootstrap.deviceLease)
+        assertNull(bootstrap.currencyMinorUnits)
         assertEquals("Bearer $dummyToken", transport.lastRequest?.headers?.get("Authorization"))
+        assertTrue("Default V1 pilot bootstrap must have empty queryParams", transport.lastRequest?.queryParams?.isEmpty() == true)
+    }
+
+    @Test
+    fun testGetBootstrapWithCurrencyMinorUnits13Fields() {
+        val transport = MockTransport()
+        val golden = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        // Insert currency_minor_units: 2 into golden json
+        val parsedJson = StrictJsonParser.parse(golden).asObject()
+        val propsWithCmu = parsedJson.properties.toMutableMap()
+        propsWithCmu["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber(java.math.BigDecimal(2))
+        val json13Fields = com.example.data.mobile.contract.CanonicalJsonSerializer.serialize(
+            com.example.data.mobile.contract.StrictJsonObject(propsWithCmu)
+        )
+        transport.responseToReturn = TransportResponse(statusCode = 200, body = json13Fields)
+
+        val client = SmallTraderReadClient(transport, baseOrigin)
+        val result = client.getBootstrap(dummyToken, dummyCompanyId, includeCurrencyMinorUnits = true)
+
+        assertTrue(result is ReadClientResult.Success)
+        val bootstrap = (result as ReadClientResult.Success).value
+        assertEquals(dummyCompanyId, bootstrap.companyId)
+        assertEquals(2, bootstrap.currencyMinorUnits)
+        assertEquals("Bearer $dummyToken", transport.lastRequest?.headers?.get("Authorization"))
+        assertEquals("currency_minor_units", transport.lastRequest?.queryParams?.get("include"))
     }
 
     @Test
