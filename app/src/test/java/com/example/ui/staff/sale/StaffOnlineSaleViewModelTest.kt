@@ -2450,7 +2450,7 @@ class StaffOnlineSaleViewModelTest {
                 },
                 baseOrigin = "https://small-trader.example.com"
             ),
-            tokenProvider = { "token" },
+            tokenProvider = { "valid_test_token_1234567890" },
             scopeGenerationProvider = { 1L },
             recoveryStore = null,
             requireRecoveryStore = true
@@ -3235,7 +3235,7 @@ class StaffOnlineSaleViewModelTest {
 
         // Switch session back to Scope 1
         val sessionScope1 = StaffSessionRecord(
-            token = "token_scope_1",
+            token = "valid_session_token_scope_1_12345",
             actorUlid = actorUlid,
             deviceUuid = deviceUuid,
             passwordEpoch = "epoch_1",

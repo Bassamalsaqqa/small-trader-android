@@ -1172,6 +1172,7 @@ class StaffWorkspaceViewModel(
                                 saleDraft = s.saleDraft.copy(
                                     isSubmitting = false,
                                     isPaymentUnverifiedHold = true,
+                                    isIndeterminate = false,
                                     submissionError = "Validation failed (422): ${result.error.message}"
                                 )
                             )
@@ -1226,6 +1227,8 @@ class StaffWorkspaceViewModel(
                         s.copy(
                             saleDraft = s.saleDraft.copy(
                                 isSubmitting = false,
+                                isPaymentUnverifiedHold = true,
+                                isIndeterminate = false,
                                 submissionError = "Durable recovery storage error: ${result.message}"
                             )
                         )
@@ -1499,6 +1502,8 @@ class StaffWorkspaceViewModel(
                         s.copy(
                             saleDraft = s.saleDraft.copy(
                                 isSubmitting = false,
+                                isPaymentUnverifiedHold = true,
+                                isIndeterminate = false,
                                 submissionError = "Durable recovery storage error: ${result.message}"
                             )
                         )
