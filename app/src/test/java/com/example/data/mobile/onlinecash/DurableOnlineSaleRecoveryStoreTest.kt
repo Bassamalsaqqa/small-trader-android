@@ -57,16 +57,33 @@ class DurableOnlineSaleRecoveryStoreTest {
         company: ServerUlid = companyId,
         actor: ServerUlid = actorId,
         device: ClientUuid = deviceId,
-        origin: String = baseOrigin
+        origin: String = baseOrigin,
+        currency: String = "USD",
+        currencyMinorUnits: Int = 2,
+        unitPrice: String = "20.000000",
+        lineCount: Int = 1
     ): DurableOnlineSaleRecoveryRecord {
+        val totalAmount = if (lineCount == 1) {
+            unitPrice.substringBefore(".") + "." + unitPrice.substringAfter(".").take(2).padEnd(2, '0')
+        } else {
+            java.math.BigDecimal(unitPrice).multiply(java.math.BigDecimal(lineCount)).setScale(2, java.math.RoundingMode.UNNECESSARY).toPlainString()
+        }
+
+        val linesJson = (0 until lineCount).joinToString(",") {
+            """{"conversion_to_base":"1","product_id":"01ARZ3NDEKTSV4RRFFQ69G5FA5","product_unit_id":"01ARZ3NDEKTSV4RRFFQ69G5FA6","quantity":"1","tax_inclusive":true,"tax_rate":"0","tax_rate_id":null,"unit_price":"$unitPrice"}"""
+        }
+
+        val rawWireJson = """{"client_event_id":"${eventId.value}","currency":"$currency","customer_id":"01ARZ3NDEKTSV4RRFFQ69G5FA4","device_id":"${device.value}","lines":[$linesJson],"payment":{"amount":"$totalAmount","cash_account_id":"01ARZ3NDEKTSV4RRFFQ69G5FA3","payment_method":"cash","settlement_mode":"full"},"warehouse_id":"01ARZ3NDEKTSV4RRFFQ69G5FA2"}"""
+        val rawWireBytes = rawWireJson.toByteArray(Charsets.UTF_8)
+
         val context = OnlineSaleContext(
             actorId = actor,
             companyId = company,
-            currencyMinorUnits = 2
+            currencyMinorUnits = currencyMinorUnits
         )
         val preparedIntent = PreparedOnlineSaleIntent.prepare(
             context = context,
-            rawWireBytes = sampleRawWireBytes,
+            rawWireBytes = rawWireBytes,
             scopeGeneration = 1L
         )
 
@@ -77,10 +94,10 @@ class DurableOnlineSaleRecoveryStoreTest {
             actorId = actor,
             deviceId = device,
             baseOrigin = origin,
-            currency = "USD",
-            currencyMinorUnits = 2,
-            amount = MoneyAmount("20.00"),
-            rawWireBytes = sampleRawWireBytes,
+            currency = currency,
+            currencyMinorUnits = currencyMinorUnits,
+            amount = MoneyAmount(totalAmount),
+            rawWireBytes = rawWireBytes,
             createdAt = "2026-11-15T12:00:00Z"
         )
     }
@@ -233,16 +250,16 @@ class DurableOnlineSaleRecoveryStoreTest {
     @Test
     fun testCompareAndSet_blocksMutationOfExistingEventWithDifferentPayload() {
         val eventId = ClientUuid.random()
-        val record1 = createSampleRecord(eventId = eventId)
+        val record1 = createSampleRecord(eventId = eventId, unitPrice = "20.000000")
         recoveryStore.savePendingSale(record1)
 
-        val tamperedBytes = record1.rawWireBytes.clone().also { it[0] = (it[0].toInt() xor 1).toByte() }
-        val tamperedRecord = record1.copy(rawWireBytes = tamperedBytes)
+        val record2 = createSampleRecord(eventId = eventId, unitPrice = "30.000000")
         try {
-            recoveryStore.savePendingSale(tamperedRecord)
+            recoveryStore.savePendingSale(record2)
             fail("Expected OnlineSaleRecoveryException when modifying payload bytes of existing pending event")
         } catch (e: OnlineSaleRecoveryException) {
-            assertTrue(e.message!!.contains("different payload", ignoreCase = true))
+            assertTrue(e.message!!.contains("Cannot overwrite pending event", ignoreCase = true) ||
+                    e.message!!.contains("different payload", ignoreCase = true))
         }
     }
 
@@ -305,22 +322,21 @@ class DurableOnlineSaleRecoveryStoreTest {
 
     @Test
     fun testEnvelope_nearLimit_succeeds() {
-        // Generate a 100 KB payload (well within 1 MiB limit)
-        val largeBytes = ByteArray(100 * 1024) { (it % 256).toByte() }
-        val record = createSampleRecord().copy(rawWireBytes = largeBytes)
+        // Generate a ~110 KB valid canonical payload with 500 lines (well within 1 MiB limit)
+        val record = createSampleRecord(lineCount = 500)
         recoveryStore.savePendingSale(record)
 
         val retrieved = recoveryStore.getPendingSale(companyId, actorId, deviceId, baseOrigin)
         assertNotNull(retrieved)
-        assertEquals(largeBytes.size, retrieved!!.rawWireBytes.size)
-        assertTrue(largeBytes.contentEquals(retrieved.rawWireBytes))
+        assertEquals(record.clientEventId, retrieved!!.clientEventId)
+        assertEquals(record.rawWireBytes.size, retrieved.rawWireBytes.size)
+        assertTrue(record.rawWireBytes.contentEquals(retrieved.rawWireBytes))
     }
 
     @Test
     fun testEnvelope_overflow_throwsException() {
-        // Generate an oversized payload exceeding 1 MiB
-        val oversizedBytes = ByteArray(1024 * 1024 + 100) { 0x41 }
-        val record = createSampleRecord().copy(rawWireBytes = oversizedBytes)
+        // Generate an oversized valid canonical payload with 5000 lines (~1.1 MB, exceeding 1 MiB MAX_FILE_BYTES)
+        val record = createSampleRecord(lineCount = 5000)
         try {
             recoveryStore.savePendingSale(record)
             fail("Expected OnlineSaleRecoveryException on oversized envelope")
@@ -329,6 +345,115 @@ class DurableOnlineSaleRecoveryStoreTest {
                 e.message!!.contains("exceeds maximum storage bound", ignoreCase = true) ||
                         e.message!!.contains("exceeds maximum allowable", ignoreCase = true)
             )
+        }
+    }
+
+    @Test
+    fun testConsistency_inconsistentEventId_rejectedOnSave() {
+        val valid = createSampleRecord()
+        val inconsistent = valid.copy(clientEventId = ClientUuid.random())
+        try {
+            recoveryStore.savePendingSale(inconsistent)
+            fail("Expected OnlineSaleRecoveryException for inconsistent eventId")
+        } catch (e: OnlineSaleRecoveryException) {
+            assertTrue(e.message!!.contains("Inconsistent", ignoreCase = true) || e.message!!.contains("mismatch", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun testConsistency_inconsistentDeviceId_rejectedOnSave() {
+        val valid = createSampleRecord()
+        val inconsistent = valid.copy(deviceId = ClientUuid.random())
+        try {
+            recoveryStore.savePendingSale(inconsistent)
+            fail("Expected OnlineSaleRecoveryException for inconsistent deviceId")
+        } catch (e: OnlineSaleRecoveryException) {
+            assertTrue(e.message!!.contains("Inconsistent", ignoreCase = true) || e.message!!.contains("mismatch", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun testConsistency_inconsistentCompanyId_rejectedOnSave() {
+        val valid = createSampleRecord()
+        val inconsistent = valid.copy(companyId = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5999"))
+        try {
+            recoveryStore.savePendingSale(inconsistent)
+            fail("Expected OnlineSaleRecoveryException for inconsistent companyId")
+        } catch (e: OnlineSaleRecoveryException) {
+            assertTrue(e.message!!.contains("Inconsistent", ignoreCase = true) || e.message!!.contains("mismatch", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun testConsistency_inconsistentActorId_rejectedOnSave() {
+        val valid = createSampleRecord()
+        val inconsistent = valid.copy(actorId = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5888"))
+        try {
+            recoveryStore.savePendingSale(inconsistent)
+            fail("Expected OnlineSaleRecoveryException for inconsistent actorId")
+        } catch (e: OnlineSaleRecoveryException) {
+            assertTrue(e.message!!.contains("Inconsistent", ignoreCase = true) || e.message!!.contains("mismatch", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun testConsistency_inconsistentCurrency_rejectedOnSave() {
+        val valid = createSampleRecord()
+        val inconsistent = valid.copy(currency = "EUR")
+        try {
+            recoveryStore.savePendingSale(inconsistent)
+            fail("Expected OnlineSaleRecoveryException for inconsistent currency")
+        } catch (e: OnlineSaleRecoveryException) {
+            assertTrue(e.message!!.contains("Inconsistent", ignoreCase = true) || e.message!!.contains("mismatch", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun testConsistency_inconsistentAmount_rejectedOnSave() {
+        val valid = createSampleRecord()
+        val inconsistent = valid.copy(amount = MoneyAmount("999.00"))
+        try {
+            recoveryStore.savePendingSale(inconsistent)
+            fail("Expected OnlineSaleRecoveryException for inconsistent amount")
+        } catch (e: OnlineSaleRecoveryException) {
+            assertTrue(e.message!!.contains("Inconsistent", ignoreCase = true) || e.message!!.contains("mismatch", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun testConsistency_inconsistentDigest_rejectedOnSave() {
+        val valid = createSampleRecord()
+        val inconsistent = valid.copy(expectedNormativeProfileDigest = PayloadDigest.fromSha256HexString("0".repeat(64)))
+        try {
+            recoveryStore.savePendingSale(inconsistent)
+            fail("Expected OnlineSaleRecoveryException for inconsistent digest")
+        } catch (e: OnlineSaleRecoveryException) {
+            assertTrue(e.message!!.contains("Inconsistent", ignoreCase = true) || e.message!!.contains("mismatch", ignoreCase = true) || e.message!!.contains("digest", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun testConsistency_corruptedDuplicateOnDisk_readFailsClosed() {
+        val recordA = createSampleRecord(eventId = ClientUuid.random(), company = companyId)
+        val recordsWithDuplicate = listOf(recordA, recordA)
+        val plaintext = DurableOnlineSaleRecoveryWireFormat.serialize(recordsWithDuplicate)
+        val aad = "purpose=online_sale_recovery;pkg=com.example.smalltrader;v=1".toByteArray(Charsets.UTF_8)
+        val (iv, ciphertext) = fakeCryptoEngine.encrypt(plaintext, aad)
+        val baos = java.io.ByteArrayOutputStream()
+        val dos = java.io.DataOutputStream(baos)
+        dos.write(byteArrayOf(0x4F, 0x53, 0x52, 0x01))
+        dos.writeByte(iv.size)
+        dos.write(iv)
+        dos.writeInt(ciphertext.size)
+        dos.write(ciphertext)
+        dos.flush()
+        storageFile.writeBytes(baos.toByteArray())
+
+        try {
+            recoveryStore.getPendingSale(companyId, actorId, deviceId, baseOrigin)
+            fail("Expected OnlineSaleRecoveryException when reading file with corrupted duplicate records")
+        } catch (e: OnlineSaleRecoveryException) {
+            assertTrue(e.message!!.contains("duplicate", ignoreCase = true) || e.message!!.contains("Corrupted", ignoreCase = true))
         }
     }
 

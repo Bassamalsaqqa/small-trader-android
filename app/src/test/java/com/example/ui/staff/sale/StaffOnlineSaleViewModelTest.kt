@@ -2244,17 +2244,38 @@ class StaffOnlineSaleViewModelTest {
         val eventA = ClientUuid.random()
         val eventB = ClientUuid.random()
 
+        val draft = StaffOnlineSaleDraft(
+            lines = listOf(
+                StaffOnlineSaleDraftLine(
+                    product = createSampleProduct(),
+                    productUnitId = unitUlid,
+                    conversionToBase = NonnegativeDecimalQuantity.of(1),
+                    quantity = PositiveDecimalQuantity.of(1),
+                    unitPrice = MoneyAmount("20.000000"),
+                    taxRateId = null,
+                    taxRate = TaxPercentage.ZERO,
+                    taxInclusive = true
+                )
+            )
+        )
+        val authority = StaffOnlineSaleAuthorityResolution.resolve(
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).bootstrap,
+            (fakeCoordinator.authState as StaffAuthState.ReadReady).session,
+            currencyMinorUnitsOverride = 2
+        )
+        val intentA = StaffOnlineSaleRequestBuilder.prepareIntent(draft, authority, 1L, eventA)
+
         val recordA = DurableOnlineSaleRecoveryRecord(
             clientEventId = eventA,
-            expectedNormativeProfileDigest = PayloadDigest.parse("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+            expectedNormativeProfileDigest = intentA.expectedNormativeProfileDigest,
             companyId = companyUlid,
             actorId = actorUlid,
             deviceId = deviceUuid,
             baseOrigin = "https://small-trader.example.com",
             currency = "USD",
             currencyMinorUnits = 2,
-            amount = MoneyAmount("10.00"),
-            rawWireBytes = byteArrayOf(1, 2, 3),
+            amount = MoneyAmount("20.00"),
+            rawWireBytes = intentA.rawWireBytes,
             createdAt = "2026-11-15T12:00:00Z"
         )
         sharedRecoveryStore.savePendingSale(recordA)
@@ -2713,6 +2734,7 @@ private class InMemoryDurableOnlineSaleRecoveryStore(
     private val records = mutableMapOf<ClientUuid, DurableOnlineSaleRecoveryRecord>()
 
     override fun savePendingSale(record: DurableOnlineSaleRecoveryRecord) {
+        record.validateConsistency()
         if (throwOnSave) {
             throw OnlineSaleRecoveryException("Simulated disk write failure")
         }
@@ -2747,9 +2769,11 @@ private class InMemoryDurableOnlineSaleRecoveryStore(
             throw OnlineSaleRecoveryException("Simulated disk read failure")
         }
         val canonical = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(baseOrigin)
-        return records.values.firstOrNull {
+        val found = records.values.firstOrNull {
             it.companyId == companyId && it.actorId == actorId && it.deviceId == deviceId && it.baseOrigin == canonical
         }
+        found?.validateConsistency()
+        return found
     }
 
     override fun clearPendingSale(

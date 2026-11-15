@@ -160,6 +160,45 @@ data class DurableOnlineSaleRecoveryRecord(
 
         return reboundIntent
     }
+
+    /**
+     * Validates that all record metadata strictly matches the canonical RFC 8785 raw wire payload,
+     * reconstructed normative profile, tenant identity, and financial economics.
+     * Fails closed with [OnlineSaleRecoveryException] on any discrepancy.
+     */
+    fun validateConsistency() {
+        val rebound = try {
+            toPreparedOnlineSaleIntent(reboundGeneration = 1L)
+        } catch (e: OnlineSaleRecoveryException) {
+            throw e
+        } catch (e: Exception) {
+            throw OnlineSaleRecoveryException(
+                "Inconsistent recovery record for event $clientEventId: ${e.message}",
+                e
+            )
+        }
+        if (rebound.clientEventId != clientEventId) {
+            throw OnlineSaleRecoveryException("Inconsistent record: event ID mismatch ($clientEventId vs ${rebound.clientEventId})")
+        }
+        if (rebound.deviceId != deviceId) {
+            throw OnlineSaleRecoveryException("Inconsistent record: device ID mismatch ($deviceId vs ${rebound.deviceId})")
+        }
+        if (rebound.context.companyId != companyId) {
+            throw OnlineSaleRecoveryException("Inconsistent record: company ID mismatch ($companyId vs ${rebound.context.companyId})")
+        }
+        if (rebound.context.actorId != actorId) {
+            throw OnlineSaleRecoveryException("Inconsistent record: actor ID mismatch ($actorId vs ${rebound.context.actorId})")
+        }
+        if (rebound.currency != currency) {
+            throw OnlineSaleRecoveryException("Inconsistent record: currency mismatch ($currency vs ${rebound.currency})")
+        }
+        if (rebound.profile.payment.amount != amount) {
+            throw OnlineSaleRecoveryException("Inconsistent record: amount mismatch ($amount vs ${rebound.profile.payment.amount})")
+        }
+        if (rebound.expectedNormativeProfileDigest != expectedNormativeProfileDigest) {
+            throw OnlineSaleRecoveryException("Inconsistent record: digest mismatch ($expectedNormativeProfileDigest vs ${rebound.expectedNormativeProfileDigest})")
+        }
+    }
 }
 
 /**
@@ -252,7 +291,14 @@ interface DurableOnlineSaleRecoveryStore {
  *
  * Uses AES-256-GCM authenticated encryption backed by AndroidKeyStore / [SessionCryptoEngine].
  * Enforces atomic replacement via temporary file and fd.sync() before rename, and directory fsync.
- * In-process concurrency is coordinated via [SessionProcessLocks].
+ *
+ * Process Concurrency and Atomic Reservation Architecture:
+ * SmallTrader operates strictly within a single Android OS process (standard android:process architecture).
+ * Thread-safety and atomic compare-and-set reservation boundaries are coordinated via canonical path
+ * ReentrantLocks ([SessionProcessLocks.getFileLock]). Across atomic disk writes, updates are written to a temp
+ * file, flushed and synced (`fd.sync()`), atomically replaced via rename, and parent directory fsynced via POSIX.
+ * Any corrupted or duplicate entries detected on disk fail closed immediately with [OnlineSaleRecoveryException]
+ * rather than silently hiding or discarding records.
  */
 class DefaultDurableOnlineSaleRecoveryStore internal constructor(
     private val storageFile: File,
@@ -264,6 +310,9 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
     internal var renameOperation: (File, File) -> Boolean = { src, dst -> src.renameTo(dst) }
 
     override fun savePendingSale(record: DurableOnlineSaleRecoveryRecord) {
+        // Enforce strict record self-consistency against raw wire bytes, canonical profile, identity, and economics BEFORE lock/save
+        record.validateConsistency()
+
         val canonicalOrigin = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(record.baseOrigin)
         val normalizedRecord = if (record.baseOrigin == canonicalOrigin) record else record.copy(baseOrigin = canonicalOrigin)
 
@@ -497,11 +546,26 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
             throw OnlineSaleRecoveryException("Failed to decrypt recovery file: ${e.message}", e)
         }
 
-        return try {
+        val records = try {
             DurableOnlineSaleRecoveryWireFormat.deserialize(plaintext)
         } catch (e: Exception) {
             throw OnlineSaleRecoveryException("Failed to deserialize recovery records: ${e.message}", e)
         }
+
+        // Validate each record's self-consistency and detect corrupted duplicate entries
+        val seenEventIds = mutableSetOf<ClientUuid>()
+        val seenScopes = mutableSetOf<String>()
+        for (record in records) {
+            record.validateConsistency()
+            if (!seenEventIds.add(record.clientEventId)) {
+                throw OnlineSaleRecoveryException("Corrupted recovery file: duplicate record with eventId ${record.clientEventId} detected")
+            }
+            val scopeKey = "${record.companyId}:${record.actorId}:${record.deviceId}:${record.baseOrigin}"
+            if (!seenScopes.add(scopeKey)) {
+                throw OnlineSaleRecoveryException("Corrupted recovery file: multiple unverified records detected for scope $scopeKey")
+            }
+        }
+        return records
     }
 
     private fun syncDirectory(dir: File?) {
