@@ -359,4 +359,173 @@ class OnlineCashSaleOrchestrator(
             }
         }
     }
+
+    /**
+     * Executes a read-only GET-status query for a retained sale intent without re-posting.
+     *
+     * Used for recovering from PaymentUnverifiedHold state:
+     * - ZERO HTTP POST / zero payload mutation.
+     * - Uses exact existing client.checkStatus(token, companyId, clientEventId).
+     * - Validates company, clientEventId, payloadDigest, and grand total.
+     * - Only returns ConfirmedFinancialSuccess when paymentId and paymentReceiptNumber are non-null and non-blank.
+     * - Returns PostedWithoutPaymentReference if the payment remains unverified on the server.
+     */
+    fun checkOnlineCashSaleStatus(
+        intent: PreparedOnlineSaleIntent,
+        targetCompanyId: ServerUlid,
+        targetDeviceId: ClientUuid,
+        targetCurrency: String
+    ): OnlineCashOrchestrationResult {
+        // 1. Pre-dispatch scope and argument validation (ZERO HTTP)
+        try {
+            intent.validateExactScope(
+                expectedCompanyId = targetCompanyId,
+                expectedDeviceId = targetDeviceId,
+                expectedCurrency = targetCurrency,
+                expectedClientEventId = intent.clientEventId
+            )
+        } catch (_: IllegalArgumentException) {
+            return OnlineCashOrchestrationResult.PreDispatchValidationError("SCOPE_VALIDATION_FAILED")
+        }
+
+        // 2. Pre-dispatch scope generation and active scope check (ZERO HTTP)
+        val initialScopeGen = scopeGenerationProvider()
+        if (!isScopeMatching(initialScopeGen, intent, targetCompanyId, targetDeviceId)) {
+            return OnlineCashOrchestrationResult.ScopeMismatch(
+                expected = initialScopeGen,
+                actual = intent.scopeGeneration
+            )
+        }
+
+        // 3. Local token validation: missing token is LOCAL UNAVAILABLE, never server AuthDenied (ZERO HTTP)
+        val token = tokenProvider()?.trim()
+        if (token.isNullOrEmpty()) {
+            return OnlineCashOrchestrationResult.LocalTokenUnavailable(
+                "No active staff session token available"
+            )
+        }
+
+        // 4. Dispatch GET-status ONLY via V2 Online Cash Client
+        val statusResult = client.checkStatus(
+            token = token,
+            companyId = targetCompanyId,
+            clientEventId = intent.clientEventId
+        )
+
+        // 5. Post-network scope validation guarding ALL result branches
+        val postNetworkScopeGen = scopeGenerationProvider()
+        val scopeStillActive = isScopeMatching(postNetworkScopeGen, intent, targetCompanyId, targetDeviceId)
+
+        if (!scopeStillActive) {
+            return when (statusResult) {
+                is OnlineCashStatusResult.AuthDenied401 -> OnlineCashOrchestrationResult.StaleAuthDenied(
+                    error = statusResult.error,
+                    intentScopeGeneration = intent.scopeGeneration,
+                    currentScopeGeneration = postNetworkScopeGen
+                )
+                else -> OnlineCashOrchestrationResult.ScopeMismatch(
+                    expected = intent.scopeGeneration,
+                    actual = postNetworkScopeGen
+                )
+            }
+        }
+
+        // 6. Evaluate status response with strict financial consistency and schema honesty
+        return when (statusResult) {
+            is OnlineCashStatusResult.Posted -> {
+                val status = statusResult.response
+                val official = status.officialInvoice
+                    ?: return OnlineCashOrchestrationResult.ParseFailure("MISSING_OFFICIAL_INVOICE")
+
+                if (status.clientEventId != intent.clientEventId) {
+                    return OnlineCashOrchestrationResult.ParseFailure("EVENT_PARITY_MISMATCH")
+                }
+                if (status.companyId != intent.context.companyId) {
+                    return OnlineCashOrchestrationResult.ParseFailure("TENANT_PARITY_MISMATCH")
+                }
+
+                // Status digest MUST be non-null and match expected normative digest
+                if (status.payloadDigest == null || status.payloadDigest != intent.expectedNormativeProfileDigest) {
+                    return OnlineCashOrchestrationResult.StatusDigestMismatch(
+                        expected = intent.expectedNormativeProfileDigest,
+                        actual = status.payloadDigest
+                    )
+                }
+
+                // Single shared receipt construction
+                val receipt = OnlineCashSaleReceipt(
+                    companyId = status.companyId,
+                    clientEventId = status.clientEventId,
+                    payloadDigest = status.payloadDigest,
+                    invoiceId = official.invoiceId,
+                    invoiceNumber = official.invoiceNumber,
+                    paymentId = official.paymentId,
+                    paymentReceiptNumber = official.paymentReceiptNumber,
+                    grandTotal = official.grandTotal,
+                    postedAt = official.postedAt,
+                    wasReplay = false
+                )
+
+                val isFullCash = intent.profile.payment.settlementMode == "full"
+                if (isFullCash) {
+                    // Aligned receipt-completeness validation: must have non-null paymentId AND paymentReceiptNumber
+                    if (receipt.paymentId == null || receipt.paymentReceiptNumber.isNullOrBlank()) {
+                        return OnlineCashOrchestrationResult.PostedWithoutPaymentReference(receipt)
+                    }
+
+                    // Authoritative financial reconciliation: official grand total must equal prepared online payment amount
+                    if (official.grandTotal.value.compareTo(intent.profile.payment.amount.value) != 0) {
+                        return OnlineCashOrchestrationResult.ParseFailure("FINANCIAL_CONSISTENCY_MISMATCH")
+                    }
+
+                    OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(receipt)
+                } else {
+                    if (receipt.paymentId != null && !receipt.paymentReceiptNumber.isNullOrBlank()) {
+                        OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(receipt)
+                    } else {
+                        OnlineCashOrchestrationResult.PostedWithoutPaymentReference(receipt)
+                    }
+                }
+            }
+            is OnlineCashStatusResult.Unknown -> {
+                OnlineCashOrchestrationResult.IndeterminateTransient(
+                    clientEventId = intent.clientEventId,
+                    payloadDigest = intent.expectedNormativeProfileDigest,
+                    reason = "EVENT_STATUS_UNKNOWN"
+                )
+            }
+            is OnlineCashStatusResult.ParkedConflict -> {
+                val conflictDto = statusResult.response.conflict
+                val errResp = ReadClientErrorResponse(
+                    code = conflictDto?.conflictCode ?: "BUSINESS_CONFLICT",
+                    message = conflictDto?.conflictReason ?: "Parked conflict on server",
+                    evidence = null
+                )
+                OnlineCashOrchestrationResult.BusinessConflict(errResp)
+            }
+            is OnlineCashStatusResult.AuthDenied401 -> {
+                onAuthDeniedLockScope?.invoke(postNetworkScopeGen, statusResult.error)
+                OnlineCashOrchestrationResult.AuthDenied(statusResult.error, postNetworkScopeGen)
+            }
+            is OnlineCashStatusResult.Forbidden403 -> {
+                OnlineCashOrchestrationResult.Forbidden(statusResult.error)
+            }
+            is OnlineCashStatusResult.ValidationFailed422 -> {
+                OnlineCashOrchestrationResult.ValidationFailed(statusResult.error)
+            }
+            is OnlineCashStatusResult.ParseFailure -> {
+                OnlineCashOrchestrationResult.ParseFailure(statusResult.category)
+            }
+            is OnlineCashStatusResult.HttpError -> {
+                OnlineCashOrchestrationResult.ParseFailure("HTTP_${statusResult.statusCode}")
+            }
+            is OnlineCashStatusResult.TransientError -> {
+                OnlineCashOrchestrationResult.IndeterminateTransient(
+                    clientEventId = intent.clientEventId,
+                    payloadDigest = intent.expectedNormativeProfileDigest,
+                    reason = statusResult.category
+                )
+            }
+        }
+    }
 }

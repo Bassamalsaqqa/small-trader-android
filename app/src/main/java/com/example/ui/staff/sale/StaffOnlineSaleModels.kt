@@ -94,8 +94,8 @@ data class StaffOnlineSaleAuthorityResolution(
                 missing.add("Missing baseCurrency from bootstrap response")
             }
 
-            // Currency minor units context: bootstrap currency_minor_units or explicit override
-            val cmu = currencyMinorUnitsOverride ?: bootstrap?.currencyMinorUnits
+            // Currency minor units context: bootstrap authoritative currency_minor_units or explicit test override
+            val cmu = bootstrap?.currencyMinorUnits ?: currencyMinorUnitsOverride
             if (cmu == null) {
                 missing.add("V1 Bootstrap lacks currency_minor_units (required for OnlineSaleContext scale validation)")
             } else if (cmu !in 0..6) {

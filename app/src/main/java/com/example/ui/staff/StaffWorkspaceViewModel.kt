@@ -391,6 +391,7 @@ class StaffWorkspaceViewModel(
         _uiState.update { s ->
             s.copy(
                 saleAuthority = authority,
+                availableTaxes = state.bootstrap.taxes,
                 isOnlineCashEnabled = onlineCashEnabled || BuildConfig.STAFF_ONLINE_CASH_ENABLED
             )
         }
@@ -554,13 +555,24 @@ class StaffWorkspaceViewModel(
             _uiState.value.saleDraft.isPaymentUnverifiedHold ||
             _uiState.value.saleDraft.isSubmitting
         ) return
+        val coord = coordinator ?: return
+        val ready = coord.authState as? StaffAuthState.ReadReady ?: return
+        val currentTaxes = ready.bootstrap.taxes
+        val matchingTax = currentTaxes.find {
+            it.id == tax.id &&
+            it.rate.value.compareTo(tax.rate.value) == 0 &&
+            it.calculation == tax.calculation
+        } ?: return
+        if (matchingTax.calculation != "inclusive" && matchingTax.calculation != "exclusive") {
+            return
+        }
         _uiState.update { s ->
             val currentLines = s.saleDraft.lines.map { line ->
                 if (line.lineId == lineId) {
                     line.copy(
-                        taxRateId = tax.id,
-                        taxRate = tax.rate,
-                        taxInclusive = (tax.calculation == "inclusive")
+                        taxRateId = matchingTax.id,
+                        taxRate = matchingTax.rate,
+                        taxInclusive = (matchingTax.calculation == "inclusive")
                     )
                 } else line
             }
@@ -579,6 +591,8 @@ class StaffWorkspaceViewModel(
             _uiState.value.saleDraft.isPaymentUnverifiedHold ||
             _uiState.value.saleDraft.isSubmitting
         ) return
+        val coord = coordinator ?: return
+        if (coord.authState !is StaffAuthState.ReadReady) return
         _uiState.update { s ->
             val currentLines = s.saleDraft.lines.map { line ->
                 if (line.lineId == lineId) {
@@ -872,6 +886,249 @@ class StaffWorkspaceViewModel(
     }
 
     /**
+     * Executes a read-only GET status check for the retained sale intent during PaymentUnverifiedHold.
+     *
+     * Invariants:
+     * - Scoped GET-status query ONLY via orchestrator / client.checkStatus (ZERO HTTP POST).
+     * - Re-uses the exact retained preparedIntent; NEVER mutates clientEventId or generates a new UUID.
+     * - Verifies tenant company, clientEventId, payloadDigest, and grand total parity.
+     * - Transitions to ConfirmedFinancialSuccess ONLY when paymentId and non-blank paymentReceiptNumber are returned.
+     * - Keeps basket, preparedIntent, and HOLD state intact if payment remains unverified or status is unknown.
+     */
+    fun checkOnlineCashSaleStatus() {
+        val currentState = _uiState.value
+        if (currentState.saleDraft.isSubmitting) return
+
+        val preparedIntent = currentState.saleDraft.preparedIntent ?: run {
+            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "No retained intent to check status for")) }
+            return
+        }
+
+        if (currentState.phase != StaffWorkspacePhase.READ_READY) {
+            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Staff workspace is not in READ_READY phase")) }
+            return
+        }
+
+        val coord = coordinator ?: run {
+            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Coordinator is unconfigured")) }
+            return
+        }
+
+        val readyState = coord.authState as? StaffAuthState.ReadReady ?: run {
+            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Session is not ready")) }
+            return
+        }
+
+        val authority = currentState.saleAuthority ?: StaffOnlineSaleAuthorityResolution.resolve(
+            readyState.bootstrap,
+            readyState.session,
+            currencyMinorUnitsOverride
+        )
+
+        if (!authority.isDispatchPermitted) {
+            val missing = authority.missingContracts.joinToString("; ")
+            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Authority resolution failed: $missing")) }
+            return
+        }
+
+        val generation = coord.currentGeneration
+        val thisIntent = ++activeIntentSeq
+
+        _uiState.update { s ->
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    isSubmitting = true,
+                    submissionError = null
+                )
+            )
+        }
+
+        saleJob?.cancel()
+        saleJob = viewModelScope.launch {
+            val targetCompanyId = authority.companyId!!
+            val targetDeviceId = authority.deviceId!!
+            val targetCurrency = authority.currency!!
+
+            val result = try {
+                withContext(ioDispatcher) {
+                    val orchestrator = getOrchestrator()
+                    orchestrator.checkOnlineCashSaleStatus(
+                        intent = preparedIntent,
+                        targetCompanyId = targetCompanyId,
+                        targetDeviceId = targetDeviceId,
+                        targetCurrency = targetCurrency
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+
+            if (thisIntent != activeIntentSeq) return@launch
+
+            if (!coord.isScopeActive(generation, targetCompanyId)) {
+                _uiState.update { s ->
+                    s.copy(
+                        saleDraft = s.saleDraft.copy(
+                            isSubmitting = false,
+                            submissionError = "Session scope expired during sale status check"
+                        )
+                    )
+                }
+                return@launch
+            }
+
+            when (result) {
+                is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                isIndeterminate = false,
+                                isPaymentUnverifiedHold = false,
+                                receipt = result.receipt,
+                                unverifiedReceipt = null,
+                                submissionError = null,
+                                preparedIntent = null,
+                                lines = emptyList(),
+                                cashTendered = null
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.PostedWithoutPaymentReference -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                isIndeterminate = false,
+                                isPaymentUnverifiedHold = true,
+                                unverifiedReceipt = result.receipt,
+                                receipt = null,
+                                submissionError = "Invoice posted (${result.receipt.invoiceNumber}), but payment confirmation remains unverified. Sale is held in read-only status."
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.BusinessConflict -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                isIndeterminate = true,
+                                submissionError = "Business conflict (409): event status indicates parked conflict on server."
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.AuthDenied -> {
+                    if (coord.isScopeActive(result.scopeGeneration, targetCompanyId)) {
+                        clearListsImmediately()
+                        _uiState.update {
+                            it.copy(
+                                phase = StaffWorkspacePhase.LOCKED,
+                                lockedReason = result.error.message,
+                                isSubmitting = false
+                            )
+                        }
+                    } else {
+                        _uiState.update { s ->
+                            s.copy(
+                                saleDraft = s.saleDraft.copy(
+                                    isSubmitting = false,
+                                    submissionError = "Stale authentication rejection from prior session ignored"
+                                )
+                            )
+                        }
+                    }
+                }
+                is OnlineCashOrchestrationResult.Forbidden -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                submissionError = "Forbidden (403): ${result.error.message}"
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.ValidationFailed -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                submissionError = "Validation failed (422): ${result.error.message}"
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.StatusDigestMismatch -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                submissionError = "Security error: server status payload digest mismatch (expected ${result.expected}, got ${result.actual})"
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.ScopeMismatch -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                submissionError = "Session scope changed during sale status check"
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.StaleAuthDenied -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                submissionError = "Stale authentication error received from previous scope"
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.LocalTokenUnavailable -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                submissionError = "Local token unavailable: ${result.reason}"
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.IndeterminateTransient,
+                is OnlineCashOrchestrationResult.ParseFailure,
+                is OnlineCashOrchestrationResult.PreDispatchValidationError,
+                null -> {
+                    val msg = when (result) {
+                        is OnlineCashOrchestrationResult.IndeterminateTransient -> "Transient error while checking status: ${result.reason}"
+                        is OnlineCashOrchestrationResult.ParseFailure -> "Failed to parse status response: ${result.category}"
+                        is OnlineCashOrchestrationResult.PreDispatchValidationError -> "Validation error: ${result.field}"
+                        else -> "Network or unexpected error while checking status"
+                    }
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                submissionError = msg
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * Restores persisted session from secure storage, verifying token expiry and bootstrap with server.
      */
     fun restoreSession() {
@@ -886,6 +1143,9 @@ class StaffWorkspaceViewModel(
         productsJob?.cancel()
         customersJob?.cancel()
         outboxHealthJob?.cancel()
+        saleJob?.cancel()
+        cachedOrchestrator = null
+        cachedOrchestratorGeneration = null
         ++outboxHealthIntentSeq
         activeScopeCompanyId = null
         activeScopeActorId = null
@@ -1062,6 +1322,9 @@ class StaffWorkspaceViewModel(
         productsJob?.cancel()
         customersJob?.cancel()
         outboxHealthJob?.cancel()
+        saleJob?.cancel()
+        cachedOrchestrator = null
+        cachedOrchestratorGeneration = null
         ++outboxHealthIntentSeq
         activeScopeCompanyId = null
         activeScopeActorId = null
@@ -1266,6 +1529,9 @@ class StaffWorkspaceViewModel(
         val thisIntent = ++activeIntentSeq
         authJob?.cancel()
         outboxHealthJob?.cancel()
+        saleJob?.cancel()
+        cachedOrchestrator = null
+        cachedOrchestratorGeneration = null
         activeScopeCompanyId = null
         activeScopeActorId = null
         activeScopeDeviceId = null
@@ -1480,6 +1746,9 @@ class StaffWorkspaceViewModel(
         productsJob?.cancel()
         customersJob?.cancel()
         outboxHealthJob?.cancel()
+        saleJob?.cancel()
+        cachedOrchestrator = null
+        cachedOrchestratorGeneration = null
         ++outboxHealthIntentSeq
         activeScopeCompanyId = null
         activeScopeActorId = null
@@ -1594,6 +1863,9 @@ class StaffWorkspaceViewModel(
         customersJob?.cancel()
         authJob?.cancel()
         outboxHealthJob?.cancel()
+        saleJob?.cancel()
+        cachedOrchestrator = null
+        cachedOrchestratorGeneration = null
         ++outboxHealthIntentSeq
         activeScopeCompanyId = null
         activeScopeActorId = null
@@ -1691,6 +1963,9 @@ class StaffWorkspaceViewModel(
         customersJob?.cancel()
         authJob?.cancel()
         outboxHealthJob?.cancel()
+        saleJob?.cancel()
+        cachedOrchestrator = null
+        cachedOrchestratorGeneration = null
         ++outboxHealthIntentSeq
         activeScopeCompanyId = null
         activeScopeActorId = null
@@ -2117,7 +2392,8 @@ class StaffWorkspaceViewModel(
                 customersHasMore = false,
                 customersError = null,
                 saleDraft = StaffOnlineSaleDraft(),
-                saleAuthority = null
+                saleAuthority = null,
+                availableTaxes = emptyList()
             )
         }
     }
@@ -2169,7 +2445,18 @@ class StaffWorkspaceViewModel(
         productsJob?.cancel()
         customersJob?.cancel()
         outboxHealthJob?.cancel()
+        saleJob?.cancel()
+        cachedOrchestrator = null
+        cachedOrchestratorGeneration = null
     }
+
+    internal fun performOnClearedForTesting() {
+        onCleared()
+    }
+
+    internal fun hasCachedOrchestratorForTesting(): Boolean = cachedOrchestrator != null
+
+    internal fun isSaleJobActiveForTesting(): Boolean = saleJob?.isActive == true
 
     private fun retryComposition() {
         val factory = coordinatorFactory
@@ -2270,12 +2557,14 @@ class StaffWorkspaceViewModel(
             }
 
             // 2. Safe coordinator composition: handle Keystore/Storage unavailability gracefully without crash
+            val effectiveIncludeCurrencyMinorUnits = onlineCashEnabled || BuildConfig.STAFF_ONLINE_CASH_ENABLED
             val coordinator = try {
                 StaffSessionCoordinator.create(
                     context = context.applicationContext,
                     baseOrigin = configuredOrigin,
                     allowHttpLoopback = effectiveLoopback,
-                    authDenialListener = authDenialListener
+                    authDenialListener = authDenialListener,
+                    includeCurrencyMinorUnits = effectiveIncludeCurrencyMinorUnits
                 )
             } catch (e: CancellationException) {
                 throw e
@@ -2291,8 +2580,13 @@ class StaffWorkspaceViewModel(
                     initialPhase = StaffWorkspacePhase.STORAGE_FAILED,
                     initialStorageError = "Secure storage initialization failed",
                     coordinatorFactory = {
-                        StaffSessionCoordinator.create(context.applicationContext, configuredOrigin,
-                            effectiveLoopback, authDenialListener)
+                        StaffSessionCoordinator.create(
+                            context.applicationContext,
+                            configuredOrigin,
+                            effectiveLoopback,
+                            authDenialListener,
+                            includeCurrencyMinorUnits = effectiveIncludeCurrencyMinorUnits
+                        )
                     },
                     outboxHealthInspector = effectiveInspector,
                     orchestratorFactory = orchestratorFactory,

@@ -126,6 +126,9 @@ fun StaffWorkspaceApp(
                         },
                         onUpdateSaleLineQuantity = { lineId, qty -> viewModel.updateDraftLineQuantity(lineId, qty) },
                         onRemoveSaleLine = { lineId -> viewModel.removeDraftLine(lineId) },
+                        onSetSaleLineTax = { lineId, tax -> viewModel.setLineTax(lineId, tax) },
+                        onSetSaleLineExplicitNoTax = { lineId -> viewModel.setLineExplicitNoTax(lineId) },
+                        onCheckPaymentStatus = { viewModel.checkOnlineCashSaleStatus() },
                         onClearSaleDraft = { viewModel.clearSaleDraft() },
                         onSubmitSale = { viewModel.submitOnlineCashSale() }
                     )
