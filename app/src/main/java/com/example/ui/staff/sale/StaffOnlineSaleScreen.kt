@@ -554,20 +554,31 @@ private fun SaleDraftLineCard(
                     )
                     if (line.taxRateId != null) {
                         Text(
-                            text = "${lang.tr("ضريبة", "Tax")}: ${line.taxRate.toPlainString()}%",
+                            text = "${lang.tr("ضريبة", "Tax")}: ${line.taxRate?.toPlainString() ?: "—"}%",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                        )
+                    } else if (line.taxRate?.toPlainString() == "0.000000" && line.taxInclusive == false) {
+                        Text(
+                            text = lang.tr("معفى صراحة من الضريبة", "Explicit No Tax (0%)"),
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                         )
                     } else {
                         Text(
-                            text = lang.tr("معفى من الضريبة", "No Tax (0.000000)"),
+                            text = lang.tr("ضريبة غير معينة", "Unassigned Tax"),
                             fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                            color = MaterialTheme.colorScheme.error
                         )
                     }
                     if (line.hasUnresolvedTaxContract) {
+                        val warningMsg = if (line.taxRateId == null && line.taxRate == null) {
+                            lang.tr("غير معين ضريبياً — لا يمكن افتراض الإعفاء", "Unassigned tax — cannot infer zero tax")
+                        } else {
+                            lang.tr("عقد الضريبة الشاملة غير متوفر في V1", "tax_inclusive missing in V1")
+                        }
                         Text(
-                            text = lang.tr("عقد الضريبة الشاملة غير متوفر في V1", "tax_inclusive missing in V1"),
+                            text = warningMsg,
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.error,
                             fontWeight = FontWeight.Bold

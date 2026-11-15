@@ -446,11 +446,12 @@ class StaffWorkspaceViewModel(
         product: ProductCatalogItem,
         packagingUnit: ProductPackagingUnit? = null,
         quantity: PositiveDecimalQuantity = PositiveDecimalQuantity.of(1),
-        taxInclusiveOverride: Boolean? = null
+        taxInclusiveOverride: Boolean? = null,
+        explicitNoTax: Boolean = false
     ) {
         _uiState.update { s ->
             val currentLines = s.saleDraft.lines.toMutableList()
-            val targetUnitId = packagingUnit?.productUnitId ?: product.defaultUnit.productUnitId
+            val targetUnitId = packagingUnit?.unitId ?: product.defaultUnit.unitId
             val existingIndex = currentLines.indexOfFirst {
                 it.product.id == product.id && it.productUnitId == targetUnitId
             }
@@ -466,7 +467,8 @@ class StaffWorkspaceViewModel(
                     product = product,
                     packagingUnit = packagingUnit,
                     quantity = quantity,
-                    taxInclusiveOverride = taxInclusiveOverride
+                    taxInclusiveOverride = taxInclusiveOverride,
+                    explicitNoTax = explicitNoTax
                 )
                 currentLines.add(newLine)
             }

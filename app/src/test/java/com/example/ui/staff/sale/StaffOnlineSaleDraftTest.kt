@@ -16,9 +16,11 @@ import com.example.data.mobile.readclient.OfflinePolicyDisabled
 import com.example.data.mobile.readclient.ProductBaseUnit
 import com.example.data.mobile.readclient.ProductCatalogItem
 import com.example.data.mobile.readclient.ProductDefaultUnit
+import com.example.data.mobile.readclient.ProductPackagingUnit
 import com.example.data.mobile.session.StaffSessionRecord
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -36,12 +38,14 @@ class StaffOnlineSaleDraftTest {
     private val walkInUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5FA4")
     private val productUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5FA5")
     private val unitUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5FA6")
+    private val pivotUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5FAP") // Deliberately distinct from unitUlid
     private val taxRateUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5FA7")
 
     private fun createSampleProduct(
         unitPrice: String = "25.000000",
         taxRateId: ServerUlid? = null,
-        taxRate: TaxPercentage? = null
+        taxRate: TaxPercentage? = null,
+        packagingUnits: List<ProductPackagingUnit> = emptyList()
     ): ProductCatalogItem {
         return ProductCatalogItem(
             id = productUlid,
@@ -56,11 +60,11 @@ class StaffOnlineSaleDraftTest {
             baseUnit = ProductBaseUnit(unitUlid, "PCS", "Pieces"),
             defaultUnit = ProductDefaultUnit(
                 unitId = unitUlid,
-                productUnitId = unitUlid,
+                productUnitId = pivotUlid, // distinct from unitId to prove mapping
                 conversionToBase = PositiveDecimalQuantity.of(1),
                 salePrice = MoneyAmount.fromNonnegativeString(unitPrice)
             ),
-            units = emptyList()
+            units = packagingUnits
         )
     }
 
@@ -97,7 +101,40 @@ class StaffOnlineSaleDraftTest {
     }
 
     @Test
-    fun testDraftLineCalculationsExactDecimal() {
+    fun testProductUnitIdMapsToUnitPublicIdNotPivot() {
+        val product = createSampleProduct(unitPrice = "10.000000")
+        val line = StaffOnlineSaleDraftLine.fromProduct(product = product, explicitNoTax = true)
+
+        // Assert that product_unit_id wire property receives Unit.public_id (unitId), NOT pivot productUnitId
+        assertEquals(unitUlid, line.productUnitId)
+        assertNotEquals(pivotUlid, line.productUnitId)
+
+        // Also test with explicit packaging unit
+        val pkgUnitId = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5PKG1")
+        val pkgPivotId = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5PKG2")
+        val pkgUnit = ProductPackagingUnit(
+            productUnitId = pkgPivotId,
+            unitId = pkgUnitId,
+            code = "BOX",
+            name = "Box of 10",
+            conversionToBase = PositiveDecimalQuantity.of(10),
+            isBase = false,
+            isDefaultSale = false,
+            salePrice = MoneyAmount.fromNonnegativeString("90.000000")
+        )
+        val pkgLine = StaffOnlineSaleDraftLine.fromProduct(
+            product = product,
+            packagingUnit = pkgUnit,
+            explicitNoTax = true
+        )
+        assertEquals(pkgUnitId, pkgLine.productUnitId)
+        assertNotEquals(pkgPivotId, pkgLine.productUnitId)
+    }
+
+    @Test
+    fun testDraftLineUnassignedCatalogTaxPairFailsClosedAsUnresolved() {
+        // Product has null pair in catalog: taxRateId == null && taxRate == null
+        // Null pair signifies NO product default tax association, NEVER inferred zero tax or exemption.
         val product = createSampleProduct(unitPrice = "12.500000")
         val line = StaffOnlineSaleDraftLine.fromProduct(
             product = product,
@@ -106,9 +143,28 @@ class StaffOnlineSaleDraftTest {
 
         assertEquals("37.500000", line.estimatedSubtotal.toPlainString())
         assertEquals("0.000000", line.estimatedTax.toPlainString())
-        assertFalse(line.hasUnresolvedTaxContract)
-        assertFalse(line.taxInclusive == true)
+        // Line MUST be typed unresolved because tax association is unassigned in catalog
+        assertTrue(line.hasUnresolvedTaxContract)
         assertNull(line.taxRateId)
+        assertNull(line.taxRate)
+        assertNull(line.taxInclusive)
+    }
+
+    @Test
+    fun testDraftLineExplicitNoTaxResolvesCleanly() {
+        val product = createSampleProduct(unitPrice = "12.500000")
+        val line = StaffOnlineSaleDraftLine.fromProduct(
+            product = product,
+            quantity = PositiveDecimalQuantity.fromPositiveString("3.000000"),
+            explicitNoTax = true
+        )
+
+        assertEquals("37.500000", line.estimatedSubtotal.toPlainString())
+        assertEquals("0.000000", line.estimatedTax.toPlainString())
+        assertFalse(line.hasUnresolvedTaxContract)
+        assertNull(line.taxRateId)
+        assertEquals("0.000000", line.taxRate?.toPlainString())
+        assertEquals(false, line.taxInclusive)
     }
 
     @Test
@@ -116,7 +172,8 @@ class StaffOnlineSaleDraftTest {
         val prodNoTax = createSampleProduct(unitPrice = "10.000000")
         val line1 = StaffOnlineSaleDraftLine.fromProduct(
             product = prodNoTax,
-            quantity = PositiveDecimalQuantity.of(2)
+            quantity = PositiveDecimalQuantity.of(2),
+            explicitNoTax = true
         )
 
         val prodTaxed = createSampleProduct(
@@ -212,7 +269,8 @@ class StaffOnlineSaleDraftTest {
         val product = createSampleProduct(unitPrice = "20.000000")
         val line = StaffOnlineSaleDraftLine.fromProduct(
             product = product,
-            quantity = PositiveDecimalQuantity.of(1)
+            quantity = PositiveDecimalQuantity.of(1),
+            explicitNoTax = true
         )
 
         val draft = StaffOnlineSaleDraft(lines = listOf(line))
@@ -239,7 +297,9 @@ class StaffOnlineSaleDraftTest {
         val expectedLineKeys = setOf("product_id", "product_unit_id", "conversion_to_base", "quantity", "unit_price", "tax_rate_id", "tax_rate", "tax_inclusive")
         assertEquals(expectedLineKeys, line0.keys)
         assertEquals(productUlid.value, line0["product_id"])
+        // Assert product_unit_id wire property matches unitUlid (Unit.public_id), not pivotUlid
         assertEquals(unitUlid.value, line0["product_unit_id"])
+        assertNotEquals(pivotUlid.value, line0["product_unit_id"])
         assertEquals("1", line0["conversion_to_base"])
         assertEquals("1", line0["quantity"])
         assertEquals("20.000000", line0["unit_price"])
@@ -289,7 +349,11 @@ class StaffOnlineSaleDraftTest {
         val authority = StaffOnlineSaleAuthorityResolution.resolve(bootstrap, session, currencyMinorUnitsOverride = 2)
 
         val product = createSampleProduct(unitPrice = "10.000000")
-        val line = StaffOnlineSaleDraftLine.fromProduct(product = product, quantity = PositiveDecimalQuantity.of(1))
+        val line = StaffOnlineSaleDraftLine.fromProduct(
+            product = product,
+            quantity = PositiveDecimalQuantity.of(1),
+            explicitNoTax = true
+        )
 
         val customCustomerUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5CUST")
         val customer = CustomerDirectoryItem(

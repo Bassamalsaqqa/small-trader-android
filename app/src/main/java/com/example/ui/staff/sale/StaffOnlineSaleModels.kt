@@ -124,13 +124,13 @@ data class StaffOnlineSaleAuthorityResolution(
 data class StaffOnlineSaleDraftLine(
     val lineId: String = UUID.randomUUID().toString(),
     val product: ProductCatalogItem,
-    val productUnitId: ServerUlid,
+    val productUnitId: ServerUlid, // Qualified online product_unit_id wire property (holds Unit.public_id, i.e., DTO unitId)
     val unitCode: String,
     val conversionToBase: PositiveDecimalQuantity,
     val quantity: PositiveDecimalQuantity,
     val unitPrice: MoneyAmount,
     val taxRateId: ServerUlid?,
-    val taxRate: TaxPercentage,
+    val taxRate: TaxPercentage?, // Null when product has unassigned tax association in catalog (fail closed)
     val taxInclusive: Boolean? // Nullable: V1 ProductCatalogItem lacks tax_inclusive for taxed products!
 ) {
     val estimatedSubtotal: MoneyAmount
@@ -141,10 +141,11 @@ data class StaffOnlineSaleDraftLine(
 
     val estimatedTax: MoneyAmount
         get() {
-            if (taxRateId == null || taxRate.toPlainString() == "0.000000") {
-                return MoneyAmount("0.000000")
+            val r = taxRate
+            if (r == null || taxRateId == null || r.toPlainString() == "0.000000") {
+                return MoneyAmount.ZERO
             }
-            val rate = taxRate.toRate()
+            val rate = r.toRate()
             val sub = quantity.value.multiply(unitPrice.value)
             val tax = if (taxInclusive == true) {
                 val divisor = BigDecimal.ONE.add(rate)
@@ -157,24 +158,37 @@ data class StaffOnlineSaleDraftLine(
         }
 
     val hasUnresolvedTaxContract: Boolean
-        get() = taxRateId != null && taxInclusive == null
+        get() = (taxRateId != null && taxInclusive == null) || (taxRateId == null && taxRate == null)
 
     companion object {
         fun fromProduct(
             product: ProductCatalogItem,
             packagingUnit: ProductPackagingUnit? = null,
             quantity: PositiveDecimalQuantity = PositiveDecimalQuantity.of(1),
-            taxInclusiveOverride: Boolean? = null
+            taxInclusiveOverride: Boolean? = null,
+            explicitNoTax: Boolean = false
         ): StaffOnlineSaleDraftLine {
-            val unitId = packagingUnit?.productUnitId ?: product.defaultUnit.productUnitId
+            // Qualified online product_unit_id means Unit.public_id -> DTO unitId, not productUnitId pivot!
+            val unitId = packagingUnit?.unitId ?: product.defaultUnit.unitId
             val code = packagingUnit?.code ?: product.baseUnit.code
             val conversion = packagingUnit?.conversionToBase ?: product.defaultUnit.conversionToBase
             val price = packagingUnit?.salePrice ?: product.defaultUnit.salePrice ?: product.unitPrice
 
+            // Truthful paired tax rate handling:
+            // (taxRateId == null && taxRate == null) || (taxRateId != null && taxRate != null)
+            // Null pair means unassigned tax association, NEVER an inferred zero tax or exemption.
             val (tRateId, tRate, tInc) = if (product.taxRateId == null) {
-                Triple(null, TaxPercentage.fromString("0.000000"), false)
+                if (explicitNoTax) {
+                    Triple(null, TaxPercentage.fromString("0.000000"), false)
+                } else {
+                    // Fail closed: typed unresolved instead of inferred zero
+                    Triple(null, null, null)
+                }
             } else {
-                Triple(product.taxRateId, product.taxRate ?: TaxPercentage.fromString("0.000000"), taxInclusiveOverride)
+                val rate = product.taxRate ?: throw IllegalStateException(
+                    "Product '${product.sku}' has broken tax pair: taxRateId is non-null (${product.taxRateId}) but taxRate is null"
+                )
+                Triple(product.taxRateId, rate, taxInclusiveOverride)
             }
 
             return StaffOnlineSaleDraftLine(
@@ -289,6 +303,12 @@ object StaffOnlineSaleRequestBuilder {
         val currency = authority.currency!!
 
         val linesWire = draft.lines.map { line ->
+            val rate = line.taxRate ?: throw IllegalStateException(
+                "Cannot build wire line '${line.product.name}': tax_rate is unassigned"
+            )
+            val inc = line.taxInclusive ?: throw IllegalStateException(
+                "Cannot build wire line '${line.product.name}': tax_inclusive is unresolved"
+            )
             mapOf(
                 "product_id" to line.product.id.value,
                 "product_unit_id" to line.productUnitId.value,
@@ -296,8 +316,8 @@ object StaffOnlineSaleRequestBuilder {
                 "quantity" to line.quantity.toPlainString(),
                 "unit_price" to line.unitPrice.toPlainString(),
                 "tax_rate_id" to line.taxRateId?.value,
-                "tax_rate" to line.taxRate.toPlainString(),
-                "tax_inclusive" to (line.taxInclusive ?: false)
+                "tax_rate" to rate.toPlainString(),
+                "tax_inclusive" to inc
             )
         }
 

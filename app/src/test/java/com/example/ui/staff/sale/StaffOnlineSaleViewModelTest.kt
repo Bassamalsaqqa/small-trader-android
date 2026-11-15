@@ -102,7 +102,7 @@ class StaffOnlineSaleViewModelTest {
             baseUnit = ProductBaseUnit(unitUlid, "PCS", "Pieces"),
             defaultUnit = ProductDefaultUnit(
                 unitId = unitUlid,
-                productUnitId = unitUlid,
+                productUnitId = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5FAP"),
                 conversionToBase = PositiveDecimalQuantity.of(1),
                 salePrice = MoneyAmount.fromNonnegativeString(unitPrice)
             ),
@@ -123,14 +123,14 @@ class StaffOnlineSaleViewModelTest {
 
         val product = createSampleProduct(unitPrice = "15.000000")
 
-        // 1. Add product to sale draft
-        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1))
+        // 1. Add product to sale draft (with explicitNoTax = true)
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
         assertEquals(1, vm.uiState.value.saleDraft.lines.size)
         assertEquals("1", vm.uiState.value.saleDraft.lines[0].quantity.toPlainString())
         assertEquals("15.000000", vm.uiState.value.saleDraft.estimatedSubtotal.toPlainString())
 
         // 2. Add same product again -> quantity increments cleanly without duplicate line
-        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(2))
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(2), explicitNoTax = true)
         assertEquals(1, vm.uiState.value.saleDraft.lines.size)
         assertEquals("3", vm.uiState.value.saleDraft.lines[0].quantity.toPlainString())
         assertEquals("45.000000", vm.uiState.value.saleDraft.estimatedSubtotal.toPlainString())
@@ -147,7 +147,7 @@ class StaffOnlineSaleViewModelTest {
         assertEquals("0.000000", vm.uiState.value.saleDraft.estimatedSubtotal.toPlainString())
 
         // 5. Clear draft
-        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1))
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
         assertFalse(vm.uiState.value.saleDraft.lines.isEmpty())
         vm.clearSaleDraft()
         assertTrue(vm.uiState.value.saleDraft.lines.isEmpty())
@@ -254,7 +254,7 @@ class StaffOnlineSaleViewModelTest {
 
         // Add product to draft
         val product = createSampleProduct(unitPrice = "30.000000")
-        vmWithMock.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1))
+        vmWithMock.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
         assertEquals(1, vmWithMock.uiState.value.saleDraft.lines.size)
         assertEquals("30.000000", vmWithMock.uiState.value.saleDraft.estimatedTotal.toPlainString())
     }
@@ -321,7 +321,7 @@ class StaffOnlineSaleViewModelTest {
         )
         advanceUntilIdle()
 
-        vm.addProductToSaleDraft(createSampleProduct(), quantity = PositiveDecimalQuantity.of(2))
+        vm.addProductToSaleDraft(createSampleProduct(), quantity = PositiveDecimalQuantity.of(2), explicitNoTax = true)
         assertFalse(vm.uiState.value.saleDraft.lines.isEmpty())
 
         // Logout
