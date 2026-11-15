@@ -1671,12 +1671,22 @@ class StaffOnlineSaleViewModelTest {
             }
         }
 
+        fakeCoordinator = TestStaffCoordinator(
+            companyId = companyUlid,
+            actorId = actorUlid,
+            deviceId = deviceUuid,
+            warehouseId = warehouseUlid,
+            cashAccountId = cashAccountUlid,
+            walkInId = walkInUlid,
+            currencyMinorUnits = 2
+        )
+
         val vm = StaffWorkspaceViewModel(
             coordinator = fakeCoordinator,
             configuredOrigin = "https://small-trader.example.com",
             ioDispatcher = testDispatcher,
             onlineCashEnabled = true,
-            currencyMinorUnitsOverride = 2,
+            currencyMinorUnitsOverride = null,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
@@ -1706,11 +1716,13 @@ class StaffOnlineSaleViewModelTest {
         val expectedDigest = originalIntent!!.expectedNormativeProfileDigest.value
         statusResponseDigest = expectedDigest
 
-        // Mutate coordinator bootstrap to invalidate new-sale authority
+        // Mutate coordinator bootstrap: changed warehouse, changed cash account, and unavailable minor units
         val currentReady = fakeCoordinator.authState as StaffAuthState.ReadReady
+        val changedWarehouse = DefaultWarehouse(ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5999"), "WH-02", "Changed Warehouse")
+        val changedCashAccount = ApprovedCashAccount(ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5888"), "CASH-02", "Changed Cash", "USD")
         val brokenBootstrap = currentReady.bootstrap.copy(
-            defaultWarehouse = null,
-            approvedCashAccount = null,
+            defaultWarehouse = changedWarehouse,
+            approvedCashAccount = changedCashAccount,
             currencyMinorUnits = null
         )
         fakeCoordinator.authState = currentReady.copy(bootstrap = brokenBootstrap)
