@@ -1686,7 +1686,7 @@ class StaffSessionCoordinatorTest {
         val golden = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
         val parsedJson = StrictJsonParser.parse(golden).asObject()
         val propsWithCmu = parsedJson.properties.toMutableMap()
-        propsWithCmu["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber(java.math.BigDecimal(2))
+        propsWithCmu["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber("2", isInt = true)
         val json13Fields = CanonicalJsonSerializer.serialize(com.example.data.mobile.contract.StrictJsonObject(propsWithCmu))
 
         transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = { request ->
@@ -1715,7 +1715,7 @@ class StaffSessionCoordinatorTest {
         val golden = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
         val parsedJson = StrictJsonParser.parse(golden).asObject()
         val propsWithCmu = parsedJson.properties.toMutableMap()
-        propsWithCmu["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber(java.math.BigDecimal(2))
+        propsWithCmu["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber("2", isInt = true)
         val json13Fields = CanonicalJsonSerializer.serialize(com.example.data.mobile.contract.StrictJsonObject(propsWithCmu))
 
         transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = { request ->

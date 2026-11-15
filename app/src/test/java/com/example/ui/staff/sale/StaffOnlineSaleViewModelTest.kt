@@ -797,7 +797,7 @@ class StaffOnlineSaleViewModelTest {
             id = taxId1,
             code = "VAT15",
             name = "VAT 15%",
-            rate = TaxPercentage.fromCanonicalString("15.000000"),
+            rate = TaxPercentage("15.000000"),
             calculation = "exclusive",
             isDefault = true
         )
@@ -831,7 +831,7 @@ class StaffOnlineSaleViewModelTest {
         assertNull("Unassigned tax must be null, never automatically zero", line.taxRate)
         assertNull(line.taxRateId)
         assertNull(line.taxInclusive)
-        assertFalse("Unassigned line must not be ready for checkout", line.isReadyForCheckout)
+        assertTrue("Unassigned line must have unresolved tax contract", line.hasUnresolvedTaxContract)
 
         // Set valid tax from current bootstrap
         vm.setLineTax(line.lineId, validTax)
@@ -839,14 +839,14 @@ class StaffOnlineSaleViewModelTest {
         assertEquals(validTax.id, updatedLine.taxRateId)
         assertEquals(validTax.rate, updatedLine.taxRate)
         assertEquals(false, updatedLine.taxInclusive)
-        assertTrue(updatedLine.isReadyForCheckout)
+        assertFalse(updatedLine.hasUnresolvedTaxContract)
 
         // Attempt setting foreign tax not in bootstrap -> must be rejected
         val foreignTax = BootstrapTax(
             id = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5TX9"),
             code = "FOREIGN",
             name = "Foreign Tax",
-            rate = TaxPercentage.fromCanonicalString("10.000000"),
+            rate = TaxPercentage("10.000000"),
             calculation = "exclusive",
             isDefault = false
         )
@@ -856,7 +856,7 @@ class StaffOnlineSaleViewModelTest {
         assertEquals(validTax.rate, lineAfterForeign.taxRate)
 
         // Attempt setting tax with mismatched rate/calculation -> must be rejected
-        val mismatchedTax = validTax.copy(rate = TaxPercentage.fromCanonicalString("5.000000"))
+        val mismatchedTax = validTax.copy(rate = TaxPercentage("5.000000"))
         vm.setLineTax(line.lineId, mismatchedTax)
         val lineAfterMismatched = vm.uiState.value.saleDraft.lines[0]
         assertEquals(validTax.id, lineAfterMismatched.taxRateId)
@@ -878,7 +878,7 @@ class StaffOnlineSaleViewModelTest {
         vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = false)
         val line = vm.uiState.value.saleDraft.lines[0]
         assertNull(line.taxRate)
-        assertFalse(line.isReadyForCheckout)
+        assertTrue(line.hasUnresolvedTaxContract)
 
         // Explicitly set No Tax control
         vm.setLineExplicitNoTax(line.lineId)
@@ -886,7 +886,7 @@ class StaffOnlineSaleViewModelTest {
         assertNull(noTaxLine.taxRateId)
         assertEquals("0.000000", noTaxLine.taxRate?.value?.toPlainString())
         assertEquals(false, noTaxLine.taxInclusive)
-        assertTrue(noTaxLine.isReadyForCheckout)
+        assertFalse(noTaxLine.hasUnresolvedTaxContract)
     }
 
     @Test

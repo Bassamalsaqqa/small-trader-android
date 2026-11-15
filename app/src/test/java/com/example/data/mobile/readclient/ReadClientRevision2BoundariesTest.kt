@@ -413,7 +413,7 @@ class ReadClientRevision2BoundariesTest {
 
         // 2. In DEFAULT mode, adding currency_minor_units violates strict-12 schema and throws CanonicalSerializationException
         val propsWithCmu = LinkedHashMap(bootObj.properties)
-        propsWithCmu["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber("2")
+        propsWithCmu["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber("2", isInt = true)
         val err = assertThrows(CanonicalSerializationException::class.java) {
             BootstrapResponse.fromStrictJson(com.example.data.mobile.contract.StrictJsonObject(propsWithCmu), includeCurrencyMinorUnits = false)
         }
@@ -434,7 +434,7 @@ class ReadClientRevision2BoundariesTest {
         // 2. In REQUESTED mode, valid 0..6 integers are parsed strictly
         for (validScale in 0..6) {
             val props = LinkedHashMap(bootObj.properties)
-            props["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber(validScale.toString())
+            props["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber(validScale.toString(), isInt = true)
             val resp = BootstrapResponse.fromStrictJson(com.example.data.mobile.contract.StrictJsonObject(props), includeCurrencyMinorUnits = true)
             assertEquals(validScale, resp.currencyMinorUnits)
         }
@@ -442,7 +442,7 @@ class ReadClientRevision2BoundariesTest {
         // 3. Out of range integers (< 0 or > 6) throw CanonicalSerializationException
         for (invalidScale in listOf(-1, 7, 10)) {
             val props = LinkedHashMap(bootObj.properties)
-            props["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber(invalidScale.toString())
+            props["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber(invalidScale.toString(), isInt = true)
             assertThrows(CanonicalSerializationException::class.java) {
                 BootstrapResponse.fromStrictJson(com.example.data.mobile.contract.StrictJsonObject(props), includeCurrencyMinorUnits = true)
             }
@@ -456,7 +456,7 @@ class ReadClientRevision2BoundariesTest {
         }
 
         val floatProps = LinkedHashMap(bootObj.properties)
-        floatProps["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber("2.5")
+        floatProps["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber("2.5", isInt = false)
         assertThrows(CanonicalSerializationException::class.java) {
             BootstrapResponse.fromStrictJson(com.example.data.mobile.contract.StrictJsonObject(floatProps), includeCurrencyMinorUnits = true)
         }

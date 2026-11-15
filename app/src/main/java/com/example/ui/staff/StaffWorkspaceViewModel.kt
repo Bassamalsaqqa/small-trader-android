@@ -1112,7 +1112,7 @@ class StaffWorkspaceViewModel(
                     val msg = when (result) {
                         is OnlineCashOrchestrationResult.IndeterminateTransient -> "Transient error while checking status: ${result.reason}"
                         is OnlineCashOrchestrationResult.ParseFailure -> "Failed to parse status response: ${result.category}"
-                        is OnlineCashOrchestrationResult.PreDispatchValidationError -> "Validation error: ${result.field}"
+                        is OnlineCashOrchestrationResult.PreDispatchValidationError -> "Validation error: ${result.message}"
                         else -> "Network or unexpected error while checking status"
                     }
                     _uiState.update { s ->

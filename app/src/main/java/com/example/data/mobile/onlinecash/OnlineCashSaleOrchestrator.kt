@@ -498,8 +498,7 @@ class OnlineCashSaleOrchestrator(
                 val conflictDto = statusResult.response.conflict
                 val errResp = ReadClientErrorResponse(
                     code = conflictDto?.conflictCode ?: "BUSINESS_CONFLICT",
-                    message = conflictDto?.conflictReason ?: "Parked conflict on server",
-                    evidence = null
+                    message = conflictDto?.conflictReason ?: "Parked conflict on server"
                 )
                 OnlineCashOrchestrationResult.BusinessConflict(errResp)
             }

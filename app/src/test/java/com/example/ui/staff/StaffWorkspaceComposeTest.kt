@@ -600,14 +600,14 @@ class StaffWorkspaceComposeTest {
         )
         val line = StaffOnlineSaleDraftLine.fromProduct(product = product, explicitNoTax = true)
         val unverifiedReceipt = OnlineCashSaleReceipt(
+            companyId = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789A"),
             clientEventId = com.example.data.mobile.contract.ClientUuid.random(),
+            payloadDigest = com.example.data.mobile.contract.PayloadDigest.fromBytes("test".toByteArray()),
             invoiceId = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789G"),
             invoiceNumber = "INV-HOLD-999",
             paymentId = null,
             paymentReceiptNumber = null,
             grandTotal = MoneyAmount.fromNonnegativeString("30.000000"),
-            amountPaid = MoneyAmount.ZERO,
-            changeReturned = MoneyAmount.ZERO,
             postedAt = "2026-11-15T12:00:00Z",
             wasReplay = false
         )
@@ -694,7 +694,7 @@ class StaffWorkspaceComposeTest {
             id = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789T"),
             code = "VAT16",
             name = "ضريبة القيمة المضافة 16%",
-            rate = TaxPercentage.fromCanonicalString("16.000000"),
+            rate = TaxPercentage("16.000000"),
             calculation = "exclusive",
             isDefault = true
         )

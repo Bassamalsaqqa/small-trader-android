@@ -404,6 +404,7 @@ class BootstrapResponse(
                 "unitsCount=${units.size}, taxesCount=${taxes.size}, offlinePolicy=$offlinePolicy, " +
                 "catalogSnapshotVersion='$catalogSnapshotVersion', currencyMinorUnits=$currencyMinorUnits)"
 
+    companion object {
         /** Strict 12-key set for DEFAULT bootstrap calls (no include param). */
         private val ALLOWED_KEYS_DEFAULT = setOf(
             "company_id", "company_name", "base_currency", "walk_in_customer_id",

@@ -174,7 +174,7 @@ class SmallTraderReadClientWorkflowTest {
         // Insert currency_minor_units: 2 into golden json
         val parsedJson = StrictJsonParser.parse(golden).asObject()
         val propsWithCmu = parsedJson.properties.toMutableMap()
-        propsWithCmu["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber(java.math.BigDecimal(2))
+        propsWithCmu["currency_minor_units"] = com.example.data.mobile.contract.StrictJsonNumber("2", isInt = true)
         val json13Fields = com.example.data.mobile.contract.CanonicalJsonSerializer.serialize(
             com.example.data.mobile.contract.StrictJsonObject(propsWithCmu)
         )
