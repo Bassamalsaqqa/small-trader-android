@@ -1,0 +1,79 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+Reusing configuration cache.
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:processDebugGoogleServices UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:kspDebugKotlin UP-TO-DATE
+> Task :app:compileDebugKotlin UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:bundleDebugClassesToCompileJar UP-TO-DATE
+> Task :app:kspDebugUnitTestKotlin UP-TO-DATE
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+
+> Task :app:compileDebugUnitTestKotlin FAILED
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleDraftTest.kt:405:17 No parameter with name 'conversionRate' found.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleDraftTest.kt:406:17 No parameter with name 'isBase' found.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleDraftTest.kt:406:17 No value passed for parameter 'allowsFraction'.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleDraftTest.kt:406:17 No value passed for parameter 'decimalPlaces'.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleDraftTest.kt:418:26 Unresolved reference 'hasUnresolvedContracts'.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleDraftTest.kt:452:25 Unresolved reference 'hasUnresolvedContracts'.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:166:29 Interface 'interface ReadClientTransport : Any' does not have constructors.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:166:51 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:259:33 Argument type mismatch: actual type is 'Function1<ERROR CLASS: Unknown return lambda parameter type, ERROR CLASS: Unknown return lambda parameter type>', but 'ReadClientTransport' was expected.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:259:35 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:276:13 No parameter with name 'error' found.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:278:13 No parameter with name 'status' found.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:278:13 No value passed for parameter 'code'.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:317:29 Interface 'interface ReadClientTransport : Any' does not have constructors.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:317:51 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:375:29 Interface 'interface ReadClientTransport : Any' does not have constructors.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:375:51 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:435:34 Unresolved reference 'CustomerDirectoryItem'.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:453:29 Interface 'interface ReadClientTransport : Any' does not have constructors.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:453:51 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:506:29 Interface 'interface ReadClientTransport : Any' does not have constructors.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:506:51 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:632:76 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:632:76 Argument type mismatch: actual type is 'List<uninferred T (of fun <T> emptyList)>', but 'String' was expected.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:632:89 Null cannot be a value of a non-null type 'String'.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:632:95 Argument type mismatch: actual type is 'Boolean', but 'String?' was expected.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:632:95 No value passed for parameter 'hasMore'.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:632:95 No value passed for parameter 'products'.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:636:79 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:636:79 Argument type mismatch: actual type is 'List<uninferred T (of fun <T> emptyList)>', but 'String' was expected.
+e: file:///home/t3dev/projects/small-trader-android/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:636:98 No value passed for parameter 'customers'.
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileDebugUnitTestKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 34s
+24 actionable tasks: 1 executed, 23 up-to-date
+Configuration cache entry reused.

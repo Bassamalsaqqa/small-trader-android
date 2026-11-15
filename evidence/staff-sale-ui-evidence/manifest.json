@@ -2,7 +2,9 @@
   "test_suite": "Staff Online Sale & Workspace Focused QA",
   "branch": "t3/android-v2-online-cash-client",
   "base_sha": "6bdcca0096cac1a2bcd971570423148aa6b1f510",
+  "execution_sha": "75665176cf5b9ff9ffb930831ad2e3f4bf0564a2",
   "timestamp_utc": "2026-11-15T06:49:38Z",
+  "raw_execution_time_seconds": 69,
   "exit_code": 0,
   "summary": {
     "total_tests": 142,
@@ -12,42 +14,138 @@
     "errors": 0
   },
   "command": "./gradlew testDebugUnitTest --tests \"com.example.ui.staff.sale.StaffOnlineSaleDraftTest\" --tests \"com.example.ui.staff.sale.StaffOnlineSaleViewModelTest\" --tests \"com.example.ui.staff.StaffWorkspaceComposeTest\" --tests \"com.example.ui.staff.StaffWorkspaceViewModelTest\" --tests \"com.example.data.mobile.session.*\" --max-workers=1 -Dorg.gradle.workers.max=1 -Dorg.gradle.jvmargs=\"-XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xmx1536m\" --no-daemon -Pkotlin.compiler.execution.strategy=in-process",
-  "suites": [
+  "source_and_test_file_hashes": {
+    "app/src/main/java/com/example/ui/staff/StaffWorkspaceScreen.kt": "e6470d5831044a20e4c71dd5b988fb26b7da5d0dd2092b073585c000f4f967da",
+    "app/src/main/java/com/example/ui/staff/StaffWorkspaceViewModel.kt": "d71cf61cdbac74a1b01a906b3cd88a042d85a73b9d95da4353013dcef6373989",
+    "app/src/main/java/com/example/ui/staff/sale/StaffOnlineSaleModels.kt": "c03e107841689582c79eafa1bda12839ba6a53df64885f11f01a108c7c5b94d1",
+    "app/src/main/java/com/example/ui/staff/sale/StaffOnlineSaleScreen.kt": "97100963a8c68f6a6977ae4fe86fd4d0f44ea0eef6d8e48de1af5f5cdc40d6d5",
+    "app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleDraftTest.kt": "559f08580293be6d9082e059ce10384864fc8c09c80d5d27284511dac37f5482",
+    "app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt": "f8710cc9a151a77952d8112edfb0355115d369b969900e4aff66e4a7102a9c7b",
+    "app/src/test/java/com/example/ui/staff/StaffWorkspaceComposeTest.kt": "27e59da84d799ab22fe5bfc539638e2ff0344519e0e0b83cd586e46a5eee0499",
+    "app/src/test/java/com/example/ui/staff/StaffWorkspaceViewModelTest.kt": "e8042ed5c4cf03a41d72dbf7c70a6db5858cc949dcb8c992e97ef33814412be9",
+    "app/src/test/java/com/example/data/mobile/session/StaffSessionCoordinatorTest.kt": "526bc971a24c49dec189e5b1120b2be6cc387e42e4e3362fd3d9a9f12ee3795f",
+    "app/src/test/java/com/example/data/mobile/session/SecureStaffSessionStoreTest.kt": "6d4d2405472cd84813ebdbc08df56888ad8e00612e124a49862896d91936d4af"
+  },
+  "test_suites": [
     {
       "name": "com.example.data.mobile.session.SecureStaffSessionStoreTest",
       "tests": 37,
       "failures": 0,
+      "errors": 0,
+      "skipped": 0,
       "xml_sha256": "120fa5024d000e046e4597561257de29765a3f29500ffb2dc9d43237fcdb7f65"
     },
     {
       "name": "com.example.data.mobile.session.StaffSessionCoordinatorTest",
       "tests": 51,
       "failures": 0,
+      "errors": 0,
+      "skipped": 0,
       "xml_sha256": "ea293c16ad7e80375ce30524a21a9566f293188ee448c7928ca8a3bc3eba2d32"
     },
     {
       "name": "com.example.ui.staff.sale.StaffOnlineSaleDraftTest",
       "tests": 11,
       "failures": 0,
+      "errors": 0,
+      "skipped": 0,
       "xml_sha256": "0bdf4e542d6aa2a2f7fd04857ea527315976a72dca286cf15722a281d0e41ed5"
     },
     {
       "name": "com.example.ui.staff.sale.StaffOnlineSaleViewModelTest",
       "tests": 8,
       "failures": 0,
+      "errors": 0,
+      "skipped": 0,
       "xml_sha256": "d7e321e32534b7cc85089664e0d6f00ef5c34e44db02afd0396d01faa74ec090"
     },
     {
       "name": "com.example.ui.staff.StaffWorkspaceComposeTest",
       "tests": 11,
       "failures": 0,
+      "errors": 0,
+      "skipped": 0,
       "xml_sha256": "4efaa0a8725d7e6b801a1d56df4d92e46ee61638eb40ddeae931de46352e46a8"
     },
     {
       "name": "com.example.ui.staff.StaffWorkspaceViewModelTest",
       "tests": 24,
       "failures": 0,
+      "errors": 0,
+      "skipped": 0,
       "xml_sha256": "ef0ff08480b10442cf1b1ab066faf686752086b90b86b6f5eae2b5a759871aea"
     }
-  ]
+  ],
+  "attempt_logs": [
+    {
+      "attempt": 1,
+      "stage": "compileDebugKotlin",
+      "outcome": "FAILED",
+      "reason": "nullability mismatch in StaffWorkspaceViewModel.kt selectedCompanyId",
+      "log_file": "attempt-logs/attempt-1-compileDebugKotlin-nullability.log",
+      "sha256": "51b7b9d379320c0b9f3a51d7c7d4953af2b8b866a3b725a7a1f0db446d75dc90"
+    },
+    {
+      "attempt": 2,
+      "stage": "compileDebugUnitTestKotlin",
+      "outcome": "FAILED",
+      "reason": "constructor/type mismatches in unit test fixtures (BootstrapUnit, line.hasUnresolvedContract, ReadClientTransport SAM, CustomerDirectoryItem import, fake coordinator response DTOs)",
+      "log_file": "attempt-logs/attempt-2-compileDebugUnitTestKotlin-errors.log",
+      "sha256": "c2e9ff81428adde98130280a4ab6c4e6304a7ce8b5c5857d6857a7760964be5a"
+    },
+    {
+      "attempt": 3,
+      "stage": "compileDebugUnitTestKotlin",
+      "outcome": "SUCCESS",
+      "reason": "clean compile after test constructor and interface object fixes",
+      "log_file": "attempt-logs/attempt-3-compileDebugUnitTestKotlin-pass.log",
+      "sha256": "da2cd1f84e904ff8a94ee4c77475f331d60526d41b1c3d29a448bbf6848975a1"
+    },
+    {
+      "attempt": 4,
+      "stage": "testDebugUnitTest",
+      "outcome": "FAILED (11 failures)",
+      "reason": "test ULID strings >26 chars, unassigned tax exception string check, SaleCommitResponse 10-key schema requirement in fake transport, uninitialized orchestrator in hook test",
+      "log_file": "attempt-logs/attempt-4-testDebugUnitTest-11failures.log",
+      "sha256": "c5444f10ce4f5746940c0c008c43dab403da59f6ad576e3b44776c297fe8e995"
+    },
+    {
+      "attempt": 5,
+      "stage": "compileDebugUnitTestKotlin",
+      "outcome": "FAILED",
+      "reason": "StrictJsonString.value called on already-unboxed String from asString()",
+      "log_file": "attempt-logs/attempt-5-compileDebugUnitTestKotlin-asString-value-error.log",
+      "sha256": "3944ab0db62f5545efaa2bf951d9de8f515a5bfb40f53d7604dbe832539b3caa"
+    },
+    {
+      "attempt": 6,
+      "stage": "testDebugUnitTest",
+      "outcome": "FAILED (5 failures)",
+      "reason": "non-Crockford Base32 characters 'U', 'I', 'O' in test ULIDs; Compose viewport clipping on catalog add button",
+      "log_file": "attempt-logs/attempt-6-testDebugUnitTest-5failures-crockford-chars.log",
+      "sha256": "c76f41727263ff95390494bf635635d3fdbbd1d9fb1dfdf64ffd2d9ca810d1bc"
+    },
+    {
+      "attempt": 7,
+      "stage": "testDebugUnitTest",
+      "outcome": "FAILED (1 failure)",
+      "reason": "performScrollTo on quantity OutlinedTextField triggered recursive layout buffer allocation causing Robolectric OutOfMemoryError",
+      "log_file": "attempt-logs/attempt-7-testDebugUnitTest-1failure-robolectric-oom.log",
+      "sha256": "3fab46b8d47ad65d0f8ce4936c967cd8a5bd33a107ad499afadbcc54e359e663"
+    },
+    {
+      "attempt": 8,
+      "stage": "testDebugUnitTest",
+      "outcome": "SUCCESS (142 passed, 0 failed)",
+      "reason": "100% clean test pass in 69 seconds across all 6 targeted test suites",
+      "log_file": "attempt-logs/attempt-8-testDebugUnitTest-142pass-clean.log",
+      "sha256": "f8b90a62c67bb253270d327a9c88a206d9bbac988ddef1a87ee7183c92b29232"
+    }
+  ],
+  "disclosures": {
+    "lint_status": "NOT_EXECUTED (no lint lease authorized; no lint pass claimed)",
+    "apk_status": "NOT_BUILT (no APK assembly authorized; working APK not claimed)",
+    "device_acceptance": "NOT_EXECUTED (no emulator/device tests performed)",
+    "production_dispatch_guards": "Normal staff online sale dispatch remains blocked in production when G1 (currency minor units) or G2 (unassigned catalog tax pair) contracts are missing, failing closed as designed."
+  }
 }
