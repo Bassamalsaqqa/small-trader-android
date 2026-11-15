@@ -13,21 +13,18 @@ import com.example.data.mobile.contract.StrictJsonNumber
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.contract.StrictJsonString
 import com.example.data.mobile.contract.v2.OnlineSaleContext
+import com.example.data.mobile.readclient.EndpointSecurity
 import com.example.data.mobile.session.AndroidKeyStoreCryptoEngine
 import com.example.data.mobile.session.BoundedStreamReader
 import com.example.data.mobile.session.SessionCryptoEngine
 import com.example.data.mobile.session.SessionProcessLocks
-import com.example.data.mobile.session.SessionStorageException
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
-import java.util.TimeZone
 import java.util.UUID
-import java.util.concurrent.CancellationException
 import kotlin.concurrent.withLock
 
 /**
@@ -45,9 +42,10 @@ class OnlineSaleRecoveryException(message: String, cause: Throwable? = null) : E
  *
  * INVARIANTS:
  * - NEVER contains bearer tokens, session secrets, or passwords.
- * - Stores authoritative normative digest, exact economics, and identity scope (company, actor, device, origin).
+ * - Stores authoritative normative digest, exact economics (payment amount), and identity scope (company, actor, device, origin).
  * - Stores raw canonical RFC 8785 request bytes for deterministic intent re-verification.
- * - [toPreparedOnlineSaleIntent] rebinds intent to the CURRENT authenticated session generation.
+ * - [toPreparedOnlineSaleIntent] rebinds intent to the CURRENT authenticated session generation and
+ *   validates decoded record totals/currency/identity against the reconstructed profile.
  */
 data class DurableOnlineSaleRecoveryRecord(
     val clientEventId: ClientUuid,
@@ -59,7 +57,6 @@ data class DurableOnlineSaleRecoveryRecord(
     val currency: String,
     val currencyMinorUnits: Int,
     val amount: MoneyAmount,
-    val grandTotal: MoneyAmount,
     val rawWireBytes: ByteArray,
     val createdAt: String
 ) {
@@ -75,7 +72,6 @@ data class DurableOnlineSaleRecoveryRecord(
                 currency == other.currency &&
                 currencyMinorUnits == other.currencyMinorUnits &&
                 amount == other.amount &&
-                grandTotal == other.grandTotal &&
                 createdAt == other.createdAt &&
                 rawWireBytes.contentEquals(other.rawWireBytes)
     }
@@ -90,7 +86,6 @@ data class DurableOnlineSaleRecoveryRecord(
         result = 31 * result + currency.hashCode()
         result = 31 * result + currencyMinorUnits.hashCode()
         result = 31 * result + amount.hashCode()
-        result = 31 * result + grandTotal.hashCode()
         result = 31 * result + createdAt.hashCode()
         result = 31 * result + rawWireBytes.contentHashCode()
         return result
@@ -98,11 +93,12 @@ data class DurableOnlineSaleRecoveryRecord(
 
     override fun toString(): String =
         "DurableOnlineSaleRecoveryRecord(eventId=$clientEventId, companyId=$companyId, " +
-                "actorId=$actorId, deviceId=$deviceId, currency='$currency', amount=$amount, grandTotal=$grandTotal)"
+                "actorId=$actorId, deviceId=$deviceId, currency='$currency', amount=$amount)"
 
     /**
      * Reconstitutes and rebinds the prepared online sale intent to [reboundGeneration].
-     * Re-validates canonical 7-key request bytes and profile digest strictly.
+     * Re-validates canonical 7-key request bytes and profile digest strictly, and asserts
+     * that decoded recovery economics match the reconstructed normative profile.
      */
     fun toPreparedOnlineSaleIntent(reboundGeneration: Long): PreparedOnlineSaleIntent {
         val context = OnlineSaleContext(
@@ -110,12 +106,34 @@ data class DurableOnlineSaleRecoveryRecord(
             companyId = companyId,
             currencyMinorUnits = currencyMinorUnits
         )
-        return PreparedOnlineSaleIntent.prepare(
+        val reboundIntent = PreparedOnlineSaleIntent.prepare(
             context = context,
             rawWireBytes = rawWireBytes,
             scopeGeneration = reboundGeneration,
             expectedDigest = expectedNormativeProfileDigest
         )
+
+        // Strict cross-validation of decoded record against reconstructed normative profile
+        require(reboundIntent.profile.payment.amount == amount) {
+            "Decoded recovery record amount ($amount) does not match reconstructed profile payment amount (${reboundIntent.profile.payment.amount})"
+        }
+        require(reboundIntent.currency == currency) {
+            "Decoded recovery record currency ($currency) does not match reconstructed profile currency (${reboundIntent.currency})"
+        }
+        require(reboundIntent.clientEventId == clientEventId) {
+            "Decoded recovery record event ID ($clientEventId) does not match reconstructed profile event ID (${reboundIntent.clientEventId})"
+        }
+        require(reboundIntent.deviceId == deviceId) {
+            "Decoded recovery record device ID ($deviceId) does not match reconstructed profile device ID (${reboundIntent.deviceId})"
+        }
+        require(reboundIntent.context.companyId == companyId) {
+            "Decoded recovery record company ID ($companyId) does not match reconstructed profile company ID (${reboundIntent.context.companyId})"
+        }
+        require(reboundIntent.context.actorId == actorId) {
+            "Decoded recovery record actor ID ($actorId) does not match reconstructed profile actor ID (${reboundIntent.context.actorId})"
+        }
+
+        return reboundIntent
     }
 }
 
@@ -125,7 +143,10 @@ data class DurableOnlineSaleRecoveryRecord(
 interface DurableOnlineSaleRecoveryStore {
     /**
      * Atomically encrypts and persists [record] to disk BEFORE network dispatch.
-     * Throws [OnlineSaleRecoveryException] on write or crypto failure.
+     * Enforces compare-and-set reservation at the store boundary:
+     * - Rejects attempts to overwrite with a different event while an unverified sale is pending.
+     * - Rejects attempts to modify the payload bytes or digest of an existing event ID.
+     * Throws [OnlineSaleRecoveryException] on conflict, write, or crypto failure.
      */
     fun savePendingSale(record: DurableOnlineSaleRecoveryRecord)
 
@@ -143,7 +164,7 @@ interface DurableOnlineSaleRecoveryStore {
 
     /**
      * Crash-safely clears the recovery record matching [clientEventId].
-     * If the stored record does not match [clientEventId], this is a no-op (never erases another event).
+     * If the stored record does not match [clientEventId], this is an idempotent no-op (never erases another event).
      */
     fun clearPendingSale(clientEventId: ClientUuid)
 
@@ -155,6 +176,19 @@ interface DurableOnlineSaleRecoveryStore {
     companion object {
         const val FILE_NAME = "small_trader_online_sale_recovery.bin"
         const val KEY_ALIAS = "small_trader_online_sale_recovery_v1"
+
+        /**
+         * Normalizes base origin identically across persistence and retrieval paths
+         * to prevent case or trailing-slash discrepancies from hiding pending records.
+         */
+        fun canonicalizeOrigin(origin: String, allowHttpLoopback: Boolean = false): String {
+            val trimmed = origin.trim().trimEnd('/')
+            return try {
+                EndpointSecurity.validateBaseOrigin(trimmed, allowHttpLoopback)
+            } catch (_: Exception) {
+                trimmed.lowercase(Locale.ROOT)
+            }
+        }
 
         fun create(context: Context): DurableOnlineSaleRecoveryStore {
             val noBackupDir = context.noBackupFilesDir
@@ -173,7 +207,7 @@ interface DurableOnlineSaleRecoveryStore {
  * Standard implementation of [DurableOnlineSaleRecoveryStore].
  *
  * Uses AES-256-GCM authenticated encryption backed by AndroidKeyStore / [SessionCryptoEngine].
- * Enforces atomic replacement via temporary file and fd.sync() before rename.
+ * Enforces atomic replacement via temporary file and fd.sync() before rename, and directory fsync.
  * In-process concurrency is coordinated via [SessionProcessLocks].
  */
 class DefaultDurableOnlineSaleRecoveryStore internal constructor(
@@ -185,10 +219,43 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
     internal var renameOperation: (File, File) -> Boolean = { src, dst -> src.renameTo(dst) }
 
     override fun savePendingSale(record: DurableOnlineSaleRecoveryRecord) {
+        val canonicalOrigin = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(record.baseOrigin)
+        val normalizedRecord = if (record.baseOrigin == canonicalOrigin) record else record.copy(baseOrigin = canonicalOrigin)
+
         val lock = SessionProcessLocks.getFileLock(storageFile)
         lock.withLock {
             val existingRecords = readRecordsInternal()
-            val updated = existingRecords.filterNot { it.clientEventId == record.clientEventId } + record
+
+            // Compare-and-set reservation: check if an event already exists for this exact identity scope
+            val existingForIdentity = existingRecords.firstOrNull {
+                it.companyId == normalizedRecord.companyId &&
+                        it.actorId == normalizedRecord.actorId &&
+                        it.deviceId == normalizedRecord.deviceId &&
+                        it.baseOrigin == normalizedRecord.baseOrigin
+            }
+
+            if (existingForIdentity != null) {
+                if (existingForIdentity.clientEventId == normalizedRecord.clientEventId) {
+                    // Same event ID: enforce byte and digest immutability
+                    if (existingForIdentity.expectedNormativeProfileDigest != normalizedRecord.expectedNormativeProfileDigest ||
+                        !existingForIdentity.rawWireBytes.contentEquals(normalizedRecord.rawWireBytes)
+                    ) {
+                        throw OnlineSaleRecoveryException(
+                            "Cannot overwrite pending event ${normalizedRecord.clientEventId} with different payload bytes or digest"
+                        )
+                    }
+                    // Idempotent re-save of exact same event
+                    return@withLock
+                } else {
+                    // Different event ID: block new event while prior unverified event is pending
+                    throw OnlineSaleRecoveryException(
+                        "Cannot save new event ${normalizedRecord.clientEventId}: pending unverified event " +
+                                "${existingForIdentity.clientEventId} already exists for this scope"
+                    )
+                }
+            }
+
+            val updated = existingRecords + normalizedRecord
             writeRecordsInternal(updated)
         }
     }
@@ -199,6 +266,7 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
         deviceId: ClientUuid,
         baseOrigin: String
     ): DurableOnlineSaleRecoveryRecord? {
+        val canonicalOrigin = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(baseOrigin)
         val lock = SessionProcessLocks.getFileLock(storageFile)
         return lock.withLock {
             if (!storageFile.exists()) return@withLock null
@@ -207,7 +275,7 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
                 r.companyId == companyId &&
                         r.actorId == actorId &&
                         r.deviceId == deviceId &&
-                        r.baseOrigin == baseOrigin
+                        r.baseOrigin == canonicalOrigin
             }
         }
     }
@@ -219,13 +287,14 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
             val records = readRecordsInternal()
             val filtered = records.filterNot { it.clientEventId == clientEventId }
             if (filtered.size == records.size) {
-                // No matching record found; do not erase another event!
+                // No matching record found; do not erase another event (idempotent success)
                 return@withLock
             }
             if (filtered.isEmpty()) {
                 if (!storageFile.delete()) {
                     throw OnlineSaleRecoveryException("Failed to delete empty recovery file")
                 }
+                syncDirectory(storageFile.parentFile)
             } else {
                 writeRecordsInternal(filtered)
             }
@@ -277,6 +346,7 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
             if (!renameOperation(tempFile, storageFile)) {
                 throw OnlineSaleRecoveryException("Failed to atomically replace recovery file")
             }
+            syncDirectory(parent)
             writeSuccess = true
         } catch (e: Exception) {
             if (e is OnlineSaleRecoveryException) throw e
@@ -284,6 +354,7 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
         } finally {
             if (!writeSuccess && tempFile.exists()) {
                 tempFile.delete()
+                syncDirectory(parent)
             }
         }
     }
@@ -315,6 +386,17 @@ class DefaultDurableOnlineSaleRecoveryStore internal constructor(
             DurableOnlineSaleRecoveryWireFormat.deserialize(plaintext)
         } catch (e: Exception) {
             throw OnlineSaleRecoveryException("Failed to deserialize recovery records: ${e.message}", e)
+        }
+    }
+
+    private fun syncDirectory(dir: File?) {
+        if (dir == null || !dir.exists() || !dir.isDirectory) return
+        try {
+            FileInputStream(dir).use { fis ->
+                fis.channel.force(true)
+            }
+        } catch (_: Exception) {
+            // Directory fsync is best-effort across various Android storage providers / sandboxes
         }
     }
 
@@ -390,7 +472,6 @@ internal object DurableOnlineSaleRecoveryWireFormat {
         "currency",
         "currency_minor_units",
         "amount",
-        "grand_total",
         "raw_wire_payload",
         "created_at"
     )
@@ -412,7 +493,6 @@ internal object DurableOnlineSaleRecoveryWireFormat {
                 "currency" to r.currency,
                 "currency_minor_units" to r.currencyMinorUnits.toLong(),
                 "amount" to r.amount.toPlainString(),
-                "grand_total" to r.grandTotal.toPlainString(),
                 "raw_wire_payload" to String(r.rawWireBytes, Charsets.UTF_8),
                 "created_at" to r.createdAt
             )
@@ -466,7 +546,6 @@ internal object DurableOnlineSaleRecoveryWireFormat {
             val cmuNum = (obj.require("currency_minor_units") as? StrictJsonNumber)?.rawString?.toIntOrNull()
                 ?: throw CanonicalSerializationException("currency_minor_units must be a valid integer")
             val amount = MoneyAmount(requireString(obj, "amount"))
-            val grandTotal = MoneyAmount(requireString(obj, "grand_total"))
             val rawWirePayload = requireString(obj, "raw_wire_payload")
             val createdAt = requireString(obj, "created_at")
 
@@ -481,7 +560,6 @@ internal object DurableOnlineSaleRecoveryWireFormat {
                     currency = currency,
                     currencyMinorUnits = cmuNum,
                     amount = amount,
-                    grandTotal = grandTotal,
                     rawWireBytes = rawWirePayload.toByteArray(Charsets.UTF_8),
                     createdAt = createdAt
                 )

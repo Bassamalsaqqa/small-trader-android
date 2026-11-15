@@ -123,7 +123,8 @@ class OnlineCashSaleOrchestrator(
     private val scopeGenerationProvider: () -> Long = { 0L },
     private val onAuthDeniedLockScope: ((scopeGeneration: Long, error: ReadClientErrorResponse) -> Unit)? = null,
     private val activeScopeSupplier: (() -> OnlineSaleScope?)? = null,
-    private val recoveryStore: DurableOnlineSaleRecoveryStore? = null
+    private val recoveryStore: DurableOnlineSaleRecoveryStore? = null,
+    private val requireRecoveryStore: Boolean = false
 ) {
 
     private fun isScopeMatching(
@@ -186,9 +187,15 @@ class OnlineCashSaleOrchestrator(
             )
         }
 
-        // 3.5. Durable recovery record persistence BEFORE network dispatch (fail-closed on crypto/write failure)
-        if (recoveryStore != null) {
-            val baseOrigin = client.validatedBaseOrigin
+        // 3.5. Durable recovery record persistence BEFORE network dispatch (fail-closed on crypto/write failure or missing mandatory store)
+        if (recoveryStore == null) {
+            if (requireRecoveryStore) {
+                return OnlineCashOrchestrationResult.StorageFailure(
+                    "Durable recovery store is mandatory for online cash sales but unavailable; dispatch rejected fail-closed"
+                )
+            }
+        } else {
+            val baseOrigin = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(client.validatedBaseOrigin)
             val record = DurableOnlineSaleRecoveryRecord(
                 clientEventId = intent.clientEventId,
                 expectedNormativeProfileDigest = intent.expectedNormativeProfileDigest,
@@ -199,7 +206,6 @@ class OnlineCashSaleOrchestrator(
                 currency = targetCurrency,
                 currencyMinorUnits = intent.context.currencyMinorUnits,
                 amount = intent.profile.payment.amount,
-                grandTotal = intent.profile.grandTotal,
                 rawWireBytes = intent.rawWireBytes,
                 createdAt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
                     timeZone = java.util.TimeZone.getTimeZone("UTC")

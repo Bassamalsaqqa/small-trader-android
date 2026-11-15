@@ -2090,7 +2090,6 @@ class StaffOnlineSaleViewModelTest {
             currency = "USD",
             currencyMinorUnits = 2,
             amount = MoneyAmount("20.00"),
-            grandTotal = MoneyAmount("20.00"),
             rawWireBytes = intentA.rawWireBytes,
             createdAt = "2026-11-15T12:00:00Z"
         )
@@ -2164,7 +2163,6 @@ class StaffOnlineSaleViewModelTest {
             currency = "USD",
             currencyMinorUnits = 2,
             amount = MoneyAmount("20.00"),
-            grandTotal = MoneyAmount("20.00"),
             rawWireBytes = intent.rawWireBytes,
             createdAt = "2026-11-15T12:00:00Z"
         )
@@ -2212,7 +2210,6 @@ class StaffOnlineSaleViewModelTest {
             currency = "USD",
             currencyMinorUnits = 2,
             amount = MoneyAmount("10.00"),
-            grandTotal = MoneyAmount("10.00"),
             rawWireBytes = byteArrayOf(1, 2, 3),
             createdAt = "2026-11-15T12:00:00Z"
         )
@@ -2261,7 +2258,6 @@ class StaffOnlineSaleViewModelTest {
             currency = "USD",
             currencyMinorUnits = 2,
             amount = MoneyAmount("20.00"),
-            grandTotal = MoneyAmount("20.00"),
             rawWireBytes = intent.rawWireBytes,
             createdAt = "2026-11-15T12:00:00Z"
         )
@@ -2326,6 +2322,95 @@ class StaffOnlineSaleViewModelTest {
         assertNotNull(vm.uiState.value.saleDraft.submissionError)
         assertTrue(vm.uiState.value.saleDraft.submissionError!!.contains("mismatch", ignoreCase = true))
         assertNotNull(sharedRecoveryStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com"))
+    }
+
+    @Test
+    fun testDurableRecovery_loadPendingFailure_locksUiWithBlockingHold() = runTest(testDispatcher) {
+        val failingRecoveryStore = InMemoryDurableOnlineSaleRecoveryStore(throwOnGet = true)
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = failingRecoveryStore
+        )
+        advanceUntilIdle()
+
+        // Read/load failure MUST lock the UI in blocking payment hold
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertFalse(vm.uiState.value.saleDraft.isSubmitting)
+        assertNotNull(vm.uiState.value.saleDraft.submissionError)
+        assertTrue(vm.uiState.value.saleDraft.submissionError!!.contains("blocked", ignoreCase = true) ||
+                vm.uiState.value.saleDraft.submissionError!!.contains("failed", ignoreCase = true))
+
+        // Adding product or submitting new sale MUST be rejected
+        vm.addProductToSaleDraft(createSampleProduct(), quantity = PositiveDecimalQuantity.of(1))
+        assertTrue(vm.uiState.value.saleDraft.lines.isEmpty())
+    }
+
+    @Test
+    fun testDurableRecovery_missingStore_onlineCashActive_locksUiWithBlockingHold() = runTest(testDispatcher) {
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = null,
+            allowRecoveryBypassForTesting = false
+        )
+        advanceUntilIdle()
+
+        // Missing store with online cash enabled MUST lock UI in blocking hold
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        assertNotNull(vm.uiState.value.saleDraft.submissionError)
+        assertTrue(vm.uiState.value.saleDraft.submissionError!!.contains("unavailable", ignoreCase = true))
+
+        // Product addition is blocked
+        vm.addProductToSaleDraft(createSampleProduct(), quantity = PositiveDecimalQuantity.of(1))
+        assertTrue(vm.uiState.value.saleDraft.lines.isEmpty())
+    }
+
+    @Test
+    fun testDurableRecovery_missingStore_submitBlockedWithHold() = runTest(testDispatcher) {
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = null,
+            allowRecoveryBypassForTesting = true // Allow startup without hold
+        )
+        advanceUntilIdle()
+
+        // Add product succeeds when bypass was enabled at startup
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        assertEquals(1, vm.uiState.value.saleDraft.lines.size)
+
+        // When orchestrator requires recovery store and store is null, dispatch returns StorageFailure
+        val draft = vm.uiState.value.saleDraft
+        val ready = fakeCoordinator.authState as StaffAuthState.ReadReady
+        val authority = StaffOnlineSaleAuthorityResolution.resolve(ready.bootstrap, ready.session, 2)
+        val intent = StaffOnlineSaleRequestBuilder.prepareIntent(draft, authority, 1L, ClientUuid.random())
+
+        // Explicit orchestrator dispatch with requireRecoveryStore = true fails closed
+        val strictOrchestrator = OnlineCashSaleOrchestrator(
+            client = AndroidV2OnlineCashClient(
+                transport = object : ReadClientTransport {
+                    override fun execute(request: TransportRequest): TransportResponse {
+                        throw AssertionError("HTTP POST must not be called")
+                    }
+                },
+                baseOrigin = "https://small-trader.example.com"
+            ),
+            tokenProvider = { "token" },
+            recoveryStore = null,
+            requireRecoveryStore = true
+        )
+        val result = strictOrchestrator.dispatchOnlineCashSale(intent, companyUlid, deviceUuid, "USD")
+        assertTrue(result is OnlineCashOrchestrationResult.StorageFailure)
     }
 }
 
@@ -2449,7 +2534,8 @@ private class TestStaffCoordinator(
  * Hermetic in-memory implementation of DurableOnlineSaleRecoveryStore for testing.
  */
 private class InMemoryDurableOnlineSaleRecoveryStore(
-    var throwOnSave: Boolean = false
+    var throwOnSave: Boolean = false,
+    var throwOnGet: Boolean = false
 ) : DurableOnlineSaleRecoveryStore {
     private val records = mutableMapOf<ClientUuid, DurableOnlineSaleRecoveryRecord>()
 
@@ -2457,7 +2543,9 @@ private class InMemoryDurableOnlineSaleRecoveryStore(
         if (throwOnSave) {
             throw OnlineSaleRecoveryException("Simulated disk write failure")
         }
-        records[record.clientEventId] = record
+        val canonical = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(record.baseOrigin)
+        val normalized = if (record.baseOrigin == canonical) record else record.copy(baseOrigin = canonical)
+        records[normalized.clientEventId] = normalized
     }
 
     override fun getPendingSale(
@@ -2466,8 +2554,12 @@ private class InMemoryDurableOnlineSaleRecoveryStore(
         deviceId: ClientUuid,
         baseOrigin: String
     ): DurableOnlineSaleRecoveryRecord? {
+        if (throwOnGet) {
+            throw OnlineSaleRecoveryException("Simulated disk read failure")
+        }
+        val canonical = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(baseOrigin)
         return records.values.firstOrNull {
-            it.companyId == companyId && it.actorId == actorId && it.deviceId == deviceId && it.baseOrigin == baseOrigin
+            it.companyId == companyId && it.actorId == actorId && it.deviceId == deviceId && it.baseOrigin == canonical
         }
     }
 

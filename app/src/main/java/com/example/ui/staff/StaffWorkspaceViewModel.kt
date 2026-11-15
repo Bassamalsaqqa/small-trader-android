@@ -85,7 +85,8 @@ class StaffWorkspaceViewModel(
     ) -> OnlineCashSaleOrchestrator)? = null,
     private val onlineCashEnabled: Boolean = false,
     private val currencyMinorUnitsOverride: Int? = null,
-    private val recoveryStore: DurableOnlineSaleRecoveryStore? = null
+    private val recoveryStore: DurableOnlineSaleRecoveryStore? = null,
+    private val allowRecoveryBypassForTesting: Boolean = false
 ) : ViewModel() {
 
     private val outboxHealthInspector: OutboxHealthInspector =
@@ -401,13 +402,29 @@ class StaffWorkspaceViewModel(
     }
 
     private fun loadDurableRecoveryIfPending(state: StaffAuthState.ReadReady) {
-        val store = recoveryStore ?: return
-        val currentCompany = state.session.selectedCompanyId
+        val isOnlineCashActive = onlineCashEnabled || BuildConfig.STAFF_ONLINE_CASH_ENABLED
+        val store = recoveryStore
+        if (store == null) {
+            if (isOnlineCashActive && !allowRecoveryBypassForTesting) {
+                _uiState.update { s ->
+                    s.copy(
+                        saleDraft = s.saleDraft.copy(
+                            isPaymentUnverifiedHold = true,
+                            isSubmitting = false,
+                            submissionError = "Durable recovery storage is unavailable. Sales are blocked until recovery storage is operational."
+                        )
+                    )
+                }
+            }
+            return
+        }
+
+        val currentCompany = state.session.selectedCompanyId ?: state.bootstrap.companyId
         val currentActor = state.session.actorUlid
         val currentDevice = state.session.deviceUuid
         val coord = coordinator ?: return
         val currentGen = coord.currentGeneration
-        val origin = configuredOrigin.trim()
+        val origin = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(configuredOrigin, allowHttpLoopback)
 
         try {
             val record = store.getPendingSale(
@@ -429,8 +446,16 @@ class StaffWorkspaceViewModel(
                     )
                 )
             }
-        } catch (_: Exception) {
-            // Fail-safe handling on storage exception
+        } catch (e: Exception) {
+            _uiState.update { s ->
+                s.copy(
+                    saleDraft = s.saleDraft.copy(
+                        isPaymentUnverifiedHold = true,
+                        isSubmitting = false,
+                        submissionError = "Durable recovery check failed: ${e.message}. Sales are blocked until recovery storage is operational."
+                    )
+                )
+            }
         }
     }
 
@@ -492,7 +517,8 @@ class StaffWorkspaceViewModel(
                 scopeGenerationProvider = scopeGenerationProvider,
                 onAuthDeniedLockScope = onAuthDeniedLockScope,
                 activeScopeSupplier = activeScopeSupplier,
-                recoveryStore = recoveryStore
+                recoveryStore = recoveryStore,
+                requireRecoveryStore = !allowRecoveryBypassForTesting && (onlineCashEnabled || BuildConfig.STAFF_ONLINE_CASH_ENABLED)
             )
         }
         cachedOrchestrator = created
@@ -704,6 +730,19 @@ class StaffWorkspaceViewModel(
         // Guard against hold
         if (currentState.saleDraft.isPaymentUnverifiedHold) return
 
+        val isOnlineCashActive = onlineCashEnabled || BuildConfig.STAFF_ONLINE_CASH_ENABLED
+        if (recoveryStore == null && !allowRecoveryBypassForTesting && isOnlineCashActive) {
+            _uiState.update {
+                it.copy(
+                    saleDraft = it.saleDraft.copy(
+                        isPaymentUnverifiedHold = true,
+                        submissionError = "Durable recovery storage is unavailable. Sales are blocked until recovery storage is operational."
+                    )
+                )
+            }
+            return
+        }
+
         if (currentState.phase != StaffWorkspacePhase.READ_READY) {
             _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Staff workspace is not in READ_READY phase")) }
             return
@@ -782,13 +821,26 @@ class StaffWorkspaceViewModel(
             val targetCurrency = authority.currency!!
 
             val store = recoveryStore
+            if (store == null && !allowRecoveryBypassForTesting && isOnlineCashActive) {
+                _uiState.update { s ->
+                    s.copy(
+                        saleDraft = s.saleDraft.copy(
+                            isSubmitting = false,
+                            isPaymentUnverifiedHold = true,
+                            submissionError = "Durable recovery storage is unavailable. Sales are blocked until recovery storage is operational."
+                        )
+                    )
+                }
+                return@launch
+            }
             if (store != null) {
                 try {
+                    val canonicalOrigin = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(configuredOrigin, allowHttpLoopback)
                     val pending = store.getPendingSale(
                         companyId = targetCompanyId,
                         actorId = readyState.session.actorUlid,
                         deviceId = targetDeviceId,
-                        baseOrigin = configuredOrigin.trim()
+                        baseOrigin = canonicalOrigin
                     )
                     if (pending != null && pending.clientEventId != preparedIntent.clientEventId) {
                         _uiState.update { s ->
@@ -808,6 +860,7 @@ class StaffWorkspaceViewModel(
                         s.copy(
                             saleDraft = s.saleDraft.copy(
                                 isSubmitting = false,
+                                isPaymentUnverifiedHold = true,
                                 submissionError = "Durable recovery storage error: ${e.message}"
                             )
                         )
@@ -2629,9 +2682,15 @@ class StaffWorkspaceViewModel(
                 com.example.data.mobile.outbox.UnavailableOutboxHealthInspector()
             }
 
+            var recoveryStoreInitError: String? = null
             val effectiveRecoveryStore: DurableOnlineSaleRecoveryStore? = try {
                 DurableOnlineSaleRecoveryStore.create(context.applicationContext)
-            } catch (_: Exception) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (e: Exception) {
+                recoveryStoreInitError = e.message ?: "Failed to initialize recovery store"
                 null
             }
 
@@ -2677,6 +2736,24 @@ class StaffWorkspaceViewModel(
 
             // 2. Safe coordinator composition: handle Keystore/Storage unavailability gracefully without crash
             val effectiveIncludeCurrencyMinorUnits = onlineCashEnabled || BuildConfig.STAFF_ONLINE_CASH_ENABLED
+
+            // Fail closed to STORAGE_FAILED if recovery store creation failed while online cash is active
+            if (effectiveIncludeCurrencyMinorUnits && effectiveRecoveryStore == null) {
+                return StaffWorkspaceViewModel(
+                    coordinator = null,
+                    configuredOrigin = configuredOrigin,
+                    allowHttpLoopback = effectiveLoopback,
+                    ioDispatcher = ioDispatcher,
+                    authDenialListener = authDenialListener,
+                    initialPhase = StaffWorkspacePhase.STORAGE_FAILED,
+                    initialStorageError = "Durable recovery storage initialization failed: $recoveryStoreInitError",
+                    outboxHealthInspector = effectiveInspector,
+                    orchestratorFactory = orchestratorFactory,
+                    onlineCashEnabled = onlineCashEnabled,
+                    currencyMinorUnitsOverride = currencyMinorUnitsOverride,
+                    recoveryStore = null
+                ) as T
+            }
             val coordinator = try {
                 StaffSessionCoordinator.create(
                     context = context.applicationContext,

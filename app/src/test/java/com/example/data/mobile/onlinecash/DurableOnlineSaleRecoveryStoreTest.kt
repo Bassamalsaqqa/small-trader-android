@@ -79,7 +79,6 @@ class DurableOnlineSaleRecoveryStoreTest {
             currency = "USD",
             currencyMinorUnits = 2,
             amount = MoneyAmount("20.00"),
-            grandTotal = MoneyAmount("20.00"),
             rawWireBytes = sampleRawWireBytes,
             createdAt = "2026-11-15T12:00:00Z"
         )
@@ -108,7 +107,6 @@ class DurableOnlineSaleRecoveryStoreTest {
         assertEquals(record.currency, retrieved.currency)
         assertEquals(record.currencyMinorUnits, retrieved.currencyMinorUnits)
         assertEquals(record.amount, retrieved.amount)
-        assertEquals(record.grandTotal, retrieved.grandTotal)
         assertEquals(record.createdAt, retrieved.createdAt)
         assertTrue(record.rawWireBytes.contentEquals(retrieved.rawWireBytes))
     }
@@ -215,7 +213,54 @@ class DurableOnlineSaleRecoveryStoreTest {
         assertEquals(record.currency, reboundIntent.currency)
         assertEquals(record.expectedNormativeProfileDigest, reboundIntent.expectedNormativeProfileDigest)
         assertEquals(record.amount, reboundIntent.profile.payment.amount)
-        assertEquals(record.grandTotal, reboundIntent.profile.grandTotal)
+    }
+
+    @Test
+    fun testCompareAndSet_blocksSecondEventWhilePriorPending() {
+        val record1 = createSampleRecord(eventId = ClientUuid.random())
+        recoveryStore.savePendingSale(record1)
+
+        val record2 = createSampleRecord(eventId = ClientUuid.random())
+        try {
+            recoveryStore.savePendingSale(record2)
+            fail("Expected OnlineSaleRecoveryException when saving second event while unverified event pending")
+        } catch (e: OnlineSaleRecoveryException) {
+            assertTrue(e.message!!.contains("already exists", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun testCompareAndSet_blocksMutationOfExistingEventWithDifferentPayload() {
+        val eventId = ClientUuid.random()
+        val record1 = createSampleRecord(eventId = eventId)
+        recoveryStore.savePendingSale(record1)
+
+        val tamperedBytes = record1.rawWireBytes.clone().also { it[0] = (it[0].toInt() xor 1).toByte() }
+        val tamperedRecord = record1.copy(rawWireBytes = tamperedBytes)
+        try {
+            recoveryStore.savePendingSale(tamperedRecord)
+            fail("Expected OnlineSaleRecoveryException when modifying payload bytes of existing pending event")
+        } catch (e: OnlineSaleRecoveryException) {
+            assertTrue(e.message!!.contains("different payload", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun testCompareAndSet_allowsIdempotentResaveOfExactSameRecord() {
+        val record = createSampleRecord()
+        recoveryStore.savePendingSale(record)
+        // Idempotent re-save of exact same record must succeed without exception
+        recoveryStore.savePendingSale(record)
+
+        val retrieved = recoveryStore.getPendingSale(companyId, actorId, deviceId, baseOrigin)
+        assertNotNull(retrieved)
+        assertEquals(record.clientEventId, retrieved!!.clientEventId)
+    }
+
+    @Test
+    fun testCanonicalizeOrigin_normalizesTrailingSlashAndCase() {
+        val canonical = DurableOnlineSaleRecoveryStore.canonicalizeOrigin("HTTPS://SMALL-TRADER.EXAMPLE.COM///")
+        assertEquals("https://small-trader.example.com", canonical)
     }
 
     /**
