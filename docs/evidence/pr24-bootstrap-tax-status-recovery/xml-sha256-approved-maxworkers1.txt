@@ -1,0 +1,5 @@
+37cd7fb65b66e468421ae751768f9d9a66ab8b81f0d48d53363f7a83dbb320b3  docs/evidence/pr24-bootstrap-tax-status-recovery/test-results-approved-maxworkers1/TEST-com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest.xml
+8271ec9c26889d4cfc8f7867acd2f6f6e9060dd9643af2932dcb5ec3257192a1  docs/evidence/pr24-bootstrap-tax-status-recovery/test-results-approved-maxworkers1/TEST-com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest.xml
+84352aafa7360c58a46bb0f59328fe1c38415ee30e73fefd05923311bd5c0bc2  docs/evidence/pr24-bootstrap-tax-status-recovery/test-results-approved-maxworkers1/TEST-com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest.xml
+5ae0e251bde593875c13c7c940a4426a74773af38872e7860c9772261659e740  docs/evidence/pr24-bootstrap-tax-status-recovery/test-results-approved-maxworkers1/TEST-com.example.ui.staff.sale.StaffOnlineSaleViewModelTest.xml
+83f98e202312eed9b7cb488d179e82d2cc9264fa920d97e9b0cbce55496afa65  docs/evidence/pr24-bootstrap-tax-status-recovery/test-results-approved-maxworkers1/TEST-com.example.ui.staff.StaffWorkspaceComposeTest.xml

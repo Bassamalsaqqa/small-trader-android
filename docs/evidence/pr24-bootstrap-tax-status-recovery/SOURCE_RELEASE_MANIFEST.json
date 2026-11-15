@@ -1,0 +1,45 @@
+{
+  "release_type": "source_only_qualified_review",
+  "branch": "t3/android-bootstrap-tax-status-recovery",
+  "pull_request": "https://github.com/Bassamalsaqqa/small-trader-android/pull/24",
+  "toolchain": {
+    "jdk": "OpenJDK 21.0.13+9",
+    "android_sdk": "API 35 (compileSdk 35, minSdk 24, targetSdk 35)",
+    "gradle_constraints": {
+      "workers_max": 1,
+      "jvmargs": "-Xmx1536m -XX:ActiveProcessorCount=2 -XX:+UseSerialGC",
+      "kotlin_execution_strategy": "in-process",
+      "daemon": false,
+      "build_cache": false
+    }
+  },
+  "runtime_configuration": {
+    "configured_origin_protocol": "HTTPS",
+    "demo_fallback_permitted": false,
+    "default_online_cash_feature": "OFF",
+    "signature_custody": {
+      "status": "SECURE_CUSTODY_PRESERVED",
+      "device_keystore_notes": "Cryptographic keys and tokens are stored in hardware-backed KeyStore/EncryptedSharedPreferences; no secrets read or exposed in source or logs."
+    }
+  },
+  "qa_status": {
+    "unit_tests_passed": 113,
+    "unit_tests_failed": 0,
+    "suites": [
+      "AndroidV2OnlineCashClientMockWebServerTest (38)",
+      "ReadClientRevision2BoundariesTest (15)",
+      "SmallTraderReadClientWorkflowTest (22)",
+      "StaffOnlineSaleViewModelTest (24)",
+      "StaffWorkspaceComposeTest (14)"
+    ],
+    "lint_status": "PASS (lintDebug)",
+    "xml_provenance_directory": "docs/evidence/pr24-bootstrap-tax-status-recovery/test-results-approved-maxworkers1/"
+  },
+  "deployment_stages": {
+    "signed_apk_build": "NOT_RUN",
+    "offline_field_verification": "NOT_RUN",
+    "device_deployment": "NOT_RUN",
+    "production_activation": "NOT_RUN",
+    "financial_service_grant": "NOT_RUN"
+  }
+}

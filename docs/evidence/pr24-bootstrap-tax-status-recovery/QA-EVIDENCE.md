@@ -79,3 +79,63 @@ The following raw execution logs are archived and published in this evidence dir
 - **`StaffWorkspaceViewModel.kt`**: Fixed `[NewApi]` lint error by replacing `java.time.Instant.now()` with `SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)` configured with UTC timezone (minSdk 24 compatible).
 - **`StaffWorkspaceComposeTest.kt`**: Added `@Config(sdk = [34], qualifiers = "w393dp-h852dp-xxhdpi")` so Compose tests execute against standard modern phone viewport dimensions matching `NativeVisualEvidenceTest.kt`.
 - **`MainActivity.kt`**: Cleaned up unresolved preview handler references from prior rebasing.
+
+---
+
+## 6. Approved Single-Worker (max1 CPU2) Focused QA Execution
+
+Under strict parent execution grant, the focused suite was compiled and executed with exact bounded resource flags:
+```bash
+./gradlew testDebugUnitTest --no-daemon --no-build-cache \
+  -Dorg.gradle.jvmargs="-Xmx1536m -XX:ActiveProcessorCount=2 -XX:+UseSerialGC" \
+  -Dorg.gradle.workers.max=1 \
+  -Pkotlin.compiler.execution.strategy=in-process \
+  --tests "*StaffOnlineSaleViewModelTest" \
+  --tests "*AndroidV2OnlineCashClientMockWebServerTest" \
+  --tests "*ReadClientRevision2BoundariesTest" \
+  --tests "*SmallTraderReadClientWorkflowTest" \
+  --tests "*StaffWorkspaceComposeTest"
+```
+
+### Execution Results
+- **Outcome**: `BUILD SUCCESSFUL in 1m 19s`
+- **Total Tests Executed**: 113
+- **Failures**: 0
+- **Errors**: 0
+- **Skipped**: 0
+- **Suite Breakdown**:
+  1. `com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest`: **38 passed** (0 failed, 0 errors, 0 skipped, 2.17s)
+  2. `com.example.data.mobile.readclient.ReadClientRevision2BoundariesTest`: **15 passed** (0 failed, 0 errors, 0 skipped, 0.044s)
+  3. `com.example.data.mobile.readclient.SmallTraderReadClientWorkflowTest`: **22 passed** (0 failed, 0 errors, 0 skipped, 0.050s)
+  4. `com.example.ui.staff.sale.StaffOnlineSaleViewModelTest`: **24 passed** (0 failed, 0 errors, 0 skipped, 0.270s)
+  5. `com.example.ui.staff.StaffWorkspaceComposeTest`: **14 passed** (0 failed, 0 errors, 0 skipped, 14.516s)
+
+### Quality Analysis (lintDebug)
+Executed under identical bounded resource constraints (`maxworkers=1`, `CPU2`, `SerialGC`, `Xmx1536m`):
+- **Command**: `./gradlew lintDebug ...`
+- **Outcome**: `BUILD SUCCESSFUL in 2m 29s`
+- **Errors**: 0 lint errors
+
+---
+
+## 7. Decoupled Read-Only Status Recovery & Session Guard Verification
+
+1. **Decoupled Read-Only Query**:
+   `StaffWorkspaceViewModel.checkOnlineCashSaleStatus()` no longer requires `authority.isDispatchPermitted`. Read-only GET status queries for retained unverified payment holds are not blocked when new-sale bootstrap authority lacks active warehouse, cash account, or minor units.
+2. **Strict Session Scope Guard**:
+   Enforces that the current authenticated `ReadReady` session (`companyId`, `actorId`, `deviceId`, `currentGeneration`) strictly matches the retained `preparedIntent`'s scope (`context.companyId`, `context.actorId`, `deviceId`, `scopeGeneration`) and active scope (`isScopeActive`).
+   Any mismatch immediately halts execution with **ZERO HTTP requests**, preserving the unverified payment hold and retained intent.
+3. **Strict Non-Null Matching Digest**:
+   Posted financial events strictly require non-null `status.payloadDigest` exactly matching `intent.expectedNormativeProfileDigest`. Mismatches fail closed to `StatusDigestMismatch` without confirming payment or clearing the basket.
+
+---
+
+## 8. Dedicated Provenance Artifacts
+
+- **Approved Execution Test Log**: [`raw-focused-qa-run.log`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/raw-focused-qa-run.log)
+- **Approved Execution Lint Log**: [`raw-lint-run-approved.log`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/raw-lint-run-approved.log)
+- **Initial Fixture Compile Failure Log**: [`compile-failure-fixture-task-987.log`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/compile-failure-fixture-task-987.log)
+- **XML Test Results Directory**: [`test-results-approved-maxworkers1/`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/test-results-approved-maxworkers1/)
+- **XML SHA-256 Checksums**: [`xml-sha256-approved-maxworkers1.txt`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/xml-sha256-approved-maxworkers1.txt)
+- **Source Release Manifest**: [`SOURCE_RELEASE_MANIFEST.json`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/SOURCE_RELEASE_MANIFEST.json)
+
