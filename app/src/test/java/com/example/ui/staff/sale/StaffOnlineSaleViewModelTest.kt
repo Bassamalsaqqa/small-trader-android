@@ -332,6 +332,268 @@ class StaffOnlineSaleViewModelTest {
         assertNull(vm.uiState.value.saleDraft.receipt)
         assertNull(vm.uiState.value.saleAuthority)
     }
+
+    @Test
+    fun testIndeterminateTransientRetainsSamePreparedIntentAndEventIdOnRetry() = runTest(testDispatcher) {
+        val capturedIntents = mutableListOf<PreparedOnlineSaleIntent>()
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+                val dummyClient = AndroidV2OnlineCashClient(
+                    transport = { _ -> throw UnsupportedOperationException() },
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                object : OnlineCashSaleOrchestrator(
+                    client = dummyClient,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier
+                ) {
+                    override suspend fun dispatchOnlineCashSale(
+                        intent: PreparedOnlineSaleIntent,
+                        targetCompanyId: ServerUlid,
+                        targetDeviceId: ClientUuid,
+                        targetCurrency: String
+                    ): OnlineCashOrchestrationResult {
+                        capturedIntents.add(intent)
+                        return OnlineCashOrchestrationResult.IndeterminateTransient("Network timeout dispatching sale")
+                    }
+                }
+            }
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "45.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+
+        // First submit attempt
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertEquals(1, capturedIntents.size)
+        val firstIntent = capturedIntents[0]
+        assertTrue(vm.uiState.value.saleDraft.isIndeterminate)
+        assertFalse(vm.uiState.value.saleDraft.isSubmitting)
+        assertEquals("Network timeout dispatching sale", vm.uiState.value.saleDraft.submissionError)
+        assertEquals(firstIntent, vm.uiState.value.saleDraft.preparedIntent)
+
+        // Retry submit attempt: MUST reuse EXACT same PreparedOnlineSaleIntent (same clientEventId & bytes)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertEquals(2, capturedIntents.size)
+        val secondIntent = capturedIntents[1]
+
+        assertEquals(firstIntent.clientEventId, secondIntent.clientEventId)
+        assertTrue(firstIntent.rawWireBytes.contentEquals(secondIntent.rawWireBytes))
+        assertEquals(firstIntent, secondIntent)
+    }
+
+    @Test
+    fun testDraftMutationsFrozenWhileIndeterminate() = runTest(testDispatcher) {
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+                val dummyClient = AndroidV2OnlineCashClient(
+                    transport = { _ -> throw UnsupportedOperationException() },
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                object : OnlineCashSaleOrchestrator(
+                    client = dummyClient,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier
+                ) {
+                    override suspend fun dispatchOnlineCashSale(
+                        intent: PreparedOnlineSaleIntent,
+                        targetCompanyId: ServerUlid,
+                        targetDeviceId: ClientUuid,
+                        targetCurrency: String
+                    ): OnlineCashOrchestrationResult {
+                        return OnlineCashOrchestrationResult.IndeterminateTransient("Gateway timeout")
+                    }
+                }
+            }
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "50.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        val initialLine = vm.uiState.value.saleDraft.lines.first()
+
+        // Submit and trigger indeterminate state
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isIndeterminate)
+
+        // Attempt mutations while indeterminate - all must be ignored
+        val otherProduct = ProductCatalogItem(
+            id = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5OTH1"),
+            sku = "SKU-OTHER",
+            barcode = null,
+            name = "Other Product",
+            unitPrice = MoneyAmount.fromNonnegativeString("10.000000"),
+            taxRate = null,
+            taxRateId = null,
+            isTracked = true,
+            availableQuantity = NonnegativeDecimalQuantity.fromNonnegativeString("10.000000"),
+            baseUnit = ProductBaseUnit(unitUlid, "PCS", "Pieces"),
+            defaultUnit = ProductDefaultUnit(unitUlid, ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5PIV1"), PositiveDecimalQuantity.of(1), MoneyAmount.fromNonnegativeString("10.000000")),
+            units = emptyList()
+        )
+        vm.addProductToSaleDraft(otherProduct, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        assertEquals(1, vm.uiState.value.saleDraft.lines.size)
+
+        vm.updateDraftLineQuantity(initialLine.lineId, PositiveDecimalQuantity.of(10))
+        assertEquals("1", vm.uiState.value.saleDraft.lines.first().quantity.value.toPlainString())
+
+        vm.removeDraftLine(initialLine.lineId)
+        assertEquals(1, vm.uiState.value.saleDraft.lines.size)
+
+        vm.selectCustomerForSale(CustomerDirectoryItem(ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5CST2"), "C2", "Customer 2", null, false))
+        assertNull(vm.uiState.value.saleDraft.selectedCustomer)
+
+        vm.updateCashTendered(MoneyAmount.fromNonnegativeString("100.00"))
+        assertNull(vm.uiState.value.saleDraft.cashTendered)
+
+        vm.clearSaleDraft()
+        assertEquals(1, vm.uiState.value.saleDraft.lines.size)
+        assertTrue(vm.uiState.value.saleDraft.isIndeterminate)
+    }
+
+    @Test
+    fun testAuthDeniedActiveScopeLocksPhaseAndClearsLists() = runTest(testDispatcher) {
+        val denialRef = AtomicReference<AuthDenialScope?>(null)
+        val authDenialListener = AuthDenialListener { scope ->
+            denialRef.set(scope)
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            authDenialListener = authDenialListener,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+                val dummyClient = AndroidV2OnlineCashClient(
+                    transport = { _ -> throw UnsupportedOperationException() },
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                object : OnlineCashSaleOrchestrator(
+                    client = dummyClient,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier
+                ) {
+                    override suspend fun dispatchOnlineCashSale(
+                        intent: PreparedOnlineSaleIntent,
+                        targetCompanyId: ServerUlid,
+                        targetDeviceId: ClientUuid,
+                        targetCurrency: String
+                    ): OnlineCashOrchestrationResult {
+                        return OnlineCashOrchestrationResult.AuthDenied(
+                            scopeGeneration = fakeCoordinator.currentGeneration,
+                            error = ReadClientErrorResponse(
+                                error = "TOKEN_EXPIRED",
+                                message = "Staff session token expired",
+                                status = 401
+                            )
+                        )
+                    }
+                }
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertEquals(StaffWorkspacePhase.LOCKED, vm.uiState.value.phase)
+        assertEquals("Staff session token expired", vm.uiState.value.lockedReason)
+        assertTrue(vm.uiState.value.products.isEmpty())
+        assertTrue(vm.uiState.value.customers.isEmpty())
+        assertTrue(vm.uiState.value.saleDraft.lines.isEmpty())
+        assertNull(vm.uiState.value.saleAuthority)
+
+        val denial = denialRef.get()
+        assertNotNull(denial)
+        assertEquals(companyUlid, denial!!.companyId)
+        assertEquals(actorUlid, denial.actorId)
+        assertEquals(deviceUuid, denial.deviceId)
+    }
+
+    @Test
+    fun testStaleAuthDeniedDoesNotLockCurrentScope() = runTest(testDispatcher) {
+        val denialRef = AtomicReference<AuthDenialScope?>(null)
+        val authDenialListener = AuthDenialListener { scope ->
+            denialRef.set(scope)
+        }
+
+        val staleGeneration = 0L // Prior generation
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            authDenialListener = authDenialListener,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+                val dummyClient = AndroidV2OnlineCashClient(
+                    transport = { _ -> throw UnsupportedOperationException() },
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                object : OnlineCashSaleOrchestrator(
+                    client = dummyClient,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier
+                ) {
+                    override suspend fun dispatchOnlineCashSale(
+                        intent: PreparedOnlineSaleIntent,
+                        targetCompanyId: ServerUlid,
+                        targetDeviceId: ClientUuid,
+                        targetCurrency: String
+                    ): OnlineCashOrchestrationResult {
+                        return OnlineCashOrchestrationResult.AuthDenied(
+                            scopeGeneration = staleGeneration,
+                            error = ReadClientErrorResponse(
+                                error = "STALE_TOKEN",
+                                message = "Stale token from old generation",
+                                status = 401
+                            )
+                        )
+                    }
+                }
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        // Stale 401 MUST NOT lock the current session!
+        assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+        assertNull(vm.uiState.value.lockedReason)
+        assertNull(denialRef.get())
+    }
 }
 
 /**

@@ -90,6 +90,8 @@ fun StaffWorkspaceScreen(
     onToggleLanguage: () -> Unit,
     onToggleTheme: () -> Unit,
     onRetryOutboxHealth: () -> Unit = {},
+    onAddProductToSale: (ProductCatalogItem) -> Unit = {},
+    onSelectCustomerForSale: (CustomerDirectoryItem) -> Unit = {},
     onUpdateSaleLineQuantity: (String, PositiveDecimalQuantity) -> Unit = { _, _ -> },
     onRemoveSaleLine: (String) -> Unit = {},
     onClearSaleDraft: () -> Unit = {},
@@ -228,6 +230,8 @@ fun StaffWorkspaceScreen(
                         errorMessage = uiState.productsError,
                         currencyCode = uiState.activeCompany?.currency ?: "USD",
                         lang = lang,
+                        isCashEnabled = isCashEnabled,
+                        onAddProductToSale = onAddProductToSale,
                         onSearchChange = onSearchProducts,
                         onRefresh = onRefreshProducts,
                         onLoadMore = onLoadMoreProducts
@@ -242,6 +246,8 @@ fun StaffWorkspaceScreen(
                         searchQuery = uiState.customerSearchQuery,
                         errorMessage = uiState.customersError,
                         lang = lang,
+                        isCashEnabled = isCashEnabled,
+                        onSelectCustomerForSale = onSelectCustomerForSale,
                         onSearchChange = onSearchCustomers,
                         onRefresh = onRefreshCustomers,
                         onLoadMore = onLoadMoreCustomers
@@ -442,6 +448,8 @@ private fun StaffProductCatalogView(
     errorMessage: String?,
     currencyCode: String = "USD",
     lang: AppLanguage,
+    isCashEnabled: Boolean = false,
+    onAddProductToSale: (ProductCatalogItem) -> Unit = {},
     onSearchChange: (String) -> Unit,
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit
@@ -570,7 +578,13 @@ private fun StaffProductCatalogView(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(products, key = { it.id.value }) { product ->
-                    ProductCatalogItemCard(product = product, currencyCode = currencyCode, lang = lang)
+                    ProductCatalogItemCard(
+                        product = product,
+                        currencyCode = currencyCode,
+                        lang = lang,
+                        isCashEnabled = isCashEnabled,
+                        onAddToSale = { onAddProductToSale(product) }
+                    )
                 }
 
                 // Pagination footer
@@ -614,7 +628,9 @@ private fun StaffProductCatalogView(
 private fun ProductCatalogItemCard(
     product: ProductCatalogItem,
     currencyCode: String = "USD",
-    lang: AppLanguage
+    lang: AppLanguage,
+    isCashEnabled: Boolean = false,
+    onAddToSale: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier
@@ -754,6 +770,30 @@ private fun ProductCatalogItemCard(
                     )
                 }
             }
+
+            if (isCashEnabled) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = onAddToSale,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("staff_product_add_to_sale_${product.id.value}"),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PointOfSale,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = lang.tr("إضافة للبيع النقدي", "Add to Cash Sale"),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
         }
     }
 }
@@ -770,6 +810,8 @@ private fun StaffCustomerDirectoryView(
     searchQuery: String,
     errorMessage: String?,
     lang: AppLanguage,
+    isCashEnabled: Boolean = false,
+    onSelectCustomerForSale: (CustomerDirectoryItem) -> Unit = {},
     onSearchChange: (String) -> Unit,
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit
@@ -898,7 +940,12 @@ private fun StaffCustomerDirectoryView(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(customers, key = { it.id.value }) { customer ->
-                    CustomerDirectoryItemCard(customer = customer, lang = lang)
+                    CustomerDirectoryItemCard(
+                        customer = customer,
+                        lang = lang,
+                        isCashEnabled = isCashEnabled,
+                        onSelectForSale = { onSelectCustomerForSale(customer) }
+                    )
                 }
 
                 // Pagination footer
@@ -941,7 +988,9 @@ private fun StaffCustomerDirectoryView(
 @Composable
 private fun CustomerDirectoryItemCard(
     customer: CustomerDirectoryItem,
-    lang: AppLanguage
+    lang: AppLanguage,
+    isCashEnabled: Boolean = false,
+    onSelectForSale: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier
@@ -996,6 +1045,23 @@ private fun CustomerDirectoryItemCard(
                         text = lang.tr("الهاتف: ", "Phone: ") + customer.phone,
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (isCashEnabled) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = onSelectForSale,
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("staff_customer_select_for_sale_${customer.id.value}"),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = lang.tr("اختيار للبيع", "Select for Sale"),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }

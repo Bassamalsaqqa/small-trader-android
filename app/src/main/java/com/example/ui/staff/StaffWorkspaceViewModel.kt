@@ -394,17 +394,27 @@ class StaffWorkspaceViewModel(
         }
     }
 
+    private var cachedOrchestrator: OnlineCashSaleOrchestrator? = null
+    private var cachedOrchestratorGeneration: Long? = null
+
     private fun getOrchestrator(): OnlineCashSaleOrchestrator {
+        val coord = coordinator ?: throw IllegalStateException("Cannot create orchestrator: coordinator is null")
+        val currentGen = coord.currentGeneration
+        val cached = cachedOrchestrator
+        if (cached != null && cachedOrchestratorGeneration == currentGen) {
+            return cached
+        }
+
         val factory = orchestratorFactory
         val tokenProvider: () -> String? = {
             (coordinator?.authState as? StaffAuthState.ReadReady)?.session?.token
         }
         val scopeGenerationProvider: () -> Long = {
-            coordinator?.currentGeneration ?: 0L
+            coordinator?.currentGeneration ?: throw IllegalStateException("Coordinator is unconfigured")
         }
         val onAuthDeniedLockScope: ((Long, ReadClientErrorResponse) -> Unit)? = { scopeGen, _ ->
-            val ready = coordinator?.authState as? StaffAuthState.ReadReady
-            if (ready != null && coordinator?.isScopeActive(scopeGen, ready.session.selectedCompanyId) == true) {
+            val ready = coord.authState as? StaffAuthState.ReadReady
+            if (ready != null && coord.isScopeActive(scopeGen, ready.session.selectedCompanyId)) {
                 authDenialListener?.onAuthDenied(
                     AuthDenialScope(
                         companyId = ready.session.selectedCompanyId,
@@ -416,30 +426,33 @@ class StaffWorkspaceViewModel(
             }
         }
         val activeScopeSupplier: (() -> OnlineSaleScope?)? = {
-            val ready = coordinator?.authState as? StaffAuthState.ReadReady
+            val ready = coord.authState as? StaffAuthState.ReadReady
             if (ready != null) {
                 OnlineSaleScope(
                     actorId = ready.session.actorUlid,
                     deviceId = ready.session.deviceUuid,
                     companyId = ready.session.selectedCompanyId,
-                    generation = coordinator?.currentGeneration ?: 0L
+                    generation = coord.currentGeneration
                 )
             } else null
         }
 
-        if (factory != null) {
-            return factory.invoke(tokenProvider, scopeGenerationProvider, onAuthDeniedLockScope, activeScopeSupplier)
+        val created = if (factory != null) {
+            factory.invoke(tokenProvider, scopeGenerationProvider, onAuthDeniedLockScope, activeScopeSupplier)
+        } else {
+            val transport = OkHttpTransport(configuredOrigin, allowHttpLoopback)
+            val client = AndroidV2OnlineCashClient(transport, configuredOrigin, allowHttpLoopback)
+            OnlineCashSaleOrchestrator(
+                client = client,
+                tokenProvider = tokenProvider,
+                scopeGenerationProvider = scopeGenerationProvider,
+                onAuthDeniedLockScope = onAuthDeniedLockScope,
+                activeScopeSupplier = activeScopeSupplier
+            )
         }
-
-        val transport = OkHttpTransport(configuredOrigin, allowHttpLoopback)
-        val client = AndroidV2OnlineCashClient(transport, configuredOrigin, allowHttpLoopback)
-        return OnlineCashSaleOrchestrator(
-            client = client,
-            tokenProvider = tokenProvider,
-            scopeGenerationProvider = scopeGenerationProvider,
-            onAuthDeniedLockScope = onAuthDeniedLockScope,
-            activeScopeSupplier = activeScopeSupplier
-        )
+        cachedOrchestrator = created
+        cachedOrchestratorGeneration = currentGen
+        return created
     }
 
     fun addProductToSaleDraft(
@@ -449,6 +462,10 @@ class StaffWorkspaceViewModel(
         taxInclusiveOverride: Boolean? = null,
         explicitNoTax: Boolean = false
     ) {
+        if (_uiState.value.saleDraft.isIndeterminate) return
+        val readyState = coordinator?.authState as? StaffAuthState.ReadReady
+        val bUnits = readyState?.bootstrap?.units ?: emptyList()
+
         _uiState.update { s ->
             val currentLines = s.saleDraft.lines.toMutableList()
             val targetUnitId = packagingUnit?.unitId ?: product.defaultUnit.unitId
@@ -468,7 +485,8 @@ class StaffWorkspaceViewModel(
                     packagingUnit = packagingUnit,
                     quantity = quantity,
                     taxInclusiveOverride = taxInclusiveOverride,
-                    explicitNoTax = explicitNoTax
+                    explicitNoTax = explicitNoTax,
+                    bootstrapUnits = bUnits
                 )
                 currentLines.add(newLine)
             }
@@ -477,6 +495,7 @@ class StaffWorkspaceViewModel(
     }
 
     fun updateDraftLineQuantity(lineId: String, newQuantity: PositiveDecimalQuantity) {
+        if (_uiState.value.saleDraft.isIndeterminate) return
         _uiState.update { s ->
             val currentLines = s.saleDraft.lines.map { line ->
                 if (line.lineId == lineId) {
@@ -488,6 +507,7 @@ class StaffWorkspaceViewModel(
     }
 
     fun removeDraftLine(lineId: String) {
+        if (_uiState.value.saleDraft.isIndeterminate) return
         _uiState.update { s ->
             val currentLines = s.saleDraft.lines.filterNot { it.lineId == lineId }
             s.copy(saleDraft = s.saleDraft.copy(lines = currentLines, submissionError = null))
@@ -495,18 +515,21 @@ class StaffWorkspaceViewModel(
     }
 
     fun selectCustomerForSale(customer: CustomerDirectoryItem?) {
+        if (_uiState.value.saleDraft.isIndeterminate) return
         _uiState.update { s ->
             s.copy(saleDraft = s.saleDraft.copy(selectedCustomer = customer, submissionError = null))
         }
     }
 
     fun updateCashTendered(amount: MoneyAmount?) {
+        if (_uiState.value.saleDraft.isIndeterminate) return
         _uiState.update { s ->
             s.copy(saleDraft = s.saleDraft.copy(cashTendered = amount, submissionError = null))
         }
     }
 
     fun clearSaleDraft() {
+        if (_uiState.value.saleDraft.isIndeterminate) return
         saleJob?.cancel()
         _uiState.update { s ->
             s.copy(saleDraft = StaffOnlineSaleDraft())
@@ -549,25 +572,29 @@ class StaffWorkspaceViewModel(
             return
         }
 
-        if (draft.hasUnresolvedTaxContract) {
-            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Draft contains taxed lines with unresolved tax_inclusive authority")) }
+        if (draft.hasUnresolvedContracts) {
+            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Draft contains lines with unresolved contracts")) }
             return
         }
 
         val generation = coord.currentGeneration
-        val clientEventId = ClientUuid.random()
 
-        // Prepare typed immutable intent (validates exact canonical 7-key wire schema)
-        val preparedIntent = try {
-            StaffOnlineSaleRequestBuilder.prepareIntent(
-                draft = draft,
-                authority = authority,
-                scopeGeneration = generation,
-                clientEventId = clientEventId
-            )
-        } catch (e: Exception) {
-            _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Failed to prepare sale intent: ${e.message}")) }
-            return
+        // P1 IDEMPOTENCY:
+        // If draft already has a preparedIntent (e.g. from an indeterminate transient attempt),
+        // RETAIN AND REUSE the EXACT same preparedIntent (same clientEventId, same wire bytes)!
+        val preparedIntent = draft.preparedIntent ?: run {
+            val clientEventId = ClientUuid.random()
+            try {
+                StaffOnlineSaleRequestBuilder.prepareIntent(
+                    draft = draft,
+                    authority = authority,
+                    scopeGeneration = generation,
+                    clientEventId = clientEventId
+                )
+            } catch (e: Exception) {
+                _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Failed to prepare sale intent: ${e.message}")) }
+                return
+            }
         }
 
         // Set isSubmitting = true and retain preparedIntent idempotently
@@ -626,6 +653,7 @@ class StaffWorkspaceViewModel(
                         s.copy(
                             saleDraft = s.saleDraft.copy(
                                 isSubmitting = false,
+                                isIndeterminate = false,
                                 receipt = result.receipt,
                                 submissionError = null,
                                 preparedIntent = null,
@@ -640,6 +668,7 @@ class StaffWorkspaceViewModel(
                         s.copy(
                             saleDraft = s.saleDraft.copy(
                                 isSubmitting = false,
+                                isIndeterminate = false,
                                 receipt = result.receipt,
                                 submissionError = null,
                                 preparedIntent = null,
@@ -650,53 +679,24 @@ class StaffWorkspaceViewModel(
                     }
                 }
                 is OnlineCashOrchestrationResult.AuthDenied -> {
-                    _uiState.update { s ->
-                        s.copy(
-                            saleDraft = s.saleDraft.copy(
+                    if (coord.isScopeActive(result.scopeGeneration, targetCompanyId)) {
+                        clearListsImmediately()
+                        _uiState.update {
+                            it.copy(
+                                phase = StaffWorkspacePhase.LOCKED,
                                 isSubmitting = false,
-                                submissionError = "Authentication denied (HTTP 401): ${result.error.message}"
+                                lockedReason = "Authentication revoked or invalid (HTTP 401)"
                             )
-                        )
-                    }
-                }
-                is OnlineCashOrchestrationResult.BusinessConflict -> {
-                    _uiState.update { s ->
-                        s.copy(
-                            saleDraft = s.saleDraft.copy(
-                                isSubmitting = false,
-                                submissionError = "Business conflict (HTTP 409): ${result.error.message}"
+                        }
+                    } else {
+                        _uiState.update { s ->
+                            s.copy(
+                                saleDraft = s.saleDraft.copy(
+                                    isSubmitting = false,
+                                    submissionError = "Stale authentication rejection from prior session ignored"
+                                )
                             )
-                        )
-                    }
-                }
-                is OnlineCashOrchestrationResult.ValidationFailed -> {
-                    _uiState.update { s ->
-                        s.copy(
-                            saleDraft = s.saleDraft.copy(
-                                isSubmitting = false,
-                                submissionError = "Validation failed (HTTP 422): ${result.error.message}"
-                            )
-                        )
-                    }
-                }
-                is OnlineCashOrchestrationResult.Forbidden -> {
-                    _uiState.update { s ->
-                        s.copy(
-                            saleDraft = s.saleDraft.copy(
-                                isSubmitting = false,
-                                submissionError = "Forbidden (HTTP 403): ${result.error.message}"
-                            )
-                        )
-                    }
-                }
-                is OnlineCashOrchestrationResult.PreDispatchValidationError -> {
-                    _uiState.update { s ->
-                        s.copy(
-                            saleDraft = s.saleDraft.copy(
-                                isSubmitting = false,
-                                submissionError = "Pre-dispatch validation error: ${result.message}"
-                            )
-                        )
+                        }
                     }
                 }
                 is OnlineCashOrchestrationResult.IndeterminateTransient -> {
@@ -704,7 +704,8 @@ class StaffWorkspaceViewModel(
                         s.copy(
                             saleDraft = s.saleDraft.copy(
                                 isSubmitting = false,
-                                submissionError = "Network timeout or transient failure: ${result.reason}"
+                                isIndeterminate = true,
+                                submissionError = "Network timeout or transient failure: ${result.reason}. Retrying will verify status first using same event ID."
                             )
                         )
                     }
@@ -1263,6 +1264,8 @@ class StaffWorkspaceViewModel(
     fun openCompanySelection() {
         outboxHealthJob?.cancel()
         saleJob?.cancel()
+        cachedOrchestrator = null
+        cachedOrchestratorGeneration = null
         ++outboxHealthIntentSeq
         if (_uiState.value.availableCompanies.isNotEmpty()) {
             _uiState.update { it.copy(phase = StaffWorkspacePhase.COMPANY_SELECTION, outboxHealthResult = null, isOutboxRetrying = false) }
@@ -1960,6 +1963,8 @@ class StaffWorkspaceViewModel(
         productRequestSeq++
         customerRequestSeq++
         saleJob?.cancel()
+        cachedOrchestrator = null
+        cachedOrchestratorGeneration = null
         _uiState.update {
             it.copy(
                 products = emptyList(),

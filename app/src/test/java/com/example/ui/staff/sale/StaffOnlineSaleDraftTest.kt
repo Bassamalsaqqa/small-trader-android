@@ -372,4 +372,96 @@ class StaffOnlineSaleDraftTest {
         val wireMap = StaffOnlineSaleRequestBuilder.buildRawWireMap(draft, authority)
         assertEquals(customCustomerUlid.value, wireMap["customer_id"])
     }
+
+    @Test
+    fun testDefaultUnitResolvesCodeFromBootstrapUnitsWhenDifferentFromBase() {
+        val distinctDefaultUnitUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5DEF1")
+        val product = ProductCatalogItem(
+            id = productUlid,
+            sku = "SKU-DEF",
+            barcode = null,
+            name = "Product With Distinct Default Unit",
+            unitPrice = MoneyAmount.fromNonnegativeString("15.000000"),
+            taxRate = null,
+            taxRateId = null,
+            isTracked = true,
+            availableQuantity = NonnegativeDecimalQuantity.fromNonnegativeString("50.000000"),
+            baseUnit = ProductBaseUnit(unitUlid, "PCS", "Pieces"),
+            defaultUnit = ProductDefaultUnit(
+                unitId = distinctDefaultUnitUlid,
+                productUnitId = pivotUlid,
+                conversionToBase = PositiveDecimalQuantity.of(12),
+                salePrice = MoneyAmount.fromNonnegativeString("150.000000")
+            ),
+            units = emptyList()
+        )
+
+        val bootstrapUnits = listOf(
+            com.example.data.mobile.readclient.BootstrapUnit(
+                id = distinctDefaultUnitUlid,
+                code = "DOZ",
+                name = "Dozen",
+                symbol = "dz",
+                conversionRate = PositiveDecimalQuantity.of(12),
+                isBase = false
+            )
+        )
+
+        val line = StaffOnlineSaleDraftLine.fromProduct(
+            product = product,
+            explicitNoTax = true,
+            bootstrapUnits = bootstrapUnits
+        )
+
+        assertEquals("DOZ", line.unitCode)
+        assertFalse(line.hasUnresolvedUnitContract)
+        assertFalse(line.hasUnresolvedContracts)
+    }
+
+    @Test
+    fun testDefaultUnitUnresolvableCodeFailsClosedAsUnknownUnit() {
+        val unresolvableUnitUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5UNR1")
+        val product = ProductCatalogItem(
+            id = productUlid,
+            sku = "SKU-UNR",
+            barcode = null,
+            name = "Product With Unresolvable Unit",
+            unitPrice = MoneyAmount.fromNonnegativeString("15.000000"),
+            taxRate = null,
+            taxRateId = null,
+            isTracked = true,
+            availableQuantity = NonnegativeDecimalQuantity.fromNonnegativeString("50.000000"),
+            baseUnit = ProductBaseUnit(unitUlid, "PCS", "Pieces"),
+            defaultUnit = ProductDefaultUnit(
+                unitId = unresolvableUnitUlid,
+                productUnitId = pivotUlid,
+                conversionToBase = PositiveDecimalQuantity.of(5),
+                salePrice = MoneyAmount.fromNonnegativeString("75.000000")
+            ),
+            units = emptyList()
+        )
+
+        val line = StaffOnlineSaleDraftLine.fromProduct(
+            product = product,
+            explicitNoTax = true,
+            bootstrapUnits = emptyList()
+        )
+
+        assertEquals("UNKNOWN_UNIT", line.unitCode)
+        assertTrue(line.hasUnresolvedUnitContract)
+        assertTrue(line.hasUnresolvedContracts)
+
+        val bootstrap = createSampleBootstrap()
+        val session = createSampleSession()
+        val authority = StaffOnlineSaleAuthorityResolution.resolve(bootstrap, session, currencyMinorUnitsOverride = 2)
+        val draft = StaffOnlineSaleDraft(lines = listOf(line))
+
+        assertFalse(draft.canPrepareIntent)
+        try {
+            StaffOnlineSaleRequestBuilder.buildRawWireMap(draft, authority)
+            fail("Expected IllegalArgumentException when draft has unresolved contracts")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("unresolved contracts"))
+        }
+    }
 }

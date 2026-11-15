@@ -10,6 +10,7 @@ import com.example.data.mobile.contract.v2.OnlineSaleContext
 import com.example.data.mobile.onlinecash.OnlineCashSaleReceipt
 import com.example.data.mobile.onlinecash.PreparedOnlineSaleIntent
 import com.example.data.mobile.readclient.BootstrapResponse
+import com.example.data.mobile.readclient.BootstrapUnit
 import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.ProductCatalogItem
 import com.example.data.mobile.readclient.ProductPackagingUnit
@@ -157,8 +158,14 @@ data class StaffOnlineSaleDraftLine(
             return MoneyAmount(tax.toPlainString())
         }
 
+    val hasUnresolvedUnitContract: Boolean
+        get() = unitCode == "UNKNOWN_UNIT"
+
     val hasUnresolvedTaxContract: Boolean
         get() = (taxRateId != null && taxInclusive == null) || (taxRateId == null && taxRate == null)
+
+    val hasUnresolvedContract: Boolean
+        get() = hasUnresolvedTaxContract || hasUnresolvedUnitContract
 
     companion object {
         fun fromProduct(
@@ -166,11 +173,28 @@ data class StaffOnlineSaleDraftLine(
             packagingUnit: ProductPackagingUnit? = null,
             quantity: PositiveDecimalQuantity = PositiveDecimalQuantity.of(1),
             taxInclusiveOverride: Boolean? = null,
-            explicitNoTax: Boolean = false
+            explicitNoTax: Boolean = false,
+            bootstrapUnits: List<BootstrapUnit> = emptyList()
         ): StaffOnlineSaleDraftLine {
             // Qualified online product_unit_id means Unit.public_id -> DTO unitId, not productUnitId pivot!
             val unitId = packagingUnit?.unitId ?: product.defaultUnit.unitId
-            val code = packagingUnit?.code ?: product.baseUnit.code
+
+            // Unit label resolution: default code NOT base code if default unit is different.
+            // 1. Packaging unit code if explicitly selected.
+            // 2. If defaultUnit.unitId matches baseUnit.id -> baseUnit.code.
+            // 3. Search product.units matching defaultUnit.unitId.
+            // 4. Search bootstrapUnits matching defaultUnit.unitId.
+            // 5. Fail closed as UNKNOWN_UNIT if unresolvable without guessing.
+            val code = packagingUnit?.code ?: run {
+                if (product.defaultUnit.unitId == product.baseUnit.id) {
+                    product.baseUnit.code
+                } else {
+                    product.units.firstOrNull { it.unitId == product.defaultUnit.unitId }?.code
+                        ?: bootstrapUnits.firstOrNull { it.id == product.defaultUnit.unitId }?.code
+                        ?: "UNKNOWN_UNIT"
+                }
+            }
+
             val conversion = packagingUnit?.conversionToBase ?: product.defaultUnit.conversionToBase
             val price = packagingUnit?.salePrice ?: product.defaultUnit.salePrice ?: product.unitPrice
 
@@ -217,6 +241,7 @@ data class StaffOnlineSaleDraft(
     val selectedCustomer: CustomerDirectoryItem? = null,
     val cashTendered: MoneyAmount? = null,
     val isSubmitting: Boolean = false,
+    val isIndeterminate: Boolean = false, // Frozen state during indeterminate recovery
     val submissionError: String? = null,
     val preparedIntent: PreparedOnlineSaleIntent? = null,
     val receipt: OnlineCashSaleReceipt? = null
@@ -255,10 +280,14 @@ data class StaffOnlineSaleDraft(
     val hasUnresolvedTaxContract: Boolean
         get() = lines.any { it.hasUnresolvedTaxContract }
 
+    val hasUnresolvedContracts: Boolean
+        get() = lines.any { it.hasUnresolvedContract }
+
     fun canPrepareIntent(authority: StaffOnlineSaleAuthorityResolution): Boolean {
         if (!authority.isDispatchPermitted) return false
         if (lines.isEmpty()) return false
-        if (hasUnresolvedTaxContract) return false
+        if (hasUnresolvedContracts) return false
+        if (isIndeterminate) return false
         return true
     }
 }
@@ -289,8 +318,8 @@ object StaffOnlineSaleRequestBuilder {
         require(draft.lines.isNotEmpty()) {
             "Cannot build wire payload: draft must contain at least one line item"
         }
-        require(!draft.hasUnresolvedTaxContract) {
-            "Cannot build wire payload: draft contains lines with unresolved tax contract"
+        require(!draft.hasUnresolvedContracts) {
+            "Cannot build wire payload: draft contains lines with unresolved contracts"
         }
 
         val cmu = authority.currencyMinorUnits!!
@@ -303,6 +332,9 @@ object StaffOnlineSaleRequestBuilder {
         val currency = authority.currency!!
 
         val linesWire = draft.lines.map { line ->
+            if (line.hasUnresolvedUnitContract) {
+                throw IllegalStateException("Cannot build wire line '${line.product.name}': unresolvable unit ID '${line.productUnitId.value}'")
+            }
             val rate = line.taxRate ?: throw IllegalStateException(
                 "Cannot build wire line '${line.product.name}': tax_rate is unassigned"
             )

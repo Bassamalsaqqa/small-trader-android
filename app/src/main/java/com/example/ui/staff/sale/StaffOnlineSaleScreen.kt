@@ -14,9 +14,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
@@ -24,6 +26,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PointOfSale
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -36,14 +39,21 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,9 +68,12 @@ import java.math.BigDecimal
  * 1. Truthful Authority: Basket totals are strictly non-authoritative client ESTIMATES.
  *    The central Laravel accounting platform is the sole posting authority for ledger entries and taxes.
  * 2. Contract Honest: Displays explicit warnings when V1 contracts lack required V2 authorities
- *    (currency_minor_units, tax_inclusive on taxed products, server quote endpoint).
- * 3. Fails Closed: Submission is disabled whenever authority resolution is incomplete.
+ *    (currency_minor_units, tax_inclusive on taxed products, server quote endpoint, or unknown units).
+ * 3. Fails Closed: Submission is disabled whenever authority resolution is incomplete or contracts unresolved.
  * 4. Exact Decimal Arithmetic: Preserves exact decimal strings without Double conversion.
+ * 5. Indeterminate Recovery: When network drops or timeouts occur, draft basket is frozen and retry
+ *    strictly reuses the exact same prepared intent and event ID for status-first verification.
+ * 6. Accessibility: All touch targets satisfy >= 48dp minimum bounds.
  */
 @Composable
 fun StaffOnlineSaleView(
@@ -124,7 +137,53 @@ fun StaffOnlineSaleView(
             }
         }
 
-        // 2. Missing Contracts Fails-Closed Alert (when contracts are missing)
+        // 2. Indeterminate Recovery Banner (when network drop occurred)
+        if (draft.isIndeterminate) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .testTag("staff_sale_indeterminate_banner"),
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = lang.tr(
+                                "حالة معلقة غير مؤكدة — السلة مجمدة لمنع التكرار",
+                                "Indeterminate State — Basket Frozen to Prevent Duplication"
+                            ),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        Text(
+                            text = lang.tr(
+                                "حدث انقطاع بالشبكة. يرجى إعادة المحاولة للتحقق من حالة الطلب السابق باستخدام نفس المعرف الأصلي.",
+                                "A network drop occurred. Please retry to verify the status of the previous request using the original event ID."
+                            ),
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3. Missing Contracts Fails-Closed Alert (when contracts are missing)
         if (authority != null && !authority.isDispatchPermitted) {
             Card(
                 modifier = Modifier
@@ -180,7 +239,7 @@ fun StaffOnlineSaleView(
             }
         }
 
-        // 3. Receipt view if sale was confirmed
+        // 4. Receipt view if sale was confirmed
         if (draft.receipt != null) {
             val receipt = draft.receipt
             Card(
@@ -233,245 +292,288 @@ fun StaffOnlineSaleView(
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     Text(
                         text = "${lang.tr("رقم الفاتورة", "Invoice")}: ${receipt.invoiceNumber}",
                         fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "${lang.tr("معرّف الفاتورة", "Invoice ULID")}: ${receipt.invoiceId.value}",
-                        fontSize = 12.sp,
+                        text = "ULID: ${receipt.invoiceId.value}",
+                        fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                     )
                     Text(
                         text = "${lang.tr("المبلغ الإجمالي", "Grand Total")}: ${receipt.grandTotal.toPlainString()} $currencyCode",
-                        fontSize = 14.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
+                    if (receipt.paymentReceiptNumber != null) {
+                        Text(
+                            text = "${lang.tr("سند القبض", "Payment Receipt")}: ${receipt.paymentReceiptNumber}",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                     Text(
-                        text = "${lang.tr("سند القبض", "Payment Receipt")}: ${receipt.paymentReceiptNumber ?: lang.tr("غير متوفر (مسجل دون رقم إيصال)", "None (recorded without payment receipt number)")}",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                    )
-                    Text(
-                        text = "${lang.tr("وقت الاعتماد", "Posted At")}: ${receipt.postedAt}",
+                        text = "${lang.tr("تاريخ التسجيل", "Posted At")}: ${receipt.postedAt}",
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
-                    Button(
+                    OutlinedButton(
                         onClick = onClearDraft,
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = 48.dp)
-                            .testTag("staff_sale_new_transaction_button"),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            .testTag("staff_sale_new_sale_button"),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
                     ) {
-                        Text(lang.tr("بدء معاملة جديدة", "Start New Transaction"), fontSize = 14.sp)
+                        Text(lang.tr("بدء بيع جديد", "Start New Sale"), fontSize = 14.sp)
                     }
                 }
             }
         }
 
-        // 4. Draft basket list
-        if (draft.lines.isEmpty() && draft.receipt == null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .testTag("staff_sale_empty_basket"),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(24.dp)
+        // 5. Active basket items or empty state
+        if (draft.receipt == null) {
+            if (draft.lines.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .testTag("staff_sale_empty_state"),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.PointOfSale,
-                        contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = lang.tr("سلة البيع فارغة", "Sale basket is empty"),
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = lang.tr(
-                            "انتقل إلى تبويب «سجل الأصناف» لإضافة منتجات إلى السلة",
-                            "Go to the 'Product Catalog' tab to add items to the basket"
-                        ),
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        } else if (draft.lines.isNotEmpty()) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .testTag("staff_sale_basket_list"),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(draft.lines, key = { it.lineId }) { line ->
-                    SaleDraftLineCard(
-                        line = line,
-                        currencyCode = currencyCode,
-                        lang = lang,
-                        onUpdateQuantity = { newQty -> onUpdateLineQuantity(line.lineId, newQty) },
-                        onRemove = { onRemoveLine(line.lineId) }
-                    )
-                }
-            }
-
-            // 5. Totals & Tender action footer
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-                    .testTag("staff_sale_summary_card"),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    // Subtotal
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(32.dp)
                     ) {
+                        Icon(
+                            imageVector = Icons.Default.PointOfSale,
+                            contentDescription = null,
+                            modifier = Modifier.size(56.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = lang.tr("المجموع الفرعي (تقديري)", "Subtotal (Estimated)"),
-                            fontSize = 13.sp,
+                            text = lang.tr("سلة البيع النقدي فارغة", "Cash Sale Basket is Empty"),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "${draft.estimatedSubtotal.toPlainString()} $currencyCode",
-                            fontSize = 13.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Medium
+                            text = lang.tr(
+                                "اختر أصنافاً من تبويب الأصناف لإضافتها إلى السلة.",
+                                "Select products from the Products tab to add them to this sale."
+                            ),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                            textAlign = TextAlign.Center
                         )
                     }
-
-                    // Tax
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = lang.tr("الضريبة (تقديري)", "Tax (Estimated)"),
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "${draft.estimatedTax.toPlainString()} $currencyCode",
-                            fontSize = 13.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Medium
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .testTag("staff_sale_lines_list"),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(draft.lines, key = { it.lineId }) { line ->
+                        SaleDraftLineCard(
+                            line = line,
+                            currencyCode = currencyCode,
+                            lang = lang,
+                            isFrozen = draft.isIndeterminate,
+                            onUpdateQuantity = { qty -> onUpdateLineQuantity(line.lineId, qty) },
+                            onRemove = { onRemoveLine(line.lineId) }
                         )
                     }
+                }
+            }
 
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-                    // Grand total tender
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+            // 6. Sale summary & Action card
+            if (draft.lines.isNotEmpty()) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .testTag("staff_sale_summary_card"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp)
                     ) {
-                        Column {
+                        // Customer indicator
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
-                                text = lang.tr("المبلغ المطلوب نقداً (كامل)", "Full Cash Tender Required"),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = lang.tr("يشمل الضريبة المؤهلة", "Includes qualified tax"),
-                                fontSize = 11.sp,
+                                text = lang.tr("العميل", "Customer"),
+                                fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        }
-                        Text(
-                            text = "${draft.estimatedTotal.toPlainString()} $currencyCode",
-                            fontSize = 18.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    // Submission error notice
-                    if (draft.submissionError != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = draft.submissionError,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.testTag("staff_sale_submission_error")
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = onClearDraft,
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 48.dp)
-                                .testTag("staff_sale_clear_button"),
-                            shape = RoundedCornerShape(8.dp),
-                            enabled = !draft.isSubmitting
-                        ) {
-                            Text(lang.tr("إفراغ السلة", "Clear"), fontSize = 13.sp)
+                            Text(
+                                text = draft.selectedCustomer?.name ?: lang.tr("زبون نقدي عام", "Walk-In Customer"),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
                         }
 
-                        val canSubmit = authority?.isDispatchPermitted == true &&
-                                draft.lines.isNotEmpty() &&
-                                !draft.hasUnresolvedTaxContract &&
-                                !draft.isSubmitting
+                        Spacer(modifier = Modifier.height(6.dp))
 
-                        Button(
-                            onClick = onSubmitSale,
-                            modifier = Modifier
-                                .weight(2f)
-                                .heightIn(min = 48.dp)
-                                .testTag("staff_sale_submit_button"),
-                            shape = RoundedCornerShape(8.dp),
-                            enabled = canSubmit,
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        // Estimated Subtotal
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            if (draft.isSubmitting) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    strokeWidth = 2.dp
+                            Text(
+                                text = lang.tr("المجموع الفرعي (تقديري)", "Estimated Subtotal"),
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "${draft.estimatedSubtotal.toPlainString()} $currencyCode",
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        // Estimated Tax
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = lang.tr("الضريبة (تقديرية)", "Estimated Tax"),
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "${draft.estimatedTax.toPlainString()} $currencyCode",
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                        // Grand total tender
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = lang.tr("المبلغ المطلوب نقداً (كامل)", "Full Cash Tender Required"),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(lang.tr("جاري الإرسال...", "Submitting..."), fontSize = 14.sp)
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.PointOfSale,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
+                                Text(
+                                    text = lang.tr("يشمل الضريبة المؤهلة", "Includes qualified tax"),
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(lang.tr("تأكيد البيع النقدي", "Confirm Cash Sale"), fontSize = 14.sp)
+                            }
+                            Text(
+                                text = "${draft.estimatedTotal.toPlainString()} $currencyCode",
+                                fontSize = 18.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        // Submission error notice
+                        if (draft.submissionError != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = draft.submissionError,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.testTag("staff_sale_submission_error")
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onClearDraft,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
+                                    .testTag("staff_sale_clear_button"),
+                                shape = RoundedCornerShape(8.dp),
+                                enabled = !draft.isSubmitting && !draft.isIndeterminate
+                            ) {
+                                Text(lang.tr("إفراغ السلة", "Clear"), fontSize = 13.sp)
+                            }
+
+                            val canSubmit = (authority?.isDispatchPermitted == true || draft.isIndeterminate) &&
+                                    draft.lines.isNotEmpty() &&
+                                    !draft.hasUnresolvedContracts &&
+                                    !draft.isSubmitting
+
+                            Button(
+                                onClick = onSubmitSale,
+                                modifier = Modifier
+                                    .weight(2f)
+                                    .heightIn(min = 48.dp)
+                                    .testTag(if (draft.isIndeterminate) "staff_sale_retry_button" else "staff_sale_submit_button"),
+                                shape = RoundedCornerShape(8.dp),
+                                enabled = canSubmit,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (draft.isIndeterminate) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
+                                )
+                            ) {
+                                if (draft.isSubmitting) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(lang.tr("جاري الإرسال...", "Submitting..."), fontSize = 14.sp)
+                                } else if (draft.isIndeterminate) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(lang.tr("التحقق وإعادة المحاولة", "Verify & Retry"), fontSize = 14.sp)
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.PointOfSale,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(lang.tr("تأكيد البيع النقدي", "Confirm Cash Sale"), fontSize = 14.sp)
+                                }
                             }
                         }
                     }
@@ -483,12 +585,16 @@ fun StaffOnlineSaleView(
 
 /**
  * Individual line card within the sale basket.
+ *
+ * Provides both direct decimal quantity entry and increment/decrement steppers,
+ * with all touch targets >= 48dp for accessibility.
  */
 @Composable
 private fun SaleDraftLineCard(
     line: StaffOnlineSaleDraftLine,
     currencyCode: String,
     lang: AppLanguage,
+    isFrozen: Boolean,
     onUpdateQuantity: (PositiveDecimalQuantity) -> Unit,
     onRemove: () -> Unit
 ) {
@@ -525,21 +631,22 @@ private fun SaleDraftLineCard(
                 IconButton(
                     onClick = onRemove,
                     modifier = Modifier
-                        .size(36.dp)
-                        .testTag("staff_sale_line_remove_${line.lineId}")
+                        .size(48.dp)
+                        .testTag("staff_sale_line_remove_${line.lineId}"),
+                    enabled = !isFrozen
                 ) {
                     Icon(
                         imageVector = Icons.Default.DeleteOutline,
                         contentDescription = lang.tr("حذف", "Remove"),
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(18.dp)
+                        tint = if (isFrozen) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) else MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Pricing & Quantity Controls
+            // Pricing & Tax Indicators
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -584,51 +691,12 @@ private fun SaleDraftLineCard(
                             fontWeight = FontWeight.Bold
                         )
                     }
-                }
-
-                // Quantity Stepper
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.testTag("staff_sale_quantity_stepper_${line.lineId}")
-                ) {
-                    IconButton(
-                        onClick = {
-                            val currentBd = line.quantity.value
-                            if (currentBd > BigDecimal.ONE) {
-                                val newBd = currentBd.subtract(BigDecimal.ONE)
-                                onUpdateQuantity(PositiveDecimalQuantity(newBd.toPlainString()))
-                            }
-                        },
-                        modifier = Modifier.size(36.dp),
-                        enabled = line.quantity.value > BigDecimal.ONE
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Remove,
-                            contentDescription = "-",
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-
-                    Text(
-                        text = line.quantity.toPlainString(),
-                        fontSize = 14.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp)
-                    )
-
-                    IconButton(
-                        onClick = {
-                            val currentBd = line.quantity.value
-                            val newBd = currentBd.add(BigDecimal.ONE)
-                            onUpdateQuantity(PositiveDecimalQuantity(newBd.toPlainString()))
-                        },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "+",
-                            modifier = Modifier.size(16.dp)
+                    if (line.hasUnresolvedUnitContract) {
+                        Text(
+                            text = lang.tr("وحدة غير معروفة — محظور الإرسال", "Unknown unit — dispatch blocked"),
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
@@ -641,6 +709,83 @@ private fun SaleDraftLineCard(
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Quantity Controls: Direct Decimal Input + 48dp Steppers
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("staff_sale_quantity_stepper_${line.lineId}"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End
+            ) {
+                // Decrement Button (min 48dp)
+                IconButton(
+                    onClick = {
+                        val currentBd = line.quantity.value
+                        if (currentBd > BigDecimal.ONE) {
+                            val newBd = currentBd.subtract(BigDecimal.ONE)
+                            onUpdateQuantity(PositiveDecimalQuantity(newBd.toPlainString()))
+                        }
+                    },
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("staff_sale_line_qty_dec_${line.lineId}"),
+                    enabled = !isFrozen && line.quantity.value > BigDecimal.ONE
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Remove,
+                        contentDescription = "-",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                // Direct Decimal Quantity Input (min 48dp height)
+                var rawInput by remember(line.quantity) { mutableStateOf(line.quantity.toPlainString()) }
+                OutlinedTextField(
+                    value = rawInput,
+                    onValueChange = { input ->
+                        rawInput = input
+                        try {
+                            val parsed = PositiveDecimalQuantity(input.trim())
+                            onUpdateQuantity(parsed)
+                        } catch (_: Exception) {}
+                    },
+                    modifier = Modifier
+                        .widthIn(min = 72.dp, max = 110.dp)
+                        .heightIn(min = 48.dp)
+                        .testTag("staff_sale_line_qty_input_${line.lineId}"),
+                    singleLine = true,
+                    enabled = !isFrozen,
+                    textStyle = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center
+                    ),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                )
+
+                // Increment Button (min 48dp)
+                IconButton(
+                    onClick = {
+                        val currentBd = line.quantity.value
+                        val newBd = currentBd.add(BigDecimal.ONE)
+                        onUpdateQuantity(PositiveDecimalQuantity(newBd.toPlainString()))
+                    },
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("staff_sale_line_qty_inc_${line.lineId}"),
+                    enabled = !isFrozen
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "+",
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }

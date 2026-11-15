@@ -113,6 +113,14 @@ fun StaffWorkspaceApp(
                         onToggleLanguage = { viewModel.toggleLanguage() },
                         onToggleTheme = { viewModel.toggleTheme() },
                         onRetryOutboxHealth = { viewModel.retryOutboxHealth() },
+                        onAddProductToSale = { product ->
+                            viewModel.addProductToSaleDraft(product)
+                            viewModel.selectTab(StaffWorkspaceTab.CASH_SALE)
+                        },
+                        onSelectCustomerForSale = { customer ->
+                            viewModel.selectCustomerForSale(customer)
+                            viewModel.selectTab(StaffWorkspaceTab.CASH_SALE)
+                        },
                         onUpdateSaleLineQuantity = { lineId, qty -> viewModel.updateDraftLineQuantity(lineId, qty) },
                         onRemoveSaleLine = { lineId -> viewModel.removeDraftLine(lineId) },
                         onClearSaleDraft = { viewModel.clearSaleDraft() },
