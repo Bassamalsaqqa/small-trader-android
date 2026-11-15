@@ -397,7 +397,7 @@ class StaffWorkspaceViewModel(
     private var cachedOrchestrator: OnlineCashSaleOrchestrator? = null
     private var cachedOrchestratorGeneration: Long? = null
 
-    private fun getOrchestrator(): OnlineCashSaleOrchestrator {
+    internal fun getOrchestrator(): OnlineCashSaleOrchestrator {
         val coord = coordinator ?: throw IllegalStateException("Cannot create orchestrator: coordinator is null")
         val currentGen = coord.currentGeneration
         val cached = cachedOrchestrator
@@ -414,10 +414,11 @@ class StaffWorkspaceViewModel(
         }
         val onAuthDeniedLockScope: ((Long, ReadClientErrorResponse) -> Unit)? = { scopeGen, _ ->
             val ready = coord.authState as? StaffAuthState.ReadReady
-            if (ready != null && coord.isScopeActive(scopeGen, ready.session.selectedCompanyId)) {
+            val companyId = ready?.session?.selectedCompanyId
+            if (ready != null && companyId != null && coord.isScopeActive(scopeGen, companyId)) {
                 authDenialListener?.onAuthDenied(
                     AuthDenialScope(
-                        companyId = ready.session.selectedCompanyId,
+                        companyId = companyId,
                         actorId = ready.session.actorUlid,
                         deviceId = ready.session.deviceUuid,
                         deniedAt = java.time.Instant.now().toString()
@@ -427,11 +428,12 @@ class StaffWorkspaceViewModel(
         }
         val activeScopeSupplier: (() -> OnlineSaleScope?)? = {
             val ready = coord.authState as? StaffAuthState.ReadReady
-            if (ready != null) {
+            val companyId = ready?.session?.selectedCompanyId
+            if (ready != null && companyId != null) {
                 OnlineSaleScope(
                     actorId = ready.session.actorUlid,
                     deviceId = ready.session.deviceUuid,
-                    companyId = ready.session.selectedCompanyId,
+                    companyId = companyId,
                     generation = coord.currentGeneration
                 )
             } else null

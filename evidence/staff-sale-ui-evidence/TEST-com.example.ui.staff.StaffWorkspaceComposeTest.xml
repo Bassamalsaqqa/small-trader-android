@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.ui.staff.StaffWorkspaceComposeTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-11-15T06:49:25.931Z" hostname="pasta-hp-worker" time="10.854">
+  <properties/>
+  <testcase name="companySelectScreen_rendersCompanies_andClicksItem" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="7.639"/>
+  <testcase name="cashSaleScreen_rendersDirectDecimalQuantityInput_andUpdatesQuantityOnInput" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.995"/>
+  <testcase name="statusScreens_renderTruthfulState" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.135"/>
+  <testcase name="mfaScreen_rendersMutuallyExclusiveChips_andSubmits" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.343"/>
+  <testcase name="signInScreen_rendersInputs_andSubmitsCredentials" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.47"/>
+  <testcase name="companySelectScreen_showsCancelWhenActiveCompanyExists_andLogoutOtherwise" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.11"/>
+  <testcase name="catalog_whenCashEnabled_rendersAddButton_andInvokesCallbackOnClick" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.186"/>
+  <testcase name="customerDirectory_whenCashEnabled_rendersSelectButton_andInvokesCallbackOnClick" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.154"/>
+  <testcase name="workspaceScreen_unassignedTaxRate_rendersTruthfulCopy" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.144"/>
+  <testcase name="workspaceScreen_rendersProductsTab_andHeaders" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.184"/>
+  <testcase name="workspaceScreen_rendersCustomersTab" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.18"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

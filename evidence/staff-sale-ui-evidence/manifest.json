@@ -1,0 +1,53 @@
+{
+  "test_suite": "Staff Online Sale & Workspace Focused QA",
+  "branch": "t3/android-v2-online-cash-client",
+  "base_sha": "6bdcca0096cac1a2bcd971570423148aa6b1f510",
+  "timestamp_utc": "2026-11-15T06:49:38Z",
+  "exit_code": 0,
+  "summary": {
+    "total_tests": 142,
+    "passed": 142,
+    "failed": 0,
+    "skipped": 0,
+    "errors": 0
+  },
+  "command": "./gradlew testDebugUnitTest --tests \"com.example.ui.staff.sale.StaffOnlineSaleDraftTest\" --tests \"com.example.ui.staff.sale.StaffOnlineSaleViewModelTest\" --tests \"com.example.ui.staff.StaffWorkspaceComposeTest\" --tests \"com.example.ui.staff.StaffWorkspaceViewModelTest\" --tests \"com.example.data.mobile.session.*\" --max-workers=1 -Dorg.gradle.workers.max=1 -Dorg.gradle.jvmargs=\"-XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xmx1536m\" --no-daemon -Pkotlin.compiler.execution.strategy=in-process",
+  "suites": [
+    {
+      "name": "com.example.data.mobile.session.SecureStaffSessionStoreTest",
+      "tests": 37,
+      "failures": 0,
+      "xml_sha256": "120fa5024d000e046e4597561257de29765a3f29500ffb2dc9d43237fcdb7f65"
+    },
+    {
+      "name": "com.example.data.mobile.session.StaffSessionCoordinatorTest",
+      "tests": 51,
+      "failures": 0,
+      "xml_sha256": "ea293c16ad7e80375ce30524a21a9566f293188ee448c7928ca8a3bc3eba2d32"
+    },
+    {
+      "name": "com.example.ui.staff.sale.StaffOnlineSaleDraftTest",
+      "tests": 11,
+      "failures": 0,
+      "xml_sha256": "0bdf4e542d6aa2a2f7fd04857ea527315976a72dca286cf15722a281d0e41ed5"
+    },
+    {
+      "name": "com.example.ui.staff.sale.StaffOnlineSaleViewModelTest",
+      "tests": 8,
+      "failures": 0,
+      "xml_sha256": "d7e321e32534b7cc85089664e0d6f00ef5c34e44db02afd0396d01faa74ec090"
+    },
+    {
+      "name": "com.example.ui.staff.StaffWorkspaceComposeTest",
+      "tests": 11,
+      "failures": 0,
+      "xml_sha256": "4efaa0a8725d7e6b801a1d56df4d92e46ee61638eb40ddeae931de46352e46a8"
+    },
+    {
+      "name": "com.example.ui.staff.StaffWorkspaceViewModelTest",
+      "tests": 24,
+      "failures": 0,
+      "xml_sha256": "ef0ff08480b10442cf1b1ab066faf686752086b90b86b6f5eae2b5a759871aea"
+    }
+  ]
+}

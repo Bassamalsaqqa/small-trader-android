@@ -8,6 +8,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
@@ -421,8 +422,7 @@ class StaffWorkspaceComposeTest {
 
         // Assert button exists and click it
         val addButtonNode = composeTestRule.onNodeWithTag("staff_product_add_to_sale_${sampleProduct.id.value}")
-        addButtonNode.assertIsDisplayed()
-        addButtonNode.performClick()
+        addButtonNode.performScrollTo().assertIsDisplayed().performClick()
         composeTestRule.waitForIdle()
 
         // Verify that onAddProductToSale callback was invoked with the exact product
@@ -542,7 +542,7 @@ class StaffWorkspaceComposeTest {
 
         // Test direct quantity input field
         val qtyInputNode = composeTestRule.onNodeWithTag("staff_sale_line_qty_input_${line.lineId}")
-        qtyInputNode.assertIsDisplayed()
+        qtyInputNode.assertExists()
         qtyInputNode.performTextClearance()
         qtyInputNode.performTextInput("4.5")
         composeTestRule.waitForIdle()

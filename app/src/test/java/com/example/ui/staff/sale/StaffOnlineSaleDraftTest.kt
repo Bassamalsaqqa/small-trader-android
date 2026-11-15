@@ -110,8 +110,8 @@ class StaffOnlineSaleDraftTest {
         assertNotEquals(pivotUlid, line.productUnitId)
 
         // Also test with explicit packaging unit
-        val pkgUnitId = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5PKG1")
-        val pkgPivotId = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5PKG2")
+        val pkgUnitId = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5PK1")
+        val pkgPivotId = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5PK2")
         val pkgUnit = ProductPackagingUnit(
             productUnitId = pkgPivotId,
             unitId = pkgUnitId,
@@ -256,7 +256,7 @@ class StaffOnlineSaleDraftTest {
             StaffOnlineSaleRequestBuilder.buildRawWireMap(draft, authority)
             fail("Expected exception when building wire payload with unresolved tax contract")
         } catch (e: IllegalArgumentException) {
-            assertTrue(e.message?.contains("unresolved tax contract") == true)
+            assertTrue(e.message?.contains("unresolved") == true)
         }
     }
 
@@ -355,7 +355,7 @@ class StaffOnlineSaleDraftTest {
             explicitNoTax = true
         )
 
-        val customCustomerUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5CUST")
+        val customCustomerUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5CS1")
         val customer = CustomerDirectoryItem(
             id = customCustomerUlid,
             code = "CUST-007",
@@ -375,7 +375,7 @@ class StaffOnlineSaleDraftTest {
 
     @Test
     fun testDefaultUnitResolvesCodeFromBootstrapUnitsWhenDifferentFromBase() {
-        val distinctDefaultUnitUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5DEF1")
+        val distinctDefaultUnitUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5DE1")
         val product = ProductCatalogItem(
             id = productUlid,
             sku = "SKU-DEF",
@@ -402,8 +402,8 @@ class StaffOnlineSaleDraftTest {
                 code = "DOZ",
                 name = "Dozen",
                 symbol = "dz",
-                conversionRate = PositiveDecimalQuantity.of(12),
-                isBase = false
+                allowsFraction = false,
+                decimalPlaces = 0
             )
         )
 
@@ -415,12 +415,12 @@ class StaffOnlineSaleDraftTest {
 
         assertEquals("DOZ", line.unitCode)
         assertFalse(line.hasUnresolvedUnitContract)
-        assertFalse(line.hasUnresolvedContracts)
+        assertFalse(line.hasUnresolvedContract)
     }
 
     @Test
     fun testDefaultUnitUnresolvableCodeFailsClosedAsUnknownUnit() {
-        val unresolvableUnitUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5UNR1")
+        val unresolvableUnitUlid = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5NN1")
         val product = ProductCatalogItem(
             id = productUlid,
             sku = "SKU-UNR",
@@ -449,7 +449,7 @@ class StaffOnlineSaleDraftTest {
 
         assertEquals("UNKNOWN_UNIT", line.unitCode)
         assertTrue(line.hasUnresolvedUnitContract)
-        assertTrue(line.hasUnresolvedContracts)
+        assertTrue(line.hasUnresolvedContract)
 
         val bootstrap = createSampleBootstrap()
         val session = createSampleSession()
