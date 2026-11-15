@@ -82,7 +82,9 @@ class StaffWorkspaceViewModel(
         tokenProvider: () -> String?,
         scopeGenerationProvider: () -> Long,
         onAuthDeniedLockScope: ((scopeGeneration: Long, error: ReadClientErrorResponse) -> Unit)?,
-        activeScopeSupplier: (() -> OnlineSaleScope?)?
+        activeScopeSupplier: (() -> OnlineSaleScope?)?,
+        recoveryStore: DurableOnlineSaleRecoveryStore?,
+        requireRecoveryStore: Boolean
     ) -> OnlineCashSaleOrchestrator)? = null,
     private val onlineCashEnabled: Boolean = false,
     private val currencyMinorUnitsOverride: Int? = null,
@@ -415,6 +417,8 @@ class StaffWorkspaceViewModel(
         val coord = coordinator ?: return
         val currentGen = coord.currentGeneration
 
+        if (_uiState.value.saleDraft.isSubmitting) return
+
         if (store == null) {
             if (isOnlineCashActive && !allowRecoveryBypassForTesting) {
                 _uiState.update { s ->
@@ -478,19 +482,22 @@ class StaffWorkspaceViewModel(
                     )
                 }
             } else {
-                // If there was a hold from a different company or a storage error hold with no retained intent, clear hold for clean company
+                // If there was a hold from a different identity scope or a storage error hold with no retained intent, clear hold for clean scope
                 if (_uiState.value.saleDraft.isPaymentUnverifiedHold) {
-                    val existingCompany = _uiState.value.saleDraft.preparedIntent?.context?.companyId
-                    if (existingCompany != currentCompany || _uiState.value.saleDraft.preparedIntent == null) {
+                    val existingIntent = _uiState.value.saleDraft.preparedIntent
+                    val isDifferentScope = existingIntent != null && (
+                        existingIntent.context.companyId != currentCompany ||
+                        existingIntent.context.actorId != currentActor ||
+                        existingIntent.deviceId != currentDevice
+                    )
+                    if (isDifferentScope || existingIntent == null) {
                         _uiState.update { s ->
                             s.copy(
                                 saleDraft = s.saleDraft.copy(
                                     isPaymentUnverifiedHold = false,
                                     isSubmitting = false,
-                                    preparedIntent = null,
-                                    submissionError = null,
-                                    lines = emptyList(),
-                                    cashTendered = null
+                                    preparedIntent = if (isDifferentScope) null else s.saleDraft.preparedIntent,
+                                    submissionError = if (isDifferentScope || s.saleDraft.preparedIntent == null) null else s.saleDraft.submissionError
                                 )
                             )
                         }
@@ -571,8 +578,16 @@ class StaffWorkspaceViewModel(
             } else null
         }
 
+        val requirePolicy = !allowRecoveryBypassForTesting && (onlineCashEnabled || BuildConfig.STAFF_ONLINE_CASH_ENABLED)
         val created = if (factory != null) {
-            factory.invoke(tokenProvider, scopeGenerationProvider, onAuthDeniedLockScope, activeScopeSupplier)
+            factory.invoke(
+                tokenProvider,
+                scopeGenerationProvider,
+                onAuthDeniedLockScope,
+                activeScopeSupplier,
+                recoveryStore,
+                requirePolicy
+            )
         } else {
             val transport = OkHttpTransport(configuredOrigin, allowHttpLoopback)
             val client = AndroidV2OnlineCashClient(transport, configuredOrigin, allowHttpLoopback)
@@ -583,7 +598,7 @@ class StaffWorkspaceViewModel(
                 onAuthDeniedLockScope = onAuthDeniedLockScope,
                 activeScopeSupplier = activeScopeSupplier,
                 recoveryStore = recoveryStore,
-                requireRecoveryStore = !allowRecoveryBypassForTesting && (onlineCashEnabled || BuildConfig.STAFF_ONLINE_CASH_ENABLED)
+                requireRecoveryStore = requirePolicy
             )
         }
         cachedOrchestrator = created
@@ -1064,25 +1079,48 @@ class StaffWorkspaceViewModel(
                     }
                 }
                 is OnlineCashOrchestrationResult.LocalTokenUnavailable -> {
-                    if (canonicalOrigin != null && store != null) {
-                        try {
-                            val currentPending = store.getPendingSale(targetCompanyId, readyState.session.actorUlid, targetDeviceId, canonicalOrigin)
-                            if (currentPending?.clientEventId == preparedIntent.clientEventId) {
-                                store.clearPendingSale(preparedIntent.clientEventId, targetCompanyId, readyState.session.actorUlid, targetDeviceId, canonicalOrigin)
-                            }
-                        } catch (_: Exception) {}
-                    }
-                    _uiState.update { s ->
-                        s.copy(
-                            saleDraft = s.saleDraft.copy(
-                                isSubmitting = false,
-                                preparedIntent = null,
-                                submissionError = result.reason
+                    val hasDurableRecord = store != null && canonicalOrigin != null && try {
+                        store.getPendingSale(targetCompanyId, readyState.session.actorUlid, targetDeviceId, canonicalOrigin)?.clientEventId == preparedIntent.clientEventId
+                    } catch (_: Exception) { false }
+                    val wasHold = _uiState.value.saleDraft.isPaymentUnverifiedHold
+
+                    if (hasDurableRecord || wasHold) {
+                        // Lost ACK or existing pending sale under re-auth: NEVER discard possibly committed record/identity! Keep exact event & HOLD intact.
+                        _uiState.update { s ->
+                            s.copy(
+                                saleDraft = s.saleDraft.copy(
+                                    isSubmitting = false,
+                                    isPaymentUnverifiedHold = true,
+                                    submissionError = result.reason
+                                )
                             )
-                        )
+                        }
+                    } else {
+                        // Proven zero-dispatch on fresh uncommitted draft: clear volatile prepared intent to permit editing
+                        _uiState.update { s ->
+                            s.copy(
+                                saleDraft = s.saleDraft.copy(
+                                    isSubmitting = false,
+                                    isPaymentUnverifiedHold = false,
+                                    preparedIntent = null,
+                                    submissionError = result.reason
+                                )
+                            )
+                        }
                     }
                 }
                 is OnlineCashOrchestrationResult.ValidationFailed -> {
+                    if (canonicalOrigin != null && store != null) {
+                        try {
+                            store.clearPendingSale(
+                                preparedIntent.clientEventId,
+                                targetCompanyId,
+                                readyState.session.actorUlid,
+                                targetDeviceId,
+                                canonicalOrigin
+                            )
+                        } catch (_: Exception) {}
+                    }
                     _uiState.update { s ->
                         s.copy(
                             saleDraft = s.saleDraft.copy(
@@ -2774,7 +2812,9 @@ class StaffWorkspaceViewModel(
             tokenProvider: () -> String?,
             scopeGenerationProvider: () -> Long,
             onAuthDeniedLockScope: ((scopeGeneration: Long, error: ReadClientErrorResponse) -> Unit)?,
-            activeScopeSupplier: (() -> OnlineSaleScope?)?
+            activeScopeSupplier: (() -> OnlineSaleScope?)?,
+            recoveryStore: DurableOnlineSaleRecoveryStore?,
+            requireRecoveryStore: Boolean
         ) -> OnlineCashSaleOrchestrator)? = null,
         private val onlineCashEnabled: Boolean = false,
         private val currencyMinorUnitsOverride: Int? = null

@@ -60,6 +60,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -202,7 +203,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -213,7 +214,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -273,7 +275,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 lockHookCaptured = lockHook
                 val dummyClient = AndroidV2OnlineCashClient(
                     transport = object : ReadClientTransport {
@@ -289,7 +291,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -354,7 +357,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -365,7 +368,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -415,7 +419,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -426,7 +430,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -498,7 +503,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -509,7 +514,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -556,7 +562,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -567,7 +573,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -619,7 +626,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -630,7 +637,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -707,7 +715,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -718,7 +726,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -786,7 +795,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -797,7 +806,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -981,7 +991,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -992,7 +1002,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -1090,7 +1101,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -1101,7 +1112,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -1181,7 +1193,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -1192,7 +1204,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -1338,7 +1351,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -1349,7 +1362,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -1434,7 +1448,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -1445,7 +1459,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -1532,7 +1547,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -1543,7 +1558,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -1623,7 +1639,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -1634,7 +1650,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -1732,7 +1749,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = null,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -1743,7 +1760,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -1829,7 +1847,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = defaultRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -1840,7 +1858,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = defaultRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -1924,7 +1943,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = failingRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -1935,7 +1954,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = failingRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -2020,7 +2040,7 @@ class StaffOnlineSaleViewModelTest {
                 onlineCashEnabled = true,
                 currencyMinorUnitsOverride = 2,
                 recoveryStore = sharedRecoveryStore,
-                orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+                orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                     val client = AndroidV2OnlineCashClient(
                         transport = testTransport,
                         baseOrigin = "https://small-trader.example.com"
@@ -2031,7 +2051,8 @@ class StaffOnlineSaleViewModelTest {
                         scopeGenerationProvider = scopeGenProvider,
                         onAuthDeniedLockScope = lockHook,
                         activeScopeSupplier = scopeSupplier,
-                        recoveryStore = sharedRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                     )
                 }
             )
@@ -2318,7 +2339,7 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             recoveryStore = sharedRecoveryStore,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
                 val client = AndroidV2OnlineCashClient(
                     transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
@@ -2329,7 +2350,8 @@ class StaffOnlineSaleViewModelTest {
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier,
-                    recoveryStore = sharedRecoveryStore
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
                 )
             }
         )
@@ -2564,6 +2586,306 @@ class StaffOnlineSaleViewModelTest {
         assertNull(vm.uiState.value.saleDraft.submissionError)
         vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
         assertEquals(1, vm.uiState.value.saleDraft.lines.size)
+    }
+
+    @Test
+    fun testLostAck_tokenLoss_preservesRecordIdentity_zeroPostNewUuid() = runTest(testDispatcher) {
+        val capturedRequests = mutableListOf<TransportRequest>()
+        var tokenAvailable = true
+        val sharedStore = InMemoryDurableOnlineSaleRecoveryStore()
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                capturedRequests.add(request)
+                if (request.method == HttpMethod.POST) {
+                    throw IOException("Network timeout during POST transport")
+                }
+                throw IllegalStateException("Unexpected GET during first submit")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = { if (tokenAvailable) tokenProvider() else null },
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "35.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+
+        // 1. Initial submit: POST network timeout produces Indeterminate / PaymentUnverifiedHold with durable record saved
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        val originalIntent = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(originalIntent)
+        val originalEventId = originalIntent!!.clientEventId
+
+        // Verify durable record exists in store
+        val storedBeforeTokenLoss = sharedStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+        assertNotNull(storedBeforeTokenLoss)
+        assertEquals(originalEventId, storedBeforeTokenLoss!!.clientEventId)
+
+        // 2. Token becomes unavailable (lost token on retry / session expiration)
+        tokenAvailable = false
+
+        // Attempt submit while token is unavailable -> produces LocalTokenUnavailable
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        // Critical assertions:
+        // Hold MUST NOT be released!
+        assertTrue("Hold must remain active despite token loss", vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        // Prepared intent MUST NOT be cleared or re-minted!
+        assertNotNull("Prepared intent must be preserved", vm.uiState.value.saleDraft.preparedIntent)
+        assertEquals(originalEventId, vm.uiState.value.saleDraft.preparedIntent!!.clientEventId)
+
+        // Durable record MUST NOT be deleted from store!
+        val storedAfterTokenLoss = sharedStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+        assertNotNull("Durable record must NEVER be deleted on lost-ACK token loss", storedAfterTokenLoss)
+        assertEquals(originalEventId, storedAfterTokenLoss!!.clientEventId)
+
+        // No new HTTP POST request was made (total POST requests remains exactly 1 from original dispatch)
+        val postRequests = capturedRequests.filter { it.method == HttpMethod.POST }
+        assertEquals(1, postRequests.size)
+
+        // 3. Recreate ViewModel (simulate app restart) on same scope
+        val recreatedVm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedStore
+        )
+        advanceUntilIdle()
+
+        // Recreated VM must restore hold and the exact same event ID
+        assertTrue(recreatedVm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        val restoredIntent = recreatedVm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(restoredIntent)
+        assertEquals(originalEventId, restoredIntent!!.clientEventId)
+    }
+
+    @Test
+    fun testFreshDraft_tokenLoss_zeroDurableWrite_allowsEditing() = runTest(testDispatcher) {
+        val capturedRequests = mutableListOf<TransportRequest>()
+        val sharedStore = InMemoryDurableOnlineSaleRecoveryStore()
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                capturedRequests.add(request)
+                throw AssertionError("No transport should be called when token is unavailable")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = { null }, // token unavailable immediately on fresh draft
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "20.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+
+        // Submit fresh draft with token unavailable
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        // Assert zero durable writes occurred
+        val storedRecord = sharedStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+        assertNull("Zero durable writes must occur on fresh draft token unavailability", storedRecord)
+
+        // Assert hold is false, preparedIntent is null, and error is set
+        val draft = vm.uiState.value.saleDraft
+        assertFalse(draft.isPaymentUnverifiedHold)
+        assertFalse(draft.isSubmitting)
+        assertNull(draft.preparedIntent)
+        assertNotNull(draft.submissionError)
+
+        // Zero transport requests dispatched
+        assertTrue(capturedRequests.isEmpty())
+
+        // Editing draft succeeds
+        val lineId = draft.lines.first().lineId
+        vm.updateDraftLineQuantity(lineId, PositiveDecimalQuantity.of(3))
+        assertEquals("3", vm.uiState.value.saleDraft.lines.first().quantity.toPlainString())
+    }
+
+    @Test
+    fun testCustomFactory_withRecoveryStore_storageFailure_zeroPost() = runTest(testDispatcher) {
+        val capturedRequests = mutableListOf<TransportRequest>()
+        val failingStore = InMemoryDurableOnlineSaleRecoveryStore(throwOnSave = true)
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                capturedRequests.add(request)
+                throw AssertionError("Transport must NEVER be called when storage fails")
+            }
+        }
+
+        var factoryReceivedStore: DurableOnlineSaleRecoveryStore? = null
+        var factoryReceivedRequirePolicy: Boolean? = null
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = failingStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                factoryReceivedStore = store
+                factoryReceivedRequirePolicy = requireStore
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        // Verify factory received the injected non-null store and requireStore == true
+        assertSame(failingStore, factoryReceivedStore)
+        assertEquals(true, factoryReceivedRequirePolicy)
+
+        val product = createSampleProduct(unitPrice = "40.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        // Zero HTTP POST requests made
+        assertEquals(0, capturedRequests.size)
+
+        // UI transitioned to blocking hold with storage failure
+        val draft = vm.uiState.value.saleDraft
+        assertFalse(draft.isSubmitting)
+        assertTrue(draft.isPaymentUnverifiedHold)
+        assertNotNull(draft.submissionError)
+        assertTrue(draft.submissionError!!.contains("Storage failure") || draft.submissionError!!.contains("disk write failure"))
+    }
+
+    @Test
+    fun testCustomFactory_activeToken_writeHappensBeforeTransport() = runTest(testDispatcher) {
+        val sharedStore = InMemoryDurableOnlineSaleRecoveryStore()
+        var recordPresentAtTransportTime = false
+        var capturedEventId: ClientUuid? = null
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                val eventIdStr = parsedBody.properties["client_event_id"]!!.asString()
+                capturedEventId = ClientUuid.fromString(eventIdStr)
+
+                // Check store at the exact moment transport executes
+                val pending = sharedStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
+                recordPresentAtTransportTime = (pending != null && pending.clientEventId == capturedEventId)
+
+                val commitJson = """
+                    {
+                        "client_event_id": "$eventIdStr",
+                        "status": "posted",
+                        "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                        "invoice_number": "INV-ORDER-001",
+                        "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5PA1",
+                        "payment_receipt_number": "RCT-ORDER-001",
+                        "grand_total": "18.00",
+                        "amount_paid": "18.00",
+                        "change_returned": "0.00",
+                        "posted_at": "2026-11-15T12:00:00Z"
+                    }
+                """.trimIndent()
+                return TransportResponse(201, emptyMap(), commitJson)
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            recoveryStore = sharedStore,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier, store, requireStore ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier,
+                    recoveryStore = store,
+                    requireRecoveryStore = requireStore
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "18.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        // Verified: durable record was written BEFORE network transport executed
+        assertTrue("Durable record must be written to recovery store before HTTP POST transport executes", recordPresentAtTransportTime)
+        assertNotNull(capturedEventId)
+
+        // After successful commit, receipt is set and lines are cleared
+        val receipt = vm.uiState.value.saleDraft.receipt
+        assertNotNull(receipt)
+        assertEquals("INV-ORDER-001", receipt?.invoiceNumber)
     }
 }
 
