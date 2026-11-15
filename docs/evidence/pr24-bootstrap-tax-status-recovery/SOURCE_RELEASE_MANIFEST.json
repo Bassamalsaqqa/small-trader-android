@@ -2,7 +2,7 @@
   "release_type": "source_only_qualified_review",
   "branch": "t3/android-bootstrap-tax-status-recovery",
   "pull_request": "https://github.com/Bassamalsaqqa/small-trader-android/pull/24",
-  "head_commit": "5f382ba77d5fa9dd87606c8f0bb9be31a4861f36",
+  "head_commit": "82dc65a2d7431c59baa71e7c94c30ad6fd8a9ffd",
   "toolchain": {
     "jdk": "OpenJDK 21.0.13+9 (/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9)",
     "android_sdk": "compileSdk 36, minSdk 24, targetSdk 36 (local SDK /home/t3dev/.local/share/android-toolchain/sdk)",
@@ -26,18 +26,21 @@
     }
   },
   "qa_status": {
-    "execution_summary": "124 tests executed across 4 focused classes: 124 passed, 0 failed, 0 errors, 0 skipped (exit code 0, 100% PASS). Unit and MockWebServer test qualification passed. Real Android OS durability, fsync/power-loss survival, and hardware-backed Keystore custody UNVERIFIED.",
-    "unit_tests_passed": 124,
+    "execution_summary": "124 tests executed across 4 core recovery classes (Attempt 7): 124 passed, 0 failed, 0 errors, 0 skipped. Pilot origin suite: 50 tests executed, 50 passed, 0 failed, 0 errors, 0 skipped. Exit code 0, 100% PASS. Unit and MockWebServer test qualification passed. Real Android OS durability, fsync/power-loss survival, and hardware-backed Keystore custody UNVERIFIED.",
+    "unit_tests_passed": 174,
     "unit_tests_failed": 0,
     "suites": [
       "AndroidV2OnlineCashClientMockWebServerTest (38 passed, 0 failed)",
       "DurableOnlineSaleRecoveryStoreTest (26 passed, 0 failed)",
       "StaffWorkspaceComposeTest (14 passed, 0 failed)",
-      "StaffOnlineSaleViewModelTest (46 passed, 0 failed)"
+      "StaffOnlineSaleViewModelTest (46 passed, 0 failed)",
+      "CashPilotHandoffConfigTest (49 passed, 0 failed)",
+      "SmallTraderOnlineCashPilotSmokeTest (1 passed [testCashPilotFinancialAcceptanceEnforcement], 0 failed; paired execution NOT RUN)"
     ],
     "lint_status": "NOT_RUN (explicitly excluded by targeted QA lease)",
     "qualification_boundary": {
       "scope": "Unit, Robolectric Compose, and OkHttp MockWebServer tests ONLY.",
+      "hermetic_truthfulness": "Pilot origin test suite is truthfully recorded as hermetically tested only AFTER actual execution under the claimed lease. Pre-execution handback was strictly source-only.",
       "durability_verification": "Tested through injected DirectorySyncEngine seam; actual Android OS fsync, sudden power loss survival, and hardware-backed Keystore custody UNVERIFIED.",
       "acceptance_claims": "No financial release, paired hardware, or physical UI device acceptance claim."
     },
@@ -48,7 +51,8 @@
       "attempt_4": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-4/",
       "attempt_5": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-5/",
       "attempt_6": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-6/",
-      "attempt_7": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-7/"
+      "attempt_7": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-7/",
+      "pilot_origin_evidence": "docs/evidence/pr24-bootstrap-tax-status-recovery/pilot-origin-evidence/"
     },
     "source_hashes_at_execution": {
       "app/build.gradle.kts": "92e77c2786f4f4cb7c49d0fcf35400b9f9aa95bb845e73220d9cc594344b89df",
@@ -60,7 +64,10 @@
       "app/src/main/java/com/example/ui/staff/sale/StaffOnlineSaleScreen.kt": "03312ce32a6156d72e14fabb3e1ef9168fb3bed546cec4971ffa4317c87298d4",
       "app/src/test/java/com/example/data/mobile/onlinecash/DurableOnlineSaleRecoveryStoreTest.kt": "5b80be60504626e36ebbcd7d1cbae197a26d7f641475ce27eb8e1906152e0564",
       "app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt": "fea427a0e3d3ccdbb24b2ac8fae1c0c5ac806e0dc16dabb22a1ea123a78f525c",
-      "app/src/test/java/com/example/ui/staff/StaffWorkspaceComposeTest.kt": "59c84c0a4caf7e159ac6ece132293794a8e5f50274145d3ae5b049f364fc78f1"
+      "app/src/test/java/com/example/ui/staff/StaffWorkspaceComposeTest.kt": "59c84c0a4caf7e159ac6ece132293794a8e5f50274145d3ae5b049f364fc78f1",
+      "app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotHandoffConfig.kt": "b07359e9309b2614d103766b8655188a985d5b95a28a5be03f9e832d048670b9",
+      "app/src/test/java/com/example/data/mobile/readclient/pilot/CashPilotHandoffConfigTest.kt": "6c7966901638c466daf61ffc6937f124fe5d7b5e1bc24feecdb8a37908119099",
+      "app/src/test/java/com/example/data/mobile/readclient/pilot/SmallTraderOnlineCashPilotSmokeTest.kt": "1045eb567891376d4368255cabf283caf9c0bac79239edd6452f98c7f5ccca50"
     }
   },
   "deployment_stages": {

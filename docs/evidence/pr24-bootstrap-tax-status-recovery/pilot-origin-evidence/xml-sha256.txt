@@ -1,0 +1,2 @@
+313e10c90714fa63f118dce4d56f149cc918f51576dc1bd1eb7761c231db5b57  TEST-com.example.data.mobile.readclient.pilot.SmallTraderOnlineCashPilotSmokeTest.xml
+70cfa7cc3630bd71f83e639019c8e1385a4a36c6b7b0d58219805b9b9cb1cb5a  TEST-com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest.xml

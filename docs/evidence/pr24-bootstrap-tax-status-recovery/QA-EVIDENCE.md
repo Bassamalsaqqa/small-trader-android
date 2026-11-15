@@ -7,8 +7,9 @@
 - Compile Fix Pin (Attempt 5): `74b6259a8cf19b43f4bbfdcb6970cb166ae7316e`
 - Evidence Documentation: `7824772bf1c277c0e8a6d5705f01f2d8273221e7`
 - Source Fix Pin (Attempt 6): `0eff096ca080aa44e424388e28438e105d967252`
-- Evidence Documentation 6: `7e442523dfbef122b0b0d2fd0973c658b401c178`
 - Source Fix Pin (Attempt 7): `5f382ba77d5fa9dd87606c8f0bb9be31a4861f36`
+- Evidence Documentation 7: `0d47343e8ea2e5f32bb9a98ef2b89f8d55a29953`
+- Pilot Origin Source Fix Pin: `82dc65a2d7431c59baa71e7c94c30ad6fd8a9ffd`
 
 > [!NOTE]
 > **Errata on Prior Full Commit SHA Notation**:
@@ -107,17 +108,39 @@ The exclusive short Android QA lease was claimed following backend release to ex
 - **Total Tests Completed**: 124
 - **Passed**: 124 | **Failed**: 0 | **Errors**: 0 | **Skipped**: 0 (100% PASS)
 
+### Pilot Origin QA Run: Focused Hermetic Origin Derivation & Financial Acceptance Enforcement
+- **Commit**: `82dc65a2d7431c59baa71e7c94c30ad6fd8a9ffd`
+- **Elapsed**: 72.09s | **Exit Code**: 0 (BUILD SUCCESSFUL)
+- **Total Tests Completed**: 50
+- **Passed**: 50 | **Failed**: 0 | **Errors**: 0 | **Skipped**: 0 (100% PASS)
+- **Execution Scope**:
+  - `CashPilotHandoffConfigTest`: 49 tests (including 4 newly added unit tests validating bare origin derivation, negative rejections, EndpointSecurity path segment rejection invariant preservation, and ReadClientTransport single POST/GET request capture with zero duplicated prefix).
+  - `SmallTraderOnlineCashPilotSmokeTest.testCashPilotFinancialAcceptanceEnforcement`: 1 test verifying that financial acceptance requires root approval SHA and refuses without authorization.
+  - Explicitly excluded: `executePairedOnlineCashPilotSmoke` (zero financial grant; paired execution not permitted).
+- **Environment**: All 7 `SMALL_TRADER*` paired handoff environment variables verified UNSET; zero financial grant.
+- **Network**: Zero external backend/HTTP traffic (0 actual network); hermetic mock fixtures and unit testing only.
+- **Teardown**: Daemon stopped with `./gradlew --stop`, 0 lingering Gradle daemon processes confirmed.
+- **QA Lease**: EXPLICITLY RELEASED.
+
 ---
 
-## 3. Detailed Test Suite Results (Attempt 7)
+## 3. Detailed Test Suite Results
 
+### Attempt 7 (4 Core Online Cash & Recovery Classes)
 | Test Class | Tests | Passed | Failed | Errors | Skipped | Status | Time | XML Report SHA-256 |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
 | `AndroidV2OnlineCashClientMockWebServerTest` | 38 | 38 | 0 | 0 | 0 | **PASS** | 0.784s | `288fbf85dc0342fda8eeafb37481ab8d070d1354c85dbbc463b5fb94cea041b5` |
 | `DurableOnlineSaleRecoveryStoreTest` | 26 | 26 | 0 | 0 | 0 | **PASS** | 0.141s | `0ad4ac50f2115a39ffb7603dcc36d4af7643995d1a3b7a88a02819e96d13ee51` |
 | `StaffWorkspaceComposeTest` | 14 | 14 | 0 | 0 | 0 | **PASS** | 10.907s | `4db2d8c4a5493590b85853d3ca58454be8bc47e814a8e38ac8f4f5d5d30aa2bc` |
 | `StaffOnlineSaleViewModelTest` | 46 | 46 | 0 | 0 | 0 | **PASS** | 0.530s | `73b0c0329484ed4b4dbc3ce1d65742560292dd27ff413512ef46ebef2b3f9155` |
-| **Total** | **124** | **124** | **0** | **0** | **0** | **100% PASS** | **138.92s** | *All XML hashes attested in `xml-sha256.txt`* |
+| **Total** | **124** | **124** | **0** | **0** | **0** | **100% PASS** | **138.92s** | *All XML hashes attested in `attempt-7/xml-sha256.txt`* |
+
+### Pilot Origin Evidence (Origin Derivation & Financial Acceptance Enforcement)
+| Test Class | Tests | Passed | Failed | Errors | Skipped | Status | Time | XML Report SHA-256 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| `CashPilotHandoffConfigTest` | 49 | 49 | 0 | 0 | 0 | **PASS** | 0.420s | `70cfa7cc3630bd71f83e639019c8e1385a4a36c6b7b0d58219805b9b9cb1cb5a` |
+| `SmallTraderOnlineCashPilotSmokeTest` (`testCashPilotFinancialAcceptanceEnforcement`) | 1 | 1 | 0 | 0 | 0 | **PASS** | 0.003s | `313e10c90714fa63f118dce4d56f149cc918f51576dc1bd1eb7761c231db5b57` |
+| **Total** | **50** | **50** | **0** | **0** | **0** | **100% PASS** | **72.09s** | *All XML hashes attested in `pilot-origin-evidence/xml-sha256.txt`* |
 
 ---
 
@@ -126,6 +149,7 @@ The exclusive short Android QA lease was claimed following backend release to ex
 > [!IMPORTANT]
 > **QUALIFICATION SCOPE & HARDWARE BOUNDARIES**:
 > - **Execution Scope**: Unit, Robolectric Compose, and OkHttp MockWebServer tests ONLY.
+> - **Hermetic Execution Truthfulness**: The pilot origin test suite is truthfully recorded as hermetically tested only AFTER actual execution under the claimed lease. Pre-execution handback was strictly source-only.
 > - **Filesystem & Durability**: Durability error handling and recovery storage atomic replace mechanics are validated exclusively through the injected `DirectorySyncEngine` seam. These tests **DO NOT** prove real Android OS `fsync` semantics, sudden power-loss survival, physical flash wear, or actual hardware-backed AndroidKeyStore StrongBox custody.
 > - **Production Durability**: Real device OS durability and flash retention remain **UNVERIFIED**.
 > - **Acceptance & Release**: This unit verification does **NOT** constitute a financial service release grant, paired hardware qualification, or physical UI device acceptance.
@@ -134,11 +158,11 @@ The exclusive short Android QA lease was claimed following backend release to ex
 
 ## 5. Attestation Record Keys & Execution Provenance
 
-- **Pre-invocation Attestation**: Uses `git_status_porcelain` as generated contemporaneously by `runner_attempt7.py` ([`pre_invocation_attestation.json`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-7/pre_invocation_attestation.json)).
-- **Post-invocation Attestation**: Uses `git_status` as generated contemporaneously ([`post_invocation_attestation.json`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-7/post_invocation_attestation.json)).
+- **Pre-invocation Attestation**: Uses `git_status_porcelain` as generated contemporaneously ([`pre_invocation_attestation.json`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/pilot-origin-evidence/pre_invocation_attestation.json)).
+- **Post-invocation Attestation**: Uses `git_status` as generated contemporaneously ([`post_invocation_attestation.json`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/pilot-origin-evidence/post_invocation_attestation.json)).
 - Both files are preserved strictly as emitted at execution time with no retroactive key normalization.
-- **Actual Gradle Argv Recorded**:
-  `./gradlew :app:cleanTestDebugUnitTest :app:testDebugUnitTest --no-build-cache --tests com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest --tests com.example.ui.staff.sale.StaffOnlineSaleViewModelTest --tests com.example.ui.staff.StaffWorkspaceComposeTest --tests com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest --max-workers=1 -Dorg.gradle.workers.max=1 -Dorg.gradle.jvmargs=-XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xmx1536m -Pkotlin.compiler.execution.strategy=in-process --no-daemon`
+- **Actual Gradle Argv Recorded (Pilot Origin QA)**:
+  `./gradlew :app:cleanTestDebugUnitTest :app:testDebugUnitTest --no-build-cache --tests com.example.data.mobile.readclient.pilot.CashPilotHandoffConfigTest --tests com.example.data.mobile.readclient.pilot.SmallTraderOnlineCashPilotSmokeTest.testCashPilotFinancialAcceptanceEnforcement --max-workers=1 -Dorg.gradle.workers.max=1 -Dorg.gradle.jvmargs=-XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xmx1536m -Pkotlin.compiler.execution.strategy=in-process --no-daemon`
 
 ---
 
@@ -163,4 +187,5 @@ All raw logs and contemporaneous attestation JSON documents are archived in this
 - [`attempt-5/`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-5/): Pre-invocation attestation, raw execution log (123 tests: 117 pass, 6 fail), post-invocation attestation, test-results XMLs, and XML SHA-256 sums.
 - [`attempt-6/`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-6/): Pre-invocation attestation, raw execution log (124 tests: 121 pass, 3 fail), post-invocation attestation, test-results XMLs, and XML SHA-256 sums.
 - [`attempt-7/`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-7/): Pre-invocation attestation, raw execution log (124 tests: 124 pass, 0 fail), post-invocation attestation, test-results XMLs, and XML SHA-256 sums.
+- [`pilot-origin-evidence/`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/pilot-origin-evidence/): Pre-invocation attestation, raw execution log (50 tests: 50 pass, 0 fail), post-invocation attestation, test-results XMLs, and XML SHA-256 sums.
 - [`SOURCE_RELEASE_MANIFEST.json`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/SOURCE_RELEASE_MANIFEST.json): Attested source file hashes and execution summary.
