@@ -893,6 +893,7 @@ class StaffOnlineSaleViewModelTest {
     fun testPaymentUnverifiedHold_checkPaymentStatus_recoversWhenPaymentConfirmed() = runTest(testDispatcher) {
         var statusCheckCount = 0
         val capturedRequests = mutableListOf<TransportRequest>()
+        var statusResponseDigest: String? = null
 
         val testTransport = object : ReadClientTransport {
             override fun execute(request: TransportRequest): TransportResponse {
@@ -919,12 +920,14 @@ class StaffOnlineSaleViewModelTest {
                     statusCheckCount++
                     val parts = request.path.split("/")
                     val eventId = parts[parts.size - 2]
+                    val digestValue = statusResponseDigest
+                        ?: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
                     val statusJson = """
                         {
                             "client_event_id": "$eventId",
                             "company_id": "${companyUlid.value}",
                             "status": "posted",
-                            "payload_digest": null,
+                            "payload_digest": "$digestValue",
                             "official_invoice": {
                                 "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
                                 "invoice_number": "INV-HOLD-01",
@@ -975,8 +978,10 @@ class StaffOnlineSaleViewModelTest {
         assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
         assertNull(vm.uiState.value.saleDraft.receipt)
         assertNotNull(vm.uiState.value.saleDraft.unverifiedReceipt)
+        val expectedDigest = vm.uiState.value.saleDraft.preparedIntent!!.expectedNormativeProfileDigest.value
+        statusResponseDigest = expectedDigest
 
-        // 2. Trigger checkOnlineCashSaleStatus() -> GET request confirms payment
+        // 2. Trigger checkOnlineCashSaleStatus() -> GET request confirms payment with matching non-null digest
         vm.checkOnlineCashSaleStatus()
         advanceUntilIdle()
 
@@ -996,6 +1001,7 @@ class StaffOnlineSaleViewModelTest {
     @Test
     fun testPaymentUnverifiedHold_checkPaymentStatus_staysOnHoldWhenPaymentStillNull() = runTest(testDispatcher) {
         val capturedRequests = mutableListOf<TransportRequest>()
+        var statusResponseDigest: String? = null
 
         val testTransport = object : ReadClientTransport {
             override fun execute(request: TransportRequest): TransportResponse {
@@ -1021,12 +1027,14 @@ class StaffOnlineSaleViewModelTest {
                 } else if (request.method == HttpMethod.GET) {
                     val parts = request.path.split("/")
                     val eventId = parts[parts.size - 2]
+                    val digestValue = statusResponseDigest
+                        ?: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
                     val statusJson = """
                         {
                             "client_event_id": "$eventId",
                             "company_id": "${companyUlid.value}",
                             "status": "posted",
-                            "payload_digest": null,
+                            "payload_digest": "$digestValue",
                             "official_invoice": {
                                 "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
                                 "invoice_number": "INV-HOLD-02",
@@ -1074,6 +1082,7 @@ class StaffOnlineSaleViewModelTest {
         assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
         val originalIntent = vm.uiState.value.saleDraft.preparedIntent
         assertNotNull(originalIntent)
+        statusResponseDigest = originalIntent!!.expectedNormativeProfileDigest.value
 
         // Status check -> still null payment
         vm.checkOnlineCashSaleStatus()
@@ -1234,6 +1243,375 @@ class StaffOnlineSaleViewModelTest {
         val authority = vm.uiState.value.saleAuthority
         assertNotNull(authority)
         assertEquals("Authoritative bootstrap currency minor units must take precedence", 3, authority!!.currencyMinorUnits)
+    }
+
+    @Test
+    fun testPaymentUnverifiedHold_checkPaymentStatus_postedNullDigest_neverConfirmedHoldKept() = runTest(testDispatcher) {
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST) {
+                    val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                    val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                    val unverifiedJson = """
+                        {
+                            "client_event_id": "$clientEventId",
+                            "status": "posted",
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                            "invoice_number": "INV-HOLD-N1",
+                            "payment_id": null,
+                            "payment_receipt_number": null,
+                            "grand_total": "20.00",
+                            "amount_paid": "0.00",
+                            "change_returned": "0.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(201, emptyMap(), unverifiedJson)
+                } else if (request.method == HttpMethod.GET) {
+                    val parts = request.path.split("/")
+                    val eventId = parts[parts.size - 2]
+                    // Server returns posted with official invoice and payment, but NULL payload_digest
+                    val statusJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "company_id": "${companyUlid.value}",
+                            "status": "posted",
+                            "payload_digest": null,
+                            "official_invoice": {
+                                "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                                "invoice_number": "INV-HOLD-N1",
+                                "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5PA1",
+                                "payment_receipt_number": "RCT-001",
+                                "grand_total": "20.00",
+                                "posted_at": "2026-11-15T12:00:00Z"
+                            },
+                            "conflict": null,
+                            "queried_at": "2026-11-15T12:05:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(200, emptyMap(), statusJson)
+                }
+                throw IllegalStateException("Unexpected request: ${request.method} ${request.path}")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        val originalIntent = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(originalIntent)
+
+        // GET status query with null digest MUST fail closed
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        val draft = vm.uiState.value.saleDraft
+        assertTrue("Hold must be KEPT when posted digest is null", draft.isPaymentUnverifiedHold)
+        assertFalse(draft.isSubmitting)
+        assertNull("Confirmed receipt must NEVER be produced when server returns null digest", draft.receipt)
+        assertNotNull("Unverified receipt preserved", draft.unverifiedReceipt)
+        assertEquals(1, draft.lines.size)
+        assertEquals(originalIntent, draft.preparedIntent)
+        assertTrue(draft.submissionError?.contains("digest mismatch", ignoreCase = true) == true)
+    }
+
+    @Test
+    fun testPaymentUnverifiedHold_checkPaymentStatus_postedWrongDigest_neverConfirmedHoldKept() = runTest(testDispatcher) {
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST) {
+                    val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                    val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                    val unverifiedJson = """
+                        {
+                            "client_event_id": "$clientEventId",
+                            "status": "posted",
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                            "invoice_number": "INV-HOLD-W1",
+                            "payment_id": null,
+                            "payment_receipt_number": null,
+                            "grand_total": "20.00",
+                            "amount_paid": "0.00",
+                            "change_returned": "0.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(201, emptyMap(), unverifiedJson)
+                } else if (request.method == HttpMethod.GET) {
+                    val parts = request.path.split("/")
+                    val eventId = parts[parts.size - 2]
+                    // Server returns posted with official invoice and payment, but WRONG payload_digest
+                    val statusJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "company_id": "${companyUlid.value}",
+                            "status": "posted",
+                            "payload_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                            "official_invoice": {
+                                "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                                "invoice_number": "INV-HOLD-W1",
+                                "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5PA1",
+                                "payment_receipt_number": "RCT-001",
+                                "grand_total": "20.00",
+                                "posted_at": "2026-11-15T12:00:00Z"
+                            },
+                            "conflict": null,
+                            "queried_at": "2026-11-15T12:05:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(200, emptyMap(), statusJson)
+                }
+                throw IllegalStateException("Unexpected request: ${request.method} ${request.path}")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        val originalIntent = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(originalIntent)
+
+        // GET status query with wrong digest MUST fail closed
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        val draft = vm.uiState.value.saleDraft
+        assertTrue("Hold must be KEPT when posted digest is mismatched", draft.isPaymentUnverifiedHold)
+        assertFalse(draft.isSubmitting)
+        assertNull("Confirmed receipt must NEVER be produced on digest mismatch", draft.receipt)
+        assertNotNull("Unverified receipt preserved", draft.unverifiedReceipt)
+        assertEquals(1, draft.lines.size)
+        assertEquals(originalIntent, draft.preparedIntent)
+        assertTrue(draft.submissionError?.contains("digest mismatch", ignoreCase = true) == true)
+    }
+
+    @Test
+    fun testPaymentUnverifiedHold_checkPaymentStatus_postedMatchingDigest_succeedsConfirmedFinancialSuccess() = runTest(testDispatcher) {
+        var statusResponseDigest: String? = null
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST) {
+                    val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                    val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                    val unverifiedJson = """
+                        {
+                            "client_event_id": "$clientEventId",
+                            "status": "posted",
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                            "invoice_number": "INV-HOLD-M1",
+                            "payment_id": null,
+                            "payment_receipt_number": null,
+                            "grand_total": "20.00",
+                            "amount_paid": "0.00",
+                            "change_returned": "0.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(201, emptyMap(), unverifiedJson)
+                } else if (request.method == HttpMethod.GET) {
+                    val parts = request.path.split("/")
+                    val eventId = parts[parts.size - 2]
+                    val digestValue = statusResponseDigest
+                        ?: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                    val statusJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "company_id": "${companyUlid.value}",
+                            "status": "posted",
+                            "payload_digest": "$digestValue",
+                            "official_invoice": {
+                                "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                                "invoice_number": "INV-HOLD-M1",
+                                "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5PA1",
+                                "payment_receipt_number": "RCT-001",
+                                "grand_total": "20.00",
+                                "posted_at": "2026-11-15T12:00:00Z"
+                            },
+                            "conflict": null,
+                            "queried_at": "2026-11-15T12:05:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(200, emptyMap(), statusJson)
+                }
+                throw IllegalStateException("Unexpected request: ${request.method} ${request.path}")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        val expectedDigest = vm.uiState.value.saleDraft.preparedIntent!!.expectedNormativeProfileDigest.value
+        statusResponseDigest = expectedDigest
+
+        // GET status query with MATCHING non-null digest succeeds
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        val draft = vm.uiState.value.saleDraft
+        assertFalse("Hold must be released on matching digest and confirmed payment", draft.isPaymentUnverifiedHold)
+        assertFalse(draft.isSubmitting)
+        assertNull(draft.unverifiedReceipt)
+        assertNotNull("Confirmed receipt must be present", draft.receipt)
+        assertEquals("INV-HOLD-M1", draft.receipt?.invoiceNumber)
+        assertEquals("RCT-001", draft.receipt?.paymentReceiptNumber)
+        assertEquals(expectedDigest, draft.receipt?.payloadDigest?.value)
+        assertTrue("Basket lines must be cleared", draft.lines.isEmpty())
+        assertNull(draft.preparedIntent)
+    }
+
+    @Test
+    fun testPaymentUnverifiedHold_checkPaymentStatus_unknownNullableDigest_remainsUnknownHold() = runTest(testDispatcher) {
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST) {
+                    val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                    val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                    val unverifiedJson = """
+                        {
+                            "client_event_id": "$clientEventId",
+                            "status": "posted",
+                            "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                            "invoice_number": "INV-HOLD-U1",
+                            "payment_id": null,
+                            "payment_receipt_number": null,
+                            "grand_total": "20.00",
+                            "amount_paid": "0.00",
+                            "change_returned": "0.00",
+                            "posted_at": "2026-11-15T12:00:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(201, emptyMap(), unverifiedJson)
+                } else if (request.method == HttpMethod.GET) {
+                    val parts = request.path.split("/")
+                    val eventId = parts[parts.size - 2]
+                    // Unknown status allows nullable payload_digest
+                    val statusJson = """
+                        {
+                            "client_event_id": "$eventId",
+                            "company_id": "${companyUlid.value}",
+                            "status": "unknown",
+                            "payload_digest": null,
+                            "official_invoice": null,
+                            "conflict": null,
+                            "queried_at": "2026-11-15T12:05:00Z"
+                        }
+                    """.trimIndent()
+                    return TransportResponse(200, emptyMap(), statusJson)
+                }
+                throw IllegalStateException("Unexpected request: ${request.method} ${request.path}")
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+        val originalIntent = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(originalIntent)
+
+        // Status check -> unknown returns indeterminate transient, hold preserved
+        vm.checkOnlineCashSaleStatus()
+        advanceUntilIdle()
+
+        val draft = vm.uiState.value.saleDraft
+        assertNull("Confirmed receipt must still be null on unknown", draft.receipt)
+        assertEquals(1, draft.lines.size)
+        assertEquals(originalIntent, draft.preparedIntent)
     }
 }
 
