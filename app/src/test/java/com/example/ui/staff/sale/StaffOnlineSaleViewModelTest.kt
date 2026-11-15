@@ -17,6 +17,7 @@ import com.example.data.mobile.readclient.ApprovedCashAccount
 import com.example.data.mobile.readclient.AuthChallengeResponse
 import com.example.data.mobile.readclient.BootstrapResponse
 import com.example.data.mobile.readclient.BootstrapStaff
+import com.example.data.mobile.readclient.BootstrapTax
 import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.CustomerDirectoryResponse
 import com.example.data.mobile.readclient.DefaultWarehouse
@@ -564,6 +565,229 @@ class StaffOnlineSaleViewModelTest {
             vm.uiState.value.saleDraft.submissionError!!.contains("expired") ||
             vm.uiState.value.saleDraft.submissionError!!.contains("Stale")
         )
+    }
+
+    @Test
+    fun testPostedWithoutPaymentReference_holdsBasketAndPreservesPreparedIntent() = runTest(testDispatcher) {
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                // Response with null payment reference (payment_id = null, payment_receipt_number = null)
+                val unverifiedPaymentJson = """
+                    {
+                        "client_event_id": "$clientEventId",
+                        "status": "posted",
+                        "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                        "invoice_number": "INV-UNVERIFIED-01",
+                        "payment_id": null,
+                        "payment_receipt_number": null,
+                        "grand_total": "25.00",
+                        "amount_paid": "0.00",
+                        "change_returned": "0.00",
+                        "posted_at": "2026-11-15T12:00:00Z"
+                    }
+                """.trimIndent()
+                return TransportResponse(201, emptyMap(), unverifiedPaymentJson)
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "25.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        assertEquals(1, vm.uiState.value.saleDraft.lines.size)
+
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        // MUST be in explicit payment unverified hold state
+        val draft = vm.uiState.value.saleDraft
+        assertTrue("isPaymentUnverifiedHold must be true", draft.isPaymentUnverifiedHold)
+        assertFalse("isSubmitting must be false", draft.isSubmitting)
+        assertFalse("isIndeterminate must be false", draft.isIndeterminate)
+        assertNull("receipt must be null (never treated as paid!)", draft.receipt)
+        assertNotNull("unverifiedReceipt must be recorded", draft.unverifiedReceipt)
+        assertEquals("INV-UNVERIFIED-01", draft.unverifiedReceipt?.invoiceNumber)
+
+        // Basket lines and prepared intent MUST be preserved
+        assertEquals(1, draft.lines.size)
+        assertNotNull("preparedIntent must be preserved", draft.preparedIntent)
+        assertTrue(draft.submissionError?.contains("unverified") == true || draft.submissionError?.contains("posted") == true)
+
+        // Mutations and re-submit must be blocked
+        val initialLine = draft.lines.first()
+        vm.updateDraftLineQuantity(initialLine.lineId, PositiveDecimalQuantity.of(5))
+        assertEquals("1", vm.uiState.value.saleDraft.lines.first().quantity.toPlainString())
+
+        vm.removeDraftLine(initialLine.lineId)
+        assertEquals(1, vm.uiState.value.saleDraft.lines.size)
+
+        vm.clearSaleDraft()
+        assertEquals(1, vm.uiState.value.saleDraft.lines.size)
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+
+        vm.submitOnlineCashSale()
+        // No change, still on hold
+        assertTrue(vm.uiState.value.saleDraft.isPaymentUnverifiedHold)
+    }
+
+    @Test
+    fun testLocalTokenUnavailable_allowsEditing_invalidatesPreparedIntent() = runTest(testDispatcher) {
+        var tokenAvailable = false
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                val commitJson = """
+                    {
+                        "client_event_id": "$clientEventId",
+                        "status": "posted",
+                        "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                        "invoice_number": "INV-2026-002",
+                        "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5PA2",
+                        "payment_receipt_number": "RCT-002",
+                        "grand_total": "50.00",
+                        "amount_paid": "50.00",
+                        "change_returned": "0.00",
+                        "posted_at": "2026-11-15T12:00:00Z"
+                    }
+                """.trimIndent()
+                return TransportResponse(201, emptyMap(), commitJson)
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = { if (tokenAvailable) tokenProvider() else null },
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        val product = createSampleProduct(unitPrice = "25.000000")
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+
+        // 1. First submit with token unavailable -> LocalTokenUnavailable
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.saleDraft.isSubmitting)
+        assertNull("preparedIntent must be invalidated / cleared on pre-dispatch failure", vm.uiState.value.saleDraft.preparedIntent)
+        assertNotNull(vm.uiState.value.saleDraft.submissionError)
+
+        // 2. Edit basket line quantity -> succeeds and keeps preparedIntent null
+        val lineId = vm.uiState.value.saleDraft.lines.first().lineId
+        vm.updateDraftLineQuantity(lineId, PositiveDecimalQuantity.of(2))
+        assertEquals("2", vm.uiState.value.saleDraft.lines.first().quantity.toPlainString())
+        assertNull("preparedIntent must remain null after mutation", vm.uiState.value.saleDraft.preparedIntent)
+
+        // 3. Make token available and submit -> dispatches fresh intent with updated quantity
+        tokenAvailable = true
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        val receipt = vm.uiState.value.saleDraft.receipt
+        assertNotNull("Sale must succeed", receipt)
+        assertEquals("INV-2026-002", receipt?.invoiceNumber)
+        assertTrue(vm.uiState.value.saleDraft.lines.isEmpty())
+    }
+
+    @Test
+    fun testConcurrentSubmit_executesSingleRequest() = runTest(testDispatcher) {
+        var requestCount = 0
+
+        val testTransport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                requestCount++
+                val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
+                val clientEventId = parsedBody.properties["client_event_id"]?.asString() ?: "00000000-0000-0000-0000-000000000000"
+                val commitJson = """
+                    {
+                        "client_event_id": "$clientEventId",
+                        "status": "posted",
+                        "invoice_id": "01ARZ3NDEKTSV4RRFFQ69G5NV1",
+                        "invoice_number": "INV-2026-003",
+                        "payment_id": "01ARZ3NDEKTSV4RRFFQ69G5PA3",
+                        "payment_receipt_number": "RCT-003",
+                        "grand_total": "20.00",
+                        "amount_paid": "20.00",
+                        "change_returned": "0.00",
+                        "posted_at": "2026-11-15T12:00:00Z"
+                    }
+                """.trimIndent()
+                return TransportResponse(201, emptyMap(), commitJson)
+            }
+        }
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher,
+            onlineCashEnabled = true,
+            currencyMinorUnitsOverride = 2,
+            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
+                    baseOrigin = "https://small-trader.example.com"
+                )
+                OnlineCashSaleOrchestrator(
+                    client = client,
+                    tokenProvider = tokenProvider,
+                    scopeGenerationProvider = scopeGenProvider,
+                    onAuthDeniedLockScope = lockHook,
+                    activeScopeSupplier = scopeSupplier
+                )
+            }
+        )
+        advanceUntilIdle()
+
+        vm.addProductToSaleDraft(createSampleProduct(unitPrice = "20.000000"), quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+
+        // Trigger two submits concurrently without advancing dispatcher between them
+        vm.submitOnlineCashSale()
+        vm.submitOnlineCashSale()
+
+        advanceUntilIdle()
+
+        assertEquals("Only one network request should be dispatched", 1, requestCount)
+        assertNotNull(vm.uiState.value.saleDraft.receipt)
+        assertEquals("INV-2026-003", vm.uiState.value.saleDraft.receipt?.invoiceNumber)
     }
 }
 

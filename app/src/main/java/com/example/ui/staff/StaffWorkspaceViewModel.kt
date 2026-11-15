@@ -21,6 +21,8 @@ import com.example.data.mobile.onlinecash.OnlineCashSaleOrchestrator
 import com.example.data.mobile.onlinecash.OnlineCashOrchestrationResult
 import com.example.data.mobile.onlinecash.OnlineSaleScope
 import com.example.data.mobile.onlinecash.PreparedOnlineSaleIntent
+import com.example.data.mobile.contract.TaxPercentage
+import com.example.data.mobile.readclient.BootstrapTax
 import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.ProductCatalogItem
 import com.example.data.mobile.readclient.ProductPackagingUnit
@@ -462,11 +464,16 @@ class StaffWorkspaceViewModel(
         packagingUnit: ProductPackagingUnit? = null,
         quantity: PositiveDecimalQuantity = PositiveDecimalQuantity.of(1),
         taxInclusiveOverride: Boolean? = null,
-        explicitNoTax: Boolean = false
+        explicitNoTax: Boolean = false,
+        selectedTax: BootstrapTax? = null
     ) {
-        if (_uiState.value.saleDraft.isIndeterminate) return
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
         val readyState = coordinator?.authState as? StaffAuthState.ReadReady
         val bUnits = readyState?.bootstrap?.units ?: emptyList()
+        val bTaxes = readyState?.bootstrap?.taxes ?: emptyList()
 
         _uiState.update { s ->
             val currentLines = s.saleDraft.lines.toMutableList()
@@ -488,50 +495,147 @@ class StaffWorkspaceViewModel(
                     quantity = quantity,
                     taxInclusiveOverride = taxInclusiveOverride,
                     explicitNoTax = explicitNoTax,
-                    bootstrapUnits = bUnits
+                    bootstrapUnits = bUnits,
+                    bootstrapTaxes = bTaxes,
+                    selectedTax = selectedTax
                 )
                 currentLines.add(newLine)
             }
-            s.copy(saleDraft = s.saleDraft.copy(lines = currentLines, submissionError = null))
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    lines = currentLines,
+                    submissionError = null,
+                    preparedIntent = null
+                )
+            )
         }
     }
 
     fun updateDraftLineQuantity(lineId: String, newQuantity: PositiveDecimalQuantity) {
-        if (_uiState.value.saleDraft.isIndeterminate) return
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
         _uiState.update { s ->
             val currentLines = s.saleDraft.lines.map { line ->
                 if (line.lineId == lineId) {
                     line.copy(quantity = newQuantity)
                 } else line
             }
-            s.copy(saleDraft = s.saleDraft.copy(lines = currentLines, submissionError = null))
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    lines = currentLines,
+                    submissionError = null,
+                    preparedIntent = null
+                )
+            )
         }
     }
 
     fun removeDraftLine(lineId: String) {
-        if (_uiState.value.saleDraft.isIndeterminate) return
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
         _uiState.update { s ->
             val currentLines = s.saleDraft.lines.filterNot { it.lineId == lineId }
-            s.copy(saleDraft = s.saleDraft.copy(lines = currentLines, submissionError = null))
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    lines = currentLines,
+                    submissionError = null,
+                    preparedIntent = null
+                )
+            )
+        }
+    }
+
+    fun setLineTax(lineId: String, tax: BootstrapTax) {
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
+        _uiState.update { s ->
+            val currentLines = s.saleDraft.lines.map { line ->
+                if (line.lineId == lineId) {
+                    line.copy(
+                        taxRateId = tax.id,
+                        taxRate = tax.rate,
+                        taxInclusive = (tax.calculation == "inclusive")
+                    )
+                } else line
+            }
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    lines = currentLines,
+                    submissionError = null,
+                    preparedIntent = null
+                )
+            )
+        }
+    }
+
+    fun setLineExplicitNoTax(lineId: String) {
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
+        _uiState.update { s ->
+            val currentLines = s.saleDraft.lines.map { line ->
+                if (line.lineId == lineId) {
+                    line.copy(
+                        taxRateId = null,
+                        taxRate = TaxPercentage.fromString("0.000000"),
+                        taxInclusive = false
+                    )
+                } else line
+            }
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    lines = currentLines,
+                    submissionError = null,
+                    preparedIntent = null
+                )
+            )
         }
     }
 
     fun selectCustomerForSale(customer: CustomerDirectoryItem?) {
-        if (_uiState.value.saleDraft.isIndeterminate) return
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
         _uiState.update { s ->
-            s.copy(saleDraft = s.saleDraft.copy(selectedCustomer = customer, submissionError = null))
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    selectedCustomer = customer,
+                    submissionError = null,
+                    preparedIntent = null
+                )
+            )
         }
     }
 
     fun updateCashTendered(amount: MoneyAmount?) {
-        if (_uiState.value.saleDraft.isIndeterminate) return
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
         _uiState.update { s ->
-            s.copy(saleDraft = s.saleDraft.copy(cashTendered = amount, submissionError = null))
+            s.copy(
+                saleDraft = s.saleDraft.copy(
+                    cashTendered = amount,
+                    submissionError = null,
+                    preparedIntent = null
+                )
+            )
         }
     }
 
     fun clearSaleDraft() {
-        if (_uiState.value.saleDraft.isIndeterminate) return
+        if (_uiState.value.saleDraft.isIndeterminate ||
+            _uiState.value.saleDraft.isPaymentUnverifiedHold ||
+            _uiState.value.saleDraft.isSubmitting
+        ) return
         saleJob?.cancel()
         _uiState.update { s ->
             s.copy(saleDraft = StaffOnlineSaleDraft())
@@ -539,8 +643,13 @@ class StaffWorkspaceViewModel(
     }
 
     fun submitOnlineCashSale() {
-        val thisIntent = ++activeIntentSeq
         val currentState = _uiState.value
+        // Guard against concurrent submit
+        if (currentState.saleDraft.isSubmitting) return
+
+        // Guard against hold
+        if (currentState.saleDraft.isPaymentUnverifiedHold) return
+
         if (currentState.phase != StaffWorkspacePhase.READ_READY) {
             _uiState.update { it.copy(saleDraft = it.saleDraft.copy(submissionError = "Staff workspace is not in READ_READY phase")) }
             return
@@ -599,6 +708,8 @@ class StaffWorkspaceViewModel(
             }
         }
 
+        val thisIntent = ++activeIntentSeq
+
         // Set isSubmitting = true and retain preparedIntent idempotently
         _uiState.update { s ->
             s.copy(
@@ -656,7 +767,9 @@ class StaffWorkspaceViewModel(
                             saleDraft = s.saleDraft.copy(
                                 isSubmitting = false,
                                 isIndeterminate = false,
+                                isPaymentUnverifiedHold = false,
                                 receipt = result.receipt,
+                                unverifiedReceipt = null,
                                 submissionError = null,
                                 preparedIntent = null,
                                 lines = emptyList(),
@@ -671,11 +784,21 @@ class StaffWorkspaceViewModel(
                             saleDraft = s.saleDraft.copy(
                                 isSubmitting = false,
                                 isIndeterminate = false,
-                                receipt = result.receipt,
-                                submissionError = null,
-                                preparedIntent = null,
-                                lines = emptyList(),
-                                cashTendered = null
+                                isPaymentUnverifiedHold = true,
+                                unverifiedReceipt = result.receipt,
+                                receipt = null,
+                                submissionError = "Invoice posted (${result.receipt.invoiceNumber}), but payment confirmation is unverified. Sale is held in read-only status."
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.BusinessConflict -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                isIndeterminate = true,
+                                submissionError = "Business conflict (409): event may have committed on server. Status lookup required."
                             )
                         )
                     }
@@ -717,7 +840,19 @@ class StaffWorkspaceViewModel(
                         s.copy(
                             saleDraft = s.saleDraft.copy(
                                 isSubmitting = false,
+                                preparedIntent = null,
                                 submissionError = result.reason
+                            )
+                        )
+                    }
+                }
+                is OnlineCashOrchestrationResult.ValidationFailed -> {
+                    _uiState.update { s ->
+                        s.copy(
+                            saleDraft = s.saleDraft.copy(
+                                isSubmitting = false,
+                                preparedIntent = null,
+                                submissionError = "Validation failed (422): ${result.error.message}"
                             )
                         )
                     }

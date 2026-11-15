@@ -121,7 +121,8 @@ interface StaffSessionCoordinator {
             baseOrigin: String,
             allowHttpLoopback: Boolean = false,
             authDenialListener: AuthDenialListener? = null,
-            clock: CoordinatorClock = SystemCoordinatorClock
+            clock: CoordinatorClock = SystemCoordinatorClock,
+            includeCurrencyMinorUnits: Boolean = false
         ): StaffSessionCoordinator {
             val sessionStore = SecureStaffSessionStore.create(context)
             val transport = OkHttpTransport(
@@ -137,7 +138,8 @@ interface StaffSessionCoordinator {
                 readClient = readClient,
                 sessionStore = sessionStore,
                 authDenialListener = authDenialListener,
-                clock = clock
+                clock = clock,
+                includeCurrencyMinorUnits = includeCurrencyMinorUnits
             )
         }
     }
@@ -161,7 +163,8 @@ class DefaultStaffSessionCoordinator(
     private val readClient: SmallTraderReadClient,
     private val sessionStore: SecureStaffSessionStore,
     private val authDenialListener: AuthDenialListener? = null,
-    private val clock: CoordinatorClock = SystemCoordinatorClock
+    private val clock: CoordinatorClock = SystemCoordinatorClock,
+    private val includeCurrencyMinorUnits: Boolean = false
 ) : StaffSessionCoordinator {
 
     private val generation = AtomicLong(1L)
@@ -530,7 +533,11 @@ class DefaultStaffSessionCoordinator(
 
                 // Revalidate with server before granting read readiness
                 val bootstrapResult = try {
-                    readClient.getBootstrap(token = record.token, companyId = companyId)
+                    readClient.getBootstrap(
+                        token = record.token,
+                        companyId = companyId,
+                        includeCurrencyMinorUnits = includeCurrencyMinorUnits
+                    )
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: VirtualMachineError) {
@@ -840,7 +847,11 @@ class DefaultStaffSessionCoordinator(
         opGen: Long
     ): CoordinatorResult<StaffAuthState> {
         val bootstrapResult = try {
-            readClient.getBootstrap(token = loginSuccess.token, companyId = companyId)
+            readClient.getBootstrap(
+                token = loginSuccess.token,
+                companyId = companyId,
+                includeCurrencyMinorUnits = includeCurrencyMinorUnits
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: VirtualMachineError) {
@@ -876,7 +887,11 @@ class DefaultStaffSessionCoordinator(
         }
 
         val bootstrapResult = try {
-            readClient.getBootstrap(token = currentSession.token, companyId = newCompanyId)
+            readClient.getBootstrap(
+                token = currentSession.token,
+                companyId = newCompanyId,
+                includeCurrencyMinorUnits = includeCurrencyMinorUnits
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: VirtualMachineError) {

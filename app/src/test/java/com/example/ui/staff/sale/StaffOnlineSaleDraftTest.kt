@@ -10,6 +10,7 @@ import com.example.data.mobile.contract.TaxPercentage
 import com.example.data.mobile.readclient.ApprovedCashAccount
 import com.example.data.mobile.readclient.BootstrapResponse
 import com.example.data.mobile.readclient.BootstrapStaff
+import com.example.data.mobile.readclient.BootstrapTax
 import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.DefaultWarehouse
 import com.example.data.mobile.readclient.OfflinePolicyDisabled
@@ -463,5 +464,85 @@ class StaffOnlineSaleDraftTest {
         } catch (e: IllegalArgumentException) {
             assertTrue(e.message!!.contains("unresolved contracts"))
         }
+    }
+
+    @Test
+    fun testAuthorityResolution_derivesCurrencyMinorUnitsFromBootstrap() {
+        val bootstrapWithCmu = createSampleBootstrap().copy(currencyMinorUnits = 2)
+        val session = createSampleSession()
+
+        // 1. Without override, authority resolves directly from bootstrap.currencyMinorUnits
+        val authority = StaffOnlineSaleAuthorityResolution.resolve(bootstrapWithCmu, session)
+        assertTrue(authority.isDispatchPermitted)
+        assertEquals(2, authority.currencyMinorUnits)
+        assertTrue(authority.missingContracts.isEmpty())
+
+        // 2. Without override and without bootstrap currencyMinorUnits -> fails closed
+        val bootstrapWithoutCmu = createSampleBootstrap()
+        val missingAuthority = StaffOnlineSaleAuthorityResolution.resolve(bootstrapWithoutCmu, session)
+        assertFalse(missingAuthority.isDispatchPermitted)
+        assertNull(missingAuthority.currencyMinorUnits)
+        assertTrue(missingAuthority.missingContracts.any { it.contains("currency_minor_units") })
+    }
+
+    @Test
+    fun testG2StaffSelectedBootstrapTaxAndExplicitNoTax() {
+        val unassignedProduct = createSampleProduct(
+            unitPrice = "100.000000",
+            taxRateId = null,
+            taxRate = null
+        )
+
+        val bootstrapTax = BootstrapTax(
+            id = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5TX1"),
+            code = "VAT16",
+            name = "VAT 16%",
+            rate = TaxPercentage.fromString("16.000000"),
+            calculation = "inclusive",
+            isDefault = true
+        )
+
+        // 1. Default unassigned catalog item fails closed
+        val defaultLine = StaffOnlineSaleDraftLine.fromProduct(unassignedProduct)
+        assertTrue(defaultLine.hasUnresolvedTaxContract)
+        assertTrue(defaultLine.hasUnresolvedContract)
+
+        // 2. Staff selects active bootstrap tax -> resolved authoritatively
+        val taxedLine = StaffOnlineSaleDraftLine.fromProduct(
+            product = unassignedProduct,
+            selectedTax = bootstrapTax
+        )
+        assertFalse(taxedLine.hasUnresolvedTaxContract)
+        assertFalse(taxedLine.hasUnresolvedContract)
+        assertEquals(bootstrapTax.id, taxedLine.taxRateId)
+        assertEquals("16.000000", taxedLine.taxRate?.toPlainString())
+        assertEquals(true, taxedLine.taxInclusive)
+
+        // 3. Explicit NoTax -> approved zero tax with taxInclusive = false
+        val noTaxLine = StaffOnlineSaleDraftLine.fromProduct(
+            product = unassignedProduct,
+            explicitNoTax = true
+        )
+        assertFalse(noTaxLine.hasUnresolvedTaxContract)
+        assertFalse(noTaxLine.hasUnresolvedContract)
+        assertNull(noTaxLine.taxRateId)
+        assertEquals("0.000000", noTaxLine.taxRate?.toPlainString())
+        assertEquals(false, noTaxLine.taxInclusive)
+    }
+
+    @Test
+    fun testDraftCannotPrepareIntentWhilePaymentUnverifiedHold() {
+        val product = createSampleProduct(unitPrice = "50.000000")
+        val line = StaffOnlineSaleDraftLine.fromProduct(product, explicitNoTax = true)
+        val bootstrap = createSampleBootstrap().copy(currencyMinorUnits = 2)
+        val session = createSampleSession()
+        val authority = StaffOnlineSaleAuthorityResolution.resolve(bootstrap, session)
+        assertTrue(authority.isDispatchPermitted)
+
+        val normalDraft = StaffOnlineSaleDraft(lines = listOf(line), isPaymentUnverifiedHold = false)
+        assertTrue(normalDraft.canPrepareIntent(authority))
+
+        val holdDraft = StaffOnlineSaleDraft(lines = listOf(line), isPaymentUnverifiedHold = true)
+        assertFalse(holdDraft.canPrepareIntent(authority))
     }
 }

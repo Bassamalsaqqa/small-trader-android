@@ -183,6 +183,62 @@ fun StaffOnlineSaleView(
             }
         }
 
+        // 2b. Payment Unverified Hold Card
+        if (draft.isPaymentUnverifiedHold) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .testTag("staff_sale_unverified_payment_hold_card"),
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = lang.tr(
+                                "حالة معلقة: الفاتورة مسجلة والدفع غير مؤكد",
+                                "Payment Unverified Hold — Invoice Posted, Payment Pending"
+                            ),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = lang.tr(
+                            "تم تسجيل الفاتورة بنجاح على الخادم ولكن لم يتم استلام تأكيد مرجع الدفع (POSTED_PAYMENT_UNVERIFIED). السلة معلقة في وضع القراءة فقط لحين التحقق.",
+                            "The invoice was posted on the server, but no payment confirmation reference was returned (POSTED_PAYMENT_UNVERIFIED). The sale is held in read-only mode pending verification."
+                        ),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    draft.unverifiedReceipt?.let { unverified ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "${lang.tr("رقم الفاتورة", "Invoice")}: ${unverified.invoiceNumber} • ULID: ${unverified.invoiceId.value}",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+            }
+        }
+
         // 3. Missing Contracts Fails-Closed Alert (when contracts are missing)
         if (authority != null && !authority.isDispatchPermitted) {
             Card(
@@ -394,7 +450,7 @@ fun StaffOnlineSaleView(
                             line = line,
                             currencyCode = currencyCode,
                             lang = lang,
-                            isFrozen = draft.isIndeterminate,
+                            isFrozen = draft.isIndeterminate || draft.isPaymentUnverifiedHold,
                             onUpdateQuantity = { qty -> onUpdateLineQuantity(line.lineId, qty) },
                             onRemove = { onRemoveLine(line.lineId) }
                         )
@@ -527,7 +583,7 @@ fun StaffOnlineSaleView(
                                     .heightIn(min = 48.dp)
                                     .testTag("staff_sale_clear_button"),
                                 shape = RoundedCornerShape(8.dp),
-                                enabled = !draft.isSubmitting && !draft.isIndeterminate
+                                enabled = !draft.isSubmitting && !draft.isIndeterminate && !draft.isPaymentUnverifiedHold
                             ) {
                                 Text(lang.tr("إفراغ السلة", "Clear"), fontSize = 13.sp)
                             }
@@ -535,7 +591,8 @@ fun StaffOnlineSaleView(
                             val canSubmit = (authority?.isDispatchPermitted == true || draft.isIndeterminate) &&
                                     draft.lines.isNotEmpty() &&
                                     !draft.hasUnresolvedContracts &&
-                                    !draft.isSubmitting
+                                    !draft.isSubmitting &&
+                                    !draft.isPaymentUnverifiedHold
 
                             Button(
                                 onClick = onSubmitSale,

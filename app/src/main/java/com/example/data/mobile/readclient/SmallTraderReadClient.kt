@@ -159,12 +159,22 @@ class SmallTraderReadClient(
      * Enforces tenant companyId matching requested companyId before exposing DTO.
      * Bearer token is passed ONLY in Authorization header.
      */
-    fun getBootstrap(token: String, companyId: ServerUlid): ReadClientResult<BootstrapResponse> {
+    fun getBootstrap(
+        token: String,
+        companyId: ServerUlid,
+        includeCurrencyMinorUnits: Boolean = false
+    ): ReadClientResult<BootstrapResponse> {
         val path = EndpointSecurity.bootstrapPath(companyId)
+        val queryParams = if (includeCurrencyMinorUnits) {
+            mapOf("include" to "currency_minor_units")
+        } else {
+            emptyMap()
+        }
         val transportRequest = TransportRequest(
             method = HttpMethod.GET,
             path = path,
             baseOrigin = validatedBaseOrigin,
+            queryParams = queryParams,
             headers = mapOf(
                 "Accept" to "application/json",
                 "Authorization" to buildAuthHeader(token)

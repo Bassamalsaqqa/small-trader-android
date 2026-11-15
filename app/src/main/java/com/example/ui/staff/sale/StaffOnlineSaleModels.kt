@@ -10,6 +10,7 @@ import com.example.data.mobile.contract.v2.OnlineSaleContext
 import com.example.data.mobile.onlinecash.OnlineCashSaleReceipt
 import com.example.data.mobile.onlinecash.PreparedOnlineSaleIntent
 import com.example.data.mobile.readclient.BootstrapResponse
+import com.example.data.mobile.readclient.BootstrapTax
 import com.example.data.mobile.readclient.BootstrapUnit
 import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.ProductCatalogItem
@@ -93,8 +94,8 @@ data class StaffOnlineSaleAuthorityResolution(
                 missing.add("Missing baseCurrency from bootstrap response")
             }
 
-            // V1 bootstrap contract gap: currency_minor_units is absent in V1 BootstrapResponse
-            val cmu = currencyMinorUnitsOverride
+            // Currency minor units context: bootstrap currency_minor_units or explicit override
+            val cmu = currencyMinorUnitsOverride ?: bootstrap?.currencyMinorUnits
             if (cmu == null) {
                 missing.add("V1 Bootstrap lacks currency_minor_units (required for OnlineSaleContext scale validation)")
             } else if (cmu !in 0..6) {
@@ -174,7 +175,9 @@ data class StaffOnlineSaleDraftLine(
             quantity: PositiveDecimalQuantity = PositiveDecimalQuantity.of(1),
             taxInclusiveOverride: Boolean? = null,
             explicitNoTax: Boolean = false,
-            bootstrapUnits: List<BootstrapUnit> = emptyList()
+            bootstrapUnits: List<BootstrapUnit> = emptyList(),
+            bootstrapTaxes: List<BootstrapTax> = emptyList(),
+            selectedTax: BootstrapTax? = null
         ): StaffOnlineSaleDraftLine {
             // Qualified online product_unit_id means Unit.public_id -> DTO unitId, not productUnitId pivot!
             val unitId = packagingUnit?.unitId ?: product.defaultUnit.unitId
@@ -201,7 +204,9 @@ data class StaffOnlineSaleDraftLine(
             // Truthful paired tax rate handling:
             // (taxRateId == null && taxRate == null) || (taxRateId != null && taxRate != null)
             // Null pair means unassigned tax association, NEVER an inferred zero tax or exemption.
-            val (tRateId, tRate, tInc) = if (product.taxRateId == null) {
+            val (tRateId, tRate, tInc) = if (selectedTax != null) {
+                Triple(selectedTax.id, selectedTax.rate, selectedTax.calculation == "inclusive")
+            } else if (product.taxRateId == null) {
                 if (explicitNoTax) {
                     Triple(null, TaxPercentage.fromString("0.000000"), false)
                 } else {
@@ -212,7 +217,9 @@ data class StaffOnlineSaleDraftLine(
                 val rate = product.taxRate ?: throw IllegalStateException(
                     "Product '${product.sku}' has broken tax pair: taxRateId is non-null (${product.taxRateId}) but taxRate is null"
                 )
-                Triple(product.taxRateId, rate, taxInclusiveOverride)
+                val matchedBootstrapTax = bootstrapTaxes.firstOrNull { it.id == product.taxRateId }
+                val resolvedInc = taxInclusiveOverride ?: (matchedBootstrapTax?.let { it.calculation == "inclusive" })
+                Triple(product.taxRateId, rate, resolvedInc)
             }
 
             return StaffOnlineSaleDraftLine(
@@ -242,6 +249,8 @@ data class StaffOnlineSaleDraft(
     val cashTendered: MoneyAmount? = null,
     val isSubmitting: Boolean = false,
     val isIndeterminate: Boolean = false, // Frozen state during indeterminate recovery
+    val isPaymentUnverifiedHold: Boolean = false, // Explicit POSTED_PAYMENT_UNVERIFIED / HOLD read-only state
+    val unverifiedReceipt: OnlineCashSaleReceipt? = null,
     val submissionError: String? = null,
     val preparedIntent: PreparedOnlineSaleIntent? = null,
     val receipt: OnlineCashSaleReceipt? = null
@@ -288,6 +297,7 @@ data class StaffOnlineSaleDraft(
         if (lines.isEmpty()) return false
         if (hasUnresolvedContracts) return false
         if (isIndeterminate) return false
+        if (isPaymentUnverifiedHold) return false
         return true
     }
 }

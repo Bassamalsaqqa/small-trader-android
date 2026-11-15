@@ -1,6 +1,7 @@
 package com.example.ui.staff
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasTestTag
@@ -17,6 +18,7 @@ import com.example.data.mobile.contract.NonnegativeDecimalQuantity
 import com.example.data.mobile.contract.PositiveDecimalQuantity
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.TaxPercentage
+import com.example.data.mobile.onlinecash.OnlineCashSaleReceipt
 import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.ProductBaseUnit
 import com.example.data.mobile.readclient.ProductCatalogItem
@@ -570,5 +572,85 @@ class StaffWorkspaceComposeTest {
         toggleBtn.assertIsDisplayed()
         toggleBtn.performClick()
         assertTrue("Language toggle callback must fire", toggled)
+    }
+
+    @Test
+    fun cashSaleScreen_rendersPaymentUnverifiedHoldCard_andFreezesControls() {
+        val baseUnit = ProductBaseUnit(ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789D"), "PCS", "Pieces")
+        val defaultUnit = ProductDefaultUnit(
+            unitId = baseUnit.id,
+            productUnitId = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789E"),
+            conversionToBase = PositiveDecimalQuantity.of(1),
+            salePrice = MoneyAmount.fromNonnegativeString("30.000000")
+        )
+        val product = ProductCatalogItem(
+            id = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789F"),
+            sku = "SKU-HOLD-01",
+            barcode = null,
+            name = "Hold Test Item",
+            unitPrice = MoneyAmount.fromNonnegativeString("30.000000"),
+            taxRate = null,
+            taxRateId = null,
+            isTracked = true,
+            availableQuantity = NonnegativeDecimalQuantity.fromNonnegativeString("10.000000"),
+            baseUnit = baseUnit,
+            defaultUnit = defaultUnit,
+            units = emptyList()
+        )
+        val line = StaffOnlineSaleDraftLine.fromProduct(product = product, explicitNoTax = true)
+        val unverifiedReceipt = OnlineCashSaleReceipt(
+            clientEventId = com.example.data.mobile.contract.ClientUuid.random(),
+            invoiceId = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789G"),
+            invoiceNumber = "INV-HOLD-999",
+            paymentId = null,
+            paymentReceiptNumber = null,
+            grandTotal = MoneyAmount.fromNonnegativeString("30.000000"),
+            amountPaid = MoneyAmount.ZERO,
+            changeReturned = MoneyAmount.ZERO,
+            postedAt = "2026-11-15T12:00:00Z",
+            wasReplay = false
+        )
+        val draft = StaffOnlineSaleDraft(
+            lines = listOf(line),
+            isPaymentUnverifiedHold = true,
+            unverifiedReceipt = unverifiedReceipt
+        )
+
+        val uiState = StaffWorkspaceUiState(
+            phase = StaffWorkspacePhase.READ_READY,
+            selectedTab = StaffWorkspaceTab.CASH_SALE,
+            activeCompany = SafeCompanyViewData("01JCV8X9M2NQW3TYZ4R5S6789A", "معصرة الزيتون", currency = "USD"),
+            saleDraft = draft,
+            isOnlineCashEnabled = true,
+            language = AppLanguage.AR
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffWorkspaceScreen(
+                    uiState = uiState,
+                    onSelectTab = {},
+                    onLoadMoreProducts = {},
+                    onRefreshProducts = {},
+                    onSearchProducts = {},
+                    onLoadMoreCustomers = {},
+                    onRefreshCustomers = {},
+                    onSearchCustomers = {},
+                    onSwitchCompany = {},
+                    onLogout = {},
+                    onToggleLanguage = {},
+                    onToggleTheme = {}
+                )
+            }
+        }
+
+        // 1. Unverified payment hold card is displayed
+        val holdCard = composeTestRule.onNodeWithTag("staff_sale_unverified_payment_hold_card")
+        holdCard.assertIsDisplayed()
+        composeTestRule.onNodeWithText("INV-HOLD-999", substring = true).assertIsDisplayed()
+
+        // 2. Clear and submit buttons are disabled (frozen)
+        composeTestRule.onNodeWithTag("staff_sale_clear_button").assertIsNotEnabled()
+        composeTestRule.onNodeWithTag("staff_sale_submit_button").assertIsNotEnabled()
     }
 }
