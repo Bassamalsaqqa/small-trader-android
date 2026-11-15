@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" tests="38" skipped="0" failures="0" errors="0" timestamp="2026-11-15T15:34:23.701Z" hostname="pasta-hp-worker" time="0.819">
+  <properties/>
+  <testcase name="testOnlineOrchestrationWrongNormativeDigestZeroHttp" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.092"/>
+  <testcase name="testStatusUnknown200" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.299"/>
+  <testcase name="testSubmitTamperedPayload409Conflict" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.009"/>
+  <testcase name="testOnlineOrchestrationStatusReplay401StaleNoCallback" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.021"/>
+  <testcase name="testSubmitReplayCashSale200Ok" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.006"/>
+  <testcase name="testOnlineOrchestrationStatusReplay401" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.056"/>
+  <testcase name="testOnlineOrchestrationPreDispatchMismatchCasesZeroHttp" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.005"/>
+  <testcase name="testSubmitAuthRevoked401Unauthorized" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.004"/>
+  <testcase name="testOnlineOrchestrationLostAckStatusPostedMatchingDigestRecovery" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.009"/>
+  <testcase name="testOnlineOrchestrationLostAckStatusPostedNullPaymentReturnsPostedWithoutPaymentReference" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.018"/>
+  <testcase name="testOnlineOrchestrationFresh401InvokesLockCallback" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.007"/>
+  <testcase name="testOnlineOrchestrationLostAckStatusPostedMissingDigestFailsClosed" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.049"/>
+  <testcase name="testOnlineOrchestrationLostAckStatusPostedWrongDigestFailsClosed" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.009"/>
+  <testcase name="testLostAckRecoveryWhenStatusUnknownSafeReplay" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.048"/>
+  <testcase name="testOnlineOrchestrationLocalTokenUnavailableNoQueueAuthLock" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.005"/>
+  <testcase name="testOnlineOrchestrationLostAckStatusPostedWrongTotalFailsClosed" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.011"/>
+  <testcase name="testLostAckRecoveryWhenStatusPosted" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.007"/>
+  <testcase name="testOnlineOrchestrationLostAckStatusPostedNullPaymentReceiptNumberReturnsPostedWithoutPaymentReference" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.008"/>
+  <testcase name="testSubmitValidationFailed422" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.004"/>
+  <testcase name="testSubmitForbidden403RoleRevoked" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.004"/>
+  <testcase name="testSubmitAuthoritativeSyntheticTemplateWirePayload" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.004"/>
+  <testcase name="testOnlineOrchestrationOversizePayloadZeroHttp" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.009"/>
+  <testcase name="testOnlineOrchestrationCorruptUtf8ZeroHttp" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.002"/>
+  <testcase name="testOnlineOrchestrationNullPaymentNoSyntheticFabrication" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.005"/>
+  <testcase name="testOnlineOrchestrationLostAckStatusUnknownSafeExactReplay409" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.051"/>
+  <testcase name="testOnlineOrchestrationNonCanonicalDoubleZeroHttp" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.002"/>
+  <testcase name="testOnlineOrchestrationFinancialConsistencyMismatchFailsClosed" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.005"/>
+  <testcase name="testOnlineOrchestrationMalformedCanonicalZeroHttp" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.002"/>
+  <testcase name="testOnlineOrchestration7KeyRawProfileSyntheticFixtureSuccess" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.012"/>
+  <testcase name="testOnlineOrchestrationNewGenerationDuring201GuardsAgainstForeignStaleReceipt" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.005"/>
+  <testcase name="testStatusPosted200" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.004"/>
+  <testcase name="testSubmitFreshCashSale201Created" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.004"/>
+  <testcase name="testOnlineOrchestrationScopeGenerationStale401NoCallback" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.005"/>
+  <testcase name="testLostAckRecoveryAuthDeniedPreservesLock" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.006"/>
+  <testcase name="testBadResponseLexemesRejected" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.01"/>
+  <testcase name="testStatusTenantMismatchRejected" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.004"/>
+  <testcase name="testStatusEventMismatchRejected" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.003"/>
+  <testcase name="testOnlineOrchestrationCommitOverTenderMismatchFailsClosed" classname="com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest" time="0.005"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[Nov 15, 2026 5:34:24 PM okhttp3.mockwebserver.MockWebServer$SocketHandler handle
+WARNING: MockWebServer[40601] connection from /127.0.0.1 didn't make a request
+Nov 15, 2026 5:34:24 PM okhttp3.mockwebserver.MockWebServer$SocketHandler handle
+WARNING: MockWebServer[35027] connection from /127.0.0.1 didn't make a request
+Nov 15, 2026 5:34:24 PM okhttp3.mockwebserver.MockWebServer$SocketHandler handle
+WARNING: MockWebServer[58825] connection from /127.0.0.1 didn't make a request
+Nov 15, 2026 5:34:24 PM okhttp3.mockwebserver.MockWebServer$SocketHandler handle
+WARNING: MockWebServer[33053] connection from /127.0.0.1 didn't make a request
+]]></system-err>
+</testsuite>
