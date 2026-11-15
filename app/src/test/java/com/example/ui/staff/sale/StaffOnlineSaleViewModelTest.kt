@@ -20,13 +20,18 @@ import com.example.data.mobile.readclient.BootstrapStaff
 import com.example.data.mobile.readclient.CustomerDirectoryResponse
 import com.example.data.mobile.readclient.DefaultWarehouse
 import com.example.data.mobile.readclient.OfflinePolicyDisabled
+import com.example.data.mobile.readclient.HttpMethod
 import com.example.data.mobile.readclient.PaginationQuery
 import com.example.data.mobile.readclient.ProductBaseUnit
 import com.example.data.mobile.readclient.ProductCatalogItem
 import com.example.data.mobile.readclient.ProductCatalogResponse
 import com.example.data.mobile.readclient.ProductDefaultUnit
 import com.example.data.mobile.readclient.ReadClientErrorResponse
+import com.example.data.mobile.readclient.ReadClientTransport
+import com.example.data.mobile.readclient.TransportRequest
+import com.example.data.mobile.readclient.TransportResponse
 import com.example.data.mobile.session.AuthDenialListener
+import java.io.IOException
 import com.example.data.mobile.session.AuthDenialScope
 import com.example.data.mobile.session.CoordinatorResult
 import com.example.data.mobile.session.LogoutResult
@@ -157,23 +162,21 @@ class StaffOnlineSaleViewModelTest {
     fun testSessionScopedOrchestratorDispatchesActiveGenerationAndToken() = runTest(testDispatcher) {
         fakeCoordinator.currentGeneration = 42L
 
-        var capturedToken: String? = null
-        var capturedGeneration: Long = -1L
-        var capturedScope: OnlineSaleScope? = null
-        var capturedIntent: PreparedOnlineSaleIntent? = null
-
-        val expectedReceipt = OnlineCashSaleReceipt(
-            companyId = companyUlid,
-            clientEventId = ClientUuid.random(),
-            payloadDigest = PayloadDigest.parse("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
-            invoiceId = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5REC1"),
-            invoiceNumber = "INV-2026-001",
-            paymentId = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5PAY1"),
-            paymentReceiptNumber = "RCT-001",
-            grandTotal = MoneyAmount.fromNonnegativeString("30.00"),
-            postedAt = "2026-11-15T12:00:00Z",
-            wasReplay = false
-        )
+        val capturedRequests = mutableListOf<TransportRequest>()
+        val testTransport = ReadClientTransport { req ->
+            capturedRequests.add(req)
+            val dummyCommitJson = """
+                {
+                    "invoice_id": "01ARZ3NDEKTSV4RRFFQ69GINV1",
+                    "invoice_number": "INV-2026-001",
+                    "payment_id": "01ARZ3NDEKTSV4RRFFQ69GPAY1",
+                    "payment_receipt_number": "RCT-001",
+                    "grand_total": "30.00",
+                    "posted_at": "2026-11-15T12:00:00Z"
+                }
+            """.trimIndent()
+            TransportResponse(201, emptyMap(), dummyCommitJson)
+        }
 
         val vm = StaffWorkspaceViewModel(
             coordinator = fakeCoordinator,
@@ -182,81 +185,54 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
-                // Create custom orchestrator proxy to verify scoped parameters without network
-                object : OnlineCashSaleOrchestrator(
-                    client = AndroidV2OnlineCashClient(
-                        transport = { _ -> throw UnsupportedOperationException("No network") },
-                        baseOrigin = "https://small-trader.example.com"
-                    ),
-                    tokenProvider = tokenProvider,
-                    scopeGenerationProvider = scopeGenProvider,
-                    onAuthDeniedLockScope = lockHook,
-                    activeScopeSupplier = scopeSupplier
-                ) {
-                    fun dispatchMock(intent: PreparedOnlineSaleIntent): OnlineCashOrchestrationResult {
-                        capturedToken = tokenProvider.invoke()
-                        capturedGeneration = scopeGenProvider.invoke()
-                        capturedScope = scopeSupplier?.invoke()
-                        capturedIntent = intent
-                        return OnlineCashOrchestrationResult.ConfirmedFinancialSuccess(expectedReceipt)
-                    }
-                }.let { mockOrch ->
-                    // Proxy call
-                    val dummyClient = AndroidV2OnlineCashClient(
-                        transport = { _ -> throw UnsupportedOperationException("No network") },
-                        baseOrigin = "https://small-trader.example.com"
-                    )
-                    object : OnlineCashSaleOrchestrator(
-                        client = dummyClient,
-                        tokenProvider = tokenProvider,
-                        scopeGenerationProvider = scopeGenProvider,
-                        onAuthDeniedLockScope = lockHook,
-                        activeScopeSupplier = scopeSupplier
-                    ) {
-                        override fun toString(): String = "MockOrchestrator"
-                    }
-                }
-            }
-        )
-
-        // For direct orchestration execution verification, use an orchestrator factory that returns our controlled result:
-        var executedDispatch = false
-        val vmWithMock = StaffWorkspaceViewModel(
-            coordinator = fakeCoordinator,
-            configuredOrigin = "https://small-trader.example.com",
-            ioDispatcher = testDispatcher,
-            onlineCashEnabled = true,
-            currencyMinorUnitsOverride = 2,
-            orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
-                val dummyClient = AndroidV2OnlineCashClient(
-                    transport = { _ -> throw UnsupportedOperationException() },
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
                 )
-                object : OnlineCashSaleOrchestrator(
-                    client = dummyClient,
+                OnlineCashSaleOrchestrator(
+                    client = client,
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier
-                ) {
-                    // Override dispatch by delegating or capturing
-                }
+                )
             }
         )
         advanceUntilIdle()
 
-        // Test authority resolution and tab switching
-        vmWithMock.selectTab(StaffWorkspaceTab.CASH_SALE)
-        val authority = vmWithMock.uiState.value.saleAuthority
+        vm.selectTab(StaffWorkspaceTab.CASH_SALE)
+        val authority = vm.uiState.value.saleAuthority
         assertNotNull(authority)
         assertTrue(authority!!.isDispatchPermitted)
         assertEquals(2, authority.currencyMinorUnits)
 
         // Add product to draft
         val product = createSampleProduct(unitPrice = "30.000000")
-        vmWithMock.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
-        assertEquals(1, vmWithMock.uiState.value.saleDraft.lines.size)
-        assertEquals("30.000000", vmWithMock.uiState.value.saleDraft.estimatedTotal.toPlainString())
+        vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
+        assertEquals(1, vm.uiState.value.saleDraft.lines.size)
+        assertEquals("30.000000", vm.uiState.value.saleDraft.estimatedTotal.toPlainString())
+
+        // Actually submit the sale through ViewModel
+        vm.submitOnlineCashSale()
+        advanceUntilIdle()
+
+        // Assert real transport request captured with actual session bearer, scope path, and wire payload
+        assertEquals(1, capturedRequests.size)
+        val request = capturedRequests[0]
+        assertEquals(HttpMethod.POST, request.method)
+        assertEquals("/api/mobile/v2/companies/${companyUlid.value}/sales/online-cash", request.path)
+        assertEquals("Bearer test_bearer_token_abc123", request.headers["Authorization"])
+        assertNotNull(request.body)
+        assertTrue(request.body!!.contains(productUlid.value))
+        assertTrue(request.body!!.contains("30.000000"))
+
+        // Assert confirmed receipt recorded in ViewModel state and basket cleared
+        val receipt = vm.uiState.value.saleDraft.receipt
+        assertNotNull(receipt)
+        assertEquals("INV-2026-001", receipt!!.invoiceNumber)
+        assertEquals("RCT-001", receipt.paymentReceiptNumber)
+        assertFalse(vm.uiState.value.saleDraft.isSubmitting)
+        assertTrue(vm.uiState.value.saleDraft.lines.isEmpty())
     }
 
     @Test
@@ -335,7 +311,13 @@ class StaffOnlineSaleViewModelTest {
 
     @Test
     fun testIndeterminateTransientRetainsSamePreparedIntentAndEventIdOnRetry() = runTest(testDispatcher) {
-        val capturedIntents = mutableListOf<PreparedOnlineSaleIntent>()
+        val capturedRequests = mutableListOf<TransportRequest>()
+
+        // Real transport simulates socket timeout on POST and Lost-ACK GET status
+        val testTransport = ReadClientTransport { req ->
+            capturedRequests.add(req)
+            throw IOException("Simulated network timeout during socket transport")
+        }
 
         val vm = StaffWorkspaceViewModel(
             coordinator = fakeCoordinator,
@@ -344,27 +326,17 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
-                val dummyClient = AndroidV2OnlineCashClient(
-                    transport = { _ -> throw UnsupportedOperationException() },
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
                 )
-                object : OnlineCashSaleOrchestrator(
-                    client = dummyClient,
+                OnlineCashSaleOrchestrator(
+                    client = client,
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier
-                ) {
-                    override suspend fun dispatchOnlineCashSale(
-                        intent: PreparedOnlineSaleIntent,
-                        targetCompanyId: ServerUlid,
-                        targetDeviceId: ClientUuid,
-                        targetCurrency: String
-                    ): OnlineCashOrchestrationResult {
-                        capturedIntents.add(intent)
-                        return OnlineCashOrchestrationResult.IndeterminateTransient("Network timeout dispatching sale")
-                    }
-                }
+                )
             }
         )
         advanceUntilIdle()
@@ -372,31 +344,38 @@ class StaffOnlineSaleViewModelTest {
         val product = createSampleProduct(unitPrice = "45.000000")
         vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
 
-        // First submit attempt
+        // First submit attempt: network timeout produces IndeterminateTransient
         vm.submitOnlineCashSale()
         advanceUntilIdle()
 
-        assertEquals(1, capturedIntents.size)
-        val firstIntent = capturedIntents[0]
         assertTrue(vm.uiState.value.saleDraft.isIndeterminate)
         assertFalse(vm.uiState.value.saleDraft.isSubmitting)
-        assertEquals("Network timeout dispatching sale", vm.uiState.value.saleDraft.submissionError)
-        assertEquals(firstIntent, vm.uiState.value.saleDraft.preparedIntent)
+        assertTrue(vm.uiState.value.saleDraft.submissionError?.contains("Network timeout") == true)
+        val firstIntent = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(firstIntent)
 
-        // Retry submit attempt: MUST reuse EXACT same PreparedOnlineSaleIntent (same clientEventId & bytes)
+        // Retry submit attempt: MUST reuse EXACT same PreparedOnlineSaleIntent (same clientEventId & wire bytes)
         vm.submitOnlineCashSale()
         advanceUntilIdle()
 
-        assertEquals(2, capturedIntents.size)
-        val secondIntent = capturedIntents[1]
+        val secondIntent = vm.uiState.value.saleDraft.preparedIntent
+        assertNotNull(secondIntent)
 
-        assertEquals(firstIntent.clientEventId, secondIntent.clientEventId)
+        assertEquals(firstIntent!!.clientEventId, secondIntent!!.clientEventId)
         assertTrue(firstIntent.rawWireBytes.contentEquals(secondIntent.rawWireBytes))
         assertEquals(firstIntent, secondIntent)
+
+        val postRequests = capturedRequests.filter { it.method == HttpMethod.POST }
+        assertTrue(postRequests.size >= 2)
+        assertEquals(postRequests[0].body, postRequests[1].body)
     }
 
     @Test
     fun testDraftMutationsFrozenWhileIndeterminate() = runTest(testDispatcher) {
+        val testTransport = ReadClientTransport { _ ->
+            throw IOException("Simulated gateway timeout")
+        }
+
         val vm = StaffWorkspaceViewModel(
             coordinator = fakeCoordinator,
             configuredOrigin = "https://small-trader.example.com",
@@ -404,26 +383,17 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
-                val dummyClient = AndroidV2OnlineCashClient(
-                    transport = { _ -> throw UnsupportedOperationException() },
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
                 )
-                object : OnlineCashSaleOrchestrator(
-                    client = dummyClient,
+                OnlineCashSaleOrchestrator(
+                    client = client,
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier
-                ) {
-                    override suspend fun dispatchOnlineCashSale(
-                        intent: PreparedOnlineSaleIntent,
-                        targetCompanyId: ServerUlid,
-                        targetDeviceId: ClientUuid,
-                        targetCurrency: String
-                    ): OnlineCashOrchestrationResult {
-                        return OnlineCashOrchestrationResult.IndeterminateTransient("Gateway timeout")
-                    }
-                }
+                )
             }
         )
         advanceUntilIdle()
@@ -432,13 +402,13 @@ class StaffOnlineSaleViewModelTest {
         vm.addProductToSaleDraft(product, quantity = PositiveDecimalQuantity.of(1), explicitNoTax = true)
         val initialLine = vm.uiState.value.saleDraft.lines.first()
 
-        // Submit and trigger indeterminate state
+        // Submit and trigger indeterminate state via transport failure
         vm.submitOnlineCashSale()
         advanceUntilIdle()
 
         assertTrue(vm.uiState.value.saleDraft.isIndeterminate)
 
-        // Attempt mutations while indeterminate - all must be ignored
+        // Attempt mutations while indeterminate - all must be ignored (frozen)
         val otherProduct = ProductCatalogItem(
             id = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5OTH1"),
             sku = "SKU-OTHER",
@@ -480,6 +450,10 @@ class StaffOnlineSaleViewModelTest {
             denialRef.set(scope)
         }
 
+        val testTransport = ReadClientTransport { _ ->
+            TransportResponse(401, emptyMap(), """{"error":"TOKEN_EXPIRED","message":"Staff session token expired","status":401}""")
+        }
+
         val vm = StaffWorkspaceViewModel(
             coordinator = fakeCoordinator,
             configuredOrigin = "https://small-trader.example.com",
@@ -488,33 +462,17 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
-                val dummyClient = AndroidV2OnlineCashClient(
-                    transport = { _ -> throw UnsupportedOperationException() },
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
                 )
-                object : OnlineCashSaleOrchestrator(
-                    client = dummyClient,
+                OnlineCashSaleOrchestrator(
+                    client = client,
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier
-                ) {
-                    override suspend fun dispatchOnlineCashSale(
-                        intent: PreparedOnlineSaleIntent,
-                        targetCompanyId: ServerUlid,
-                        targetDeviceId: ClientUuid,
-                        targetCurrency: String
-                    ): OnlineCashOrchestrationResult {
-                        return OnlineCashOrchestrationResult.AuthDenied(
-                            scopeGeneration = fakeCoordinator.currentGeneration,
-                            error = ReadClientErrorResponse(
-                                error = "TOKEN_EXPIRED",
-                                message = "Staff session token expired",
-                                status = 401
-                            )
-                        )
-                    }
-                }
+                )
             }
         )
         advanceUntilIdle()
@@ -524,7 +482,7 @@ class StaffOnlineSaleViewModelTest {
         advanceUntilIdle()
 
         assertEquals(StaffWorkspacePhase.LOCKED, vm.uiState.value.phase)
-        assertEquals("Staff session token expired", vm.uiState.value.lockedReason)
+        assertTrue(vm.uiState.value.lockedReason?.contains("HTTP 401") == true)
         assertTrue(vm.uiState.value.products.isEmpty())
         assertTrue(vm.uiState.value.customers.isEmpty())
         assertTrue(vm.uiState.value.saleDraft.lines.isEmpty())
@@ -544,7 +502,11 @@ class StaffOnlineSaleViewModelTest {
             denialRef.set(scope)
         }
 
-        val staleGeneration = 0L // Prior generation
+        // Real transport simulates generation advancement during network flight
+        val testTransport = ReadClientTransport { _ ->
+            fakeCoordinator.currentGeneration = 999L
+            TransportResponse(401, emptyMap(), """{"error":"STALE_TOKEN","message":"Stale token from old generation","status":401}""")
+        }
 
         val vm = StaffWorkspaceViewModel(
             coordinator = fakeCoordinator,
@@ -554,33 +516,17 @@ class StaffOnlineSaleViewModelTest {
             onlineCashEnabled = true,
             currencyMinorUnitsOverride = 2,
             orchestratorFactory = { tokenProvider, scopeGenProvider, lockHook, scopeSupplier ->
-                val dummyClient = AndroidV2OnlineCashClient(
-                    transport = { _ -> throw UnsupportedOperationException() },
+                val client = AndroidV2OnlineCashClient(
+                    transport = testTransport,
                     baseOrigin = "https://small-trader.example.com"
                 )
-                object : OnlineCashSaleOrchestrator(
-                    client = dummyClient,
+                OnlineCashSaleOrchestrator(
+                    client = client,
                     tokenProvider = tokenProvider,
                     scopeGenerationProvider = scopeGenProvider,
                     onAuthDeniedLockScope = lockHook,
                     activeScopeSupplier = scopeSupplier
-                ) {
-                    override suspend fun dispatchOnlineCashSale(
-                        intent: PreparedOnlineSaleIntent,
-                        targetCompanyId: ServerUlid,
-                        targetDeviceId: ClientUuid,
-                        targetCurrency: String
-                    ): OnlineCashOrchestrationResult {
-                        return OnlineCashOrchestrationResult.AuthDenied(
-                            scopeGeneration = staleGeneration,
-                            error = ReadClientErrorResponse(
-                                error = "STALE_TOKEN",
-                                message = "Stale token from old generation",
-                                status = 401
-                            )
-                        )
-                    }
-                }
+                )
             }
         )
         advanceUntilIdle()
@@ -593,6 +539,7 @@ class StaffOnlineSaleViewModelTest {
         assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
         assertNull(vm.uiState.value.lockedReason)
         assertNull(denialRef.get())
+        assertTrue(vm.uiState.value.saleDraft.submissionError?.contains("Stale") == true)
     }
 }
 

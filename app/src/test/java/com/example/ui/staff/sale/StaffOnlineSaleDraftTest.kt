@@ -456,7 +456,7 @@ class StaffOnlineSaleDraftTest {
         val authority = StaffOnlineSaleAuthorityResolution.resolve(bootstrap, session, currencyMinorUnitsOverride = 2)
         val draft = StaffOnlineSaleDraft(lines = listOf(line))
 
-        assertFalse(draft.canPrepareIntent)
+        assertFalse(draft.canPrepareIntent(authority))
         try {
             StaffOnlineSaleRequestBuilder.buildRawWireMap(draft, authority)
             fail("Expected IllegalArgumentException when draft has unresolved contracts")
