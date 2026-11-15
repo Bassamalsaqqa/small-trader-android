@@ -17,6 +17,7 @@ import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.MoneyAmount
 import com.example.data.mobile.contract.PositiveDecimalQuantity
 import com.example.data.mobile.onlinecash.AndroidV2OnlineCashClient
+import com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryRecord
 import com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStore
 import com.example.data.mobile.onlinecash.OnlineCashSaleOrchestrator
 import com.example.data.mobile.onlinecash.OnlineCashOrchestrationResult

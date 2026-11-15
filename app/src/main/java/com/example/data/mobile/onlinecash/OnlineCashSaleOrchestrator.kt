@@ -399,6 +399,7 @@ class OnlineCashSaleOrchestrator(
 
         if (finalResult is OnlineCashOrchestrationResult.ConfirmedFinancialSuccess) {
             try {
+                val baseOrigin = DurableOnlineSaleRecoveryStore.canonicalizeOrigin(client.validatedBaseOrigin)
                 recoveryStore?.clearPendingSale(
                     clientEventId = intent.clientEventId,
                     companyId = targetCompanyId,
