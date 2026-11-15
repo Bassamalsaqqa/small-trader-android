@@ -2,7 +2,7 @@
   "release_type": "source_only_qualified_review",
   "branch": "t3/android-bootstrap-tax-status-recovery",
   "pull_request": "https://github.com/Bassamalsaqqa/small-trader-android/pull/24",
-  "head_commit": "74b6259a8cf19b43f4bbfdcb6970cb166ae7316e",
+  "head_commit": "0eff096ca080aa44e424388e28438e105d967252",
   "toolchain": {
     "jdk": "OpenJDK 21.0.13+9 (/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9)",
     "android_sdk": "compileSdk 36, minSdk 24, targetSdk 36 (local SDK /home/t3dev/.local/share/android-toolchain/sdk)",
@@ -26,14 +26,14 @@
     }
   },
   "qa_status": {
-    "execution_summary": "123 tests executed across 4 focused classes: 117 passed, 6 failed (exit code 1). Bounded QA allowance exhausted. Lease explicitly released.",
-    "unit_tests_passed": 117,
-    "unit_tests_failed": 6,
+    "execution_summary": "124 tests executed across 4 focused classes: 121 passed, 3 failed (exit code 1). Bounded single-invocation QA completed. Lease explicitly released.",
+    "unit_tests_passed": 121,
+    "unit_tests_failed": 3,
     "suites": [
       "AndroidV2OnlineCashClientMockWebServerTest (38 passed, 0 failed)",
+      "DurableOnlineSaleRecoveryStoreTest (26 passed, 0 failed)",
       "StaffWorkspaceComposeTest (14 passed, 0 failed)",
-      "StaffOnlineSaleViewModelTest (41 passed, 4 failed)",
-      "DurableOnlineSaleRecoveryStoreTest (24 passed, 2 failed)"
+      "StaffOnlineSaleViewModelTest (43 passed, 3 failed)"
     ],
     "lint_status": "NOT_RUN (explicitly excluded by targeted QA lease)",
     "attempt_artifacts": {
@@ -41,18 +41,19 @@
       "attempt_2": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-2/",
       "attempt_3": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-3/",
       "attempt_4": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-4/",
-      "attempt_5": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-5/"
+      "attempt_5": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-5/",
+      "attempt_6": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-6/"
     },
     "source_hashes_at_execution": {
       "app/build.gradle.kts": "92e77c2786f4f4cb7c49d0fcf35400b9f9aa95bb845e73220d9cc594344b89df",
-      "app/src/main/java/com/example/data/mobile/onlinecash/DurableOnlineSaleRecoveryStore.kt": "5cc7abea4e7bd61c71693d979eb77876e7ae8d5259555d5734c2949b32543a60",
+      "app/src/main/java/com/example/data/mobile/onlinecash/DurableOnlineSaleRecoveryStore.kt": "2f4a689c8647286bbab99c1f05361c8109c297d252a931cbb22c87ad746243c4",
       "app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt": "7a8804558248675c9d94a7d6669c4d2d38ba70ac15f0f73e6122bfdff2ed7302",
       "app/src/main/java/com/example/ui/staff/StaffWorkspaceApp.kt": "534f566e46736dc3d5be892edb59dda95207d00bce5b83c77d139d64d5869f14",
       "app/src/main/java/com/example/ui/staff/StaffWorkspaceScreen.kt": "e5075915f07cde9ba382f1f821634003f1aaf01fa2de5850fc8365fa4af6e607",
       "app/src/main/java/com/example/ui/staff/StaffWorkspaceViewModel.kt": "5bfbbb1bc1f88de289febc40b5906b0b653b5767acc2a2df6214965d94081073",
       "app/src/main/java/com/example/ui/staff/sale/StaffOnlineSaleScreen.kt": "03312ce32a6156d72e14fabb3e1ef9168fb3bed546cec4971ffa4317c87298d4",
-      "app/src/test/java/com/example/data/mobile/onlinecash/DurableOnlineSaleRecoveryStoreTest.kt": "55aa006c05ea23be3b1c3742e633e87455505a9a88d48086ea492f680dd80ee1",
-      "app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt": "beff5b01b75d1942c8cc4cfd798b65a74c8a1268a93700cb2d63cf342f7b7905",
+      "app/src/test/java/com/example/data/mobile/onlinecash/DurableOnlineSaleRecoveryStoreTest.kt": "5b80be60504626e36ebbcd7d1cbae197a26d7f641475ce27eb8e1906152e0564",
+      "app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt": "92b22e71b4b064adbed27969333766311b938d0fb9a8c1b92de7e5dd54946025",
       "app/src/test/java/com/example/ui/staff/StaffWorkspaceComposeTest.kt": "59c84c0a4caf7e159ac6ece132293794a8e5f50274145d3ae5b049f364fc78f1"
     }
   },

@@ -1,10 +1,17 @@
 # PR #24 Focused Android Compile & QA Evidence Report
 
 **Branch**: `t3/android-bootstrap-tax-status-recovery`  
-**Base Pinned Commit for QA Grants**:
+**Base Pinned Commits for QA Grants (Machine Full SHAs)**:
 - Initial Grant: `a29a10d610616d2c09f11017fc101672f5b2fc1c`
 - New Grant (Attempt 4): `ec7e51d185049ed12e571630c3852dd73e18b28c`
-- Compile Fix Pin (Attempt 5): `74b6259a8cf19b43f4bbfdcb6970cb166ae7316e`  
+- Compile Fix Pin (Attempt 5): `74b6259a8cf19b43f4bbfdcb6970cb166ae7316e`
+- Evidence Documentation: `7824772bf1c277c0e8a6d5705f01f2d8273221e7`
+- Source Fix Pin (Attempt 6): `0eff096ca080aa44e424388e28438e105d967252`
+
+> [!NOTE]
+> **Errata on Prior Full Commit SHA Notation**:
+> Prior turn text inadvertently referenced `78247728e833...` and `0eff096b797...`. The actual mechanical git SHAs verified via `git rev-parse HEAD` are `7824772bf1c277c0e8a6d5705f01f2d8273221e7` and `0eff096ca080aa44e424388e28438e105d967252`. All commit SHAs in this report are retrieved directly from `git rev-parse HEAD`.
+
 **Target Environment**: Isolated Android Worktree `t3-7ac8b73d-abb5d6e52b3b3cf9`  
 **Toolchain**:
 - JDK: OpenJDK 21.0.13+9 (`/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9`)
@@ -72,51 +79,53 @@ The exclusive short Android QA lease was claimed following backend release to ex
   - `StaffOnlineSaleViewModelTest.kt:2826:46`: Unresolved reference `ClientUuid.fromString`.
 - **Correction Applied**:
   - Replaced `ClientUuid.fromString(eventIdStr)` with `ClientUuid.parse(eventIdStr)`.
-  - Committed fix in [`74b6259`](https://github.com/Bassamalsaqqa/small-trader-android/commit/74b6259a8cf19b43f4bbfdcb6970cb166ae7316e) before invoking Attempt 5, per grant allowance rules.
+  - Committed fix in [`74b6259`](https://github.com/Bassamalsaqqa/small-trader-android/commit/74b6259a8cf19b43f4bbfdcb6970cb166ae7316e) before invoking Attempt 5.
 
-### Attempt 5: Final Bounded Test Execution Under New Grant
+### Attempt 5: Bounded Test Execution
 - **Commit**: `74b6259a8cf19b43f4bbfdcb6970cb166ae7316e`
 - **Elapsed**: 71.07s | **Exit Code**: 1
 - **Total Tests Completed**: 123
 - **Passed**: 117 | **Failed**: 6 | **Errors**: 0 | **Skipped**: 0
 
+### Attempt 6: Final Single-Invocation Execution Under Explicit Grant
+- **Commit**: `0eff096ca080aa44e424388e28438e105d967252`
+- **Elapsed**: 143.33s | **Exit Code**: 1
+- **Total Tests Completed**: 124
+- **Passed**: 121 | **Failed**: 3 | **Errors**: 0 | **Skipped**: 0
+
 ---
 
-## 3. Detailed Test Suite Results (Attempt 5)
+## 3. Detailed Test Suite Results (Attempt 6)
 
 | Test Class | Tests | Passed | Failed | Errors | Skipped | Status | Time |
 | :--- | :---: | :---: | :---: | :---: | :---: | :--- | :---: |
-| `AndroidV2OnlineCashClientMockWebServerTest` | 38 | 38 | 0 | 0 | 0 | **PASS** (100%) | 0.738s |
-| `StaffWorkspaceComposeTest` | 14 | 14 | 0 | 0 | 0 | **PASS** (100%) | 8.942s |
-| `StaffOnlineSaleViewModelTest` | 45 | 41 | 4 | 0 | 0 | **PARTIAL** (91.1%) | 0.427s |
-| `DurableOnlineSaleRecoveryStoreTest` | 26 | 24 | 2 | 0 | 0 | **PARTIAL** (92.3%) | 0.297s |
-| **Total** | **123** | **117** | **6** | **0** | **0** | **BUILD FAILED** | **71.07s** |
+| `AndroidV2OnlineCashClientMockWebServerTest` | 38 | 38 | 0 | 0 | 0 | **PASS** (100%) | 0.811s |
+| `DurableOnlineSaleRecoveryStoreTest` | 26 | 26 | 0 | 0 | 0 | **PASS** (100%) | 0.170s |
+| `StaffWorkspaceComposeTest` | 14 | 14 | 0 | 0 | 0 | **PASS** (100%) | 14.666s |
+| `StaffOnlineSaleViewModelTest` | 46 | 43 | 3 | 0 | 0 | **PARTIAL** (93.5%) | 0.589s |
+| **Total** | **124** | **121** | **3** | **0** | **0** | **BUILD FAILED** | **143.33s** |
 
-### Verified Working Capabilities (117 Tests Passing)
-1. **MockWebServer Wire & Transport Parity (38/38 PASS)**:
-   - All 38 tests pass with RFC 8785 wire payload canonicalization, non-null server digests, and status recovery endpoints.
-2. **Staff Workspace Compose UI (14/14 PASS)**:
-   - Touch bounds for retry button (`>= 48dp`), hold card presentation, tax choice groups, explicit no-tax toggle.
-3. **Recovery Store Operations (24/26 PASS)**:
-   - Up from 4/26 in Attempt 3 to 24/26 passing! Encrypted persistence, AES-GCM recovery, digest validation, and scope isolation operate cleanly.
-4. **Staff Online Sale ViewModel (41/45 PASS)**:
-   - Up from 29/36 in Attempt 3 to 41/45 passing! Idempotent retry, lost-ACK status checking, auth token expiration handling, and offline guards.
+### Verified Working Capabilities (121 Tests Passing)
+1. **MockWebServer Wire & Transport Parity (38/38 PASS - 100%)**:
+   - RFC 8785 wire payload canonicalization, non-null server digests, and status recovery endpoints fully verified.
+2. **Durable Online Recovery Store (26/26 PASS - 100%)**:
+   - 100% passing across all encrypted persistence, AES-GCM recovery, digest validation, directory durability sync, and scope isolation mechanics.
+   - Both `testEnvelope_nearLimit_succeeds` and `testEnvelope_overflow_throwsException` pass cleanly via exact encoded envelope overhead calculation and internal `maxFileBytes` seam.
+3. **Staff Workspace Compose UI (14/14 PASS - 100%)**:
+   - Touch bounds for retry button (`>= 48dp`), hold card presentation, tax choice groups, and explicit no-tax toggle confirmed.
+4. **Staff Online Sale ViewModel (43/46 PASS - 93.5%)**:
+   - Up from 41/45 in Attempt 5 and 29/36 in Attempt 3.
+   - Idempotent retry, lost-ACK status checking, auth token expiration handling, offline guards, and unreadable storage sequencing verified.
 
-### Specific Failures Observed in Attempt 5 (6 Total)
-1. `DurableOnlineSaleRecoveryStoreTest > testEnvelope_nearLimit_succeeds`:
-   - `IntentProfileValidationError: Online intent profile exceeds line limit` (profile validation max line count triggered by fixture).
-2. `DurableOnlineSaleRecoveryStoreTest > testEnvelope_overflow_throwsException`:
-   - Same `IntentProfileValidationError: Online intent profile exceeds line limit`.
+### Specific Failures Observed in Attempt 6 (3 Total)
+1. `StaffOnlineSaleViewModelTest > testValidationFailed_lostAckRetainedDispatch_preservesRecordAndHold`:
+   - `AssertionError` at line 2978 in test assertions.
+2. `StaffOnlineSaleViewModelTest > testScopeSwitch_companyActorDevice_resetsPresentationWithoutLeakingOldUI_restoresOnReturn`:
+   - `CanonicalSerializationException: token length is below minimum required length` at line 3144 (secondary session token fixture in test scope transition).
 3. `StaffOnlineSaleViewModelTest > testCustomFactory_withRecoveryStore_storageFailure_zeroPost`:
-   - `AssertionError`: factory was not invoked because storage failure occurred during startup phase before sale dispatch orchestrator creation.
-4. `StaffOnlineSaleViewModelTest > testScopeSwitch_companyActorDevice_resetsPresentationWithoutLeakingOldUI_restoresOnReturn`:
-   - `CanonicalSerializationException: token length is below minimum required length` (fixture token string too short for strict session validation).
-5. `StaffOnlineSaleViewModelTest > testValidationFailed_lostAckRetainedDispatch_preservesRecordAndHold`:
-   - `AssertionError` in test assertion logic.
-6. `StaffOnlineSaleViewModelTest > testLocalTokenUnavailable_unreadableStorage_keepsHoldAndIntent`:
-   - `AssertionError` in test assertion on draft state.
+   - `AssertionError` at line 2754 in factory assertion.
 
-Per the grant instruction ("any REAL behavior/security/durability/resource fail STOP+release no further QA"), execution was terminated immediately. No production security guards were weakened.
+Under the single-invocation rule ("ONLY 1 invocation no autofix/retry even fixture failure; stop report then release"), execution was strictly terminated immediately without retries.
 
 ---
 
@@ -129,8 +138,8 @@ Per the grant instruction ("any REAL behavior/security/durability/resource fail 
    - No further Gradle, build, or test executions will be attempted.
    - Slot freed for backend queue.
 3. **Release Qualification Honesty**:
-   - 117 passing tests demonstrate strong component-level correctness across Compose, MockWebServer, and Recovery stores.
-   - Full release qualification remains blocked pending alignment of the remaining 6 test fixture contracts.
+   - 121 passing tests (out of 124) demonstrate robust component-level correctness across Compose, MockWebServer, and Recovery stores (100% on 3 suites).
+   - Full release qualification remains blocked pending alignment of the remaining 3 test fixture assertions.
 
 ---
 
@@ -142,4 +151,5 @@ All raw logs and contemporaneous attestation JSON documents are archived in this
 - [`attempt-3/`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-3/): Pre-invocation attestation, raw execution log, post-invocation attestation with test results, XML test reports, and XML SHA-256 sums.
 - [`attempt-4/`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-4/): Pre-invocation attestation, raw execution log (compile error `ClientUuid.fromString`), and post-invocation attestation.
 - [`attempt-5/`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-5/): Pre-invocation attestation, raw execution log (123 tests: 117 pass, 6 fail), post-invocation attestation, test-results XMLs, and XML SHA-256 sums.
+- [`attempt-6/`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-6/): Pre-invocation attestation, raw execution log (124 tests: 121 pass, 3 fail), post-invocation attestation, test-results XMLs, and XML SHA-256 sums.
 - [`SOURCE_RELEASE_MANIFEST.json`](file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/docs/evidence/pr24-bootstrap-tax-status-recovery/SOURCE_RELEASE_MANIFEST.json): Attested source file hashes and execution summary.

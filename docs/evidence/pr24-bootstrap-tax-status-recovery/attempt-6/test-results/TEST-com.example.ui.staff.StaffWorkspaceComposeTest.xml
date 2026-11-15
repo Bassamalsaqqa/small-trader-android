@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.ui.staff.StaffWorkspaceComposeTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-11-15T16:52:28.941Z" hostname="pasta-hp-worker" time="14.666">
+  <properties/>
+  <testcase name="cashSaleScreen_rendersPaymentUnverifiedHoldCard_andFreezesControls" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="10.092"/>
+  <testcase name="companySelectScreen_rendersCompanies_andClicksItem" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.183"/>
+  <testcase name="unconfiguredScreen_rendersTruthfulSetupNotice_andTogglesLanguage" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.191"/>
+  <testcase name="cashSaleScreen_rendersDirectDecimalQuantityInput_andUpdatesQuantityOnInput" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.535"/>
+  <testcase name="statusScreens_renderTruthfulState" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.135"/>
+  <testcase name="mfaScreen_rendersMutuallyExclusiveChips_andSubmits" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.397"/>
+  <testcase name="signInScreen_rendersInputs_andSubmitsCredentials" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="1.687"/>
+  <testcase name="companySelectScreen_showsCancelWhenActiveCompanyExists_andLogoutOtherwise" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.093"/>
+  <testcase name="cashSaleScreen_rendersDraftLineTaxChoices_andSelectsTaxAndNoTax" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.205"/>
+  <testcase name="catalog_whenCashEnabled_rendersAddButton_andInvokesCallbackOnClick" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.191"/>
+  <testcase name="customerDirectory_whenCashEnabled_rendersSelectButton_andInvokesCallbackOnClick" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.158"/>
+  <testcase name="workspaceScreen_unassignedTaxRate_rendersTruthfulCopy" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.166"/>
+  <testcase name="workspaceScreen_rendersProductsTab_andHeaders" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.167"/>
+  <testcase name="workspaceScreen_rendersCustomersTab" classname="com.example.ui.staff.StaffWorkspaceComposeTest" time="0.151"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

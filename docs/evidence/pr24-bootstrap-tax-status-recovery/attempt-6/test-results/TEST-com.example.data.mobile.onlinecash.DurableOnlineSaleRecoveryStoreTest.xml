@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" tests="26" skipped="0" failures="0" errors="0" timestamp="2026-11-15T16:52:28.551Z" hostname="pasta-hp-worker" time="0.17">
+  <properties/>
+  <testcase name="testSaveAndGet_roundTrip_exactParity" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.026"/>
+  <testcase name="testConsistency_inconsistentAmount_rejectedOnSave" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.003"/>
+  <testcase name="testScopedClearPendingSale_onlyClearsMatchingScope" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.008"/>
+  <testcase name="testTenantIsolation_matchesExactScopeOnly" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.008"/>
+  <testcase name="testConsistency_inconsistentDeviceId_rejectedOnSave" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.002"/>
+  <testcase name="testCorruptedCiphertext_throwsRecoveryException" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.007"/>
+  <testcase name="testGlobalEventUuidCollision_acrossScopes_rejected" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.008"/>
+  <testcase name="testReboundIntent_reconstitutesValidPreparedOnlineSaleIntent" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.003"/>
+  <testcase name="testTruncatedEnvelope_throwsRecoveryException" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.001"/>
+  <testcase name="testCanonicalizeOrigin_normalizesTrailingSlashAndCase" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.001"/>
+  <testcase name="testConsistency_inconsistentDigest_rejectedOnSave" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.003"/>
+  <testcase name="testEnvelope_nearLimit_succeeds" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.011"/>
+  <testcase name="testConsistency_inconsistentActorId_rejectedOnSave" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.002"/>
+  <testcase name="testConsistency_inconsistentCurrency_rejectedOnSave" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.002"/>
+  <testcase name="testDurabilitySyncFailure_propagatesRecoveryExceptionBeforePost" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.005"/>
+  <testcase name="testEnvelope_overflow_throwsException" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.031"/>
+  <testcase name="testCanonicalizeOrigin_normalizesDefaultPorts" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.002"/>
+  <testcase name="testConsistency_corruptedDuplicateOnDisk_readFailsClosed" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.005"/>
+  <testcase name="testCompareAndSet_blocksMutationOfExistingEventWithDifferentPayload" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.006"/>
+  <testcase name="testClearPendingSale_onlyClearsMatchingEventId" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.012"/>
+  <testcase name="testCanonicalizeOrigin_strictValidation_failsClosedOnInvalid" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.002"/>
+  <testcase name="testConsistency_inconsistentEventId_rejectedOnSave" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.002"/>
+  <testcase name="testConsistency_inconsistentCompanyId_rejectedOnSave" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.002"/>
+  <testcase name="testCompareAndSet_allowsIdempotentResaveOfExactSameRecord" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.005"/>
+  <testcase name="testClearPendingSale_nonMatchingEventId_isNoOp" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.004"/>
+  <testcase name="testCompareAndSet_blocksSecondEventWhilePriorPending" classname="com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest" time="0.006"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
