@@ -2823,7 +2823,7 @@ class StaffOnlineSaleViewModelTest {
             override fun execute(request: TransportRequest): TransportResponse {
                 val parsedBody = com.example.data.mobile.contract.StrictJsonParser.parse(request.body!!).asObject()
                 val eventIdStr = parsedBody.properties["client_event_id"]!!.asString()
-                capturedEventId = ClientUuid.fromString(eventIdStr)
+                capturedEventId = ClientUuid.parse(eventIdStr)
 
                 // Check store at the exact moment transport executes
                 val pending = sharedStore.getPendingSale(companyUlid, actorUlid, deviceUuid, "https://small-trader.example.com")
