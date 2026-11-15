@@ -2,7 +2,7 @@
   "release_type": "source_only_qualified_review",
   "branch": "t3/android-bootstrap-tax-status-recovery",
   "pull_request": "https://github.com/Bassamalsaqqa/small-trader-android/pull/24",
-  "head_commit": "2c462ca6256d79a9586dfba8f6b05eb1daf3fd80",
+  "head_commit": "74b6259a8cf19b43f4bbfdcb6970cb166ae7316e",
   "toolchain": {
     "jdk": "OpenJDK 21.0.13+9 (/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9)",
     "android_sdk": "compileSdk 36, minSdk 24, targetSdk 36 (local SDK /home/t3dev/.local/share/android-toolchain/sdk)",
@@ -26,31 +26,33 @@
     }
   },
   "qa_status": {
-    "execution_summary": "114 tests executed across 4 focused classes: 85 passed, 29 failed (exit code 1). Bounded QA allowance exhausted (2 correction iterations used for trivial compile defects). Lease explicitly released.",
-    "unit_tests_passed": 85,
-    "unit_tests_failed": 29,
+    "execution_summary": "123 tests executed across 4 focused classes: 117 passed, 6 failed (exit code 1). Bounded QA allowance exhausted. Lease explicitly released.",
+    "unit_tests_passed": 117,
+    "unit_tests_failed": 6,
     "suites": [
       "AndroidV2OnlineCashClientMockWebServerTest (38 passed, 0 failed)",
       "StaffWorkspaceComposeTest (14 passed, 0 failed)",
-      "DurableOnlineSaleRecoveryStoreTest (4 passed, 22 failed)",
-      "StaffOnlineSaleViewModelTest (29 passed, 7 failed)"
+      "StaffOnlineSaleViewModelTest (41 passed, 4 failed)",
+      "DurableOnlineSaleRecoveryStoreTest (24 passed, 2 failed)"
     ],
     "lint_status": "NOT_RUN (explicitly excluded by targeted QA lease)",
     "attempt_artifacts": {
       "attempt_1": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-1/",
       "attempt_2": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-2/",
-      "attempt_3": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-3/"
+      "attempt_3": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-3/",
+      "attempt_4": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-4/",
+      "attempt_5": "docs/evidence/pr24-bootstrap-tax-status-recovery/attempt-5/"
     },
     "source_hashes_at_execution": {
       "app/build.gradle.kts": "92e77c2786f4f4cb7c49d0fcf35400b9f9aa95bb845e73220d9cc594344b89df",
-      "app/src/main/java/com/example/data/mobile/onlinecash/DurableOnlineSaleRecoveryStore.kt": "b28724e58199155d9d55ee4143db6fdde8341ffcae96df42b44e00479c38033a",
+      "app/src/main/java/com/example/data/mobile/onlinecash/DurableOnlineSaleRecoveryStore.kt": "5cc7abea4e7bd61c71693d979eb77876e7ae8d5259555d5734c2949b32543a60",
       "app/src/main/java/com/example/data/mobile/onlinecash/OnlineCashSaleOrchestrator.kt": "7a8804558248675c9d94a7d6669c4d2d38ba70ac15f0f73e6122bfdff2ed7302",
       "app/src/main/java/com/example/ui/staff/StaffWorkspaceApp.kt": "534f566e46736dc3d5be892edb59dda95207d00bce5b83c77d139d64d5869f14",
       "app/src/main/java/com/example/ui/staff/StaffWorkspaceScreen.kt": "e5075915f07cde9ba382f1f821634003f1aaf01fa2de5850fc8365fa4af6e607",
-      "app/src/main/java/com/example/ui/staff/StaffWorkspaceViewModel.kt": "56389bbd62674dab33aeb6de70309a8c9fb060914ec518482977405beeb0c9cc",
+      "app/src/main/java/com/example/ui/staff/StaffWorkspaceViewModel.kt": "5bfbbb1bc1f88de289febc40b5906b0b653b5767acc2a2df6214965d94081073",
       "app/src/main/java/com/example/ui/staff/sale/StaffOnlineSaleScreen.kt": "03312ce32a6156d72e14fabb3e1ef9168fb3bed546cec4971ffa4317c87298d4",
-      "app/src/test/java/com/example/data/mobile/onlinecash/DurableOnlineSaleRecoveryStoreTest.kt": "f6ed18c11276d3bef57479474a4dd0f8067cd6696d853bacc444ac6bf03ac843",
-      "app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt": "c0bc598231d03fa36f70c7c00d99f39082f4d11307362429cdd2d6b3eaf93902",
+      "app/src/test/java/com/example/data/mobile/onlinecash/DurableOnlineSaleRecoveryStoreTest.kt": "55aa006c05ea23be3b1c3742e633e87455505a9a88d48086ea492f680dd80ee1",
+      "app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt": "beff5b01b75d1942c8cc4cfd798b65a74c8a1268a93700cb2d63cf342f7b7905",
       "app/src/test/java/com/example/ui/staff/StaffWorkspaceComposeTest.kt": "59c84c0a4caf7e159ac6ece132293794a8e5f50274145d3ae5b049f364fc78f1"
     }
   },

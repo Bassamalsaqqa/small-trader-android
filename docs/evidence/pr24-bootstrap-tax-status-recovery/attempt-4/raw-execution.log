@@ -1,0 +1,66 @@
+=== GRADLE QA EXECUTION LOG ===
+Start UTC: 2026-11-15T16:23:19.125991+00:00
+HEAD: ec7e51d185049ed12e571630c3852dd73e18b28c
+JAVA_HOME: /home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9
+ANDROID_HOME: /home/t3dev/.local/share/android-toolchain/sdk
+Command: ./gradlew :app:cleanTestDebugUnitTest :app:testDebugUnitTest --no-build-cache --tests com.example.data.mobile.onlinecash.DurableOnlineSaleRecoveryStoreTest --tests com.example.ui.staff.sale.StaffOnlineSaleViewModelTest --tests com.example.ui.staff.StaffWorkspaceComposeTest --tests com.example.data.mobile.onlinecash.AndroidV2OnlineCashClientMockWebServerTest --max-workers=1 -Dorg.gradle.workers.max=1 -Dorg.gradle.jvmargs=-XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xmx1536m -Pkotlin.compiler.execution.strategy=in-process --no-daemon
+
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+Calculating task graph as configuration cache cannot be reused because environment variable 'ANDROID_SDK_ROOT' has changed.
+> Task :app:cleanTestDebugUnitTest
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:processDebugGoogleServices UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:kspDebugKotlin
+> Task :app:compileDebugKotlin
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/ui/screens/HomeScreen.kt:557:77 'val Icons.Filled.MenuBook: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.MenuBook.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/ui/screens/HomeScreen.kt:845:61 'val Icons.Filled.ReceiptLong: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.ReceiptLong.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/main/java/com/example/ui/screens/PurchaseDialogs.kt:558:59 Condition is always 'true'.
+
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:kspDebugUnitTestKotlin
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+
+> Task :app:compileDebugUnitTestKotlin FAILED
+e: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-7ac8b73d-abb5d6e52b3b3cf9/app/src/test/java/com/example/ui/staff/sale/StaffOnlineSaleViewModelTest.kt:2826:46 Unresolved reference 'fromString'.
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileDebugUnitTestKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 1m 54s
+26 actionable tasks: 7 executed, 19 up-to-date
+Configuration cache entry stored.
+
+Exit Code: 1
+End UTC: 2026-11-15T16:25:14.190598+00:00
+Elapsed Seconds: 115.06
