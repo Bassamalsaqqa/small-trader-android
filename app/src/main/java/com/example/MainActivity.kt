@@ -62,18 +62,31 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            if (BuildConfig.STAFF_READ_WORKSPACE) {
-                val context = androidx.compose.ui.platform.LocalContext.current
-                val authDenialListener = androidx.compose.runtime.remember(context) {
-                    com.example.data.mobile.integration.OutboxAuthDenialBridge.create(context.applicationContext)
+            val launchTarget = com.example.ui.navigation.AppLaunchTargetResolver.resolve(
+                isDebug = BuildConfig.DEBUG,
+                staffReadWorkspace = BuildConfig.STAFF_READ_WORKSPACE,
+                configuredOrigin = BuildConfig.STAFF_WORKSPACE_ORIGIN,
+                demoModeOptIn = false,
+                allowHttpLoopback = BuildConfig.DEBUG && BuildConfig.STAFF_ALLOW_HTTP_LOOPBACK
+            )
+            when (launchTarget) {
+                com.example.ui.navigation.AppLaunchTarget.STAFF_WORKSPACE -> {
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val authDenialListener = androidx.compose.runtime.remember(context) {
+                        com.example.data.mobile.integration.OutboxAuthDenialBridge.create(context.applicationContext)
+                    }
+                    com.example.ui.staff.StaffWorkspaceApp(
+                        configuredOrigin = BuildConfig.STAFF_WORKSPACE_ORIGIN,
+                        allowHttpLoopback = BuildConfig.DEBUG && BuildConfig.STAFF_ALLOW_HTTP_LOOPBACK,
+                        authDenialListener = authDenialListener
+                    )
                 }
-                com.example.ui.staff.StaffWorkspaceApp(
-                    configuredOrigin = BuildConfig.STAFF_WORKSPACE_ORIGIN,
-                    allowHttpLoopback = BuildConfig.DEBUG && BuildConfig.STAFF_ALLOW_HTTP_LOOPBACK,
-                    authDenialListener = authDenialListener
-                )
-            } else {
-                SmallTraderApp()
+                com.example.ui.navigation.AppLaunchTarget.DEMO_TRADER -> {
+                    SmallTraderApp()
+                }
+                com.example.ui.navigation.AppLaunchTarget.UNCONFIGURED -> {
+                    com.example.ui.staff.StaffUnconfiguredScreen(lang = com.example.model.AppLanguage.AR)
+                }
             }
         }
     }

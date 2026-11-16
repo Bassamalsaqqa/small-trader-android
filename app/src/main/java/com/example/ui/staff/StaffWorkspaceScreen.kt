@@ -607,14 +607,14 @@ private fun ProductCatalogItemCard(
                 }
             }
 
-            if (product.barcode != null) {
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = lang.tr("باركود: ", "Barcode: ") + product.barcode,
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "\u2066ID: ${product.id.value.take(8)}\u2069" +
+                    (product.barcode?.let { " • " + lang.tr("باركود: ", "Barcode: ") + "\u2066$it\u2069" } ?: ""),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -935,7 +935,7 @@ private fun CustomerDirectoryItemCard(
 
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = lang.tr("الكود: ", "Code: ") + customer.code,
+                    text = lang.tr("الكود: ", "Code: ") + "\u2066${customer.code}\u2069 • \u2066ID: ${customer.id.value.take(8)}\u2069",
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
