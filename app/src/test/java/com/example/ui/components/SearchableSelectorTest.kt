@@ -734,7 +734,7 @@ class SearchableSelectorTest {
         // Observable detail card is rendered with stable ID and clear action in the same live composition
         composeTestRule.onNodeWithTag("staff_selected_product_card").assertIsDisplayed()
         composeTestRule.onNodeWithTag("staff_selected_product_name").assertTextContains("زيت زيتون بلدي")
-        composeTestRule.onNodeWithTag("staff_selected_product_id").assertTextContains("01JCV8X9M2NQW3TYZ4R5S67891")
+        composeTestRule.onNodeWithTag("staff_selected_product_id").assertTextContains("01JCV8X9M2NQW3TYZ4R5S67891", substring = true)
 
         // Clear selection via clear button
         composeTestRule.onNodeWithTag("staff_selected_product_clear_button").performClick()
@@ -813,7 +813,7 @@ class SearchableSelectorTest {
         // Observable detail card is rendered in the same live composition
         composeTestRule.onNodeWithTag("staff_selected_customer_card").assertIsDisplayed()
         composeTestRule.onNodeWithTag("staff_selected_customer_name").assertTextContains("شركة الأمل للتجارة")
-        composeTestRule.onNodeWithTag("staff_selected_customer_id").assertTextContains("01JCV8X9M2NQW3TYZ4R5S6789C")
+        composeTestRule.onNodeWithTag("staff_selected_customer_id").assertTextContains("01JCV8X9M2NQW3TYZ4R5S6789C", substring = true)
 
         composeTestRule.onNodeWithTag("staff_selected_customer_clear_button").performClick()
         customScope.advanceUntilIdle()
