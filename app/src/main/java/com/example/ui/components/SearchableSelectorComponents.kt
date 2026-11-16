@@ -382,8 +382,15 @@ class SearchableSelectorState<T>(
     }
 
     fun confirmHighlight(): Boolean {
-        if (highlightedIndex in candidates.indices) {
-            return selectItem(candidates[highlightedIndex])
+        val targetIndex = if (highlightedIndex in candidates.indices) {
+            highlightedIndex
+        } else if (candidates.size == 1) {
+            0
+        } else {
+            -1
+        }
+        if (targetIndex in candidates.indices) {
+            return selectItem(candidates[targetIndex])
         }
         return false
     }
@@ -539,20 +546,33 @@ fun <T> SearchableTypeaheadField(
                     if (event.type == KeyEventType.KeyDown) {
                         when (event.key) {
                             Key.DirectionDown -> {
-                                if (state.isExpanded && state.candidates.isNotEmpty()) {
+                                if (state.candidates.isNotEmpty()) {
+                                    if (!state.isExpanded) {
+                                        state.expand()
+                                    }
                                     state.navigateHighlight(1)
                                     true
                                 } else false
                             }
                             Key.DirectionUp -> {
-                                if (state.isExpanded && state.candidates.isNotEmpty()) {
+                                if (state.candidates.isNotEmpty()) {
+                                    if (!state.isExpanded) {
+                                        state.expand()
+                                    }
                                     state.navigateHighlight(-1)
                                     true
                                 } else false
                             }
                             Key.Enter, Key.NumPadEnter -> {
-                                if (state.isExpanded && state.highlightedIndex in state.candidates.indices) {
-                                    val item = state.candidates[state.highlightedIndex]
+                                val targetIndex = if (state.highlightedIndex in state.candidates.indices) {
+                                    state.highlightedIndex
+                                } else if (state.candidates.size == 1) {
+                                    0
+                                } else {
+                                    -1
+                                }
+                                if (state.isExpanded && targetIndex in state.candidates.indices) {
+                                    val item = state.candidates[targetIndex]
                                     if (state.selectItem(item)) {
                                         onItemSelected(item)
                                         focusManager.clearFocus()

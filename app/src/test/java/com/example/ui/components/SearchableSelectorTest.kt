@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.requestFocus
 import com.example.data.mobile.contract.MoneyAmount
 import com.example.data.mobile.contract.NonnegativeDecimalQuantity
 import com.example.data.mobile.contract.PositiveDecimalQuantity
@@ -393,6 +394,7 @@ class SearchableSelectorTest {
         }
 
         state.onQueryChanged("حليب")
+        customScope.advanceUntilIdle()
         composeTestRule.waitForIdle()
 
         // Both candidates rendered in dropdown
@@ -406,6 +408,7 @@ class SearchableSelectorTest {
 
         // Select the second duplicate product B
         composeTestRule.onNodeWithTag("test_product_selector_item_01JCV8X9M2NQW3TYZ4R5S6789B").performClick()
+        customScope.advanceUntilIdle()
         composeTestRule.waitForIdle()
 
         // Verify that exactly Product B's stable ID and DTO were selected
@@ -458,6 +461,7 @@ class SearchableSelectorTest {
         }
 
         state.onQueryChanged("شركة النور")
+        customScope.advanceUntilIdle()
         composeTestRule.waitForIdle()
 
         // Both items displayed with codes C-101 and C-102
@@ -466,6 +470,7 @@ class SearchableSelectorTest {
 
         // Click customer A
         composeTestRule.onNodeWithTag("test_customer_selector_item_01JCV8X9M2NQW3TYZ4R5S6789A").performClick()
+        customScope.advanceUntilIdle()
         composeTestRule.waitForIdle()
 
         assertNotNull(selectedCustomer)
@@ -526,7 +531,7 @@ class SearchableSelectorTest {
         // Logical server-side 10,000 item catalog
         val fakeServerCatalog = (0 until 10000).map { i ->
             createProduct(
-                id = String.format("01JCV8X9M2NQW3TYZ4%07d", i),
+                id = String.format("01JCV8X9M2NQW3TYZ4%08d", i),
                 sku = "SKU-$i",
                 name = if (i % 2 == 0) "زيت رقم $i" else "طحين رقم $i"
             )
@@ -708,6 +713,7 @@ class SearchableSelectorTest {
 
         // Type search query
         composeTestRule.onNodeWithTag("staff_product_selector_input").performTextInput("زيت")
+        customScope.advanceUntilIdle()
         composeTestRule.waitForIdle()
 
         // Dropdown appears with candidate
@@ -715,6 +721,7 @@ class SearchableSelectorTest {
 
         // Click candidate
         composeTestRule.onNodeWithTag("staff_product_selector_item_01JCV8X9M2NQW3TYZ4R5S67891").performClick()
+        customScope.advanceUntilIdle()
         composeTestRule.waitForIdle()
 
         // Selected product callback received item
@@ -751,6 +758,8 @@ class SearchableSelectorTest {
 
         // Clear selection via clear button
         composeTestRule.onNodeWithTag("staff_selected_product_clear_button").performClick()
+        customScope.advanceUntilIdle()
+        composeTestRule.waitForIdle()
         assertNull(currentSelectedProduct)
     }
 
@@ -808,6 +817,7 @@ class SearchableSelectorTest {
 
         // Type search query
         composeTestRule.onNodeWithTag("staff_customer_selector_input").performTextInput("الأمل")
+        customScope.advanceUntilIdle()
         composeTestRule.waitForIdle()
 
         // Dropdown displays candidate
@@ -815,6 +825,7 @@ class SearchableSelectorTest {
 
         // Click candidate
         composeTestRule.onNodeWithTag("staff_customer_selector_item_01JCV8X9M2NQW3TYZ4R5S6789C").performClick()
+        customScope.advanceUntilIdle()
         composeTestRule.waitForIdle()
 
         assertEquals("01JCV8X9M2NQW3TYZ4R5S6789C", currentSelectedCustomer?.id?.value)
@@ -847,6 +858,8 @@ class SearchableSelectorTest {
         composeTestRule.onNodeWithTag("staff_selected_customer_id").assertTextContains("01JCV8X9M2NQW3TYZ4R5S6789C")
 
         composeTestRule.onNodeWithTag("staff_selected_customer_clear_button").performClick()
+        customScope.advanceUntilIdle()
+        composeTestRule.waitForIdle()
         assertNull(currentSelectedCustomer)
     }
 
@@ -1123,7 +1136,10 @@ class SearchableSelectorTest {
             }
         }
 
-        // Navigate Down via KeyInput
+        // Focus input and navigate Down via KeyInput
+        composeTestRule.onNodeWithTag("key_selector_input").requestFocus()
+        composeTestRule.waitForIdle()
+
         composeTestRule.onNodeWithTag("key_selector_input").performKeyInput {
             pressKey(Key.DirectionDown)
         }
@@ -1144,6 +1160,9 @@ class SearchableSelectorTest {
         // Re-expand and test Escape
         state.expand()
         assertTrue(state.isExpanded)
+
+        composeTestRule.onNodeWithTag("key_selector_input").requestFocus()
+        composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithTag("key_selector_input").performKeyInput {
             pressKey(Key.Escape)
