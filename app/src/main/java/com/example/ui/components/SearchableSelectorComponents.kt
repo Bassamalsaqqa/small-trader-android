@@ -149,38 +149,48 @@ class SearchableSelectorState<T>(
     var currentIntentSeq: Long = 0L
         private set
 
-    // Active session scope recorded at the time of query
-    private var activeCompanyAtQuery: String? = null
-    private var activeGenerationAtQuery: Long = 0L
+    // Immutable provenance of the committed candidates
+    var committedQuery: String? = null
+        private set
+    var committedCompany: String? = null
+        private set
+    var committedGeneration: Long = 0L
+        private set
 
     /**
      * Handles text query modifications with max 250ms debounce, rapid keystroke cancellation,
-     * and stale sequence/session discard.
+     * immediate UI/cursor/candidate invalidation, and stale sequence/session discard.
      */
     fun onQueryChanged(newQuery: String) {
+        // 1. Advance sequence FIRST before any edit or check
+        val seq = ++currentIntentSeq
+
+        // 2. Immediately cancel both in-flight jobs
+        searchJob?.cancel()
+        loadMoreJob?.cancel()
+
+        // 3. Immediately clear displayed rows, page cursor, hasMore, highlightedIndex, and isLoadingMore
         query = newQuery
         highlightedIndex = -1
         errorMessage = null
-
-        // Immediately cancel older in-flight query job
-        searchJob?.cancel()
+        candidates = emptyList()
+        nextCursor = null
+        hasMore = false
+        isLoadingMore = false
+        committedQuery = null
+        committedCompany = null
+        committedGeneration = 0L
 
         val trimmed = newQuery.trim()
         if (trimmed.isEmpty()) {
-            // Under 1 char threshold: clear candidates immediately and close dropdown
-            candidates = emptyList()
+            // Under 1 char threshold: clear loading & close dropdown
             isLoading = false
-            hasMore = false
-            nextCursor = null
             isExpanded = false
             return
         }
 
-        val seq = ++currentIntentSeq
         val startCompany = companyScopeProvider()
         val startGen = sessionGenerationProvider()
-        activeCompanyAtQuery = startCompany
-        activeGenerationAtQuery = startGen
 
         searchJob = scope.launch {
             if (debounceMs > 0) {
@@ -203,6 +213,11 @@ class SearchableSelectorState<T>(
                 // 3. Active session generation
                 if (sessionGenerationProvider() != startGen) return@launch
 
+                // Record committed result provenance
+                committedQuery = trimmed
+                committedCompany = startCompany
+                committedGeneration = startGen
+
                 // Deduplicate items strictly by ID
                 candidates = result.items.distinctBy(idSelector)
                 nextCursor = result.nextCursor
@@ -216,8 +231,12 @@ class SearchableSelectorState<T>(
                     candidates = emptyList()
                     hasMore = false
                     nextCursor = null
+                    committedQuery = null
+                    committedCompany = null
+                    committedGeneration = 0L
                 }
             } finally {
+                // Cancelled or superseded job must NOT mutate loading state
                 if (seq == currentIntentSeq) {
                     isLoading = false
                 }
@@ -227,22 +246,22 @@ class SearchableSelectorState<T>(
 
     /**
      * Loads the next bounded page (30 items) using cursor pagination with strict ID deduplication.
+     * Captures the exact committed query and provenance for which the cursor was issued.
      */
     fun loadMore() {
-        if (isLoading || isLoadingMore || !hasMore || nextCursor == null) return
+        val targetQuery = committedQuery ?: return
         val cursor = nextCursor ?: return
-        val trimmed = query.trim()
-        if (trimmed.isEmpty()) return
+        if (isLoading || isLoadingMore || !hasMore) return
 
         val seq = currentIntentSeq
-        val startCompany = companyScopeProvider()
-        val startGen = sessionGenerationProvider()
+        val startCompany = committedCompany
+        val startGen = committedGeneration
 
         loadMoreJob?.cancel()
         loadMoreJob = scope.launch {
             isLoadingMore = true
             try {
-                val result = onFetchCandidates(trimmed, cursor, 30)
+                val result = onFetchCandidates(targetQuery, cursor, 30)
 
                 if (seq != currentIntentSeq) return@launch
                 if (companyScopeProvider() != startCompany) return@launch
@@ -258,24 +277,34 @@ class SearchableSelectorState<T>(
             } catch (_: Exception) {
                 // Non-fatal pagination failure preserves already loaded candidates
             } finally {
-                isLoadingMore = false
+                // Cancelled old finally does not flip new loading state
+                if (seq == currentIntentSeq) {
+                    isLoadingMore = false
+                }
             }
         }
     }
 
     /**
-     * Selects a candidate item after validating that current company and session generation
-     * remain consistent with the active environment.
+     * Selects a candidate item after validating against current result provenance:
+     * - Item must exist in current active candidates list
+     * - Active company and session generation must match committed provenance
      *
-     * @return true if selection was committed; false if rejected due to stale session.
+     * @return true if selection was committed; false if rejected due to stale session or invalid provenance.
      */
     fun selectItem(item: T): Boolean {
         val currentCompany = companyScopeProvider()
         val currentGen = sessionGenerationProvider()
-        if (activeCompanyAtQuery != null && currentCompany != activeCompanyAtQuery) {
+        if (committedCompany != null && currentCompany != committedCompany) {
             return false
         }
-        if (activeGenerationAtQuery != 0L && currentGen != activeGenerationAtQuery) {
+        if (committedGeneration != 0L && currentGen != committedGeneration) {
+            return false
+        }
+
+        val itemId = idSelector(item)
+        val isInCandidates = candidates.any { idSelector(it) == itemId }
+        if (!isInCandidates) {
             return false
         }
 
@@ -283,6 +312,28 @@ class SearchableSelectorState<T>(
         isExpanded = false
         highlightedIndex = -1
         return true
+    }
+
+    /**
+     * Invalidate entire scope and selection without typing (e.g. on company switch, logout, 401).
+     */
+    fun invalidateScope() {
+        val seq = ++currentIntentSeq
+        searchJob?.cancel()
+        loadMoreJob?.cancel()
+        selectedItem = null
+        candidates = emptyList()
+        query = ""
+        nextCursor = null
+        hasMore = false
+        isLoading = false
+        isLoadingMore = false
+        errorMessage = null
+        isExpanded = false
+        highlightedIndex = -1
+        committedQuery = null
+        committedCompany = null
+        committedGeneration = 0L
     }
 
     /**
@@ -296,17 +347,7 @@ class SearchableSelectorState<T>(
      * Clears query, cancels jobs, and resets candidates and dropdown.
      */
     fun clearQuery() {
-        query = ""
-        candidates = emptyList()
-        isLoading = false
-        isLoadingMore = false
-        hasMore = false
-        nextCursor = null
-        errorMessage = null
-        isExpanded = false
-        highlightedIndex = -1
-        searchJob?.cancel()
-        loadMoreJob?.cancel()
+        onQueryChanged("")
     }
 
     /**
@@ -351,11 +392,18 @@ class SearchableSelectorState<T>(
         query = q
     }
 
-    fun setDirectCandidates(items: List<T>, hasMore: Boolean = false, nextCursor: String? = null) {
+    fun setDirectCandidates(items: List<T>, hasMore: Boolean = false, nextCursor: String? = null, query: String = "") {
+        val seq = ++currentIntentSeq
+        searchJob?.cancel()
+        loadMoreJob?.cancel()
+        committedQuery = query
+        committedCompany = companyScopeProvider()
+        committedGeneration = sessionGenerationProvider()
         candidates = items.distinctBy(idSelector)
         this.hasMore = hasMore
         this.nextCursor = nextCursor
         this.isLoading = false
+        this.isLoadingMore = false
         this.errorMessage = null
         if (items.isNotEmpty()) {
             this.isExpanded = true

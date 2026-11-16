@@ -62,7 +62,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.ProductCatalogItem
-import com.example.model.AppLanguage
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.text.style.TextDirection
+import com.example.ui.components.SearchableCustomerSelector
+import com.example.ui.components.SearchableProductSelector
+import com.example.ui.components.SearchableSelectorState
+import com.example.ui.components.SelectorFetchResult
+import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.PrimaryBlueLight
 
 /**
@@ -86,9 +95,36 @@ fun StaffWorkspaceScreen(
     onToggleLanguage: () -> Unit,
     onToggleTheme: () -> Unit,
     onRetryOutboxHealth: () -> Unit = {},
+    productSelectorState: SearchableSelectorState<ProductCatalogItem>? = null,
+    customerSelectorState: SearchableSelectorState<CustomerDirectoryItem>? = null,
+    onSelectProduct: (ProductCatalogItem) -> Unit = {},
+    onClearSelectedProduct: () -> Unit = {},
+    onSelectCustomer: (CustomerDirectoryItem) -> Unit = {},
+    onClearSelectedCustomer: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val lang = uiState.language
+    val coroutineScope = rememberCoroutineScope()
+
+    val effectiveProductSelectorState = productSelectorState ?: remember(uiState.activeCompany?.companyId) {
+        SearchableSelectorState(
+            scope = coroutineScope,
+            debounceMs = 250L,
+            idSelector = { it.id.value },
+            companyScopeProvider = { uiState.activeCompany?.companyId },
+            onFetchCandidates = { _, _, _ -> SelectorFetchResult(items = uiState.products) }
+        )
+    }
+
+    val effectiveCustomerSelectorState = customerSelectorState ?: remember(uiState.activeCompany?.companyId) {
+        SearchableSelectorState(
+            scope = coroutineScope,
+            debounceMs = 250L,
+            idSelector = { it.id.value },
+            companyScopeProvider = { uiState.activeCompany?.companyId },
+            onFetchCandidates = { _, _, _ -> SelectorFetchResult(items = uiState.customers) }
+        )
+    }
 
     Column(
         modifier = modifier
@@ -191,7 +227,11 @@ fun StaffWorkspaceScreen(
                         lang = lang,
                         onSearchChange = onSearchProducts,
                         onRefresh = onRefreshProducts,
-                        onLoadMore = onLoadMoreProducts
+                        onLoadMore = onLoadMoreProducts,
+                        selectedProduct = uiState.selectedProduct,
+                        selectorState = effectiveProductSelectorState,
+                        onSelectProduct = onSelectProduct,
+                        onClearSelectedProduct = onClearSelectedProduct
                     )
                 }
                 StaffWorkspaceTab.CUSTOMERS -> {
@@ -205,7 +245,11 @@ fun StaffWorkspaceScreen(
                         lang = lang,
                         onSearchChange = onSearchCustomers,
                         onRefresh = onRefreshCustomers,
-                        onLoadMore = onLoadMoreCustomers
+                        onLoadMore = onLoadMoreCustomers,
+                        selectedCustomer = uiState.selectedCustomer,
+                        selectorState = effectiveCustomerSelectorState,
+                        onSelectCustomer = onSelectCustomer,
+                        onClearSelectedCustomer = onClearSelectedCustomer
                     )
                 }
             }
@@ -393,7 +437,11 @@ private fun StaffProductCatalogView(
     lang: AppLanguage,
     onSearchChange: (String) -> Unit,
     onRefresh: () -> Unit,
-    onLoadMore: () -> Unit
+    onLoadMore: () -> Unit,
+    selectedProduct: ProductCatalogItem? = null,
+    selectorState: SearchableSelectorState<ProductCatalogItem>? = null,
+    onSelectProduct: (ProductCatalogItem) -> Unit = {},
+    onClearSelectedProduct: () -> Unit = {}
 ) {
     val focusManager = LocalFocusManager.current
 
@@ -402,43 +450,147 @@ private fun StaffProductCatalogView(
             .fillMaxSize()
             .testTag("staff_product_catalog_view")
     ) {
-        // Search and refresh bar
+        // Selected Product Detail Card with Clear Action
+        if (selectedProduct != null) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .testTag("staff_selected_product_card"),
+                shape = RoundedCornerShape(10.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = lang.tr("الصنف المختار", "Selected Product"),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        IconButton(
+                            onClick = onClearSelectedProduct,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("staff_selected_product_clear_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Clear,
+                                contentDescription = lang.tr("إلغاء الاختيار", "Clear Selection"),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = selectedProduct.name,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.testTag("staff_selected_product_name")
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "\u2066ID: ${selectedProduct.id.value}\u2069",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = MonoFontFamily,
+                                textDirection = TextDirection.Ltr
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("staff_selected_product_id")
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Text(
+                                text = "\u2066SKU: ${selectedProduct.sku}\u2069",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = MonoFontFamily,
+                                    textDirection = TextDirection.Ltr
+                                ),
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${selectedProduct.unitPrice.toPlainString()} $currencyCode",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "${selectedProduct.availableQuantity.value.toPlainString()} ${selectedProduct.baseUnit.name}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        // Searchable Selector and Refresh bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = onSearchChange,
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 48.dp)
-                    .testTag("staff_product_search_input"),
-                placeholder = { Text(lang.tr("بحث بالاسم أو الباركود...", "Search by name or barcode..."), fontSize = 13.sp) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(
-                            onClick = { onSearchChange("") },
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(Icons.Default.Clear, contentDescription = lang.tr("مسح", "Clear"))
+            if (selectorState != null) {
+                SearchableProductSelector(
+                    state = selectorState,
+                    modifier = Modifier.weight(1f),
+                    currencyCode = currencyCode,
+                    lang = lang,
+                    testTagPrefix = "staff_product_selector",
+                    onProductSelected = onSelectProduct
+                )
+            } else {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onSearchChange,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag("staff_product_search_input"),
+                    placeholder = { Text(lang.tr("بحث بالاسم أو الباركود...", "Search by name or barcode..."), fontSize = 13.sp) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = { onSearchChange("") },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(Icons.Default.Clear, contentDescription = lang.tr("مسح", "Clear"))
+                            }
                         }
-                    }
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() })
-            )
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() })
+                )
+            }
             Spacer(modifier = Modifier.width(8.dp))
             IconButton(
                 onClick = onRefresh,
                 modifier = Modifier
                     .size(48.dp)
                     .testTag("staff_product_refresh_button"),
-                enabled = !isLoading
+                enabled = !isLoading && (selectorState == null || !selectorState.isLoading)
             ) {
                 Icon(
                     imageVector = Icons.Default.Refresh,
@@ -519,7 +671,12 @@ private fun StaffProductCatalogView(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(products, key = { it.id.value }) { product ->
-                    ProductCatalogItemCard(product = product, currencyCode = currencyCode, lang = lang)
+                    ProductCatalogItemCard(
+                        product = product,
+                        currencyCode = currencyCode,
+                        lang = lang,
+                        onClick = { onSelectProduct(product) }
+                    )
                 }
 
                 // Pagination footer
@@ -563,11 +720,13 @@ private fun StaffProductCatalogView(
 private fun ProductCatalogItemCard(
     product: ProductCatalogItem,
     currencyCode: String = "USD",
-    lang: AppLanguage
+    lang: AppLanguage,
+    onClick: (() -> Unit)? = null
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .testTag("staff_product_card_${product.id.value}"),
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -721,7 +880,11 @@ private fun StaffCustomerDirectoryView(
     lang: AppLanguage,
     onSearchChange: (String) -> Unit,
     onRefresh: () -> Unit,
-    onLoadMore: () -> Unit
+    onLoadMore: () -> Unit,
+    selectedCustomer: CustomerDirectoryItem? = null,
+    selectorState: SearchableSelectorState<CustomerDirectoryItem>? = null,
+    onSelectCustomer: (CustomerDirectoryItem) -> Unit = {},
+    onClearSelectedCustomer: () -> Unit = {}
 ) {
     val focusManager = LocalFocusManager.current
 
@@ -730,43 +893,156 @@ private fun StaffCustomerDirectoryView(
             .fillMaxSize()
             .testTag("staff_customer_directory_view")
     ) {
-        // Search & Refresh bar
+        // Selected Customer Detail Card with Clear Action
+        if (selectedCustomer != null) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .testTag("staff_selected_customer_card"),
+                shape = RoundedCornerShape(10.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = lang.tr("الزبون المختار", "Selected Customer"),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        IconButton(
+                            onClick = onClearSelectedCustomer,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("staff_selected_customer_clear_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Clear,
+                                contentDescription = lang.tr("إلغاء الاختيار", "Clear Selection"),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = selectedCustomer.name,
+                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.testTag("staff_selected_customer_name")
+                        )
+                        if (selectedCustomer.isWalkIn) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer
+                            ) {
+                                Text(
+                                    text = lang.tr("زبون نقدي", "Walk-in"),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "\u2066ID: ${selectedCustomer.id.value}\u2069",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = MonoFontFamily,
+                                textDirection = TextDirection.Ltr
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("staff_selected_customer_id")
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Text(
+                                text = "\u2066Code: ${selectedCustomer.code}\u2069",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = MonoFontFamily,
+                                    textDirection = TextDirection.Ltr
+                                ),
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    if (selectedCustomer.phone != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "\u2066${selectedCustomer.phone}\u2069",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = MonoFontFamily,
+                                textDirection = TextDirection.Ltr
+                            ),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+        }
+
+        // Searchable Customer Selector & Refresh bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = onSearchChange,
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 48.dp)
-                    .testTag("staff_customer_search_input"),
-                placeholder = { Text(lang.tr("بحث بالاسم أو الكود...", "Search by name or code..."), fontSize = 13.sp) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(
-                            onClick = { onSearchChange("") },
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(Icons.Default.Clear, contentDescription = lang.tr("مسح", "Clear"))
+            if (selectorState != null) {
+                SearchableCustomerSelector(
+                    state = selectorState,
+                    modifier = Modifier.weight(1f),
+                    lang = lang,
+                    testTagPrefix = "staff_customer_selector",
+                    onCustomerSelected = onSelectCustomer
+                )
+            } else {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onSearchChange,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag("staff_customer_search_input"),
+                    placeholder = { Text(lang.tr("بحث بالاسم أو الكود...", "Search by name or code..."), fontSize = 13.sp) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = { onSearchChange("") },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(Icons.Default.Clear, contentDescription = lang.tr("مسح", "Clear"))
+                            }
                         }
-                    }
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() })
-            )
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() })
+                )
+            }
             Spacer(modifier = Modifier.width(8.dp))
             IconButton(
                 onClick = onRefresh,
                 modifier = Modifier
                     .size(48.dp)
                     .testTag("staff_customer_refresh_button"),
-                enabled = !isLoading
+                enabled = !isLoading && (selectorState == null || !selectorState.isLoading)
             ) {
                 Icon(
                     imageVector = Icons.Default.Refresh,
@@ -847,7 +1123,11 @@ private fun StaffCustomerDirectoryView(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(customers, key = { it.id.value }) { customer ->
-                    CustomerDirectoryItemCard(customer = customer, lang = lang)
+                    CustomerDirectoryItemCard(
+                        customer = customer,
+                        lang = lang,
+                        onClick = { onSelectCustomer(customer) }
+                    )
                 }
 
                 // Pagination footer
@@ -890,11 +1170,13 @@ private fun StaffCustomerDirectoryView(
 @Composable
 private fun CustomerDirectoryItemCard(
     customer: CustomerDirectoryItem,
-    lang: AppLanguage
+    lang: AppLanguage,
+    onClick: (() -> Unit)? = null
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .testTag("staff_customer_card_${customer.id.value}"),
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

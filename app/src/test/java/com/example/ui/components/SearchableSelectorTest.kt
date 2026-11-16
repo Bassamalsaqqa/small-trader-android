@@ -18,7 +18,17 @@ import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.ProductBaseUnit
 import com.example.data.mobile.readclient.ProductCatalogItem
 import com.example.data.mobile.readclient.ProductDefaultUnit
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.unit.dp
 import com.example.model.AppLanguage
+import com.example.ui.staff.SafeCompanyViewData
+import com.example.ui.staff.StaffWorkspacePhase
+import com.example.ui.staff.StaffWorkspaceScreen
+import com.example.ui.staff.StaffWorkspaceTab
+import com.example.ui.staff.StaffWorkspaceUiState
 import com.example.ui.theme.SmallTraderTheme
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -596,7 +606,7 @@ class SearchableSelectorTest {
         assertFalse(state.isExpanded)
     }
 
-    // 12. Touch target bounds: verifies 48dp minimum
+    // 12. Touch target bounds: verifies 48dp minimum interactive bounds via getBoundsInRoot()
     @Test
     fun touchTargets_verify48dpCompliance() {
         val testDispatcher = StandardTestDispatcher()
@@ -608,10 +618,10 @@ class SearchableSelectorTest {
             debounceMs = 0L,
             idSelector = { it.id.value },
             onFetchCandidates = { _, _, _ ->
-                SelectorFetchResult(items = listOf(product))
+                SelectorFetchResult(items = listOf(product), hasMore = true, nextCursor = "cur_2")
             }
         )
-        state.setDirectCandidates(listOf(product))
+        state.setDirectCandidates(listOf(product), hasMore = true, nextCursor = "cur_2", query = "زيت")
         state.setExplicitQuery("زيت")
 
         composeTestRule.setContent {
@@ -624,10 +634,520 @@ class SearchableSelectorTest {
             }
         }
 
-        // Verify clear button exists with 48dp touch bounds
-        composeTestRule.onNodeWithTag("touch_test_selector_clear_button").assertIsDisplayed()
+        // 1. Text input height >= 48dp
+        val inputBounds = composeTestRule.onNodeWithTag("touch_test_selector_input").getBoundsInRoot()
+        assertTrue("Input height must be >= 48dp", (inputBounds.bottom - inputBounds.top) >= 48.dp)
 
-        // Candidate item row exists and is clickable with 48dp min height
-        composeTestRule.onNodeWithTag("touch_test_selector_item_01JCV8X9M2NQW3TYZ4R5S67891").assertIsDisplayed()
+        // 2. Clear button interactive target >= 48dp
+        val clearBounds = composeTestRule.onNodeWithTag("touch_test_selector_clear_button").getBoundsInRoot()
+        assertTrue("Clear button height must be >= 48dp", (clearBounds.bottom - clearBounds.top) >= 48.dp)
+        assertTrue("Clear button width must be >= 48dp", (clearBounds.right - clearBounds.left) >= 48.dp)
+
+        // 3. Candidate item row touch bounds >= 48dp
+        val itemBounds = composeTestRule.onNodeWithTag("touch_test_selector_item_01JCV8X9M2NQW3TYZ4R5S67891").getBoundsInRoot()
+        assertTrue("Item row height must be >= 48dp", (itemBounds.bottom - itemBounds.top) >= 48.dp)
+
+        // 4. Load more button interactive target >= 48dp
+        val loadMoreBounds = composeTestRule.onNodeWithTag("touch_test_selector_load_more").getBoundsInRoot()
+        assertTrue("Load more height must be >= 48dp", (loadMoreBounds.bottom - loadMoreBounds.top) >= 48.dp)
+    }
+
+    // 13. P1 Production wiring: StaffWorkspaceScreen renders SearchableProductSelector, selects item, shows card, clears
+    @Test
+    fun staffWorkspaceScreen_productSelectorWiring_selectsAndClears() {
+        val testDispatcher = StandardTestDispatcher()
+        val customScope = TestScope(testDispatcher)
+
+        val product1 = createProduct("01JCV8X9M2NQW3TYZ4R5S67891", "SKU-OIL-1", "زيت زيتون بلدي", "45.00")
+        val product2 = createProduct("01JCV8X9M2NQW3TYZ4R5S67892", "SKU-FLOUR-1", "طحين أبيض ممتاز", "12.00")
+
+        val selectorState = SearchableSelectorState<ProductCatalogItem>(
+            scope = customScope,
+            debounceMs = 0L,
+            idSelector = { it.id.value },
+            companyScopeProvider = { "01JCV8X9M2NQW3TYZ4R5S6789A" },
+            onFetchCandidates = { q, _, _ ->
+                val matches = listOf(product1, product2).filter { it.name.contains(q) }
+                SelectorFetchResult(items = matches)
+            }
+        )
+
+        var currentSelectedProduct: ProductCatalogItem? = null
+        var uiState = StaffWorkspaceUiState(
+            phase = StaffWorkspacePhase.READ_READY,
+            selectedTab = StaffWorkspaceTab.PRODUCTS,
+            activeCompany = SafeCompanyViewData("01JCV8X9M2NQW3TYZ4R5S6789A", "شركة السلام", "ILS"),
+            products = listOf(product1, product2),
+            language = AppLanguage.AR
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffWorkspaceScreen(
+                    uiState = uiState.copy(selectedProduct = currentSelectedProduct),
+                    onSelectTab = {},
+                    onLoadMoreProducts = {},
+                    onRefreshProducts = {},
+                    onSearchProducts = {},
+                    onLoadMoreCustomers = {},
+                    onRefreshCustomers = {},
+                    onSearchCustomers = {},
+                    onSwitchCompany = {},
+                    onLogout = {},
+                    onToggleLanguage = {},
+                    onToggleTheme = {},
+                    productSelectorState = selectorState,
+                    onSelectProduct = { currentSelectedProduct = it },
+                    onClearSelectedProduct = { currentSelectedProduct = null }
+                )
+            }
+        }
+
+        // Verify SearchableProductSelector input is mounted
+        composeTestRule.onNodeWithTag("staff_product_selector_input").assertIsDisplayed()
+
+        // Type search query
+        composeTestRule.onNodeWithTag("staff_product_selector_input").performTextInput("زيت")
+        composeTestRule.waitForIdle()
+
+        // Dropdown appears with candidate
+        composeTestRule.onNodeWithTag("staff_product_selector_item_01JCV8X9M2NQW3TYZ4R5S67891").assertIsDisplayed()
+
+        // Click candidate
+        composeTestRule.onNodeWithTag("staff_product_selector_item_01JCV8X9M2NQW3TYZ4R5S67891").performClick()
+        composeTestRule.waitForIdle()
+
+        // Selected product callback received item
+        assertNotNull(currentSelectedProduct)
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S67891", currentSelectedProduct!!.id.value)
+
+        // Re-compose with selected product state
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffWorkspaceScreen(
+                    uiState = uiState.copy(selectedProduct = currentSelectedProduct),
+                    onSelectTab = {},
+                    onLoadMoreProducts = {},
+                    onRefreshProducts = {},
+                    onSearchProducts = {},
+                    onLoadMoreCustomers = {},
+                    onRefreshCustomers = {},
+                    onSearchCustomers = {},
+                    onSwitchCompany = {},
+                    onLogout = {},
+                    onToggleLanguage = {},
+                    onToggleTheme = {},
+                    productSelectorState = selectorState,
+                    onSelectProduct = { currentSelectedProduct = it },
+                    onClearSelectedProduct = { currentSelectedProduct = null }
+                )
+            }
+        }
+
+        // Observable detail card is rendered with stable ID and clear action
+        composeTestRule.onNodeWithTag("staff_selected_product_card").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("staff_selected_product_name").assertTextContains("زيت زيتون بلدي")
+        composeTestRule.onNodeWithTag("staff_selected_product_id").assertTextContains("01JCV8X9M2NQW3TYZ4R5S67891")
+
+        // Clear selection via clear button
+        composeTestRule.onNodeWithTag("staff_selected_product_clear_button").performClick()
+        assertNull(currentSelectedProduct)
+    }
+
+    // 14. P1 Production wiring: StaffWorkspaceScreen renders SearchableCustomerSelector, selects customer, shows card, clears
+    @Test
+    fun staffWorkspaceScreen_customerSelectorWiring_selectsAndClears() {
+        val testDispatcher = StandardTestDispatcher()
+        val customScope = TestScope(testDispatcher)
+
+        val customer = createCustomer("01JCV8X9M2NQW3TYZ4R5S6789C", "C-777", "شركة الأمل للتجارة", "0599554433")
+
+        val selectorState = SearchableSelectorState<CustomerDirectoryItem>(
+            scope = customScope,
+            debounceMs = 0L,
+            idSelector = { it.id.value },
+            companyScopeProvider = { "01JCV8X9M2NQW3TYZ4R5S6789A" },
+            onFetchCandidates = { _, _, _ ->
+                SelectorFetchResult(items = listOf(customer))
+            }
+        )
+
+        var currentSelectedCustomer: CustomerDirectoryItem? = null
+        val uiState = StaffWorkspaceUiState(
+            phase = StaffWorkspacePhase.READ_READY,
+            selectedTab = StaffWorkspaceTab.CUSTOMERS,
+            activeCompany = SafeCompanyViewData("01JCV8X9M2NQW3TYZ4R5S6789A", "شركة السلام", "ILS"),
+            customers = listOf(customer),
+            language = AppLanguage.AR
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffWorkspaceScreen(
+                    uiState = uiState.copy(selectedCustomer = currentSelectedCustomer),
+                    onSelectTab = {},
+                    onLoadMoreProducts = {},
+                    onRefreshProducts = {},
+                    onSearchProducts = {},
+                    onLoadMoreCustomers = {},
+                    onRefreshCustomers = {},
+                    onSearchCustomers = {},
+                    onSwitchCompany = {},
+                    onLogout = {},
+                    onToggleLanguage = {},
+                    onToggleTheme = {},
+                    customerSelectorState = selectorState,
+                    onSelectCustomer = { currentSelectedCustomer = it },
+                    onClearSelectedCustomer = { currentSelectedCustomer = null }
+                )
+            }
+        }
+
+        // Customer selector is mounted
+        composeTestRule.onNodeWithTag("staff_customer_selector_input").assertIsDisplayed()
+
+        // Type search query
+        composeTestRule.onNodeWithTag("staff_customer_selector_input").performTextInput("الأمل")
+        composeTestRule.waitForIdle()
+
+        // Dropdown displays candidate
+        composeTestRule.onNodeWithTag("staff_customer_selector_item_01JCV8X9M2NQW3TYZ4R5S6789C").assertIsDisplayed()
+
+        // Click candidate
+        composeTestRule.onNodeWithTag("staff_customer_selector_item_01JCV8X9M2NQW3TYZ4R5S6789C").performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S6789C", currentSelectedCustomer?.id?.value)
+
+        // Re-compose with selected customer
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffWorkspaceScreen(
+                    uiState = uiState.copy(selectedCustomer = currentSelectedCustomer),
+                    onSelectTab = {},
+                    onLoadMoreProducts = {},
+                    onRefreshProducts = {},
+                    onSearchProducts = {},
+                    onLoadMoreCustomers = {},
+                    onRefreshCustomers = {},
+                    onSearchCustomers = {},
+                    onSwitchCompany = {},
+                    onLogout = {},
+                    onToggleLanguage = {},
+                    onToggleTheme = {},
+                    customerSelectorState = selectorState,
+                    onSelectCustomer = { currentSelectedCustomer = it },
+                    onClearSelectedCustomer = { currentSelectedCustomer = null }
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("staff_selected_customer_card").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("staff_selected_customer_name").assertTextContains("شركة الأمل للتجارة")
+        composeTestRule.onNodeWithTag("staff_selected_customer_id").assertTextContains("01JCV8X9M2NQW3TYZ4R5S6789C")
+
+        composeTestRule.onNodeWithTag("staff_selected_customer_clear_button").performClick()
+        assertNull(currentSelectedCustomer)
+    }
+
+    // 15. P2: Pause fetch after query change / select old item rejected
+    @Test
+    fun pauseFetch_afterQueryChange_selectOldItemRejected() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val customScope = TestScope(testDispatcher)
+
+        val itemA = createProduct("01JCV8X9M2NQW3TYZ4R5S6789A", "SKU-A", "Item A")
+        val itemB = createProduct("01JCV8X9M2NQW3TYZ4R5S6789B", "SKU-B", "Item B")
+        val deferredQueryB = CompletableDeferred<SelectorFetchResult<ProductCatalogItem>>()
+
+        val state = SearchableSelectorState<ProductCatalogItem>(
+            scope = customScope,
+            debounceMs = 0L,
+            idSelector = { it.id.value },
+            companyScopeProvider = { "COMP_1" },
+            onFetchCandidates = { q, _, _ ->
+                if (q == "queryA") SelectorFetchResult(items = listOf(itemA))
+                else deferredQueryB.await()
+            }
+        )
+
+        // Query A completes
+        state.onQueryChanged("queryA")
+        customScope.advanceUntilIdle()
+        assertEquals(1, state.candidates.size)
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S6789A", state.candidates.first().id.value)
+
+        // Query B is typed; fetch is paused (waiting on deferredQueryB)
+        state.onQueryChanged("queryB")
+        customScope.advanceTimeBy(10L)
+
+        // Candidates are immediately wiped on query change
+        assertTrue("Candidates must be immediately cleared on query change", state.candidates.isEmpty())
+
+        // Attempting to select old itemA from queryA MUST be rejected!
+        val committed = state.selectItem(itemA)
+        assertFalse("Old candidate under previous query must be rejected", committed)
+        assertNull("Selected item must remain null", state.selectedItem)
+
+        // Now query B finally arrives
+        deferredQueryB.complete(SelectorFetchResult(items = listOf(itemB)))
+        customScope.advanceUntilIdle()
+
+        assertEquals(1, state.candidates.size)
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S6789B", state.candidates.first().id.value)
+
+        // Now itemB is committed cleanly
+        assertTrue(state.selectItem(itemB))
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S6789B", state.selectedItem?.id?.value)
+    }
+
+    // 16. P2: Company switch before debounce rejects old company items
+    @Test
+    fun companySwitch_beforeDebounce_rejectsOldCompanyItems() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val customScope = TestScope(testDispatcher)
+
+        var activeCompany = "COMP_ALPHA"
+        val itemAlpha = createProduct("01JCV8X9M2NQW3TYZ4R5S67891", "SKU-1", "Alpha Product")
+
+        val state = SearchableSelectorState<ProductCatalogItem>(
+            scope = customScope,
+            debounceMs = 250L,
+            idSelector = { it.id.value },
+            companyScopeProvider = { activeCompany },
+            onFetchCandidates = { _, _, _ ->
+                SelectorFetchResult(items = listOf(itemAlpha))
+            }
+        )
+
+        state.onQueryChanged("Alpha")
+        customScope.advanceTimeBy(100L) // Halfway through debounce
+
+        // Company switches before debounce expires!
+        activeCompany = "COMP_BETA"
+
+        // Debounce timer finishes
+        customScope.advanceTimeBy(200L)
+        customScope.advanceUntilIdle()
+
+        // Alpha results must be rejected due to company mismatch
+        assertTrue("Candidates must be empty after company switch before debounce", state.candidates.isEmpty())
+        assertNull(state.selectedItem)
+    }
+
+    // 17. P2: Edit before loadMore does not use old cursor
+    @Test
+    fun editBeforeLoadMore_doesNotUseOldCursor() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val customScope = TestScope(testDispatcher)
+
+        val item1 = createProduct("01JCV8X9M2NQW3TYZ4R5S67891", "SKU-1", "Product 1")
+        val queriesDispatched = mutableListOf<Pair<String, String?>>()
+
+        val state = SearchableSelectorState<ProductCatalogItem>(
+            scope = customScope,
+            debounceMs = 0L,
+            idSelector = { it.id.value },
+            onFetchCandidates = { q, cursor, _ ->
+                queriesDispatched.add(q to cursor)
+                SelectorFetchResult(items = listOf(item1), nextCursor = "cursor_page_1", hasMore = true)
+            }
+        )
+
+        state.onQueryChanged("queryOld")
+        customScope.advanceUntilIdle()
+        assertEquals(listOf("queryOld" to null), queriesDispatched)
+        assertEquals("cursor_page_1", state.nextCursor)
+
+        // User edits query to "queryNew"
+        state.onQueryChanged("queryNew")
+
+        // Immediately, nextCursor and committedQuery are cleared
+        assertNull(state.nextCursor)
+        assertFalse(state.hasMore)
+
+        // If loadMore is invoked immediately, it cannot run with old cursor
+        state.loadMore()
+        customScope.advanceUntilIdle()
+
+        // No loadMore dispatch with old cursor occurred
+        assertFalse(queriesDispatched.any { it.second == "cursor_page_1" })
+    }
+
+    // 18. P2: Clear during in-flight loadMore does not append to cleared state
+    @Test
+    fun clearDuringInFlightLoadMore_doesNotAppendToClearedState() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val customScope = TestScope(testDispatcher)
+
+        val item1 = createProduct("01JCV8X9M2NQW3TYZ4R5S67891", "SKU-1", "Product 1")
+        val item2 = createProduct("01JCV8X9M2NQW3TYZ4R5S67892", "SKU-2", "Product 2")
+        val deferredLoadMore = CompletableDeferred<SelectorFetchResult<ProductCatalogItem>>()
+
+        val state = SearchableSelectorState<ProductCatalogItem>(
+            scope = customScope,
+            debounceMs = 0L,
+            idSelector = { it.id.value },
+            onFetchCandidates = { _, cursor, _ ->
+                if (cursor == null) {
+                    SelectorFetchResult(items = listOf(item1), nextCursor = "cur_1", hasMore = true)
+                } else {
+                    deferredLoadMore.await()
+                }
+            }
+        )
+
+        state.onQueryChanged("search")
+        customScope.advanceUntilIdle()
+        assertEquals(1, state.candidates.size)
+
+        // Start loadMore (in flight)
+        state.loadMore()
+        customScope.advanceTimeBy(10L)
+        assertTrue(state.isLoadingMore)
+
+        // User clears query during in-flight loadMore
+        state.clearQuery()
+        assertEquals("", state.query)
+        assertTrue(state.candidates.isEmpty())
+
+        // In-flight loadMore now resolves
+        deferredLoadMore.complete(SelectorFetchResult(items = listOf(item2), hasMore = false))
+        customScope.advanceUntilIdle()
+
+        // Late pagination response MUST NOT append to cleared state
+        assertTrue("Late pagination response must be discarded", state.candidates.isEmpty())
+        assertFalse(state.isLoadingMore)
+    }
+
+    // 19. P2: Cancelled old finally does not flip new loading state
+    @Test
+    fun cancelledOldFinally_doesNotFlipNewLoadingState() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val customScope = TestScope(testDispatcher)
+
+        val deferredFirst = CompletableDeferred<SelectorFetchResult<ProductCatalogItem>>()
+
+        val state = SearchableSelectorState<ProductCatalogItem>(
+            scope = customScope,
+            debounceMs = 0L,
+            idSelector = { it.id.value },
+            onFetchCandidates = { q, _, _ ->
+                if (q == "first") deferredFirst.await()
+                else SelectorFetchResult(items = listOf(createProduct("01JCV8X9M2NQW3TYZ4R5S67892", "SKU-2", "Second")))
+            }
+        )
+
+        state.onQueryChanged("first")
+        customScope.advanceTimeBy(10L)
+        assertTrue(state.isLoading)
+
+        // Query 2 cancels Query 1
+        state.onQueryChanged("second")
+        customScope.advanceTimeBy(10L)
+
+        // Complete query 1 (cancelled job completes finally block)
+        deferredFirst.complete(SelectorFetchResult(items = emptyList()))
+        customScope.advanceUntilIdle()
+
+        // State has committed Query 2 without old finally corrupting it
+        assertEquals(1, state.candidates.size)
+        assertEquals("Second", state.candidates.first().name)
+        assertFalse(state.isLoading)
+    }
+
+    // 20. P2: Empty query while page is in-flight cannot repopulate
+    @Test
+    fun emptyQuery_whilePageInFlight_cannotRepopulate() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val customScope = TestScope(testDispatcher)
+
+        val deferredInFlight = CompletableDeferred<SelectorFetchResult<ProductCatalogItem>>()
+
+        val state = SearchableSelectorState<ProductCatalogItem>(
+            scope = customScope,
+            debounceMs = 0L,
+            idSelector = { it.id.value },
+            onFetchCandidates = { _, _, _ ->
+                deferredInFlight.await()
+            }
+        )
+
+        state.onQueryChanged("coffee")
+        customScope.advanceTimeBy(10L)
+        assertTrue(state.isLoading)
+
+        // User blanks query before response
+        state.onQueryChanged("")
+        assertFalse(state.isLoading)
+        assertTrue(state.candidates.isEmpty())
+
+        // In-flight response returns late
+        deferredInFlight.complete(
+            SelectorFetchResult(
+                items = listOf(createProduct("01JCV8X9M2NQW3TYZ4R5S67891", "SKU-COFFEE", "قهوة عربية"))
+            )
+        )
+        customScope.advanceUntilIdle()
+
+        // Discarded: cannot repopulate
+        assertTrue("Candidates must remain empty when query was blanked", state.candidates.isEmpty())
+        assertFalse(state.isExpanded)
+    }
+
+    // 21. Keyboard navigation via actual Compose onPreviewKeyEvent
+    @Test
+    fun keyboardEvents_actualComposeKeyEvents_navigatesAndSelects() {
+        val testDispatcher = StandardTestDispatcher()
+        val customScope = TestScope(testDispatcher)
+
+        val item1 = createProduct("01JCV8X9M2NQW3TYZ4R5S67891", "SKU-1", "Product 1")
+        val item2 = createProduct("01JCV8X9M2NQW3TYZ4R5S67892", "SKU-2", "Product 2")
+
+        val state = SearchableSelectorState<ProductCatalogItem>(
+            scope = customScope,
+            debounceMs = 0L,
+            idSelector = { it.id.value },
+            onFetchCandidates = { _, _, _ ->
+                SelectorFetchResult(items = listOf(item1, item2))
+            }
+        )
+        state.setDirectCandidates(listOf(item1, item2), query = "Prod")
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = false) {
+                SearchableProductSelector(
+                    state = state,
+                    testTagPrefix = "key_selector"
+                )
+            }
+        }
+
+        // Navigate Down via KeyInput
+        composeTestRule.onNodeWithTag("key_selector_input").performKeyInput {
+            pressKey(Key.DirectionDown)
+        }
+        assertEquals(0, state.highlightedIndex)
+
+        composeTestRule.onNodeWithTag("key_selector_input").performKeyInput {
+            pressKey(Key.DirectionDown)
+        }
+        assertEquals(1, state.highlightedIndex)
+
+        // Confirm selection via Enter
+        composeTestRule.onNodeWithTag("key_selector_input").performKeyInput {
+            pressKey(Key.Enter)
+        }
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S67892", state.selectedItem?.id?.value)
+        assertFalse(state.isExpanded)
+
+        // Re-expand and test Escape
+        state.expand()
+        assertTrue(state.isExpanded)
+
+        composeTestRule.onNodeWithTag("key_selector_input").performKeyInput {
+            pressKey(Key.Escape)
+        }
+        assertFalse(state.isExpanded)
     }
 }

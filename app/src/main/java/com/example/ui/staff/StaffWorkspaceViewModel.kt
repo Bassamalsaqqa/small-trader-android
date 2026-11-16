@@ -1856,11 +1856,42 @@ class StaffWorkspaceViewModel(
     }
 
     /**
+     * Reusable [SearchableSelectorState] singletons bound to this ViewModel's scope and coordinator lifecycle.
+     */
+    val productSelectorState: SearchableSelectorState<ProductCatalogItem> by lazy {
+        createProductSelectorState(viewModelScope)
+    }
+
+    val customerSelectorState: SearchableSelectorState<CustomerDirectoryItem> by lazy {
+        createCustomerSelectorState(viewModelScope)
+    }
+
+    fun selectProduct(item: ProductCatalogItem?) {
+        _uiState.update { it.copy(selectedProduct = item) }
+    }
+
+    fun clearSelectedProduct() {
+        productSelectorState.clearSelection()
+        _uiState.update { it.copy(selectedProduct = null) }
+    }
+
+    fun selectCustomer(item: CustomerDirectoryItem?) {
+        _uiState.update { it.copy(selectedCustomer = item) }
+    }
+
+    fun clearSelectedCustomer() {
+        customerSelectorState.clearSelection()
+        _uiState.update { it.copy(selectedCustomer = null) }
+    }
+
+    /**
      * Clears products and customers lists immediately from memory.
      */
     private fun clearListsImmediately() {
         productRequestSeq++
         customerRequestSeq++
+        productSelectorState.invalidateScope()
+        customerSelectorState.invalidateScope()
         _uiState.update {
             it.copy(
                 products = emptyList(),
@@ -1869,12 +1900,14 @@ class StaffWorkspaceViewModel(
                 productsNextCursor = null,
                 productsHasMore = false,
                 productsError = null,
+                selectedProduct = null,
                 customers = emptyList(),
                 isCustomersLoading = false,
                 isCustomersLoadingMore = false,
                 customersNextCursor = null,
                 customersHasMore = false,
-                customersError = null
+                customersError = null,
+                selectedCustomer = null
             )
         }
     }

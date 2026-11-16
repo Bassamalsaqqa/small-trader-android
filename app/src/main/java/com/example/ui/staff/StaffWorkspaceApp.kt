@@ -112,7 +112,13 @@ fun StaffWorkspaceApp(
                         onLogout = { viewModel.logout() },
                         onToggleLanguage = { viewModel.toggleLanguage() },
                         onToggleTheme = { viewModel.toggleTheme() },
-                        onRetryOutboxHealth = { viewModel.retryOutboxHealth() }
+                        onRetryOutboxHealth = { viewModel.retryOutboxHealth() },
+                        productSelectorState = viewModel.productSelectorState,
+                        customerSelectorState = viewModel.customerSelectorState,
+                        onSelectProduct = { viewModel.selectProduct(it) },
+                        onClearSelectedProduct = { viewModel.clearSelectedProduct() },
+                        onSelectCustomer = { viewModel.selectCustomer(it) },
+                        onClearSelectedCustomer = { viewModel.clearSelectedCustomer() }
                     )
                 }
                 StaffWorkspacePhase.LOCKED -> {
