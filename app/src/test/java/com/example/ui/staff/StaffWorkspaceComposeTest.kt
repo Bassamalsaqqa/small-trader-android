@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -251,7 +252,9 @@ class StaffWorkspaceComposeTest {
         }
 
         composeTestRule.onNodeWithText("شركة النور التجارية").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("staff_customer_list").performScrollToNode(hasText("الكود: C-500"))
         composeTestRule.onNodeWithText("الكود: C-500").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("staff_customer_list").performScrollToNode(hasText("الهاتف: 0599112233"))
         composeTestRule.onNodeWithText("الهاتف: 0599112233").assertIsDisplayed()
     }
 
