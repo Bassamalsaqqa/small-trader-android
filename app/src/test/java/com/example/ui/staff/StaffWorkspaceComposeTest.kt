@@ -252,8 +252,9 @@ class StaffWorkspaceComposeTest {
         }
 
         composeTestRule.onNodeWithText("شركة النور التجارية").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("staff_customer_list").performScrollToNode(hasText("الكود: C-500"))
-        composeTestRule.onNodeWithText("الكود: C-500").assertIsDisplayed()
+        val displayedCode = "الكود: \u2066${customer.code}\u2069 • \u2066ID: ${customer.id.value.take(8)}\u2069"
+        composeTestRule.onNodeWithTag("staff_customer_list").performScrollToNode(hasText(displayedCode))
+        composeTestRule.onNodeWithText(displayedCode).assertIsDisplayed()
         composeTestRule.onNodeWithTag("staff_customer_list").performScrollToNode(hasText("الهاتف: 0599112233"))
         composeTestRule.onNodeWithText("الهاتف: 0599112233").assertIsDisplayed()
     }
