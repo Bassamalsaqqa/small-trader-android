@@ -1295,6 +1295,7 @@ class StaffWorkspaceViewModelTest {
 
         // Obsolete query from old company must NOT lock or corrupt session
         assertFalse(vm.uiState.value.phase == StaffWorkspacePhase.LOCKED)
+        assertEquals("Olive", vm.productSelectorState.query)
 
         // Also verify handleSelectorDenial directly discards stale scope
         vm.handleSelectorDenial(requestGen = 1L, requestCompanyId = testCompanyId1.value, isForbidden = false)
@@ -1347,6 +1348,7 @@ class StaffWorkspaceViewModelTest {
 
         // Obsolete loadMore 401 must NOT lock
         assertFalse(vm.uiState.value.phase == StaffWorkspacePhase.LOCKED)
+        assertEquals("Olive", vm.productSelectorState.query)
     }
 
     @Test

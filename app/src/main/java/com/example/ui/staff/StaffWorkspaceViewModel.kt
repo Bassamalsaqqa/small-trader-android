@@ -1824,6 +1824,11 @@ class StaffWorkspaceViewModel(
                     CoordinatorResult.Error(e.message ?: "Failed to fetch products")
                 }
 
+                // Reject obsolete completions before mutating this reusable selector state.
+                if (capturedGen != coord.currentGeneration || _uiState.value.activeCompany?.companyId != capturedCompanyId) {
+                    return@SearchableSelectorState SelectorFetchResult(emptyList(), hasMore = false)
+                }
+
                 when (res) {
                     is CoordinatorResult.Success -> {
                         if (capturedGen != coord.currentGeneration || _uiState.value.activeCompany?.companyId != capturedCompanyId) {
@@ -1903,6 +1908,11 @@ class StaffWorkspaceViewModel(
                     throw e
                 } catch (e: Exception) {
                     CoordinatorResult.Error(e.message ?: "Failed to fetch customers")
+                }
+
+                // Reject obsolete completions before mutating this reusable selector state.
+                if (capturedGen != coord.currentGeneration || _uiState.value.activeCompany?.companyId != capturedCompanyId) {
+                    return@SearchableSelectorState SelectorFetchResult(emptyList(), hasMore = false)
                 }
 
                 when (res) {
