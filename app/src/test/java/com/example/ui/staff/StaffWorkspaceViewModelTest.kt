@@ -999,6 +999,8 @@ class StaffWorkspaceViewModelTest {
         val pendingSecret = StaffWorkspaceViewModel::class.java.getDeclaredField("pendingPassword")
         pendingSecret.isAccessible = true
         assertEquals("", pendingSecret.get(vm))
+    }
+
     @Test
     fun productSelector_authDenied401_locksUiAndClearsSelectionsAndLists() = runTest(testDispatcher) {
         fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyId1, "Al-Zaytouna")
