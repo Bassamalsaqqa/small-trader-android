@@ -7,6 +7,9 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.requestFocus
@@ -677,8 +680,8 @@ class SearchableSelectorTest {
             }
         )
 
-        var currentSelectedProduct: ProductCatalogItem? = null
-        var uiState = StaffWorkspaceUiState(
+        var currentSelectedProduct by mutableStateOf<ProductCatalogItem?>(null)
+        val uiState = StaffWorkspaceUiState(
             phase = StaffWorkspacePhase.READ_READY,
             selectedTab = StaffWorkspaceTab.PRODUCTS,
             activeCompany = SafeCompanyViewData("01JCV8X9M2NQW3TYZ4R5S6789A", "شركة السلام", "ILS"),
@@ -728,30 +731,7 @@ class SearchableSelectorTest {
         assertNotNull(currentSelectedProduct)
         assertEquals("01JCV8X9M2NQW3TYZ4R5S67891", currentSelectedProduct!!.id.value)
 
-        // Re-compose with selected product state
-        composeTestRule.setContent {
-            SmallTraderTheme(darkTheme = false, isRtl = true) {
-                StaffWorkspaceScreen(
-                    uiState = uiState.copy(selectedProduct = currentSelectedProduct),
-                    onSelectTab = {},
-                    onLoadMoreProducts = {},
-                    onRefreshProducts = {},
-                    onSearchProducts = {},
-                    onLoadMoreCustomers = {},
-                    onRefreshCustomers = {},
-                    onSearchCustomers = {},
-                    onSwitchCompany = {},
-                    onLogout = {},
-                    onToggleLanguage = {},
-                    onToggleTheme = {},
-                    productSelectorState = selectorState,
-                    onSelectProduct = { currentSelectedProduct = it },
-                    onClearSelectedProduct = { currentSelectedProduct = null }
-                )
-            }
-        }
-
-        // Observable detail card is rendered with stable ID and clear action
+        // Observable detail card is rendered with stable ID and clear action in the same live composition
         composeTestRule.onNodeWithTag("staff_selected_product_card").assertIsDisplayed()
         composeTestRule.onNodeWithTag("staff_selected_product_name").assertTextContains("زيت زيتون بلدي")
         composeTestRule.onNodeWithTag("staff_selected_product_id").assertTextContains("01JCV8X9M2NQW3TYZ4R5S67891")
@@ -781,7 +761,7 @@ class SearchableSelectorTest {
             }
         )
 
-        var currentSelectedCustomer: CustomerDirectoryItem? = null
+        var currentSelectedCustomer by mutableStateOf<CustomerDirectoryItem?>(null)
         val uiState = StaffWorkspaceUiState(
             phase = StaffWorkspacePhase.READ_READY,
             selectedTab = StaffWorkspaceTab.CUSTOMERS,
@@ -830,29 +810,7 @@ class SearchableSelectorTest {
 
         assertEquals("01JCV8X9M2NQW3TYZ4R5S6789C", currentSelectedCustomer?.id?.value)
 
-        // Re-compose with selected customer
-        composeTestRule.setContent {
-            SmallTraderTheme(darkTheme = false, isRtl = true) {
-                StaffWorkspaceScreen(
-                    uiState = uiState.copy(selectedCustomer = currentSelectedCustomer),
-                    onSelectTab = {},
-                    onLoadMoreProducts = {},
-                    onRefreshProducts = {},
-                    onSearchProducts = {},
-                    onLoadMoreCustomers = {},
-                    onRefreshCustomers = {},
-                    onSearchCustomers = {},
-                    onSwitchCompany = {},
-                    onLogout = {},
-                    onToggleLanguage = {},
-                    onToggleTheme = {},
-                    customerSelectorState = selectorState,
-                    onSelectCustomer = { currentSelectedCustomer = it },
-                    onClearSelectedCustomer = { currentSelectedCustomer = null }
-                )
-            }
-        }
-
+        // Observable detail card is rendered in the same live composition
         composeTestRule.onNodeWithTag("staff_selected_customer_card").assertIsDisplayed()
         composeTestRule.onNodeWithTag("staff_selected_customer_name").assertTextContains("شركة الأمل للتجارة")
         composeTestRule.onNodeWithTag("staff_selected_customer_id").assertTextContains("01JCV8X9M2NQW3TYZ4R5S6789C")

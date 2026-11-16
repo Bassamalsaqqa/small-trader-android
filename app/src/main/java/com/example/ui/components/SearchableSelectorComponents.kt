@@ -485,7 +485,12 @@ fun <T> SearchableTypeaheadField(
         // Primary inline text field
         OutlinedTextField(
             value = state.query,
-            onValueChange = { state.onQueryChanged(it) },
+            onValueChange = { newText ->
+                val filtered = newText.replace("\n", "").replace("\r", "")
+                if (filtered != state.query) {
+                    state.onQueryChanged(filtered)
+                }
+            },
             enabled = enabled,
             placeholder = {
                 Text(
@@ -538,32 +543,36 @@ fun <T> SearchableTypeaheadField(
                 .heightIn(min = 48.dp)
                 .testTag("${testTagPrefix}_input")
                 .onFocusChanged { focusState ->
-                    if (focusState.isFocused && state.candidates.isNotEmpty()) {
+                    if (focusState.isFocused && state.candidates.isNotEmpty() && state.selectedItem == null) {
                         state.expand()
                     }
                 }
                 .onPreviewKeyEvent { event ->
-                    if (event.type == KeyEventType.KeyDown) {
-                        when (event.key) {
-                            Key.DirectionDown -> {
+                    when (event.key) {
+                        Key.DirectionDown -> {
+                            if (event.type == KeyEventType.KeyDown) {
                                 if (state.candidates.isNotEmpty()) {
                                     if (!state.isExpanded) {
                                         state.expand()
                                     }
                                     state.navigateHighlight(1)
-                                    true
-                                } else false
+                                }
                             }
-                            Key.DirectionUp -> {
+                            true
+                        }
+                        Key.DirectionUp -> {
+                            if (event.type == KeyEventType.KeyDown) {
                                 if (state.candidates.isNotEmpty()) {
                                     if (!state.isExpanded) {
                                         state.expand()
                                     }
                                     state.navigateHighlight(-1)
-                                    true
-                                } else false
+                                }
                             }
-                            Key.Enter, Key.NumPadEnter -> {
+                            true
+                        }
+                        Key.Enter, Key.NumPadEnter -> {
+                            if (event.type == KeyEventType.KeyDown) {
                                 val targetIndex = if (state.highlightedIndex in state.candidates.indices) {
                                     state.highlightedIndex
                                 } else if (state.candidates.size == 1) {
@@ -575,21 +584,21 @@ fun <T> SearchableTypeaheadField(
                                     val item = state.candidates[targetIndex]
                                     if (state.selectItem(item)) {
                                         onItemSelected(item)
-                                        focusManager.clearFocus()
                                     }
-                                    true
-                                } else false
+                                }
                             }
-                            Key.Escape -> {
+                            true
+                        }
+                        Key.Escape -> {
+                            if (event.type == KeyEventType.KeyDown) {
                                 if (state.isExpanded) {
                                     state.dismiss()
-                                    focusManager.clearFocus()
-                                    true
-                                } else false
+                                }
                             }
-                            else -> false
+                            true
                         }
-                    } else false
+                        else -> false
+                    }
                 }
         )
 
