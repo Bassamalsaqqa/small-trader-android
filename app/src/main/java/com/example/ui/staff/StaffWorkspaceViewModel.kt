@@ -6,9 +6,11 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
 import com.example.data.mobile.contract.ServerUlid
+import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.CustomerDirectoryResponse
 import com.example.data.mobile.readclient.EndpointSecurity
 import com.example.data.mobile.readclient.PaginationQuery
+import com.example.data.mobile.readclient.ProductCatalogItem
 import com.example.data.mobile.readclient.ProductCatalogResponse
 import com.example.data.mobile.outbox.OutboxHealthInspector
 import com.example.data.mobile.outbox.OutboxHealthResult
