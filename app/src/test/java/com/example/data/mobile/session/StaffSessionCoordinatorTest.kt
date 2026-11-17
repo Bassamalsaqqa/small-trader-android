@@ -208,7 +208,7 @@ class StaffSessionCoordinatorTest {
 
         // Proves encrypted session file was saved to disk
         assertTrue(sessionStore.hasSessionFile())
-        val readDisk = sessionStore.readSession(SessionReadScope(expectedDeviceUuid = coordinator.installationId))
+        val readDisk = sessionStore.readSession(SessionReadScope(expectedDeviceUuid = coordinator.installationId), nowEpochMs = testClock.nowEpochMs())
         assertTrue(readDisk is SessionReadResult.Success)
         val diskRecord = (readDisk as SessionReadResult.Success).session
         assertEquals(testActorUlid, diskRecord.actorUlid)
@@ -754,7 +754,7 @@ class StaffSessionCoordinatorTest {
         assertEquals(testSecondCompanyUlid, ready.session.selectedCompanyId)
 
         // Check disk record updated
-        val diskRead = sessionStore.readSession(SessionReadScope(expectedDeviceUuid = coordinator.installationId))
+        val diskRead = sessionStore.readSession(SessionReadScope(expectedDeviceUuid = coordinator.installationId), nowEpochMs = testClock.nowEpochMs())
         assertTrue(diskRead is SessionReadResult.Success)
         assertEquals(testSecondCompanyUlid, (diskRead as SessionReadResult.Success).session.selectedCompanyId)
     }
@@ -1241,7 +1241,7 @@ class StaffSessionCoordinatorTest {
         // User A's remote logout completion did NOT clobber User B's state or delete User B's credentials!
         assertTrue(coordinator.authState is StaffAuthState.ReadReady)
         assertTrue(sessionStore.hasSessionFile())
-        val diskRecord = sessionStore.readSession(SessionReadScope(expectedDeviceUuid = coordinator.installationId))
+        val diskRecord = sessionStore.readSession(SessionReadScope(expectedDeviceUuid = coordinator.installationId), nowEpochMs = testClock.nowEpochMs())
         assertTrue(diskRecord is SessionReadResult.Success)
     }
 
