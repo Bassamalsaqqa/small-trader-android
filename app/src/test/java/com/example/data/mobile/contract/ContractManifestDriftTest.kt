@@ -37,8 +37,8 @@ class ContractManifestDriftTest {
             computedHash
         )
         assertEquals(
-            "ContractConstants.MANIFEST_SHA256 must be draft revision 3 hash e8e3fe67...",
-            "e8e3fe672a8f7aceb3152c3dd990b4fb137fa517b24038e468659e0fdf5a87a7",
+            "ContractConstants.MANIFEST_SHA256 must be draft revision 3 hash 648abd73...",
+            "648abd7360ebe9ccc87c98c80d177f1e1918a5115ba3ada0fdfcd26687f5e631",
             ContractConstants.MANIFEST_SHA256
         )
         assertEquals(

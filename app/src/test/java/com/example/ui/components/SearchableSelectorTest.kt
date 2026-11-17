@@ -70,7 +70,7 @@ class SearchableSelectorTest {
         id: String,
         sku: String,
         name: String,
-        price: String = "25.00",
+        price: String? = "25.00",
         qty: String = "10.000000",
         barcode: String? = null
     ): ProductCatalogItem = ProductCatalogItem(
@@ -78,7 +78,7 @@ class SearchableSelectorTest {
         sku = sku,
         barcode = barcode,
         name = name,
-        unitPrice = MoneyAmount(price),
+        unitPrice = price?.let { MoneyAmount(it) },
         taxRate = TaxPercentage("16.00"),
         taxRateId = ServerUlid("01JCV8X9M2NQW3TYZ4R5S6789T"),
         isTracked = true,
@@ -90,7 +90,7 @@ class SearchableSelectorTest {
 
     private fun createCustomer(
         id: String,
-        code: String,
+        code: String?,
         name: String,
         phone: String? = "0599112233",
         isWalkIn: Boolean = false
@@ -418,7 +418,7 @@ class SearchableSelectorTest {
         assertNotNull(selectedProduct)
         assertEquals("01JCV8X9M2NQW3TYZ4R5S6789B", selectedProduct!!.id.value)
         assertEquals("SKU-MILK-2L", selectedProduct!!.sku)
-        assertEquals("9.00", selectedProduct!!.unitPrice.toPlainString())
+        assertEquals("9.00", selectedProduct!!.unitPrice?.toPlainString())
         assertFalse(state.isExpanded)
     }
 
@@ -1126,5 +1126,155 @@ class SearchableSelectorTest {
             pressKey(Key.Escape)
         }
         assertFalse(state.isExpanded)
+    }
+
+    // 13. Unpriced product: displays unavailable price and selects truthfully
+    @Test
+    fun unpricedProduct_displaysUnavailablePriceAndSelectsTruthfully() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val customScope = TestScope(testDispatcher)
+        var selectedProduct: ProductCatalogItem? = null
+        val unpricedItem = createProduct(
+            id = "01JCV8X9M2NQW3TYZ4R5S6789A",
+            sku = "SKU-UNPRICED",
+            name = "Organic Honey",
+            price = null
+        )
+
+        val state = SearchableSelectorState<ProductCatalogItem>(
+            scope = customScope,
+            idSelector = { it.id.value },
+            onFetchCandidates = { _, _, _ ->
+                SelectorFetchResult(
+                    items = listOf(unpricedItem),
+                    hasMore = false,
+                    nextCursor = null
+                )
+            }
+        )
+
+        composeTestRule.setContent {
+            SearchableProductSelector(
+                state = state,
+                lang = AppLanguage.EN,
+                currencyCode = "ILS",
+                testTagPrefix = "unpriced_product_selector",
+                onProductSelected = { selectedProduct = it }
+            )
+        }
+
+        state.onQueryChanged("Honey")
+        customScope.advanceUntilIdle()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("Organic Honey").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Unavailable", substring = true).assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("unpriced_product_selector_item_01JCV8X9M2NQW3TYZ4R5S6789A").performClick()
+        customScope.advanceUntilIdle()
+        composeTestRule.waitForIdle()
+
+        assertNotNull(selectedProduct)
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S6789A", selectedProduct!!.id.value)
+        assertNull("Selected product unit price must be null", selectedProduct!!.unitPrice)
+    }
+
+    // 14. Customer with null code: displays name and ID without code pill and selects truthfully
+    @Test
+    fun customerWithNullCode_displaysWithoutCodePillAndSelectsTruthfully() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val customScope = TestScope(testDispatcher)
+        var selectedCustomer: CustomerDirectoryItem? = null
+        val noCodeCustomer = createCustomer(
+            id = "01JCV8X9M2NQW3TYZ4R5S6789N",
+            code = null,
+            name = "Fatima Noor",
+            phone = "0599000111"
+        )
+
+        val state = SearchableSelectorState<CustomerDirectoryItem>(
+            scope = customScope,
+            idSelector = { it.id.value },
+            onFetchCandidates = { _, _, _ ->
+                SelectorFetchResult(
+                    items = listOf(noCodeCustomer),
+                    hasMore = false,
+                    nextCursor = null
+                )
+            }
+        )
+
+        composeTestRule.setContent {
+            SearchableCustomerSelector(
+                state = state,
+                lang = AppLanguage.EN,
+                testTagPrefix = "no_code_customer_selector",
+                onCustomerSelected = { selectedCustomer = it }
+            )
+        }
+
+        state.onQueryChanged("Fatima")
+        customScope.advanceUntilIdle()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("Fatima Noor").assertIsDisplayed()
+        composeTestRule.onNodeWithText("ID: 01JCV8X9", substring = true).assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("no_code_customer_selector_item_01JCV8X9M2NQW3TYZ4R5S6789N").performClick()
+        customScope.advanceUntilIdle()
+        composeTestRule.waitForIdle()
+
+        assertNotNull(selectedCustomer)
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S6789N", selectedCustomer!!.id.value)
+        assertNull("Selected customer code must be null", selectedCustomer!!.code)
+    }
+
+    // 15. Exact prices continue to work in selector
+    @Test
+    fun exactPrices_continueToWorkInSelector() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val customScope = TestScope(testDispatcher)
+        var selectedProduct: ProductCatalogItem? = null
+        val pricedItem = createProduct(
+            id = "01JCV8X9M2NQW3TYZ4R5S6789P",
+            sku = "SKU-EXACT-PRICE",
+            name = "Exact Price Item",
+            price = "123.456000"
+        )
+
+        val state = SearchableSelectorState<ProductCatalogItem>(
+            scope = customScope,
+            idSelector = { it.id.value },
+            onFetchCandidates = { _, _, _ ->
+                SelectorFetchResult(
+                    items = listOf(pricedItem),
+                    hasMore = false,
+                    nextCursor = null
+                )
+            }
+        )
+
+        composeTestRule.setContent {
+            SearchableProductSelector(
+                state = state,
+                lang = AppLanguage.EN,
+                currencyCode = "ILS",
+                testTagPrefix = "exact_price_selector",
+                onProductSelected = { selectedProduct = it }
+            )
+        }
+
+        state.onQueryChanged("Exact")
+        customScope.advanceUntilIdle()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("123.456000 ILS", substring = true).assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("exact_price_selector_item_01JCV8X9M2NQW3TYZ4R5S6789P").performClick()
+        customScope.advanceUntilIdle()
+        composeTestRule.waitForIdle()
+
+        assertNotNull(selectedProduct)
+        assertEquals("123.456000", selectedProduct!!.unitPrice?.toPlainString())
     }
 }

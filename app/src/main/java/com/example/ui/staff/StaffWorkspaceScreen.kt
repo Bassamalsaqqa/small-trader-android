@@ -530,10 +530,15 @@ private fun StaffProductCatalogView(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val selectedUnitPriceText = if (selectedProduct.unitPrice != null) {
+                            "${selectedProduct.unitPrice.toPlainString()} $currencyCode"
+                        } else {
+                            lang.tr("غير محدد", "Unavailable")
+                        }
                         Text(
-                            text = "${selectedProduct.unitPrice.toPlainString()} $currencyCode",
+                            text = selectedUnitPriceText,
                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
+                            color = if (selectedProduct.unitPrice != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
                             text = "${selectedProduct.availableQuantity.value.toPlainString()} ${selectedProduct.baseUnit.name}",
@@ -792,11 +797,16 @@ private fun ProductCatalogItemCard(
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    val basePriceDisplay = if (product.unitPrice != null) {
+                        formatCurrencyAmount(product.unitPrice.toPlainString(), currencyCode)
+                    } else {
+                        lang.tr("غير محدد", "Unavailable")
+                    }
                     Text(
-                        text = formatCurrencyAmount(product.unitPrice.toPlainString(), currencyCode),
+                        text = basePriceDisplay,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
+                        color = if (product.unitPrice != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
@@ -1218,8 +1228,13 @@ private fun CustomerDirectoryItemCard(
                 }
 
                 Spacer(modifier = Modifier.height(2.dp))
+                val customerCodePrefix = if (customer.code != null) {
+                    lang.tr("الكود: ", "Code: ") + "\u2066${customer.code}\u2069 • "
+                } else {
+                    ""
+                }
                 Text(
-                    text = lang.tr("الكود: ", "Code: ") + "\u2066${customer.code}\u2069 • \u2066ID: ${customer.id.value.take(8)}\u2069",
+                    text = customerCodePrefix + "\u2066ID: ${customer.id.value.take(8)}\u2069",
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

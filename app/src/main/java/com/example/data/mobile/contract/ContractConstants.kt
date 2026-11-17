@@ -8,7 +8,7 @@ package com.example.data.mobile.contract
 object ContractConstants {
     const val CONTRACT_VERSION: String = "mobile-v1"
     const val CONTRACT_REVISION: Int = 3
-    const val MANIFEST_SHA256: String = "e8e3fe672a8f7aceb3152c3dd990b4fb137fa517b24038e468659e0fdf5a87a7"
+    const val MANIFEST_SHA256: String = "648abd7360ebe9ccc87c98c80d177f1e1918a5115ba3ada0fdfcd26687f5e631"
 
     // Server entity public ID: strict 26-character Crockford Base32 ULID starting with [0-7]
     val CROCKFORD_ULID_REGEX: Regex = Regex("^[0-7][0-9A-HJKMNP-TV-Z]{25}\$")

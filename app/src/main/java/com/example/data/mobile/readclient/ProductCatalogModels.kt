@@ -137,7 +137,7 @@ class ProductCatalogItem(
     val sku: String,
     val barcode: String?,
     val name: String,
-    val unitPrice: MoneyAmount,
+    val unitPrice: MoneyAmount?,
     val taxRate: TaxPercentage?,
     val taxRateId: ServerUlid?,
     val isTracked: Boolean,
@@ -172,7 +172,7 @@ class ProductCatalogItem(
         sku: String = this.sku,
         barcode: String? = this.barcode,
         name: String = this.name,
-        unitPrice: MoneyAmount = this.unitPrice,
+        unitPrice: MoneyAmount? = this.unitPrice,
         taxRate: TaxPercentage? = this.taxRate,
         taxRateId: ServerUlid? = this.taxRateId,
         isTracked: Boolean = this.isTracked,
@@ -207,7 +207,7 @@ class ProductCatalogItem(
         result = 31 * result + sku.hashCode()
         result = 31 * result + (barcode?.hashCode() ?: 0)
         result = 31 * result + name.hashCode()
-        result = 31 * result + unitPrice.hashCode()
+        result = 31 * result + (unitPrice?.hashCode() ?: 0)
         result = 31 * result + (taxRate?.hashCode() ?: 0)
         result = 31 * result + (taxRateId?.hashCode() ?: 0)
         result = 31 * result + isTracked.hashCode()
@@ -256,7 +256,7 @@ class ProductCatalogItem(
                 sku = requireString(obj, "sku", minLength = 1, maxLength = 128),
                 barcode = optionalString(obj, "barcode", minLength = 1, maxLength = 128),
                 name = requireString(obj, "name", minLength = 1, maxLength = 255),
-                unitPrice = requireMoney(obj, "unit_price"),
+                unitPrice = requireNullableMoney(obj, "unit_price"),
                 taxRate = taxRate,
                 taxRateId = taxRateId,
                 isTracked = requireBoolean(obj, "is_tracked"),

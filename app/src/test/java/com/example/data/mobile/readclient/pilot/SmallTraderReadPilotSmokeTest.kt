@@ -251,7 +251,9 @@ class SmallTraderReadPilotSmokeTest {
             assertEquals("Total unique products across pages 2+1 must be 3", 3, collectedProductIds.size)
 
             for (p in allProducts) {
-                assertTrue("Malformed unitPrice decimal string: ${p.unitPrice.lexeme}", p.unitPrice.lexeme.matches(Regex("^[0-9]+(\\.[0-9]+)?$")))
+                p.unitPrice?.let { price ->
+                assertTrue("Malformed unitPrice decimal string: ${price.lexeme}", price.lexeme.matches(Regex("^[0-9]+(\\.[0-9]+)?$")))
+                }
                 if (p.taxRate != null) {
                     assertTrue("Malformed taxRate decimal string: ${p.taxRate.lexeme}", p.taxRate.lexeme.matches(Regex("^[0-9]+(\\.[0-9]+)?$")))
                 }
@@ -263,7 +265,7 @@ class SmallTraderReadPilotSmokeTest {
             assertEquals("Product IDs must match independently supplied fixtures", expectedProductsById.keys, collectedProductIds)
             for (product in allProducts) {
                 val expected = expectedProductsById.getValue(product.id.value)
-                assertEquals("Exact unit-price lexeme must match fixture", expected.exactUnitPrice, product.unitPrice.lexeme)
+                assertEquals("Exact unit-price lexeme must match fixture", expected.exactUnitPrice, product.unitPrice?.lexeme)
                 assertEquals("Exact nullable tax-rate lexeme must match fixture", expected.taxRate, product.taxRate?.lexeme)
                 assertEquals("Nullable tax association must match fixture; unassigned is not NoTax", expected.taxRateId, product.taxRateId?.value)
                 assertEquals("SKU must match independent fixture", expected.sku, product.sku)

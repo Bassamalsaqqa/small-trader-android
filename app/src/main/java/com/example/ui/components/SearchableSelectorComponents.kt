@@ -832,11 +832,16 @@ fun SearchableProductSelector(
                         ),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    val priceDisplay = if (product.unitPrice != null) {
+                        "\u2066${product.unitPrice.toPlainString()} $currencyCode\u2069"
+                    } else {
+                        if (lang == AppLanguage.AR) "غير محدد" else "Unavailable"
+                    }
                     Text(
-                        text = "\u2066${product.unitPrice.toPlainString()} $currencyCode\u2069 • " +
+                        text = "$priceDisplay • " +
                                 "${product.availableQuantity.value.toPlainString()} ${product.baseUnit.name}",
                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                        color = MaterialTheme.colorScheme.primary
+                        color = if (product.unitPrice != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -899,20 +904,22 @@ fun SearchableCustomerSelector(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        modifier = Modifier.padding(start = 6.dp)
-                    ) {
-                        Text(
-                            text = "\u2066${customer.code}\u2069",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontFamily = MonoFontFamily,
-                                textDirection = TextDirection.Ltr
-                            ),
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                        )
+                    if (customer.code != null) {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            modifier = Modifier.padding(start = 6.dp)
+                        ) {
+                            Text(
+                                text = "\u2066${customer.code}\u2069",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = MonoFontFamily,
+                                    textDirection = TextDirection.Ltr
+                                ),
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
 

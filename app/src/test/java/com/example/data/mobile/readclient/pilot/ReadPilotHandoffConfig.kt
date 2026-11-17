@@ -25,7 +25,7 @@ import java.util.Locale
  */
 data class ExpectedProductFixture(
     val id: String,
-    val exactUnitPrice: String,
+    val exactUnitPrice: String? = null,
     val taxRate: String? = null,
     val taxRateId: String? = null,
     val sku: String? = null
@@ -218,9 +218,9 @@ data class ReadPilotHandoffConfig(
     }
 
     companion object {
-        const val FROZEN_MANIFEST_DIGEST = "e8e3fe672a8f7aceb3152c3dd990b4fb137fa517b24038e468659e0fdf5a87a7"
-        const val EXPECTED_CANDIDATE_REV3 = "e8e3fe672a8f7aceb3152c3dd990b4fb137fa517b24038e468659e0fdf5a87a7"
-        const val EXPECTED_PRIMARY_PIN_REV2 = "ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659"
+        const val FROZEN_MANIFEST_DIGEST = "648abd7360ebe9ccc87c98c80d177f1e1918a5115ba3ada0fdfcd26687f5e631"
+        const val EXPECTED_CANDIDATE_REV3 = "648abd7360ebe9ccc87c98c80d177f1e1918a5115ba3ada0fdfcd26687f5e631"
+        const val EXPECTED_PRIMARY_PIN_REV2 = "08202cda104ff03726106599e8b4f5d70e24de53f7c3b0338c9a5f68b2787ed8"
         const val ENV_HANDOFF_PATH = "SMALL_TRADER_READ_PILOT_HANDOFF"
         const val ENV_EXPECTED_BACKEND_SHA = "SMALL_TRADER_EXPECTED_BACKEND_SHA"
         const val MAX_FILE_SIZE_BYTES = 64 * 1024L // 64 KiB bounded read
@@ -707,7 +707,7 @@ data class ReadPilotHandoffConfig(
                 for (el in prodArray.elements) {
                     if (el is StrictJsonObject) {
                         val id = requireString(el, "id")
-                        val unitPrice = requireString(el, "exactUnitPrice")
+                        val unitPrice = requireNullableString(el, "exactUnitPrice")
                         val taxRate = requireNullableString(el, "taxRate")
                         expectedProducts.add(ExpectedProductFixture(id, unitPrice, taxRate, requireNullableString(el, "taxRateId"), optionalString(el, "sku")))
                     }
