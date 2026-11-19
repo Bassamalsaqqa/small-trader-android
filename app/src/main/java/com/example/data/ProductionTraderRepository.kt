@@ -25,6 +25,18 @@ import com.example.data.mobile.outbox.CommandStatus
 import com.example.data.mobile.outbox.InMemoryMerchantCommandStore
 import com.example.data.mobile.outbox.MerchantCommandStore
 import com.example.data.mobile.outbox.OutboxRepository
+import com.example.data.mobile.merchantread.CustomerStatementResponse
+import com.example.data.mobile.merchantread.HomeResponse
+import com.example.data.mobile.merchantread.MerchantReadAdapter
+import com.example.data.mobile.merchantread.MerchantReadClient
+import com.example.data.mobile.merchantread.MerchantReadResult
+import com.example.data.mobile.merchantread.MerchantReadTokenProvider
+import com.example.data.mobile.merchantread.ProductHistoryResponse
+import com.example.data.mobile.merchantread.SalesInvoiceDetailResponse
+import com.example.data.mobile.merchantread.SalesInvoiceListItem
+import com.example.data.mobile.merchantread.SalesInvoicesQuery
+import com.example.data.mobile.merchantread.ShiftSummaryReportResponse
+import com.example.data.mobile.merchantread.TreasuryReportResponse
 import com.example.data.mobile.readclient.ApprovedCashAccount
 import com.example.data.mobile.readclient.BootstrapResponse
 import com.example.data.mobile.readclient.BootstrapTax
@@ -124,7 +136,9 @@ class ProductionTraderRepository(
     private val authScopeProvider: (() -> CurrentAuthScope?)? = null,
     private val onClose: (() -> Unit)? = null,
     initialBusinessInfo: BusinessInfo? = null,
-    val commandStore: MerchantCommandStore
+    val commandStore: MerchantCommandStore,
+    private val merchantReadClient: MerchantReadClient? = null,
+    private val autoRefresh: Boolean = true
 ) : TraderRepository {
 
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
@@ -410,8 +424,23 @@ class ProductionTraderRepository(
     private val _expenseCategoriesFlow = MutableStateFlow<List<ServerExpenseCategory>>(emptyList())
     override fun getServerExpenseCategories(): List<ServerExpenseCategory> = _expenseCategoriesFlow.value
 
+    private val _homeMetricsFlow = MutableStateFlow<HomeResponse?>(null)
+    override val homeMetricsFlow: StateFlow<HomeResponse?> = _homeMetricsFlow.asStateFlow()
+
+    private val _shiftSummaryFlow = MutableStateFlow<ShiftSummaryReportResponse?>(null)
+    override val shiftSummaryFlow: StateFlow<ShiftSummaryReportResponse?> = _shiftSummaryFlow.asStateFlow()
+
+    private val _treasuryReportFlow = MutableStateFlow<TreasuryReportResponse?>(null)
+    override val treasuryReportFlow: StateFlow<TreasuryReportResponse?> = _treasuryReportFlow.asStateFlow()
+
+    private val _serverInvoicesFlow = MutableStateFlow<List<SalesInvoiceListItem>>(emptyList())
+    override val serverInvoicesFlow: StateFlow<List<SalesInvoiceListItem>> = _serverInvoicesFlow.asStateFlow()
+
+    private val _invoicesHasMoreGapFlow = MutableStateFlow<Boolean>(false)
+    override val invoicesHasMoreGapFlow: StateFlow<Boolean> = _invoicesHasMoreGapFlow.asStateFlow()
+
     init {
-        refreshFromBackend()
+        if (autoRefresh) refreshFromBackend()
     }
 
     fun refreshFromBackend() {
@@ -422,6 +451,10 @@ class ProductionTraderRepository(
             refreshPurchases()
             refreshExpenses()
             loadExpenseCategories()
+            refreshInvoices()
+            refreshHomeMetrics()
+            refreshShiftSummary()
+            refreshTreasuryReport()
         }
     }
 
@@ -832,6 +865,42 @@ class ProductionTraderRepository(
 
     override fun getStockMovements(): List<StockMovement> = _stockMovementsFlow.value
 
+    override suspend fun getProductStockHistory(
+        productId: String,
+        limit: Int
+    ): Result<ProductHistoryResponse> = withContext(ioDispatcher) {
+        val client = merchantReadClient ?: return@withContext Result.failure(IllegalStateException("MerchantReadClient not configured"))
+        val ulid = try {
+            ServerUlid.parse(productId)
+        } catch (e: Exception) {
+            return@withContext Result.failure(IllegalArgumentException("Invalid productId ULID: '$productId'", e))
+        }
+        try {
+            val res = client.getProductHistory(companyId, ulid, limit, retainedGeneration = retainedGeneration)
+            when (res) {
+                is MerchantReadResult.Success -> {
+                    val history = res.value
+                    val mapped = history.movements.map { item ->
+                        MerchantReadAdapter.toDomainStockMovement(item, productId)
+                    }
+                    _stockMovementsFlow.update { current ->
+                        val others = current.filter { it.productId != productId }
+                        mapped + others
+                    }
+                    Result.success(history)
+                }
+                is MerchantReadResult.NotFound -> Result.failure(NoSuchElementException("Product '$productId' not found"))
+                is MerchantReadResult.Forbidden -> Result.failure(SecurityException("Forbidden: ${res.error?.message ?: "Missing inventory.stock.view permission"}"))
+                is MerchantReadResult.AuthDenial -> Result.failure(SecurityException("Authentication denied: ${res.error?.message ?: "UNAUTHENTICATED"}"))
+                is MerchantReadResult.NetworkError -> Result.failure(java.io.IOException("Network error fetching product movements: ${res.message}"))
+                is MerchantReadResult.SchemaError -> Result.failure(IllegalStateException("Schema error parsing product movements: ${res.message}"))
+                else -> Result.failure(RuntimeException("Failed to load product stock history: $res"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override suspend fun addCustomProduct(product: Product): Result<Product> {
         _productsFlow.update { listOf(product) + it }
         return Result.success(product)
@@ -1150,6 +1219,87 @@ class ProductionTraderRepository(
         }
     }
 
+    override suspend fun refreshInvoices(query: SalesInvoicesQuery): Result<List<InvoiceRecord>> = withContext(ioDispatcher) {
+        val client = merchantReadClient ?: return@withContext Result.failure(IllegalStateException("MerchantReadClient not configured"))
+        try {
+            val res = client.getSalesInvoices(companyId, query, retainedGeneration = retainedGeneration)
+            when (res) {
+                is MerchantReadResult.Success -> {
+                    val serverList = res.value.invoices
+                    _serverInvoicesFlow.value = serverList
+                    _invoicesHasMoreGapFlow.value = res.value.hasMore
+
+                    val currentLocal = _invoicesFlow.value
+
+                    // Identify local outbox invoices that must not be dropped:
+                    // Any pending/unreconciled local record, including unknown ACK events
+                    val pendingOutbox = currentLocal.filter { local ->
+                        val isConfirmed = local.outboxStatus == "CONFIRMED" && local.serverInvoiceUlid != null
+                        val isReconciledOnServer = isConfirmed && serverList.any { it.id.value == local.serverInvoiceUlid }
+                        !isReconciledOnServer
+                    }
+
+                    // Map server list, merging with matching local outbox invoice by real ULID / ID / clientEventId
+                    val serverMerged = serverList.map { serverItem ->
+                        val localMatch = currentLocal.firstOrNull { local ->
+                            local.serverInvoiceUlid == serverItem.id.value ||
+                            local.id == serverItem.id.value ||
+                            (!local.clientEventId.isNullOrBlank() && local.clientEventId == serverItem.id.value)
+                        }
+                        MerchantReadAdapter.toDomainInvoiceRecord(serverItem, localMatch)
+                    }
+
+                    val mergedList = pendingOutbox + serverMerged
+                    _invoicesFlow.value = mergedList
+                    Result.success(mergedList)
+                }
+                is MerchantReadResult.Forbidden -> {
+                    Result.failure(SecurityException("Forbidden: ${res.error?.message ?: "Missing sales.invoice.view permission"}"))
+                }
+                is MerchantReadResult.AuthDenial -> {
+                    Result.failure(SecurityException("Authentication denied: ${res.error?.message ?: "UNAUTHENTICATED"}"))
+                }
+                is MerchantReadResult.NetworkError -> {
+                    Result.failure(java.io.IOException("Network error during sales invoices refresh: ${res.message}"))
+                }
+                is MerchantReadResult.SchemaError -> {
+                    Result.failure(IllegalStateException("Schema validation error in sales invoices: ${res.message}"))
+                }
+                is MerchantReadResult.HttpError -> {
+                    Result.failure(RuntimeException("HTTP error ${res.statusCode}: ${res.error?.message}"))
+                }
+                else -> {
+                    Result.failure(RuntimeException("Failed to refresh sales invoices: $res"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun getSalesInvoiceDetail(invoicePublicId: String): Result<SalesInvoiceDetailResponse> = withContext(ioDispatcher) {
+        val client = merchantReadClient ?: return@withContext Result.failure(IllegalStateException("MerchantReadClient not configured"))
+        val ulid = try {
+            ServerUlid.parse(invoicePublicId)
+        } catch (e: Exception) {
+            return@withContext Result.failure(IllegalArgumentException("Invalid invoice ULID: '$invoicePublicId'", e))
+        }
+        try {
+            val res = client.getSalesInvoiceDetail(companyId, ulid, retainedGeneration = retainedGeneration)
+            when (res) {
+                is MerchantReadResult.Success -> Result.success(res.value)
+                is MerchantReadResult.NotFound -> Result.failure(NoSuchElementException("Invoice '$invoicePublicId' not found on server"))
+                is MerchantReadResult.Forbidden -> Result.failure(SecurityException("Forbidden: ${res.error?.message ?: "Missing sales.invoice.view permission"}"))
+                is MerchantReadResult.AuthDenial -> Result.failure(SecurityException("Authentication denied: ${res.error?.message ?: "UNAUTHENTICATED"}"))
+                is MerchantReadResult.NetworkError -> Result.failure(java.io.IOException("Network error loading invoice detail: ${res.message}"))
+                is MerchantReadResult.SchemaError -> Result.failure(IllegalStateException("Schema error in invoice detail: ${res.message}"))
+                else -> Result.failure(RuntimeException("Failed to load invoice detail: $res"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Customers & Balances
     // -------------------------------------------------------------------------
@@ -1295,6 +1445,46 @@ class ProductionTraderRepository(
         )
         _customersFlow.update { list -> list.map { if (it.id == customerId) updated else it } }
         Result.success(updated)
+    }
+
+    override suspend fun getCustomerStatement(
+        customerId: String,
+        fromDate: String?,
+        toDate: String?
+    ): Result<CustomerStatementResponse> = withContext(ioDispatcher) {
+        val client = merchantReadClient ?: return@withContext Result.failure(IllegalStateException("MerchantReadClient not configured"))
+        val ulid = try {
+            ServerUlid.parse(customerId)
+        } catch (e: Exception) {
+            return@withContext Result.failure(IllegalArgumentException("Invalid customerId ULID: '$customerId'", e))
+        }
+        try {
+            val res = client.getCustomerStatement(companyId, ulid, fromDate, toDate, retainedGeneration = retainedGeneration)
+            when (res) {
+                is MerchantReadResult.Success -> {
+                    val statement = res.value
+                    val summary = statement.currencies[baseCurrency] ?: statement.currencies.values.firstOrNull()
+                    if (summary != null) {
+                        val mapped = summary.entries.map { entry ->
+                            MerchantReadAdapter.toDomainCustomerTransaction(entry, customerId)
+                        }
+                        _customerTransactionsFlow.update { current ->
+                            val others = current.filter { it.customerId != customerId }
+                            mapped + others
+                        }
+                    }
+                    Result.success(statement)
+                }
+                is MerchantReadResult.NotFound -> Result.failure(NoSuchElementException("Customer '$customerId' not found"))
+                is MerchantReadResult.Forbidden -> Result.failure(SecurityException("Forbidden: ${res.error?.message ?: "Missing customers.view permission"}"))
+                is MerchantReadResult.AuthDenial -> Result.failure(SecurityException("Authentication denied: ${res.error?.message ?: "UNAUTHENTICATED"}"))
+                is MerchantReadResult.NetworkError -> Result.failure(java.io.IOException("Network error loading customer statement: ${res.message}"))
+                is MerchantReadResult.SchemaError -> Result.failure(IllegalStateException("Schema error in customer statement: ${res.message}"))
+                else -> Result.failure(RuntimeException("Failed to load customer statement: $res"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -1854,6 +2044,106 @@ class ProductionTraderRepository(
         commandStore.cancelDraftOperation(scope.companyId.value, scope.actorId.value, scope.deviceId.value, formType)
     }
 
+    override suspend fun refreshHomeMetrics(): Result<HomeResponse?> = withContext(ioDispatcher) {
+        val client = merchantReadClient ?: return@withContext Result.failure(IllegalStateException("MerchantReadClient not configured"))
+        try {
+            val res = client.getHome(companyId, retainedGeneration = retainedGeneration)
+            when (res) {
+                is MerchantReadResult.Success -> {
+                    _homeMetricsFlow.value = res.value
+                    Result.success(res.value)
+                }
+                is MerchantReadResult.Forbidden -> {
+                    // Lacks permission (e.g. pos.home.view or reports permission) -> remains unknown, no fake 0
+                    _homeMetricsFlow.value = null
+                    Result.success(null)
+                }
+                is MerchantReadResult.AuthDenial -> {
+                    _homeMetricsFlow.value = null
+                    Result.failure(SecurityException("Authentication denied: ${res.error?.message ?: "UNAUTHENTICATED"}"))
+                }
+                is MerchantReadResult.NetworkError -> {
+                    // Preserves existing or null on network error, never fake 0
+                    Result.failure(java.io.IOException("Network error loading home metrics: ${res.message}"))
+                }
+                is MerchantReadResult.SchemaError -> {
+                    Result.failure(IllegalStateException("Schema error in home metrics: ${res.message}"))
+                }
+                else -> {
+                    Result.failure(RuntimeException("Failed to refresh home metrics: $res"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun refreshShiftSummary(): Result<ShiftSummaryReportResponse?> = withContext(ioDispatcher) {
+        val client = merchantReadClient ?: return@withContext Result.failure(IllegalStateException("MerchantReadClient not configured"))
+        try {
+            val res = client.getShiftSummary(companyId, retainedGeneration = retainedGeneration)
+            when (res) {
+                is MerchantReadResult.Success -> {
+                    _shiftSummaryFlow.value = res.value
+                    Result.success(res.value)
+                }
+                is MerchantReadResult.Forbidden -> {
+                    // Missing reports.financial.view permission -> remains null, no fake 0
+                    _shiftSummaryFlow.value = null
+                    Result.success(null)
+                }
+                is MerchantReadResult.AuthDenial -> {
+                    _shiftSummaryFlow.value = null
+                    Result.failure(SecurityException("Authentication denied: ${res.error?.message ?: "UNAUTHENTICATED"}"))
+                }
+                is MerchantReadResult.NetworkError -> {
+                    Result.failure(java.io.IOException("Network error loading shift summary: ${res.message}"))
+                }
+                is MerchantReadResult.SchemaError -> {
+                    Result.failure(IllegalStateException("Schema error in shift summary: ${res.message}"))
+                }
+                else -> {
+                    Result.failure(RuntimeException("Failed to refresh shift summary: $res"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun refreshTreasuryReport(): Result<TreasuryReportResponse?> = withContext(ioDispatcher) {
+        val client = merchantReadClient ?: return@withContext Result.failure(IllegalStateException("MerchantReadClient not configured"))
+        try {
+            val res = client.getTreasury(companyId, retainedGeneration = retainedGeneration)
+            when (res) {
+                is MerchantReadResult.Success -> {
+                    _treasuryReportFlow.value = res.value
+                    Result.success(res.value)
+                }
+                is MerchantReadResult.Forbidden -> {
+                    // Missing reports.financial.view permission -> remains null, no fake 0
+                    _treasuryReportFlow.value = null
+                    Result.success(null)
+                }
+                is MerchantReadResult.AuthDenial -> {
+                    _treasuryReportFlow.value = null
+                    Result.failure(SecurityException("Authentication denied: ${res.error?.message ?: "UNAUTHENTICATED"}"))
+                }
+                is MerchantReadResult.NetworkError -> {
+                    Result.failure(java.io.IOException("Network error loading treasury report: ${res.message}"))
+                }
+                is MerchantReadResult.SchemaError -> {
+                    Result.failure(IllegalStateException("Schema error in treasury report: ${res.message}"))
+                }
+                else -> {
+                    Result.failure(RuntimeException("Failed to refresh treasury report: $res"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     companion object {
         suspend fun fromReadReady(
             readReady: StaffAuthState.ReadReady,
@@ -1863,7 +2153,8 @@ class ProductionTraderRepository(
             commandStore: MerchantCommandStore,
             authScopeProvider: (() -> CurrentAuthScope?)? = null,
             onClose: (() -> Unit)? = null,
-            authoritativeMinorUnits: Int? = null
+            authoritativeMinorUnits: Int? = null,
+            merchantReadClient: MerchantReadClient? = null
         ): ProductionTraderRepository {
             val bootstrap = readReady.bootstrap
             val session = readReady.session
@@ -1895,6 +2186,24 @@ class ProductionTraderRepository(
             val syncCoordinator = SaleSyncCoordinatorImpl(
                 outboxRepository = outboxRepository,
                 gateway = saleSyncGateway
+            )
+
+            val readTokenProvider = MerchantReadTokenProvider { reqCompanyId, retainedGen ->
+                val current = authScopeProvider?.invoke() ?: return@MerchantReadTokenProvider null
+                if (current.companyId != reqCompanyId || current.actorId != session.actorUlid || current.deviceId != session.deviceUuid) {
+                    return@MerchantReadTokenProvider null
+                }
+                if (retainedGen != null && current.generation != retainedGen) {
+                    return@MerchantReadTokenProvider null
+                }
+                current.token
+            }
+
+            val effectiveReadClient = merchantReadClient ?: MerchantReadClient(
+                transport = transport,
+                baseOrigin = baseOrigin,
+                allowHttpLoopback = false,
+                tokenProvider = readTokenProvider
             )
 
             // Obtain authoritative business settings from server
@@ -1952,7 +2261,9 @@ class ProductionTraderRepository(
                 authScopeProvider = authScopeProvider,
                 onClose = onClose,
                 initialBusinessInfo = realBusinessInfo,
-                commandStore = commandStore
+                commandStore = commandStore,
+                merchantReadClient = effectiveReadClient,
+                autoRefresh = false
             )
         }
 
@@ -1963,8 +2274,31 @@ class ProductionTraderRepository(
             deviceId: ClientUuid,
             warehouseId: ServerUlid = ServerUlid.parse("01JMB000000000000000000003"),
             commandStore: MerchantCommandStore = InMemoryMerchantCommandStore(),
-            authScopeProvider: (() -> CurrentAuthScope?)? = null
+            authScopeProvider: (() -> CurrentAuthScope?)? = null,
+            merchantReadClient: MerchantReadClient? = null
         ): ProductionTraderRepository {
+            val readTokenProvider = MerchantReadTokenProvider { reqCompanyId, retainedGen ->
+                val current = (authScopeProvider ?: { CurrentAuthScope(companyId = companyId, actorId = actorId, deviceId = deviceId, token = "test-token", generation = 1L) }).invoke()
+                    ?: return@MerchantReadTokenProvider null
+                if (current.companyId != reqCompanyId || current.actorId != actorId || current.deviceId != deviceId) {
+                    return@MerchantReadTokenProvider null
+                }
+                if (retainedGen != null && current.generation != retainedGen) {
+                    return@MerchantReadTokenProvider null
+                }
+                current.token
+            }
+
+            val effectiveReadClient = merchantReadClient ?: MerchantReadClient(
+                transport = object : com.example.data.mobile.readclient.ReadClientTransport {
+                    override fun execute(request: com.example.data.mobile.readclient.TransportRequest): com.example.data.mobile.readclient.TransportResponse {
+                        return com.example.data.mobile.readclient.TransportResponse(200, emptyMap(), "{}")
+                    }
+                },
+                baseOrigin = "https://api.example.com",
+                tokenProvider = readTokenProvider
+            )
+
             return ProductionTraderRepository(
                 companyId = companyId,
                 companyName = "Test Company",
@@ -1982,7 +2316,9 @@ class ProductionTraderRepository(
                 bootstrapTaxes = emptyList(),
                 apiClient = apiClient,
                 authScopeProvider = authScopeProvider ?: { CurrentAuthScope(companyId = companyId, actorId = actorId, deviceId = deviceId, token = "test-token", generation = 1L) },
-                commandStore = commandStore
+                commandStore = commandStore,
+                merchantReadClient = effectiveReadClient,
+                autoRefresh = false
             )
         }
     }

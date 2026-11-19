@@ -42,6 +42,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
 class TraderViewModelFactory(
@@ -418,6 +419,7 @@ class TraderViewModel(
     }
 
     fun selectProductForDetail(product: Product) {
+        if (repository !is OfflineDemoTraderRepository) loadProductStockHistory(product.id)
         _uiState.update { state ->
             val freshProduct = state.products.firstOrNull { it.id == product.id } ?: product
             state.copy(
@@ -438,6 +440,114 @@ class TraderViewModel(
                 lastInventoryActionMessageEn = null,
                 isInventoryActionError = false
             )
+        }
+    }
+
+    init {
+        viewModelScope.launch {
+            repository.homeMetricsFlow.collect { home ->
+                _uiState.update { current ->
+                    current.copy(
+                        liveHomeMetrics = home?.let { com.example.data.mobile.merchantread.MerchantReadAdapter.toLiveHomeMetrics(it) }
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            repository.shiftSummaryFlow.collect { shift ->
+                _uiState.update { current ->
+                    current.copy(
+                        liveShiftSummary = shift?.let { com.example.data.mobile.merchantread.MerchantReadAdapter.toLiveShiftSummary(it) }
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            repository.treasuryReportFlow.collect { treasury ->
+                _uiState.update { current ->
+                    current.copy(
+                        liveTreasurySummary = treasury?.let { com.example.data.mobile.merchantread.MerchantReadAdapter.toLiveTreasurySummary(it) }
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            repository.invoicesHasMoreGapFlow.collect { hasMore ->
+                _uiState.update { current -> current.copy(liveInvoicesHasMoreGap = hasMore) }
+            }
+        }
+    }
+
+    fun loadCustomerStatement(customerId: String, fromDate: String? = null, toDate: String? = null, onComplete: ((Boolean) -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = repository.getCustomerStatement(customerId, fromDate, toDate)
+            withContext(Dispatchers.Main) {
+                result.onSuccess { statement ->
+                    _uiState.update { current ->
+                        current.copy(
+                            selectedCustomerStatement = com.example.data.mobile.merchantread.LiveCustomerStatement(
+                                customerId = statement.customerId.value,
+                                customerName = statement.customerName,
+                                fromDate = statement.fromDate,
+                                toDate = statement.toDate,
+                                currencies = statement.currencies
+                            )
+                        )
+                    }
+                    onComplete?.invoke(true)
+                }.onFailure {
+                    onComplete?.invoke(false)
+                }
+            }
+        }
+    }
+
+    fun loadProductStockHistory(productId: String, limit: Int = 50, onComplete: ((Boolean) -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = repository.getProductStockHistory(productId, limit)
+            withContext(Dispatchers.Main) {
+                result.onSuccess { history ->
+                    _uiState.update { current ->
+                        current.copy(
+                            selectedProductHistory = com.example.data.mobile.merchantread.LiveStockMovementHistory(
+                                productId = history.productId.value,
+                                movements = history.movements
+                            )
+                        )
+                    }
+                    onComplete?.invoke(true)
+                }.onFailure {
+                    onComplete?.invoke(false)
+                }
+            }
+        }
+    }
+
+    fun loadInvoiceDetail(invoicePublicId: String, onComplete: ((Boolean) -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = repository.getSalesInvoiceDetail(invoicePublicId)
+            withContext(Dispatchers.Main) {
+                result.onSuccess { detail ->
+                    _uiState.update { current ->
+                        val localMatch = current.invoices.firstOrNull { it.id == invoicePublicId || it.serverInvoiceUlid == invoicePublicId }
+                        current.copy(
+                            selectedInvoiceDetail = com.example.data.mobile.merchantread.MerchantReadAdapter.toLiveInvoiceRecord(detail, localMatch)
+                        )
+                    }
+                    onComplete?.invoke(true)
+                }.onFailure {
+                    onComplete?.invoke(false)
+                }
+            }
+        }
+    }
+
+    fun refreshLiveMerchantReads() {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.refreshInvoices()
+            repository.refreshHomeMetrics()
+            repository.refreshShiftSummary()
+            repository.refreshTreasuryReport()
         }
     }
 
@@ -1188,6 +1298,7 @@ class TraderViewModel(
     }
 
     fun openInvoiceReceipt(invoice: InvoiceRecord) {
+        if (repository !is OfflineDemoTraderRepository) invoice.serverInvoiceUlid?.let { loadInvoiceDetail(it) }
         _uiState.update { state ->
             val printer = state.connectedPrinter
             val ready = printer != null && printer.isPaired
@@ -1227,6 +1338,7 @@ class TraderViewModel(
 
     // Customer Ledger & Debt Collections
     fun selectCustomerForDetail(customer: Customer) {
+        if (repository !is OfflineDemoTraderRepository) loadCustomerStatement(customer.id)
         _uiState.update { state ->
             val freshCustomer = state.customers.firstOrNull { it.id == customer.id } ?: customer
             state.copy(

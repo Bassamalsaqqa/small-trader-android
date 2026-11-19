@@ -45,6 +45,15 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class TraderUiState(
+    // Mobile V1 Merchant Live Read Authoritative Projections
+    val liveHomeMetrics: com.example.data.mobile.merchantread.LiveHomeMetrics? = null,
+    val liveShiftSummary: com.example.data.mobile.merchantread.LiveShiftSummary? = null,
+    val liveTreasurySummary: com.example.data.mobile.merchantread.LiveTreasurySummary? = null,
+    val liveInvoicesHasMoreGap: Boolean = false,
+    val selectedCustomerStatement: com.example.data.mobile.merchantread.LiveCustomerStatement? = null,
+    val selectedProductHistory: com.example.data.mobile.merchantread.LiveStockMovementHistory? = null,
+    val selectedInvoiceDetail: com.example.data.mobile.merchantread.LiveInvoiceRecord? = null,
+
     val language: AppLanguage = AppLanguage.AR,
     val isDarkTheme: Boolean = false,
     val currentScreen: TraderScreen = TraderScreen.HOME,

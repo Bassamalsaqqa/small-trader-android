@@ -17,6 +17,14 @@ import com.example.model.Supplier
 import com.example.model.SupplierPayment
 import com.example.model.UserSession
 import com.example.model.WesternFormatters
+import com.example.data.mobile.merchantread.CustomerStatementResponse
+import com.example.data.mobile.merchantread.HomeResponse
+import com.example.data.mobile.merchantread.ProductHistoryResponse
+import com.example.data.mobile.merchantread.SalesInvoiceDetailResponse
+import com.example.data.mobile.merchantread.SalesInvoiceListItem
+import com.example.data.mobile.merchantread.SalesInvoicesQuery
+import com.example.data.mobile.merchantread.ShiftSummaryReportResponse
+import com.example.data.mobile.merchantread.TreasuryReportResponse
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -135,6 +143,36 @@ interface TraderRepository {
     fun cancelDraftOperation(formType: String) {}
 
     fun close() {}
+
+    // -------------------------------------------------------------------------
+    // Mobile V1 Merchant Live Read Additive API
+    // -------------------------------------------------------------------------
+    val homeMetricsFlow: StateFlow<HomeResponse?> get() = MutableStateFlow(null)
+    val shiftSummaryFlow: StateFlow<ShiftSummaryReportResponse?> get() = MutableStateFlow(null)
+    val treasuryReportFlow: StateFlow<TreasuryReportResponse?> get() = MutableStateFlow(null)
+    val serverInvoicesFlow: StateFlow<List<SalesInvoiceListItem>> get() = MutableStateFlow(emptyList())
+    val invoicesHasMoreGapFlow: StateFlow<Boolean> get() = MutableStateFlow(false)
+
+    suspend fun refreshHomeMetrics(): Result<HomeResponse?> = Result.success(null)
+    suspend fun refreshShiftSummary(): Result<ShiftSummaryReportResponse?> = Result.success(null)
+    suspend fun refreshTreasuryReport(): Result<TreasuryReportResponse?> = Result.success(null)
+    suspend fun refreshInvoices(query: SalesInvoicesQuery = SalesInvoicesQuery()): Result<List<InvoiceRecord>> = Result.success(emptyList())
+
+    suspend fun getSalesInvoiceDetail(invoicePublicId: String): Result<SalesInvoiceDetailResponse> =
+        Result.failure(UnsupportedOperationException("Invoice detail read not supported in this repository mode"))
+
+    suspend fun getCustomerStatement(
+        customerId: String,
+        fromDate: String? = null,
+        toDate: String? = null
+    ): Result<CustomerStatementResponse> =
+        Result.failure(UnsupportedOperationException("Customer statement read not supported in this repository mode"))
+
+    suspend fun getProductStockHistory(
+        productId: String,
+        limit: Int = 50
+    ): Result<ProductHistoryResponse> =
+        Result.failure(UnsupportedOperationException("Product stock history read not supported in this repository mode"))
 }
 
 data class RecordedGrnOperation(
