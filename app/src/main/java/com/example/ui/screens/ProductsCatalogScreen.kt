@@ -1,5 +1,9 @@
 package com.example.ui.screens
 
+import java.math.BigDecimal
+import androidx.compose.material3.CircularProgressIndicator
+import com.example.data.mobile.merchantread.LiveStockMovementHistory
+import com.example.data.mobile.merchantread.StockMovementItem
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -80,7 +84,6 @@ import com.example.ui.components.StitchBidiUtils
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
-import java.math.BigDecimal
 import java.math.RoundingMode
 import kotlin.math.abs
 
@@ -717,6 +720,12 @@ fun ProductDetailScreen(
     val lang = state.language
     val product = state.selectedProductForDetail ?: return
     val canManageInventory = state.currentSession.canManageInventory()
+    val isDemo = state.currentSession.isDemoSession
+    val liveHistory = if (!isDemo && state.selectedProductHistory?.productId == product.id) {
+        state.selectedProductHistory
+    } else null
+    val isHistoryLoading = !isDemo && liveHistory == null
+
     val movements = remember(state.stockMovements, product.id) {
         state.stockMovements.filter { it.productId == product.id }
     }
@@ -1374,10 +1383,11 @@ fun ProductDetailScreen(
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                        val count = if (!isDemo && liveHistory != null) liveHistory.movements.size else movements.size
                         Text(
                             text = lang.tr(
-                                "${WesternFormatters.formatInt(movements.size)} حركة",
-                                "${WesternFormatters.formatInt(movements.size)} entries"
+                                "${WesternFormatters.formatInt(count)} حركة",
+                                "${WesternFormatters.formatInt(count)} entries"
                             ),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1385,28 +1395,86 @@ fun ProductDetailScreen(
                     }
                 }
 
-                if (movements.isEmpty()) {
+                if (!isDemo && isHistoryLoading) {
                     item {
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = MaterialTheme.colorScheme.surface,
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("product_stock_history_loading")
                         ) {
-                            Text(
-                                text = lang.tr(
-                                    "لا توجد حركات مخزنية مسجلة لهذا الصنف بعد.",
-                                    "No stock movements recorded for this item yet."
-                                ),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(14.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = lang.tr("جارٍ تحميل سجل الحركات...", "Loading stock movements..."),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                } else if (!isDemo && liveHistory != null) {
+                    if (liveHistory.movements.isEmpty()) {
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = lang.tr(
+                                        "لا توجد حركات مخزنية مسجلة لهذا الصنف بعد.",
+                                        "No stock movements recorded for this item yet."
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(14.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        items(liveHistory.movements, key = { it.id.value }) { smItem ->
+                            LiveStockMovementRow(item = smItem, lang = lang)
                         }
                     }
                 } else {
-                    items(movements, key = { it.id }) { sm ->
-                        StockMovementRow(sm = sm, lang = lang)
+                    if (movements.isEmpty()) {
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = lang.tr(
+                                        "لا توجد حركات مخزنية مسجلة لهذا الصنف بعد.",
+                                        "No stock movements recorded for this item yet."
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(14.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        items(movements, key = { it.id }) { sm ->
+                            StockMovementRow(sm = sm, lang = lang)
+                        }
                     }
                 }
             }
@@ -2180,6 +2248,63 @@ private fun StockMovementRow(
                 )
                 Text(
                     text = "${lang.tr("الرصيد:", "Stock:")} ${WesternFormatters.formatQuantity(sm.resultingStock)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveStockMovementRow(
+    item: StockMovementItem,
+    lang: AppLanguage
+) {
+    val isPositive = item.delta.compareTo(BigDecimal.ZERO) > 0
+    val deltaStr = WesternFormatters.formatExactOrPlain(item.delta)
+    val resultingStr = WesternFormatters.formatExactOrPlain(item.resultingStock)
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("stock_movement_${item.id.value}")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = item.reason,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = item.date,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFontFamily),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = if (isPositive) "+$deltaStr" else deltaStr,
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = if (isPositive) TraderTheme.financial.income else TraderTheme.financial.debit
+                )
+                Text(
+                    text = "${lang.tr("الرصيد:", "Stock:")} $resultingStr",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -424,6 +424,7 @@ class TraderViewModel(
             val freshProduct = state.products.firstOrNull { it.id == product.id } ?: product
             state.copy(
                 selectedProductForDetail = freshProduct,
+                selectedProductHistory = null,
                 lastInventoryActionMessageAr = null,
                 lastInventoryActionMessageEn = null,
                 isInventoryActionError = false,
@@ -484,15 +485,19 @@ class TraderViewModel(
             withContext(Dispatchers.Main) {
                 result.onSuccess { statement ->
                     _uiState.update { current ->
-                        current.copy(
-                            selectedCustomerStatement = com.example.data.mobile.merchantread.LiveCustomerStatement(
-                                customerId = statement.customerId.value,
-                                customerName = statement.customerName,
-                                fromDate = statement.fromDate,
-                                toDate = statement.toDate,
-                                currencies = statement.currencies
+                        if (current.selectedCustomerForDetail?.id != customerId) {
+                            current
+                        } else {
+                            current.copy(
+                                selectedCustomerStatement = com.example.data.mobile.merchantread.LiveCustomerStatement(
+                                    customerId = statement.customerId.value,
+                                    customerName = statement.customerName,
+                                    fromDate = statement.fromDate,
+                                    toDate = statement.toDate,
+                                    currencies = statement.currencies
+                                )
                             )
-                        )
+                        }
                     }
                     onComplete?.invoke(true)
                 }.onFailure {
@@ -508,12 +513,16 @@ class TraderViewModel(
             withContext(Dispatchers.Main) {
                 result.onSuccess { history ->
                     _uiState.update { current ->
-                        current.copy(
-                            selectedProductHistory = com.example.data.mobile.merchantread.LiveStockMovementHistory(
-                                productId = history.productId.value,
-                                movements = history.movements
+                        if (current.selectedProductForDetail?.id != productId) {
+                            current
+                        } else {
+                            current.copy(
+                                selectedProductHistory = com.example.data.mobile.merchantread.LiveStockMovementHistory(
+                                    productId = history.productId.value,
+                                    movements = history.movements
+                                )
                             )
-                        )
+                        }
                     }
                     onComplete?.invoke(true)
                 }.onFailure {
@@ -529,10 +538,15 @@ class TraderViewModel(
             withContext(Dispatchers.Main) {
                 result.onSuccess { detail ->
                     _uiState.update { current ->
-                        val localMatch = current.invoices.firstOrNull { it.id == invoicePublicId || it.serverInvoiceUlid == invoicePublicId }
-                        current.copy(
-                            selectedInvoiceDetail = com.example.data.mobile.merchantread.MerchantReadAdapter.toLiveInvoiceRecord(detail, localMatch)
-                        )
+                        val currentActive = current.activeReceipt
+                        if (currentActive == null || (currentActive.id != invoicePublicId && currentActive.serverInvoiceUlid != invoicePublicId)) {
+                            current
+                        } else {
+                            val localMatch = current.invoices.firstOrNull { it.id == invoicePublicId || it.serverInvoiceUlid == invoicePublicId }
+                            current.copy(
+                                selectedInvoiceDetail = com.example.data.mobile.merchantread.MerchantReadAdapter.toLiveInvoiceRecord(detail, localMatch)
+                            )
+                        }
                     }
                     onComplete?.invoke(true)
                 }.onFailure {
@@ -1304,6 +1318,7 @@ class TraderViewModel(
             val ready = printer != null && printer.isPaired
             state.copy(
                 activeReceipt = invoice,
+                selectedInvoiceDetail = null,
                 isNewlyCompletedSale = false,
                 receiptShareCount = 0,
                 receiptCopyCount = 0,
@@ -1343,6 +1358,7 @@ class TraderViewModel(
             val freshCustomer = state.customers.firstOrNull { it.id == customer.id } ?: customer
             state.copy(
                 selectedCustomerForDetail = freshCustomer,
+                selectedCustomerStatement = null,
                 lastCustomerPaymentMessageAr = null,
                 lastCustomerPaymentMessageEn = null,
                 currentScreen = TraderScreen.CUSTOMER_DETAIL,

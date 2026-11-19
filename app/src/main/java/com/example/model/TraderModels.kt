@@ -850,6 +850,8 @@ enum class PrinterStatus {
  * Uses exact BigDecimal math for financial totals.
  */
 object WesternFormatters {
+    fun formatExactOrPlain(value: java.math.BigDecimal?): String = value?.toPlainString() ?: "—"
+
     private val usSymbols = DecimalFormatSymbols(Locale.US)
     private val moneyFormat = DecimalFormat("#,##0.00", usSymbols)
     private val compactMoneyFormat = DecimalFormat("#,##0.##", usSymbols)
