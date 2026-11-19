@@ -828,7 +828,13 @@ class MerchantRound3EngineeringTest {
         val nanRes = repo.recordStructuredPurchaseBill(supplier.id, listOf(nanLine), 0.0, repo.getCurrentSession())
         assertTrue("NaN cost must be rejected", nanRes.isFailure)
 
-        val infLine = nanLine.copy(unitCostIls = Double.POSITIVE_INFINITY)
+        val infLine = PurchaseLineItem(
+            productId = "p_olive_oil",
+            productNameAr = "زيت",
+            productNameEn = "Oil",
+            quantity = 5,
+            unitCostIls = Double.POSITIVE_INFINITY
+        )
         val infRes = repo.recordStructuredPurchaseBill(supplier.id, listOf(infLine), 0.0, repo.getCurrentSession())
         assertTrue("Infinity cost must be rejected", infRes.isFailure)
 
@@ -854,8 +860,8 @@ class MerchantRound3EngineeringTest {
         assertEquals("Authoritative total must be exactly 460.00 ILS", 460.00, bill.totalIls, 0.001)
         assertEquals("Exact priced lines must be preserved without rounding loss", 2, bill.lines.size)
         assertEquals(5, bill.lines[0].quantity)
-        assertEquals(20.0, bill.lines[0].unitCostIls, 0.001)
+        assertEquals(20.0, requireNotNull(bill.lines[0].unitCostIls), 0.001)
         assertEquals(15, bill.lines[1].quantity)
-        assertEquals(24.0, bill.lines[1].unitCostIls, 0.001)
+        assertEquals(24.0, requireNotNull(bill.lines[1].unitCostIls), 0.001)
     }
 }

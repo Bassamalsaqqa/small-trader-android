@@ -3,25 +3,33 @@ package com.example.data.mobile.sync
 import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.PayloadDigest
 import com.example.data.mobile.contract.ServerUlid
+import com.example.data.mobile.contract.v2.OnlineSaleIntentProfile
 
 /**
- * Authoritative server receipt acknowledgement for a posted offline sale event.
+ * Authoritative server receipt acknowledgement for a posted offline or online sale event.
  *
  * Invariant:
  * Contains the authoritative backend identifiers, canonical digest, and receipt timestamp.
  * Exact match against the local event is strictly validated prior to confirmation.
  * Malformed or mismatched acks are NEVER confirmed and local payloads are NEVER replaced.
+ *
+ * Settlement Mode Invariants:
+ * - Unpaid: paymentUlid is explicitly null; accepted ONLY for original admitted unpaid profile.
+ * - Full / Partial: paymentUlid MUST be non-null, valid ServerUlid, and distinct from invoiceUlid.
+ *   Payment ULID must NEVER fall back to invoice ID.
  */
 data class ServerSaleAck(
     val companyId: ServerUlid,
     val clientEventId: ClientUuid,
     val payloadDigest: PayloadDigest,
     val invoiceUlid: ServerUlid,
-    val paymentUlid: ServerUlid,
-    val serverAcknowledgedAt: String
+    val paymentUlid: ServerUlid?,
+    val serverAcknowledgedAt: String,
+    val invoiceNumber: String? = null,
+    val paymentReceiptNumber: String? = null
 ) {
     override fun toString(): String {
-        return "ServerSaleAck(companyId=$companyId, clientEventId=$clientEventId, payloadDigest=$payloadDigest, invoiceUlid=$invoiceUlid, paymentUlid=$paymentUlid, serverAcknowledgedAt='$serverAcknowledgedAt')"
+        return "ServerSaleAck(companyId=$companyId, clientEventId=$clientEventId, payloadDigest=$payloadDigest, invoiceUlid=$invoiceUlid, paymentUlid=$paymentUlid, serverAcknowledgedAt='$serverAcknowledgedAt', invoiceNumber=$invoiceNumber, paymentReceiptNumber=$paymentReceiptNumber)"
     }
 }
 
@@ -176,13 +184,18 @@ interface SaleSyncGateway {
     /**
      * Checks if the event is already known/posted on the backend.
      * Must be called BEFORE attempting submission for each claimed record.
+     *
+     * @param expectedIntent Original retained canonical profile from persisted record.
+     * Bound to typed confirmation rules (unpaid explicit null payment accepted ONLY for
+     * original admitted unpaid profile; full/partial MUST have non-null distinct real payment ULID).
      */
     fun checkStatus(
         companyId: ServerUlid,
         actorId: ServerUlid,
         deviceId: ClientUuid,
         clientEventId: ClientUuid,
-        payloadDigest: PayloadDigest
+        payloadDigest: PayloadDigest,
+        expectedIntent: OnlineSaleIntentProfile? = null
     ): SyncStatusOutcome
 
     /**

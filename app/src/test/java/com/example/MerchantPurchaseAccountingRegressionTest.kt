@@ -131,9 +131,9 @@ class MerchantPurchaseAccountingRegressionTest {
         // 7. Verify exact lines in domain repository: 2 distinct lines with distinct costs
         assertEquals("Must preserve 2 exact priced lines without weighted rounding loss", 2, bill.lines.size)
         assertEquals(2, bill.lines[0].quantity)
-        assertEquals(10.0, bill.lines[0].unitCostIls, 0.001)
+        assertEquals(10.0, requireNotNull(bill.lines[0].unitCostIls), 0.001)
         assertEquals(1, bill.lines[1].quantity)
-        assertEquals(20.0, bill.lines[1].unitCostIls, 0.001)
+        assertEquals(20.0, requireNotNull(bill.lines[1].unitCostIls), 0.001)
 
         // 8. Verify supplier balance updated by exactly 25.00 ILS
         val updatedSupplier = repo.getSuppliers().first { it.id == supplier.id }
@@ -271,10 +271,10 @@ class MerchantPurchaseAccountingRegressionTest {
         assertTrue("Mixed zero-cost bill must succeed", res.isSuccess)
         val bill = res.getOrNull()!!
         assertEquals(2, bill.lines.size)
-        assertEquals(0.0, bill.lines[0].unitCostIls, 0.001)
-        assertEquals(0.0, bill.lines[0].totalCostIls, 0.001)
-        assertEquals(25.0, bill.lines[1].unitCostIls, 0.001)
-        assertEquals(50.0, bill.lines[1].totalCostIls, 0.001)
+        assertEquals(0.0, requireNotNull(bill.lines[0].unitCostIls), 0.001)
+        assertEquals(0.0, requireNotNull(bill.lines[0].totalCostIls), 0.001)
+        assertEquals(25.0, requireNotNull(bill.lines[1].unitCostIls), 0.001)
+        assertEquals(50.0, requireNotNull(bill.lines[1].totalCostIls), 0.001)
         assertEquals("Total must be 50.00 ILS", 50.00, bill.totalIls, 0.001)
 
         // 2. Bill with ONLY zero-cost lines (0.0 total) must fail domain validation

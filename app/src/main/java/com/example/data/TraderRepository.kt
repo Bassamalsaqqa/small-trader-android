@@ -11,6 +11,7 @@ import com.example.model.Product
 import com.example.model.ProductCategory
 import com.example.model.PurchaseBill
 import com.example.model.PurchaseLineItem
+import com.example.model.ServerExpenseCategory
 import com.example.model.StockMovement
 import com.example.model.Supplier
 import com.example.model.SupplierPayment
@@ -56,6 +57,8 @@ interface TraderRepository {
     fun findProductById(id: String): Product?
     suspend fun updateProductPrice(productId: String, newPriceIls: Double, operator: UserSession): Result<Unit>
     suspend fun adjustProductStock(productId: String, adjustment: Int, reason: String, operator: UserSession): Result<StockMovement>
+    suspend fun adjustProductStock(productId: String, adjustment: Int, reason: String, operator: UserSession, operationId: String): Result<StockMovement> =
+        adjustProductStock(productId, adjustment, reason, operator)
     fun getStockMovements(): List<StockMovement>
     suspend fun addCustomProduct(product: Product): Result<Product>
     suspend fun saveProduct(
@@ -95,6 +98,8 @@ interface TraderRepository {
     suspend fun saveSupplier(supplierId: String?, name: String, company: String, phone: String, operator: UserSession): Result<Supplier>
     suspend fun recordPurchaseBill(supplierId: String, itemsSummary: String, totalIls: Double, paidNowIls: Double, operator: UserSession, expectedProductId: String? = null, expectedQuantity: Int = 0): Result<PurchaseBill>
     suspend fun recordStructuredPurchaseBill(supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, operator: UserSession, note: String = ""): Result<PurchaseBill>
+    suspend fun recordStructuredPurchaseBill(supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, operator: UserSession, note: String, operationId: String): Result<PurchaseBill> =
+        recordStructuredPurchaseBill(supplierId, lines, paidNowIls, operator, note)
     suspend fun confirmPhysicalGoodsReceipt(billId: String, productId: String, receivedQty: Int, batchNote: String, operator: UserSession, operationId: String = "", lineId: String? = null): Result<StockMovement>
     suspend fun confirmPhysicalGoodsReceipt(billId: String, productId: String, receivedQty: BigDecimal, batchNote: String, operator: UserSession, operationId: String = "", lineId: String? = null): Result<StockMovement> =
         confirmPhysicalGoodsReceipt(billId, productId, receivedQty.toInt(), batchNote, operator, operationId, lineId)
@@ -102,7 +107,32 @@ interface TraderRepository {
 
     // Expenses
     fun getExpenses(): List<ExpenseEntry>
-    suspend fun recordExpense(title: String, category: ExpenseCategory, amountIls: Double, operator: UserSession): Result<ExpenseEntry>
+    fun getServerExpenseCategories(): List<ServerExpenseCategory> = emptyList()
+    suspend fun recordExpense(
+        title: String,
+        category: ExpenseCategory,
+        amountIls: Double,
+        operator: UserSession
+    ): Result<ExpenseEntry> = recordExpense(title, category, amountIls, operator, null, "")
+    suspend fun recordExpense(
+        title: String,
+        category: ExpenseCategory,
+        amountIls: Double,
+        operator: UserSession,
+        categoryId: String?
+    ): Result<ExpenseEntry> = recordExpense(title, category, amountIls, operator, categoryId, "")
+    suspend fun recordExpense(
+        title: String,
+        category: ExpenseCategory,
+        amountIls: Double,
+        operator: UserSession,
+        categoryId: String?,
+        operationId: String
+    ): Result<ExpenseEntry>
+
+    fun getDraftOperationId(formType: String): String = java.util.UUID.randomUUID().toString()
+    fun rotateDraftOperationId(formType: String): String = java.util.UUID.randomUUID().toString()
+    fun cancelDraftOperation(formType: String) {}
 
     fun close() {}
 }
@@ -492,10 +522,10 @@ class OfflineDemoTraderRepository(
                         id = "sm_${System.currentTimeMillis()}_${products[idx].id}",
                         productId = products[idx].id,
                         date = timestamp,
-                        delta = -totalDemanded,
+                        deltaExact = totalDemanded.negate(),
                         reasonAr = "مبيعات فاتورة #INV-${invoice.invoiceNumber}",
                         reasonEn = "Sales Invoice #INV-${invoice.invoiceNumber}",
-                        resultingStock = resultingStockExact
+                        resultingStockExact = resultingStockExact
                     )
                 )
             }
@@ -757,7 +787,7 @@ class OfflineDemoTraderRepository(
         val paidExact = BigDecimal(paidNowIls.toString()).setScale(2, RoundingMode.HALF_UP)
         val payableAdded = totalExact.subtract(paidExact)
 
-        val nextBillNum = (purchaseBills.maxOfOrNull { it.billNumber } ?: 300) + 1
+        val nextBillNum = (purchaseBills.mapNotNull { it.billNumber.toIntOrNull() }.maxOrNull() ?: 300) + 1
         val synthesizedLines = if (!expectedProductId.isNullOrBlank() && expectedQuantity > 0) {
             val prod = products.firstOrNull { it.id == expectedProductId }
             listOf(
@@ -776,7 +806,7 @@ class OfflineDemoTraderRepository(
 
         val bill = PurchaseBill(
             id = "pb_${System.currentTimeMillis()}_$nextBillNum",
-            billNumber = nextBillNum,
+            billNumber = nextBillNum.toString(),
             supplierId = supplierId,
             date = WesternFormatters.currentDate(),
             totalExact = totalExact,
@@ -834,7 +864,7 @@ class OfflineDemoTraderRepository(
             if (line.quantity <= 0) {
                 return Result.failure(IllegalArgumentException("Line ${lineIdx + 1}: Quantity must be greater than zero (was ${line.quantity})."))
             }
-            if (line.unitCostIls < 0.0 || line.unitCostIls.isNaN() || line.unitCostIls.isInfinite()) {
+            if (line.unitCostExact == null || line.unitCostExact.signum() < 0) {
                 return Result.failure(IllegalArgumentException("Line ${lineIdx + 1}: Explicit unit cost must be a valid non-negative number (was ${line.unitCostIls})."))
             }
             val lineId = if (line.id.isNotBlank()) line.id else UUID.randomUUID().toString()
@@ -866,12 +896,12 @@ class OfflineDemoTraderRepository(
         }
 
         val payableAdded = totalExact.subtract(paidExact)
-        val nextBillNum = (purchaseBills.maxOfOrNull { it.billNumber } ?: 300) + 1
+        val nextBillNum = (purchaseBills.mapNotNull { it.billNumber.toIntOrNull() }.maxOrNull() ?: 300) + 1
         val summaryStr = if (note.isNotBlank()) note else validatedLines.joinToString(" • ") { "${it.quantity}x ${it.productNameAr}" }
 
         val bill = PurchaseBill(
             id = "pb_${System.currentTimeMillis()}_$nextBillNum",
-            billNumber = nextBillNum,
+            billNumber = nextBillNum.toString(),
             supplierId = supplierId,
             date = WesternFormatters.currentDate(),
             totalExact = totalExact,
@@ -997,7 +1027,8 @@ class OfflineDemoTraderRepository(
 
         // 3. Update line and bill receiving state
         val updatedLine = targetLine.copy(
-            receivedQuantity = targetLine.receivedQuantity + receivedQty
+            receivedQuantity = targetLine.receivedQuantity + receivedQty,
+            receivedQuantityExact = targetLine.receivedQuantityExact + BigDecimal.valueOf(receivedQty.toLong())
         )
         val updatedLines = effectiveLines.toMutableList()
         updatedLines[targetLineIndex] = updatedLine
@@ -1007,6 +1038,7 @@ class OfflineDemoTraderRepository(
         purchaseBills[billIdx] = bill.copy(
             lines = updatedLines,
             receivedQuantity = newReceivedTotal,
+            receivedQuantityExact = updatedLines.fold(BigDecimal.ZERO) { total, line -> total + line.receivedQuantityExact },
             isReceived = isFullyReceived
         )
 
@@ -1113,6 +1145,23 @@ class OfflineDemoTraderRepository(
         category: ExpenseCategory,
         amountIls: Double,
         operator: UserSession
+    ): Result<ExpenseEntry> = recordExpense(title, category, amountIls, operator, null, "")
+
+    override suspend fun recordExpense(
+        title: String,
+        category: ExpenseCategory,
+        amountIls: Double,
+        operator: UserSession,
+        categoryId: String?
+    ): Result<ExpenseEntry> = recordExpense(title, category, amountIls, operator, categoryId, "")
+
+    override suspend fun recordExpense(
+        title: String,
+        category: ExpenseCategory,
+        amountIls: Double,
+        operator: UserSession,
+        categoryId: String?,
+        operationId: String
     ): Result<ExpenseEntry> {
         if (!operator.canManageExpenses()) {
             return Result.failure(SecurityException("غير مصرح: تسجيل المصروفات متاح للمالك والمدير فقط | Permission denied: Expense recording requires Owner or Manager"))
@@ -1121,7 +1170,7 @@ class OfflineDemoTraderRepository(
             return Result.failure(IllegalArgumentException("Invalid expense entry details."))
         }
         val exp = ExpenseEntry(
-            id = "exp_${System.currentTimeMillis()}",
+            id = if (operationId.isNotBlank()) operationId else "exp_${System.currentTimeMillis()}",
             date = WesternFormatters.currentDate(),
             titleAr = title.trim(),
             titleEn = title.trim(),
@@ -1131,5 +1180,21 @@ class OfflineDemoTraderRepository(
         expenses.add(0, exp)
         _expensesFlow.value = expenses.toList()
         return Result.success(exp)
+    }
+
+    private val draftIntents = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    override fun getDraftOperationId(formType: String): String {
+        return draftIntents.computeIfAbsent(formType) { java.util.UUID.randomUUID().toString() }
+    }
+
+    override fun rotateDraftOperationId(formType: String): String {
+        val next = java.util.UUID.randomUUID().toString()
+        draftIntents[formType] = next
+        return next
+    }
+
+    override fun cancelDraftOperation(formType: String) {
+        draftIntents[formType] = java.util.UUID.randomUUID().toString()
     }
 }

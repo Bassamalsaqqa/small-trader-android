@@ -204,7 +204,7 @@ interface OutboxRepository {
         clientEventId: ClientUuid,
         payloadDigest: PayloadDigest,
         invoiceUlid: ServerUlid,
-        paymentUlid: ServerUlid,
+        paymentUlid: ServerUlid?,
         serverAcknowledgedAt: String,
         claimToken: String
     ): Boolean
@@ -220,7 +220,7 @@ interface OutboxRepository {
         clientEventId: ClientUuid,
         payloadDigest: PayloadDigest,
         invoiceUlid: ServerUlid,
-        paymentUlid: ServerUlid,
+        paymentUlid: ServerUlid?,
         serverAcknowledgedAt: String
     ): Boolean
 
@@ -952,13 +952,16 @@ class OutboxRepositoryImpl(
         clientEventId: ClientUuid,
         payloadDigest: PayloadDigest,
         invoiceUlid: ServerUlid,
-        paymentUlid: ServerUlid,
+        paymentUlid: ServerUlid?,
         serverAcknowledgedAt: String,
         claimToken: String
     ): Boolean {
         require(claimToken.isNotBlank()) { "claimToken must not be blank for worker delivery confirmation" }
         require(ServerUlid.isValid(invoiceUlid.value)) { "Invalid invoice ULID: '${invoiceUlid.value}'" }
-        require(ServerUlid.isValid(paymentUlid.value)) { "Invalid payment ULID: '${paymentUlid.value}'" }
+        if (paymentUlid != null) {
+            require(ServerUlid.isValid(paymentUlid.value)) { "Invalid payment ULID: '${paymentUlid.value}'" }
+            require(paymentUlid != invoiceUlid) { "Payment ULID must not match invoice ULID" }
+        }
         com.example.data.mobile.contract.Rfc3339Validator.requireValid(serverAcknowledgedAt, "serverAcknowledgedAt")
 
         val now = clock()
@@ -980,6 +983,31 @@ class OutboxRepositoryImpl(
                 )
             }
 
+            val profile = try {
+                if (event.eventVersion == 2) {
+                    val root = StrictJsonParser.parseObject(String(event.payloadBytes, StandardCharsets.UTF_8))
+                    if ("lines" in root.properties && "payment" in root.properties) {
+                        OnlineSaleIntentProfile.fromStrictJson(root)
+                    } else null
+                } else null
+            } catch (_: Exception) {
+                null
+            }
+
+            if (paymentUlid == null) {
+                if (profile == null || profile.payment.settlementMode != "unpaid") {
+                    throw InvalidAcknowledgementException(
+                        "Explicit null payment accepted ONLY for original admitted unpaid profile; rejected for ${profile?.payment?.settlementMode ?: "offline/legacy"}"
+                    )
+                }
+            } else {
+                if (profile != null && profile.payment.settlementMode == "unpaid") {
+                    throw InvalidAcknowledgementException(
+                        "Non-null payment ULID ${paymentUlid.value} rejected for original admitted unpaid profile"
+                    )
+                }
+            }
+
             val state = database.outboxDao().getDeliveryState(companyId.value, clientEventId.value)
                 ?: throw InvalidAcknowledgementException("No delivery state found for clientEventId: $clientEventId")
 
@@ -997,14 +1025,14 @@ class OutboxRepositoryImpl(
                 val currentInvoice = state.invoiceUlid
                 val currentPayment = state.paymentUlid
                 val matches = currentInvoice == invoiceUlid.value &&
-                        currentPayment == paymentUlid.value
+                        currentPayment == paymentUlid?.value
                 if (matches) {
                     // Exact mapping replay: return true without mutating existing record
                     return@runInTransaction true
                 } else {
                     // Conflicting mapping rejected; preserve original
                     throw InvalidAcknowledgementException(
-                        "Conflicting server mapping for already-confirmed record (existing invoice: $currentInvoice, payment: $currentPayment; incoming invoice: ${invoiceUlid.value}, payment: ${paymentUlid.value}); original preserved"
+                        "Conflicting server mapping for already-confirmed record (existing invoice: $currentInvoice, payment: $currentPayment; incoming invoice: ${invoiceUlid.value}, payment: ${paymentUlid?.value}); original preserved"
                     )
                 }
             }
@@ -1039,7 +1067,7 @@ class OutboxRepositoryImpl(
                 deviceId = deviceId.value,
                 claimToken = claimToken,
                 invoiceUlid = invoiceUlid.value,
-                paymentUlid = paymentUlid.value,
+                paymentUlid = paymentUlid?.value,
                 serverUlid = invoiceUlid.value,
                 serverAcknowledgedAt = serverAcknowledgedAt,
                 nowMillis = now
@@ -1055,11 +1083,14 @@ class OutboxRepositoryImpl(
         clientEventId: ClientUuid,
         payloadDigest: PayloadDigest,
         invoiceUlid: ServerUlid,
-        paymentUlid: ServerUlid,
+        paymentUlid: ServerUlid?,
         serverAcknowledgedAt: String
     ): Boolean {
         require(ServerUlid.isValid(invoiceUlid.value)) { "Invalid invoice ULID: '${invoiceUlid.value}'" }
-        require(ServerUlid.isValid(paymentUlid.value)) { "Invalid payment ULID: '${paymentUlid.value}'" }
+        if (paymentUlid != null) {
+            require(ServerUlid.isValid(paymentUlid.value)) { "Invalid payment ULID: '${paymentUlid.value}'" }
+            require(paymentUlid != invoiceUlid) { "Payment ULID must not match invoice ULID" }
+        }
         com.example.data.mobile.contract.Rfc3339Validator.requireValid(serverAcknowledgedAt, "serverAcknowledgedAt")
 
         val now = clock()
@@ -1077,6 +1108,31 @@ class OutboxRepositoryImpl(
                 throw InvalidAcknowledgementException("Payload digest mismatch on reconciliation")
             }
 
+            val profile = try {
+                if (event.eventVersion == 2) {
+                    val root = StrictJsonParser.parseObject(String(event.payloadBytes, StandardCharsets.UTF_8))
+                    if ("lines" in root.properties && "payment" in root.properties) {
+                        OnlineSaleIntentProfile.fromStrictJson(root)
+                    } else null
+                } else null
+            } catch (_: Exception) {
+                null
+            }
+
+            if (paymentUlid == null) {
+                if (profile == null || profile.payment.settlementMode != "unpaid") {
+                    throw InvalidAcknowledgementException(
+                        "Explicit null payment accepted ONLY for original admitted unpaid profile; rejected for ${profile?.payment?.settlementMode ?: "offline/legacy"}"
+                    )
+                }
+            } else {
+                if (profile != null && profile.payment.settlementMode == "unpaid") {
+                    throw InvalidAcknowledgementException(
+                        "Non-null payment ULID ${paymentUlid.value} rejected for original admitted unpaid profile"
+                    )
+                }
+            }
+
             val state = database.outboxDao().getDeliveryState(companyId.value, clientEventId.value)
                 ?: throw InvalidAcknowledgementException("No delivery state found for clientEventId: $clientEventId")
 
@@ -1092,7 +1148,7 @@ class OutboxRepositoryImpl(
                 val currentInvoice = state.invoiceUlid
                 val currentPayment = state.paymentUlid
                 val matches = currentInvoice == invoiceUlid.value &&
-                        currentPayment == paymentUlid.value
+                        currentPayment == paymentUlid?.value
                 if (matches) {
                     return@runInTransaction true
                 } else {
@@ -1112,7 +1168,7 @@ class OutboxRepositoryImpl(
                 actorId = actorId.value,
                 deviceId = deviceId.value,
                 invoiceUlid = invoiceUlid.value,
-                paymentUlid = paymentUlid.value,
+                paymentUlid = paymentUlid?.value,
                 serverUlid = invoiceUlid.value,
                 serverAcknowledgedAt = serverAcknowledgedAt,
                 nowMillis = now

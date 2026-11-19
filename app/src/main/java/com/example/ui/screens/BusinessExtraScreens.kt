@@ -726,12 +726,15 @@ fun ExpensesScreen(
 fun AddExpenseDialog(
     state: TraderUiState,
     onDismiss: () -> Unit,
-    onConfirmExpense: (String, ExpenseCategory, Double) -> Unit
+    onConfirmExpense: (String, ExpenseCategory, Double, String?) -> Unit
 ) {
     val lang = state.language
     val financial = TraderTheme.financial
     var titleText by rememberSaveable { mutableStateOf("") }
     var selectedCategory by rememberSaveable { mutableStateOf(ExpenseCategory.TRANSPORT) }
+    var selectedServerCategoryId by rememberSaveable {
+        mutableStateOf(state.serverExpenseCategories.firstOrNull()?.id ?: "")
+    }
     var amountText by rememberSaveable { mutableStateOf("") }
     var localError by remember { mutableStateOf<String?>(null) }
 
@@ -864,20 +867,37 @@ fun AddExpenseDialog(
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        ExpenseCategory.entries.forEach { cat ->
-                            FilterChip(
-                                selected = selectedCategory == cat,
-                                onClick = { selectedCategory = cat },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = expenseCategoryIcon(cat),
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                },
-                                label = { Text(cat.label(lang)) },
-                                modifier = Modifier.heightIn(min = 48.dp)
-                            )
+                        if (state.serverExpenseCategories.isNotEmpty()) {
+                            state.serverExpenseCategories.forEach { serverCat ->
+                                FilterChip(
+                                    selected = selectedServerCategoryId == serverCat.id,
+                                    onClick = {
+                                        selectedServerCategoryId = serverCat.id
+                                        val enumMatch = ExpenseCategory.entries.firstOrNull {
+                                            serverCat.name(lang).contains(it.name, ignoreCase = true)
+                                        }
+                                        if (enumMatch != null) selectedCategory = enumMatch
+                                    },
+                                    label = { Text(serverCat.name(lang)) },
+                                    modifier = Modifier.heightIn(min = 48.dp)
+                                )
+                            }
+                        } else {
+                            ExpenseCategory.entries.forEach { cat ->
+                                FilterChip(
+                                    selected = selectedCategory == cat,
+                                    onClick = { selectedCategory = cat },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = expenseCategoryIcon(cat),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    },
+                                    label = { Text(cat.label(lang)) },
+                                    modifier = Modifier.heightIn(min = 48.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -968,7 +988,7 @@ fun AddExpenseDialog(
                             localError = lang.tr("يرجى إدخال مبلغ صحيح أكبر من صفر", "Please enter a valid amount greater than zero")
                         }
                         else -> {
-                            onConfirmExpense(titleText.trim(), selectedCategory, parsedAmount)
+                            onConfirmExpense(titleText.trim(), selectedCategory, parsedAmount, selectedServerCategoryId.ifBlank { null })
                         }
                     }
                 },
@@ -988,9 +1008,9 @@ fun AddExpenseDialog(
                             "Confirm ${StitchBidiUtils.formatIls(parsedAmount)}"
                         )
                     } else {
-                        lang.tr("تأكيد الصرف من الصندوق", "Confirm Drawer Expense")
+                        lang.tr("تأكيد الصرف", "Confirm Disbursement")
                     },
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                 )
             }
         },
@@ -999,12 +1019,22 @@ fun AddExpenseDialog(
                 onClick = onDismiss,
                 modifier = Modifier.heightIn(min = 48.dp)
             ) {
-                Text(
-                    text = lang.tr("إلغاء والعودة", "Cancel"),
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                Text(lang.tr("إلغاء", "Cancel"))
             }
         }
+    )
+}
+
+@Composable
+fun AddExpenseDialog(
+    state: TraderUiState,
+    onDismiss: () -> Unit,
+    onConfirmExpense: (String, ExpenseCategory, Double) -> Unit
+) {
+    AddExpenseDialog(
+        state = state,
+        onDismiss = onDismiss,
+        onConfirmExpense = { title, cat, amt, _ -> onConfirmExpense(title, cat, amt) }
     )
 }
 

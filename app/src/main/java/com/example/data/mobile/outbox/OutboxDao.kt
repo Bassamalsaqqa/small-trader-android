@@ -439,7 +439,7 @@ abstract class OutboxDao {
         deviceId: String,
         claimToken: String,
         invoiceUlid: String,
-        paymentUlid: String,
+        paymentUlid: String?,
         serverUlid: String,
         serverAcknowledgedAt: String,
         nowMillis: Long
@@ -468,7 +468,7 @@ abstract class OutboxDao {
         actorId: String,
         deviceId: String,
         invoiceUlid: String,
-        paymentUlid: String,
+        paymentUlid: String?,
         serverUlid: String,
         serverAcknowledgedAt: String,
         nowMillis: Long

@@ -337,8 +337,9 @@ fun PhysicalGoodsReceiptDialog(
 
     val maxReceivableQty = pendingQty.coerceAtLeast(0)
     var receivingQtyText by rememberSaveable(bill.id, selectedLineId) { mutableStateOf(maxReceivableQty.toString()) }
-    val receivingQty = receivingQtyText.toIntOrNull() ?: 0
-    val isQtyValid = receivingQty > 0 && receivingQty <= maxReceivableQty
+    val receivingQtyDouble = receivingQtyText.toDoubleOrNull() ?: 0.0
+    val receivingQty = receivingQtyDouble.toInt()
+    val isQtyValid = receivingQtyDouble > 0.0 && receivingQtyDouble <= maxReceivableQty.toDouble()
 
     var batchNote by rememberSaveable(bill.id) {
         mutableStateOf("استلام مخزني مطابق للفاتورة ${WesternFormatters.formatBillCode(bill.billNumber)}")
@@ -500,7 +501,7 @@ fun PhysicalGoodsReceiptDialog(
                                 grnInlineError = null
                             },
                             label = { Text(lang.tr("الكمية المستلمة الآن", "Quantity Received Now")) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             singleLine = true,
                             shape = RoundedCornerShape(10.dp),
                             isError = !isQtyValid && receivingQtyText.isNotBlank(),
@@ -1105,7 +1106,7 @@ fun ReceivePurchaseBillDialog(
                                                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
                                             )
                                             Text(
-                                                "${line.quantity} × ${WesternFormatters.formatIls(line.unitCostIls)} = ${WesternFormatters.formatIls(line.totalCostIls)}",
+                                                "${line.quantity} × ${(line.unitCostExact?.toPlainString() ?: "—")} = ${(line.totalCostExact?.toPlainString() ?: "—")}",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -1549,7 +1550,7 @@ fun PurchaseBillRow(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "${WesternFormatters.formatIls(line.unitCostIls)}/${lang.tr("وحدة", "unit")}",
+                                text = "${(line.unitCostExact?.toPlainString() ?: "—")}/${lang.tr("وحدة", "unit")}",
                                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

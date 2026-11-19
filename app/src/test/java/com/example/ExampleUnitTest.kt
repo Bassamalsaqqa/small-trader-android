@@ -2023,15 +2023,15 @@ class ExampleUnitTest {
         assertEquals(Integer.valueOf(1036), latestTx.invoiceNumber)
         assertEquals(158.00, latestTx.debitIls, 0.001)
         assertEquals(58.00, latestTx.creditIls, 0.001)
-        assertEquals(460.00, latestTx.runningBalanceIls, 0.001)
-        assertEquals(360.00, priorTx.runningBalanceIls, 0.001)
+        assertEquals(460.00, requireNotNull(latestTx.runningBalanceIls), 0.001)
+        assertEquals(360.00, requireNotNull(priorTx.runningBalanceIls), 0.001)
         assertEquals(
             "Running balance after #INV-1036 must equal prior balance (360) + unpaid remainder (158 - 58 = 100)",
-            priorTx.runningBalanceIls + (latestTx.debitIls - latestTx.creditIls),
-            latestTx.runningBalanceIls,
+            requireNotNull(priorTx.runningBalanceIls) + (latestTx.debitIls - latestTx.creditIls),
+            requireNotNull(latestTx.runningBalanceIls),
             0.001
         )
-        assertEquals(cust04.balanceIls, latestTx.runningBalanceIls, 0.001)
+        assertEquals(cust04.balanceIls, requireNotNull(latestTx.runningBalanceIls), 0.001)
 
         // Statement share text for cust_04 includes #INV-1036, 158.00 total, 58.00 paid, +100.00 remaining, and 460.00 balance
         val cust04Statement = viewModel.formatCustomerStatementText(cust04)
@@ -2048,7 +2048,7 @@ class ExampleUnitTest {
                 assertEquals(
                     "Latest transaction running balance for ${customer.id} must match customer.balanceIls",
                     customer.balanceIls,
-                    txs.first().runningBalanceIls,
+                    requireNotNull(txs.first().runningBalanceIls),
                     0.001
                 )
             }

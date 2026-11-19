@@ -18,8 +18,10 @@ import com.example.SmallTraderApp
 import com.example.data.CurrentAuthScope
 import com.example.data.ProductionTraderRepository
 import com.example.data.mobile.integration.OutboxAuthDenialBridge
+import com.example.data.mobile.session.AndroidKeyStoreCryptoEngine
 import com.example.data.mobile.outbox.OutboxDatabase
 import com.example.data.mobile.outbox.OutboxRepositoryImpl
+import com.example.data.mobile.outbox.RoomMerchantCommandStore
 import com.example.data.mobile.session.AuthDenialListener
 import com.example.data.mobile.session.StaffAuthState
 import com.example.ui.staff.StaffCompanySelectScreen
@@ -146,6 +148,8 @@ fun AuthenticatedTraderApp(
                                 val loaded = kotlinx.coroutines.withContext(Dispatchers.IO) {
                             val db = OutboxDatabase.buildDatabase(context.applicationContext)
                             val outboxRepo = OutboxRepositoryImpl(database = db)
+                            val cryptoEngine = AndroidKeyStoreCryptoEngine()
+                            val commandStore = RoomMerchantCommandStore(db, cryptoEngine)
                             val authScopeProvider: () -> CurrentAuthScope? = {
                                 val currentCoord = staffViewModel.getCoordinator()
                                 val currentReady = currentCoord?.authState as? StaffAuthState.ReadReady
@@ -166,6 +170,7 @@ fun AuthenticatedTraderApp(
                                 outboxRepository = outboxRepo,
                                 transport = transport,
                                 baseOrigin = configuredOrigin,
+                                commandStore = commandStore,
                                 authScopeProvider = authScopeProvider,
                                 onClose = { db.close() }
                             ).also { created = it } } catch (error: Exception) { db.close(); throw error }

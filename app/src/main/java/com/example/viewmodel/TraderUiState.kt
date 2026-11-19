@@ -85,6 +85,12 @@ data class TraderUiState(
     val isSubmittingSale: Boolean = false,
     val isActionBusy: Boolean = false,
     val currentSaleClientEventId: String = java.util.UUID.randomUUID().toString(),
+    val draftExpenseOperationId: String = java.util.UUID.randomUUID().toString(),
+    val draftStockAdjustOperationId: String = java.util.UUID.randomUUID().toString(),
+    val draftPurchaseOperationId: String = java.util.UUID.randomUUID().toString(),
+    val draftSupplierPaymentOperationId: String = java.util.UUID.randomUUID().toString(),
+    val draftCustomerPaymentOperationId: String = java.util.UUID.randomUUID().toString(),
+    val draftGrnOperationId: String = java.util.UUID.randomUUID().toString(),
     val checkoutErrorAr: String? = null,
     val checkoutErrorEn: String? = null,
 
@@ -118,6 +124,7 @@ data class TraderUiState(
 
     // Expenses
     val expenses: List<ExpenseEntry> = emptyList(),
+    val serverExpenseCategories: List<com.example.model.ServerExpenseCategory> = emptyList(),
     val lastExpenseActionMessageAr: String? = null,
     val lastExpenseActionMessageEn: String? = null,
     val isExpenseActionError: Boolean = false,

@@ -1414,6 +1414,7 @@ private fun CustomerStatementRow(
 
     val runningBal = tx.runningBalanceIls
     val runningBalLabel = when {
+        runningBal == null -> "—"
         runningBal > 0.005 -> lang.tr(
             "الرصيد بعدها: عليه ${StitchBidiUtils.formatIls(runningBal)}",
             "Balance after: Owes ${StitchBidiUtils.formatIls(runningBal)}"

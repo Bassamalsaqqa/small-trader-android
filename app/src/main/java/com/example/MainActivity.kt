@@ -640,8 +640,8 @@ fun SmallTraderApp(
                     AddExpenseDialog(
                         state = state,
                         onDismiss = { traderViewModel.openAddExpenseDialog(false) },
-                        onConfirmExpense = { title, category, amountIls ->
-                            traderViewModel.addExpense(title, category, amountIls)
+                        onConfirmExpense = { title, category, amountIls, categoryId ->
+                            traderViewModel.addExpense(title, category, amountIls, categoryId)
                         }
                     )
                     }
