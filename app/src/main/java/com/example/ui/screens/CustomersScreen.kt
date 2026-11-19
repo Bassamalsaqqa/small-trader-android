@@ -146,10 +146,10 @@ fun CustomersScreen(
 
             TraderUiState.normalizeForSearch(c.nameAr).contains(q) ||
                 TraderUiState.normalizeForSearch(c.nameEn).contains(q) ||
-                TraderUiState.normalizeForSearch(c.addressAr).contains(q) ||
-                TraderUiState.normalizeForSearch(c.addressEn).contains(q) ||
-                c.phone.replace("-", "").contains(q.replace("-", "")) ||
-                c.phone.contains(q)
+                (c.addressAr?.let { TraderUiState.normalizeForSearch(it).contains(q) } ?: false) ||
+                (c.addressEn?.let { TraderUiState.normalizeForSearch(it).contains(q) } ?: false) ||
+                (c.phone?.replace("-", "")?.contains(q.replace("-", "")) ?: false) ||
+                (c.phone?.contains(q) ?: false)
         }
     }
 
@@ -607,7 +607,7 @@ private fun CustomerDirectoryRow(
                 ) {
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                         Text(
-                            text = customer.phone,
+                            text = customer.phone ?: "",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontFamily = MonoFontFamily,
                                 fontWeight = FontWeight.SemiBold
@@ -781,7 +781,7 @@ fun CustomerDetailScreen(
                     ) {
                         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                             Text(
-                                text = customer.phone,
+                                text = customer.phone ?: "",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.SemiBold
@@ -1206,8 +1206,8 @@ private fun EditCustomerDialog(
     onConfirmUpdate: (name: String, phone: String, address: String, creditLimitIls: Double) -> Unit
 ) {
     var nameText by rememberSaveable(customer.id) { mutableStateOf(customer.nameAr) }
-    var phoneText by rememberSaveable(customer.id) { mutableStateOf(customer.phone) }
-    var addressText by rememberSaveable(customer.id) { mutableStateOf(customer.addressAr) }
+    var phoneText by rememberSaveable(customer.id) { mutableStateOf(customer.phone ?: "") }
+    var addressText by rememberSaveable(customer.id) { mutableStateOf(customer.addressAr ?: "") }
     var limitText by remember(customer.id) {
         mutableStateOf(WesternFormatters.formatNumber(customer.creditLimitIls).removeSuffix(".00"))
     }

@@ -32,7 +32,7 @@ class ExampleUnitTest {
     // =========================================================================
 
     @Test
-    fun repositoryRecordSale_isIdempotent_doesNotDoubleDeductStockOrDuplicateInvoices() {
+    fun repositoryRecordSale_isIdempotent_doesNotDoubleDeductStockOrDuplicateInvoices(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val oliveOil = repo.getProducts().first { it.id == "p_olive_oil" }
         val initialStock = oliveOil.stockCount
@@ -103,7 +103,7 @@ class ExampleUnitTest {
     // =========================================================================
 
     @Test
-    fun staleOperation_revalidatesStockAtFinalPosting_rejectsWithoutSilentClamping() {
+    fun staleOperation_revalidatesStockAtFinalPosting_rejectsWithoutSilentClamping(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val manager = repo.getCurrentSession()
         val oliveOil = repo.getProducts().first { it.id == "p_olive_oil" }
@@ -127,7 +127,7 @@ class ExampleUnitTest {
         )
 
         // Meanwhile, another cashier or inventory adjustment reduces stock to 2 items
-        repo.adjustProductStock(oliveOil.id, -(oliveOil.stockCount - 2), "تعديل خارجي", manager)
+        repo.adjustProductStock(oliveOil.id, -(oliveOil.stockCount - 2).toInt(), "تعديل خارجي", manager)
         assertEquals(2, repo.findProductById(oliveOil.id)!!.stockCount)
 
         // Now final sale posting is attempted with the stale 5 items
@@ -147,7 +147,7 @@ class ExampleUnitTest {
     // =========================================================================
 
     @Test
-    fun purchaseBill_rejectsNegativePaidNow_andInvalidSupplier() {
+    fun purchaseBill_rejectsNegativePaidNow_andInvalidSupplier(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val manager = repo.getCurrentSession()
         val supplier = repo.getSuppliers().first()
@@ -228,7 +228,7 @@ class ExampleUnitTest {
     // =========================================================================
 
     @Test
-    fun discountRounding_exactMoneyValues_5PercentOn6Point50Yields33AgorotDiscountAnd6Point17Net() {
+    fun discountRounding_exactMoneyValues_5PercentOn6Point50Yields33AgorotDiscountAnd6Point17Net(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val viewModel = TraderViewModel(repo)
 
@@ -302,7 +302,7 @@ class ExampleUnitTest {
     // =========================================================================
 
     @Test
-    fun customerCreditLimit_isEnforcedAuthoritatively() {
+    fun customerCreditLimit_isEnforcedAuthoritatively(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val viewModel = TraderViewModel(repo)
         val customer = repo.getCustomers().first { it.id == "cust_02" } // Um Samer: balance 90, limit 800
@@ -523,12 +523,12 @@ class ExampleUnitTest {
     // =========================================================================
 
     @Test
-    fun aggregateStock_multipleLinesOfSameProduct_rejectsWhenCombinedDemandExceedsStock() {
+    fun aggregateStock_multipleLinesOfSameProduct_rejectsWhenCombinedDemandExceedsStock(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val oliveOil = repo.getProducts().first { it.id == "p_olive_oil" } // initial stock = 20
         // Set stock to exactly 18
         val manager = repo.getCurrentSession()
-        repo.adjustProductStock(oliveOil.id, -(oliveOil.stockCount - 18), "ضبط للاختبار", manager)
+        repo.adjustProductStock(oliveOil.id, -(oliveOil.stockCount - 18).toInt(), "ضبط للاختبار", manager)
         assertEquals(18, repo.findProductById(oliveOil.id)!!.stockCount)
 
         // Invoice has TWO lines of olive oil: 12 + 12 = 24 items demanded. Available = 18.
@@ -567,7 +567,7 @@ class ExampleUnitTest {
     // =========================================================================
 
     @Test
-    fun lineQuantity_negativeOrZero_isRejectedAndDoesNotMutateStock() {
+    fun lineQuantity_negativeOrZero_isRejectedAndDoesNotMutateStock(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val oliveOil = repo.getProducts().first { it.id == "p_olive_oil" }
         val initialStock = oliveOil.stockCount
@@ -601,7 +601,7 @@ class ExampleUnitTest {
     // =========================================================================
 
     @Test
-    fun invoiceTotals_callerTamperedAmount_isRejectedByCanonicalPricing() {
+    fun invoiceTotals_callerTamperedAmount_isRejectedByCanonicalPricing(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val oliveOil = repo.getProducts().first { it.id == "p_olive_oil" } // price is 38.00 ₪
 
@@ -633,7 +633,7 @@ class ExampleUnitTest {
     // =========================================================================
 
     @Test
-    fun invoiceNumberCollision_differentIds_failsRatherThanSilentLoss() {
+    fun invoiceNumberCollision_differentIds_failsRatherThanSilentLoss(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val oliveOil = repo.getProducts().first { it.id == "p_olive_oil" }
 
@@ -684,7 +684,7 @@ class ExampleUnitTest {
     // =========================================================================
 
     @Test
-    fun customerPayment_idempotentReplayWithSameId_doesNotDoubleDeduct() {
+    fun customerPayment_idempotentReplayWithSameId_doesNotDoubleDeduct(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val cust1 = repo.getCustomers().first { it.id == "cust_01" } // balance 185.00
         val initialBalance = cust1.balanceIls
@@ -722,7 +722,7 @@ class ExampleUnitTest {
     // =========================================================================
 
     @Test
-    fun customProduct_negativePriceOrStock_isRejected() {
+    fun customProduct_negativePriceOrStock_isRejected(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
 
         val negativePriceProduct = Product(
@@ -765,7 +765,7 @@ class ExampleUnitTest {
     // =========================================================================
 
     @Test
-    fun recordExpense_cashierRole_isRejectedByPermissionBoundary() {
+    fun recordExpense_cashierRole_isRejectedByPermissionBoundary(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val cashier = SampleCatalog.demoStaff.first { it.role == UserRole.CASHIER }
         val owner = SampleCatalog.demoStaff.first { it.role == UserRole.OWNER }
@@ -795,7 +795,7 @@ class ExampleUnitTest {
     // =========================================================================
 
     @Test
-    fun anonymousWalkIn_creditSale_isRejected() {
+    fun anonymousWalkIn_creditSale_isRejected(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val oliveOil = repo.getProducts().first { it.id == "p_olive_oil" }
 
@@ -1585,8 +1585,8 @@ class ExampleUnitTest {
         // 1. Seeded weighted item (za'atar / frekeh) carries warehouse, lot/expiry, and isWeightedDisplayOnly
         val zaatar = viewModel.uiState.value.products.first { it.id == "p_zaatar_jenin" }
         assertTrue(zaatar.isWeightedDisplayOnly)
-        assertTrue(zaatar.warehouseAr.isNotEmpty())
-        assertTrue(zaatar.lotBatchCode.isNotEmpty())
+        assertTrue(!zaatar.warehouseAr.isNullOrEmpty())
+        assertTrue(!zaatar.lotBatchCode.isNullOrEmpty())
         assertFalse(zaatar.expiryDate.isNullOrEmpty())
 
         // 2. Create a new catalog product with warehouse, lot/batch, expiry, and weighted display flag
@@ -1627,7 +1627,7 @@ class ExampleUnitTest {
             costIls = 21.00,
             unitAr = "كغم موزون",
             unitEn = "Weighted kg",
-            initialStock = halva.stockCount, // Stock count preserved; adjusted via stock movements
+            initialStock = halva.stockCountInt, // Stock count preserved; adjusted via stock movements
             minStockThreshold = 5,
             warehouseAr = "ركن الأجبان والحلاوة الموزونة",
             lotBatchCode = "LOT-HLV-2612",
@@ -1863,7 +1863,7 @@ class ExampleUnitTest {
     // =========================================================================
 
     @Test
-    fun physicalGoodsReceiptGrn_rejectsUnknownBill_unrelatedProduct_mismatchedQuantity_textOnlyBill_andDuplicateReceipt() {
+    fun physicalGoodsReceiptGrn_rejectsUnknownBill_unrelatedProduct_mismatchedQuantity_textOnlyBill_andDuplicateReceipt(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val viewModel = TraderViewModel(repo)
         val manager = repo.getCurrentSession()
@@ -1977,7 +1977,7 @@ class ExampleUnitTest {
         for (invoice in state.invoices) {
             val lineSum = invoice.items.fold(BigDecimal.ZERO) { acc, item ->
                 val line = BigDecimal(item.product.priceIls.toString())
-                    .multiply(BigDecimal(item.quantity))
+                    .multiply(item.quantity)
                     .setScale(2, RoundingMode.HALF_UP)
                 acc.add(line)
             }.setScale(2, RoundingMode.HALF_UP).toDouble()

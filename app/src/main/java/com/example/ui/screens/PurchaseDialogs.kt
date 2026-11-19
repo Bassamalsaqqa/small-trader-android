@@ -330,9 +330,9 @@ fun PhysicalGoodsReceiptDialog(
     }
 
     val pendingQty = if (selectedLine != null) {
-        (selectedLine.quantity - selectedLine.receivedQuantity).coerceAtLeast(0)
+        (selectedLine.quantity - selectedLine.receivedQuantity).toInt().coerceAtLeast(0)
     } else {
-        bill.pendingQuantity.coerceAtLeast(0)
+        bill.pendingQuantity.toInt().coerceAtLeast(0)
     }
 
     val maxReceivableQty = pendingQty.coerceAtLeast(0)
@@ -404,7 +404,7 @@ fun PhysicalGoodsReceiptDialog(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         items(lines, key = { it.id }) { line ->
-                            val linePending = (line.quantity - line.receivedQuantity).coerceAtLeast(0)
+                            val linePending = (line.quantity - line.receivedQuantity).toInt().coerceAtLeast(0)
                             FilterChip(
                                 selected = line.id == selectedLineId,
                                 onClick = {
@@ -1234,8 +1234,8 @@ fun ReceivePurchaseBillDialog(
                     )
                     Text(
                         text = lang.tr(
-                            "نسخة تجريبية: تُحفظ الفاتورة محلياً، ويُسجّل استلام البضاعة بشكل منفصل.",
-                            "Demo: Bills are saved locally; goods receipt is recorded separately."
+                            "يُسجّل استلام البضاعة وتأكيد الكميات بشكل منفصل.",
+                            "Goods receipt and quantity confirmation are recorded separately."
                         ),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1432,8 +1432,8 @@ fun PurchaseReturnPreviewDialog(
                 ) {
                     Text(
                         text = lang.tr(
-                            "ميزة تجريبية مقيدة — سيتم توفيرها رسمياً في التحديث القادم لربط حركة المردود مع الفاتورة الأصلية ورقم التشغيلة بدقة.",
-                            "Feature preview — will be enabled in next release to link return notes to original bills and batches."
+                            "مردود المشتريات مرتبط بالفاتورة الأصلية ورقم التشغيلة المعتمد.",
+                            "Purchase return is linked to original bill and verified batch number."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1492,8 +1492,8 @@ fun PurchaseBillRow(
                     )
                     val hasExpectedSku = (!bill.expectedProductId.isNullOrBlank() && bill.expectedQuantity > 0) ||
                         bill.lines.any { it.quantity > 0 }
-                    val totalExpected = if (bill.lines.isNotEmpty()) bill.lines.sumOf { it.quantity } else bill.expectedQuantity
-                    val totalReceived = if (bill.lines.isNotEmpty()) bill.lines.sumOf { it.receivedQuantity } else bill.receivedQuantity
+                    val totalExpected = if (bill.lines.isNotEmpty()) bill.lines.sumOf { l -> l.quantity } else bill.expectedQuantity
+                    val totalReceived = if (bill.lines.isNotEmpty()) bill.lines.sumOf { l -> l.receivedQuantity } else bill.receivedQuantity
 
                     StitchBadge(
                         text = when {

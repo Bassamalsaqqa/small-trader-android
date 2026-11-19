@@ -8,6 +8,7 @@ import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.contract.v2.OfflineSaleEventV2
 import com.example.data.mobile.contract.v2.OfflineSaleIntakeRequestV2
+import com.example.data.mobile.contract.v2.OnlineSaleIntentProfile
 import com.example.data.mobile.contract.v2.PaymentDecimalConsistency
 import com.example.data.mobile.contract.ContractConstants
 import java.math.BigDecimal
@@ -101,6 +102,20 @@ interface OutboxRepository {
         deviceId: ClientUuid,
         currencyMinorUnits: Int,
         rawCanonicalEventUtf8: ByteArray
+    ): CaptureResult
+
+    /**
+     * Atomically captures a validated online sale intent profile.
+     * Durably persists immutable canonical profile UTF-8 bytes and digest alongside actor,
+     * company, device, and currencyMinorUnits metadata WITHOUT a fabricated offline lease (deviceLeaseId = null).
+     */
+    fun captureOnlineSaleIntent(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        currencyMinorUnits: Int,
+        profile: OnlineSaleIntentProfile,
+        rawCanonicalProfileUtf8: ByteArray? = null
     ): CaptureResult
 
     /**
@@ -414,11 +429,8 @@ class OutboxRepositoryImpl(
         }
 
         // 4. Strict parse direct root OfflineSaleEventV2:
-        // Strictly rejects intake envelope (e.g. "event", "payload_digest"), fixture wrapper (e.g. "request"),
-        // arbitrary root (e.g. {}), or unknown keys.
         val parsedJson = StrictJsonParser.parse(jsonString).asObject()
         val event = OfflineSaleEventV2.fromStrictJson(parsedJson)
-
         return captureSaleV2(
             companyId = companyId,
             actorId = actorId,
@@ -426,6 +438,64 @@ class OutboxRepositoryImpl(
             currencyMinorUnits = currencyMinorUnits,
             event = event,
             rawCanonicalEventUtf8 = clonedRaw
+        )
+    }
+
+    override fun captureOnlineSaleIntent(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        currencyMinorUnits: Int,
+        profile: OnlineSaleIntentProfile,
+        rawCanonicalProfileUtf8: ByteArray?
+    ): CaptureResult {
+        // Guard 1: Scope parameters MUST match profile identity BEFORE write
+        require(companyId == profile.companyId) {
+            "Explicit companyId ($companyId) does not match profile companyId (${profile.companyId})"
+        }
+        require(actorId == profile.actorId) {
+            "Explicit actorId ($actorId) does not match profile actorId (${profile.actorId})"
+        }
+        require(deviceId == profile.deviceId) {
+            "Explicit deviceId ($deviceId) does not match profile deviceId (${profile.deviceId})"
+        }
+        require(currencyMinorUnits == profile.currencyMinorUnits) {
+            "Explicit currencyMinorUnits ($currencyMinorUnits) does not match profile currencyMinorUnits (${profile.currencyMinorUnits})"
+        }
+
+        // Canonical bytes validation & defensive copy
+        val canonicalBytes = if (rawCanonicalProfileUtf8 != null) {
+            val clonedRaw = rawCanonicalProfileUtf8.clone()
+            require(clonedRaw.size <= ContractConstants.MAX_PAYLOAD_BYTES) {
+                "rawCanonicalProfileUtf8 size ${clonedRaw.size} exceeds maximum allowed 1 MiB (${ContractConstants.MAX_PAYLOAD_BYTES} bytes)"
+            }
+            val expectedBytes = CanonicalJsonSerializer.serialize(profile).toByteArray(StandardCharsets.UTF_8)
+            require(clonedRaw.contentEquals(expectedBytes)) {
+                "Provided rawCanonicalProfileUtf8 is not canonical for event ${profile.clientEventId}"
+            }
+            clonedRaw
+        } else {
+            CanonicalJsonSerializer.serialize(profile).toByteArray(StandardCharsets.UTF_8)
+        }
+
+        val computedDigest = profile.computePayloadDigest()
+        val byteDigest = PayloadDigest.fromBytes(canonicalBytes)
+        require(computedDigest == byteDigest) {
+            "Canonical bytes digest ($byteDigest) does not match profile digest ($computedDigest) for event ${profile.clientEventId}"
+        }
+
+        return executeCaptureTransaction(
+            companyIdStr = profile.companyId.value,
+            actorIdStr = profile.actorId.value,
+            deviceIdStr = profile.deviceId.value,
+            deviceLeaseIdStr = null, // No fabricated offline lease!
+            clientEventIdStr = profile.clientEventId.value,
+            capturedAtStr = java.text.SimpleDateFormat("yyyy-MM-dd\'T\'HH:mm:ss.SSS\'Z\'", java.util.Locale.ROOT).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date(clock())),
+            eventVersion = 2,
+            payloadDigestStr = computedDigest.value,
+            canonicalBytes = canonicalBytes
         )
     }
 
@@ -604,7 +674,7 @@ class OutboxRepositoryImpl(
         companyIdStr: String,
         actorIdStr: String,
         deviceIdStr: String,
-        deviceLeaseIdStr: String,
+        deviceLeaseIdStr: String?,
         clientEventIdStr: String,
         capturedAtStr: String,
         eventVersion: Int,

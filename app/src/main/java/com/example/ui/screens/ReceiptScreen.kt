@@ -768,8 +768,8 @@ fun ReceiptScreen(
                             )
                             Text(
                                 text = lang.tr(
-                                    "طباعة تجريبية أو مشاركة نص الفاتورة عبر النظام",
-                                    "Simulated printing or native text sharing"
+                                    "طباعة الإيصال أو مشاركة نص الفاتورة عبر النظام",
+                                    "Print receipt or share invoice text"
                                 ),
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant

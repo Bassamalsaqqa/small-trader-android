@@ -2085,7 +2085,7 @@ fun UserProfileScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
-                                text = lang.tr("تفاصيل الصلاحيات وأداة التبديل التجريبية", "Permission Details & Demo Role Switcher"),
+                                text = lang.tr("تفاصيل الصلاحيات وأداة التبديل", "Permission Details & Role Switcher"),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -2112,14 +2112,14 @@ fun UserProfileScreen(
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = lang.tr("أداة تبديل الدور التجريبية:", "Demo Role Switcher:"),
+                                text = lang.tr("تبديل الدور النشط:", "Active Role Switcher:"),
                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
                                 text = lang.tr(
-                                    "معاينة الفروق الميدانية بين صلاحيات المالك والكاشير داخل هذا النموذج التجريبي المحلي.",
-                                    "Inspect field differences between Owner and Cashier permissions in this local prototype."
+                                    "معاينة الفروق الميدانية بين صلاحيات المالك والكاشير داخل النظام.",
+                                    "Inspect field differences between Owner and Cashier permissions in the system."
                                 ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -2600,7 +2600,7 @@ fun BusinessSettingsScreen(
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(
-                                    text = lang.tr("التاجر الصغير — نموذج تجريبي محلي يعمل في ذاكرة الجهاز • الإصدار 1.0", "Small Trader — Local in-memory demo • v1.0"),
+                                    text = lang.tr("التاجر الصغير — الإصدار 1.1", "Small Trader — v1.1"),
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
@@ -2626,7 +2626,7 @@ fun BusinessSettingsScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = lang.tr("إعادة تصفير الذاكرة التجريبية", "Reset In-Memory Demo Data"),
+                                    text = lang.tr("إعادة ضبط البيانات المحلية", "Reset Local Session Data"),
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                                 )
                             }
@@ -2644,15 +2644,15 @@ fun BusinessSettingsScreen(
             shape = RoundedCornerShape(16.dp),
             title = {
                 Text(
-                    text = lang.tr("تأكيد إعادة ضبط البيانات التجريبية", "Confirm In-Memory Reset"),
+                    text = lang.tr("تأكيد إعادة ضبط البيانات المحلية", "Confirm Local Session Reset"),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             },
             text = {
                 Text(
                     text = lang.tr(
-                        "سيؤدي هذا الإجراء إلى حذف العمليات المسجلة في الذاكرة للجلسة الحالية واستعادة البيانات الافتراضية للنموذج.",
-                        "This action will reset current session's in-memory transactions and restore default sample data."
+                        "سيؤدي هذا الإجراء إلى مسح العمليات المخزنة محلياً للجلسة الحالية وإعادة تهيئة السجلات.",
+                        "This action will clear locally stored transactions for the current session and reinitialize records."
                     ),
                     style = MaterialTheme.typography.bodySmall
                 )

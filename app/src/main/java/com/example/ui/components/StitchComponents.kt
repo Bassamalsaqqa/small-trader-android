@@ -70,6 +70,13 @@ object StitchBidiUtils {
     fun formatIls(amount: Double): String {
         return "\u2066${WesternFormatters.formatIls(amount)}\u2069"
     }
+
+    /**
+     * Formats an exact BigDecimal ILS monetary amount with Western numerals and directional isolation.
+     */
+    fun formatIls(amount: java.math.BigDecimal?): String {
+        return "\u2066${WesternFormatters.formatIls(amount)}\u2069"
+    }
 }
 
 enum class StitchBadgeTone {

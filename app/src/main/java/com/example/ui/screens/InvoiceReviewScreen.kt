@@ -692,8 +692,8 @@ private fun EditableInvoiceLinesSection(
             // Itemized Rows
             basket.forEachIndexed { index, item ->
                 val product = item.product
-                val isMaxStock = product.isStockTracked && item.quantity >= product.stockCount
-                val stockRemainingAfterSale = (product.stockCount - item.quantity).coerceAtLeast(0)
+                val isMaxStock = product.isStockTracked && item.quantity >= product.stockCountExact
+                val stockRemainingAfterSale = (product.stockCountExact - item.quantity).coerceAtLeast(java.math.BigDecimal.ZERO)
 
                 if (index > 0) {
                     HorizontalDivider(
@@ -1621,9 +1621,9 @@ internal fun CustomerPickerModalSheet(
         customers.filter { cust ->
             TraderUiState.normalizeForSearch(cust.nameAr).contains(normalizedQuery) ||
                 TraderUiState.normalizeForSearch(cust.nameEn).contains(normalizedQuery) ||
-                cust.phone.contains(normalizedQuery) ||
-                TraderUiState.normalizeForSearch(cust.addressAr).contains(normalizedQuery) ||
-                TraderUiState.normalizeForSearch(cust.addressEn).contains(normalizedQuery)
+                (cust.phone?.contains(normalizedQuery) ?: false) ||
+                TraderUiState.normalizeForSearch(cust.addressAr ?: "").contains(normalizedQuery) ||
+                TraderUiState.normalizeForSearch(cust.addressEn ?: "").contains(normalizedQuery)
         }
     }
 

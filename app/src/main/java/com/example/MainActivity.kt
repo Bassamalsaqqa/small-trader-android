@@ -67,9 +67,21 @@ class MainActivity : ComponentActivity() {
                 staffReadWorkspace = BuildConfig.STAFF_READ_WORKSPACE,
                 configuredOrigin = BuildConfig.STAFF_WORKSPACE_ORIGIN,
                 demoModeOptIn = false,
-                allowHttpLoopback = BuildConfig.DEBUG && BuildConfig.STAFF_ALLOW_HTTP_LOOPBACK
+                allowHttpLoopback = BuildConfig.DEBUG && BuildConfig.STAFF_ALLOW_HTTP_LOOPBACK,
+                fullShell = true
             )
             when (launchTarget) {
+                com.example.ui.navigation.AppLaunchTarget.FULL_SHELL -> {
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val authDenialListener = androidx.compose.runtime.remember(context) {
+                        com.example.data.mobile.integration.OutboxAuthDenialBridge.create(context.applicationContext)
+                    }
+                    com.example.ui.AuthenticatedTraderApp(
+                        configuredOrigin = BuildConfig.STAFF_WORKSPACE_ORIGIN,
+                        allowHttpLoopback = BuildConfig.DEBUG && BuildConfig.STAFF_ALLOW_HTTP_LOOPBACK,
+                        authDenialListener = authDenialListener
+                    )
+                }
                 com.example.ui.navigation.AppLaunchTarget.STAFF_WORKSPACE -> {
                     val context = androidx.compose.ui.platform.LocalContext.current
                     val authDenialListener = androidx.compose.runtime.remember(context) {

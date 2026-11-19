@@ -108,6 +108,9 @@ class StaffWorkspaceViewModel(
     private var activeScopeActorId: String? = null
     private var activeScopeDeviceId: String? = null
 
+    fun getCoordinator(): StaffSessionCoordinator? = coordinator
+    fun getReadReadyState(): StaffAuthState.ReadReady? = coordinator?.authState as? StaffAuthState.ReadReady
+
     init {
         if (coordinator != null && configuredOrigin.isNotBlank() && _uiState.value.phase == StaffWorkspacePhase.INITIALIZING) {
             restoreSession()

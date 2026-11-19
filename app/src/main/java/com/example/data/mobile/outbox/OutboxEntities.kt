@@ -42,7 +42,7 @@ class OutboxEventEntity(
     val deviceId: String,
 
     @ColumnInfo(name = "device_lease_id")
-    val deviceLeaseId: String,
+    val deviceLeaseId: String? = null,
 
     @ColumnInfo(name = "captured_at")
     val capturedAt: String,
@@ -78,7 +78,7 @@ class OutboxEventEntity(
         result = 31 * result + companyId.hashCode()
         result = 31 * result + actorId.hashCode()
         result = 31 * result + deviceId.hashCode()
-        result = 31 * result + deviceLeaseId.hashCode()
+        result = 31 * result + (deviceLeaseId?.hashCode() ?: 0)
         result = 31 * result + capturedAt.hashCode()
         result = 31 * result + payloadDigest.hashCode()
         result = 31 * result + payloadBytes.contentHashCode()

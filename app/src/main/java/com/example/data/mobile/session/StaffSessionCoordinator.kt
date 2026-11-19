@@ -29,6 +29,9 @@ interface StaffSessionCoordinator {
     /** Current observable lifecycle state. */
     val authState: StaffAuthState
 
+    /** Injected HTTP transport used for API requests. */
+    val transport: com.example.data.mobile.readclient.ReadClientTransport? get() = null
+
     /** Stable client device installation identity. */
     val installationId: ClientUuid
 
@@ -158,11 +161,14 @@ interface StaffSessionCoordinator {
  * 6. Local credential purge on logout occurs atomically BEFORE remote revocation network calls.
  */
 class DefaultStaffSessionCoordinator(
-    private val readClient: SmallTraderReadClient,
+    val readClient: SmallTraderReadClient,
     private val sessionStore: SecureStaffSessionStore,
     private val authDenialListener: AuthDenialListener? = null,
     private val clock: CoordinatorClock = SystemCoordinatorClock
 ) : StaffSessionCoordinator {
+
+    override val transport: com.example.data.mobile.readclient.ReadClientTransport
+        get() = readClient.transport
 
     private val generation = AtomicLong(1L)
     private val stateLock = Any()

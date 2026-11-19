@@ -285,6 +285,19 @@ class OnlineSaleIntentProfile(
         "warehouse_id" to warehouseId.value
     )
 
+    fun toWireRequestStructure(): Map<String, Any?> = mapOf(
+        "client_event_id" to clientEventId.value,
+        "device_id" to deviceId.value,
+        "customer_id" to customerId.value,
+        "warehouse_id" to warehouseId.value,
+        "currency" to currency,
+        "lines" to lines.map { it.toCanonicalStructure() },
+        "payment" to payment.toCanonicalStructure()
+    )
+
+    fun toWireRequestJson(): String =
+        CanonicalJsonSerializer.serialize(this.toWireRequestStructure())
+
     fun computePayloadDigest(): PayloadDigest =
         CanonicalJsonSerializer.computeDigest(this)
 
@@ -513,6 +526,36 @@ class OnlineSaleIntentProfile(
             val reqObj = StrictJsonParser.parse(requestJson).asObject()
             val ctx = OnlineSaleContext.fromStrictJson(ctxObj)
             return fromContextAndRequest(ctx, reqObj)
+        }
+
+        fun fromStrictJson(json: StrictJsonObject): OnlineSaleIntentProfile {
+            val allowedCanonicalProfileKeys = ALLOWED_ROOT_KEYS + setOf("actor_id", "company_id", "currency_minor_units")
+            val unexpected = json.properties.keys - allowedCanonicalProfileKeys
+            if (unexpected.isNotEmpty()) {
+                throw IntentProfileValidationError("Unexpected canonical profile keys: $unexpected")
+            }
+            val missing = allowedCanonicalProfileKeys - json.properties.keys
+            if (missing.isNotEmpty()) {
+                throw IntentProfileValidationError("Missing required canonical profile keys: $missing")
+            }
+
+            val minorUnitsElem = json.require("currency_minor_units")
+            if (minorUnitsElem is StrictJsonBoolean) {
+                throw IntentProfileValidationError("currency_minor_units must be an integer, rejecting boolean")
+            }
+            val currencyMinorUnits = (minorUnitsElem as? StrictJsonNumber)?.rawString?.toIntOrNull()
+                ?: throw IntentProfileValidationError("Invalid currency minor units")
+            if (currencyMinorUnits !in 0..6) {
+                throw IntentProfileValidationError("currency_minor_units must be in 0..6, got $currencyMinorUnits")
+            }
+
+            val ctx = OnlineSaleContext(
+                companyId = ServerUlid.parse(json.require("company_id").asString()),
+                actorId = ServerUlid.parse(json.require("actor_id").asString()),
+                currencyMinorUnits = currencyMinorUnits
+            )
+            val reqProps = ALLOWED_ROOT_KEYS.associateWith { json.require(it) }
+            return fromContextAndRequest(ctx, StrictJsonObject(reqProps))
         }
     }
 }

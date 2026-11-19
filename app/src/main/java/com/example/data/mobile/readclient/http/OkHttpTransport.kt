@@ -158,7 +158,9 @@ class OkHttpTransport(
         var acceptCount = 0
         var contentTypeCount = 0
         var authCount = 0
+        var idempotencyCount = 0
         var validatedAuthHeader: String? = null
+        var validatedIdempotencyHeader: String? = null
 
         for ((name, value) in request.headers) {
             when {
@@ -218,6 +220,22 @@ class OkHttpTransport(
                         )
                     }
                     validatedAuthHeader = value
+                }
+                name.equals("Idempotency-Key", ignoreCase = true) -> {
+                    idempotencyCount++
+                    if (idempotencyCount > 1) {
+                        throw HttpTransportException(
+                            HttpTransportException.CATEGORY_SECURITY_VIOLATION,
+                            "Duplicate Idempotency-Key header"
+                        )
+                    }
+                    if (!value.matches(Regex("^[a-zA-Z0-9_-]{1,128}$"))) {
+                        throw HttpTransportException(
+                            HttpTransportException.CATEGORY_SECURITY_VIOLATION,
+                            "Invalid Idempotency-Key header format"
+                        )
+                    }
+                    validatedIdempotencyHeader = value
                 }
                 else -> {
                     throw HttpTransportException(
@@ -285,16 +303,24 @@ class OkHttpTransport(
         requestBuilder.tag(CallExecutionState::class.java, callExecutionState)
 
         requestBuilder.header("Accept", "application/json")
-        if (preparedRequestBodyBytes != null || request.method == HttpMethod.POST) {
+        if (preparedRequestBodyBytes != null || request.method == HttpMethod.POST || request.method == HttpMethod.PUT) {
             requestBuilder.header("Content-Type", "application/json; charset=utf-8")
         }
         if (validatedAuthHeader != null) {
             requestBuilder.header("Authorization", validatedAuthHeader)
         }
+        if (validatedIdempotencyHeader != null) {
+            requestBuilder.header("Idempotency-Key", validatedIdempotencyHeader)
+        }
 
         val requestBody = when (request.method) {
             HttpMethod.GET -> null
-            HttpMethod.POST -> {
+            HttpMethod.DELETE -> if (preparedRequestBodyBytes != null) {
+                createOneShotRequestBody(preparedRequestBodyBytes, "application/json; charset=utf-8".toMediaType())
+            } else {
+                null
+            }
+            HttpMethod.POST, HttpMethod.PUT -> {
                 val mediaType = "application/json; charset=utf-8".toMediaType()
                 val bytes = preparedRequestBodyBytes ?: ByteArray(0)
                 createOneShotRequestBody(bytes, mediaType)

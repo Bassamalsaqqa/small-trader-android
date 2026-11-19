@@ -16,6 +16,9 @@ import com.example.model.Supplier
 import com.example.model.SupplierPayment
 import com.example.model.UserSession
 import com.example.model.WesternFormatters
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.UUID
@@ -36,15 +39,26 @@ interface TraderRepository {
     fun getCurrentSession(): UserSession
     fun getBusinessInfo(): BusinessInfo
 
+    // Reactive StateFlow domain streams
+    val productsFlow: StateFlow<List<Product>>
+    val customersFlow: StateFlow<List<Customer>>
+    val suppliersFlow: StateFlow<List<Supplier>>
+    val purchasesFlow: StateFlow<List<PurchaseBill>>
+    val expensesFlow: StateFlow<List<ExpenseEntry>>
+    val invoicesFlow: StateFlow<List<InvoiceRecord>>
+    val stockMovementsFlow: StateFlow<List<StockMovement>>
+    val customerTransactionsFlow: StateFlow<List<CustomerTransaction>>
+    val supplierPaymentsFlow: StateFlow<List<SupplierPayment>>
+
     // Product & Inventory
     fun getProducts(): List<Product>
     fun searchProducts(query: String, category: ProductCategory = ProductCategory.ALL, limit: Int = 30): List<Product>
     fun findProductById(id: String): Product?
-    fun updateProductPrice(productId: String, newPriceIls: Double, operator: UserSession): Result<Unit>
-    fun adjustProductStock(productId: String, adjustment: Int, reason: String, operator: UserSession): Result<StockMovement>
+    suspend fun updateProductPrice(productId: String, newPriceIls: Double, operator: UserSession): Result<Unit>
+    suspend fun adjustProductStock(productId: String, adjustment: Int, reason: String, operator: UserSession): Result<StockMovement>
     fun getStockMovements(): List<StockMovement>
-    fun addCustomProduct(product: Product): Result<Product>
-    fun saveProduct(
+    suspend fun addCustomProduct(product: Product): Result<Product>
+    suspend fun saveProduct(
         productId: String?,
         nameAr: String,
         nameEn: String,
@@ -65,28 +79,32 @@ interface TraderRepository {
 
     // Sales & Invoices
     fun getInvoices(): List<InvoiceRecord>
-    fun recordSale(invoice: InvoiceRecord): Result<InvoiceRecord>
+    suspend fun recordSale(invoice: InvoiceRecord): Result<InvoiceRecord>
 
     // Customers & Collections
     fun getCustomers(): List<Customer>
     fun getCustomerTransactions(): List<CustomerTransaction>
-    fun recordCustomerPayment(customerId: String, amountIls: Double, note: String, paymentId: String = ""): Result<CustomerTransaction>
-    fun createCustomer(name: String, phone: String, address: String, creditLimitIls: Double = 1000.0): Result<Customer>
-    fun updateCustomer(customerId: String, name: String, phone: String, address: String, creditLimitIls: Double): Result<Customer>
+    suspend fun recordCustomerPayment(customerId: String, amountIls: Double, note: String, paymentId: String = ""): Result<CustomerTransaction>
+    suspend fun createCustomer(name: String, phone: String, address: String, creditLimitIls: Double = 1000.0): Result<Customer>
+    suspend fun updateCustomer(customerId: String, name: String, phone: String, address: String, creditLimitIls: Double): Result<Customer>
 
     // Suppliers & Disbursements
     fun getSuppliers(): List<Supplier>
     fun getPurchaseBills(): List<PurchaseBill>
     fun getSupplierPayments(): List<SupplierPayment>
-    fun saveSupplier(supplierId: String?, name: String, company: String, phone: String, operator: UserSession): Result<Supplier>
-    fun recordPurchaseBill(supplierId: String, itemsSummary: String, totalIls: Double, paidNowIls: Double, operator: UserSession, expectedProductId: String? = null, expectedQuantity: Int = 0): Result<PurchaseBill>
-    fun recordStructuredPurchaseBill(supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, operator: UserSession, note: String = ""): Result<PurchaseBill>
-    fun confirmPhysicalGoodsReceipt(billId: String, productId: String, receivedQty: Int, batchNote: String, operator: UserSession, operationId: String = "", lineId: String? = null): Result<StockMovement>
-    fun recordSupplierPayment(supplierId: String, amountIls: Double, note: String, operator: UserSession, paymentId: String = ""): Result<SupplierPayment>
+    suspend fun saveSupplier(supplierId: String?, name: String, company: String, phone: String, operator: UserSession): Result<Supplier>
+    suspend fun recordPurchaseBill(supplierId: String, itemsSummary: String, totalIls: Double, paidNowIls: Double, operator: UserSession, expectedProductId: String? = null, expectedQuantity: Int = 0): Result<PurchaseBill>
+    suspend fun recordStructuredPurchaseBill(supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, operator: UserSession, note: String = ""): Result<PurchaseBill>
+    suspend fun confirmPhysicalGoodsReceipt(billId: String, productId: String, receivedQty: Int, batchNote: String, operator: UserSession, operationId: String = "", lineId: String? = null): Result<StockMovement>
+    suspend fun confirmPhysicalGoodsReceipt(billId: String, productId: String, receivedQty: BigDecimal, batchNote: String, operator: UserSession, operationId: String = "", lineId: String? = null): Result<StockMovement> =
+        confirmPhysicalGoodsReceipt(billId, productId, receivedQty.toInt(), batchNote, operator, operationId, lineId)
+    suspend fun recordSupplierPayment(supplierId: String, amountIls: Double, note: String, operator: UserSession, paymentId: String = ""): Result<SupplierPayment>
 
     // Expenses
     fun getExpenses(): List<ExpenseEntry>
-    fun recordExpense(title: String, category: ExpenseCategory, amountIls: Double, operator: UserSession): Result<ExpenseEntry>
+    suspend fun recordExpense(title: String, category: ExpenseCategory, amountIls: Double, operator: UserSession): Result<ExpenseEntry>
+
+    fun close() {}
 }
 
 data class RecordedGrnOperation(
@@ -121,6 +139,33 @@ class OfflineDemoTraderRepository(
     private val recordedSupplierPayments = mutableMapOf<String, SupplierPayment>()
     private val expenses = SampleCatalog.initialExpenses.toMutableList()
 
+    private val _productsFlow = MutableStateFlow<List<Product>>(products.toList())
+    override val productsFlow: StateFlow<List<Product>> = _productsFlow.asStateFlow()
+
+    private val _customersFlow = MutableStateFlow<List<Customer>>(customers.toList())
+    override val customersFlow: StateFlow<List<Customer>> = _customersFlow.asStateFlow()
+
+    private val _suppliersFlow = MutableStateFlow<List<Supplier>>(suppliers.toList())
+    override val suppliersFlow: StateFlow<List<Supplier>> = _suppliersFlow.asStateFlow()
+
+    private val _purchasesFlow = MutableStateFlow<List<PurchaseBill>>(purchaseBills.toList())
+    override val purchasesFlow: StateFlow<List<PurchaseBill>> = _purchasesFlow.asStateFlow()
+
+    private val _expensesFlow = MutableStateFlow<List<ExpenseEntry>>(expenses.toList())
+    override val expensesFlow: StateFlow<List<ExpenseEntry>> = _expensesFlow.asStateFlow()
+
+    private val _invoicesFlow = MutableStateFlow<List<InvoiceRecord>>(invoices.toList())
+    override val invoicesFlow: StateFlow<List<InvoiceRecord>> = _invoicesFlow.asStateFlow()
+
+    private val _stockMovementsFlow = MutableStateFlow<List<StockMovement>>(stockMovements.toList())
+    override val stockMovementsFlow: StateFlow<List<StockMovement>> = _stockMovementsFlow.asStateFlow()
+
+    private val _customerTransactionsFlow = MutableStateFlow<List<CustomerTransaction>>(customerTransactions.toList())
+    override val customerTransactionsFlow: StateFlow<List<CustomerTransaction>> = _customerTransactionsFlow.asStateFlow()
+
+    private val _supplierPaymentsFlow = MutableStateFlow<List<SupplierPayment>>(supplierPayments.toList())
+    override val supplierPaymentsFlow: StateFlow<List<SupplierPayment>> = _supplierPaymentsFlow.asStateFlow()
+
     override fun getCurrentSession(): UserSession = currentSession
     override fun getBusinessInfo(): BusinessInfo = businessInfo
 
@@ -138,7 +183,7 @@ class OfflineDemoTraderRepository(
 
     override fun getStockMovements(): List<StockMovement> = stockMovements.toList()
 
-    override fun addCustomProduct(product: Product): Result<Product> {
+    override suspend fun addCustomProduct(product: Product): Result<Product> {
         if (product.nameAr.isBlank() && product.nameEn.isBlank()) {
             return Result.failure(IllegalArgumentException("Product name cannot be blank."))
         }
@@ -152,10 +197,11 @@ class OfflineDemoTraderRepository(
             return Result.failure(IllegalArgumentException("Product stock count cannot be negative."))
         }
         products.add(0, product)
+        _productsFlow.value = products.toList()
         return Result.success(product)
     }
 
-    override fun saveProduct(
+    override suspend fun saveProduct(
         productId: String?,
         nameAr: String,
         nameEn: String,
@@ -211,16 +257,16 @@ class OfflineDemoTraderRepository(
                 unitAr = cleanUnitAr,
                 unitEn = cleanUnitEn,
                 barcode = cleanBarcode,
-                priceIls = exactPrice,
-                costIls = exactCost,
+                priceExact = BigDecimal(exactPrice.toString()).setScale(2, RoundingMode.HALF_UP),
+                costExact = BigDecimal(exactCost.toString()).setScale(2, RoundingMode.HALF_UP),
                 minStockThreshold = minStockThreshold,
-                warehouseAr = cleanWarehouse,
-                warehouseEn = cleanWarehouse,
+                warehouseName = cleanWarehouse.ifBlank { null },
                 lotBatchCode = cleanLot,
                 expiryDate = cleanExpiry,
                 isWeightedDisplayOnly = isWeightedDisplayOnly
             )
             products[idx] = updated
+            _productsFlow.value = products.toList()
             return Result.success(updated)
         } else {
             val newId = "p_${System.currentTimeMillis()}"
@@ -248,6 +294,7 @@ class OfflineDemoTraderRepository(
                 isWeightedDisplayOnly = isWeightedDisplayOnly
             )
             products.add(0, created)
+            _productsFlow.value = products.toList()
             if (initialStock > 0) {
                 stockMovements.add(
                     0,
@@ -261,12 +308,13 @@ class OfflineDemoTraderRepository(
                         resultingStock = initialStock
                     )
                 )
+                _stockMovementsFlow.value = stockMovements.toList()
             }
             return Result.success(created)
         }
     }
 
-    override fun updateProductPrice(productId: String, newPriceIls: Double, operator: UserSession): Result<Unit> {
+    override suspend fun updateProductPrice(productId: String, newPriceIls: Double, operator: UserSession): Result<Unit> {
         if (!operator.canManageInventory()) {
             return Result.failure(SecurityException("غير مصرح: تعديل الأسعار متاح للمالك والمدير فقط | Permission denied: Price update requires Owner or Manager"))
         }
@@ -275,11 +323,12 @@ class OfflineDemoTraderRepository(
         }
         val idx = products.indexOfFirst { it.id == productId }
         if (idx == -1) return Result.failure(NoSuchElementException("Product not found: $productId"))
-        products[idx] = products[idx].copy(priceIls = BigDecimal(newPriceIls.toString()).setScale(2, RoundingMode.HALF_UP).toDouble())
+        products[idx] = products[idx].copy(priceExact = BigDecimal(newPriceIls.toString()).setScale(2, RoundingMode.HALF_UP))
+        _productsFlow.value = products.toList()
         return Result.success(Unit)
     }
 
-    override fun adjustProductStock(productId: String, adjustment: Int, reason: String, operator: UserSession): Result<StockMovement> {
+    override suspend fun adjustProductStock(productId: String, adjustment: Int, reason: String, operator: UserSession): Result<StockMovement> {
         if (!operator.canManageInventory()) {
             return Result.failure(SecurityException("غير مصرح: تعديل المخزون متاح للمالك والمدير فقط | Permission denied: Stock adjustment requires Owner or Manager"))
         }
@@ -298,7 +347,7 @@ class OfflineDemoTraderRepository(
             return Result.failure(IllegalStateException("لا يمكن تقليل المخزون إلى ما دون الصفر | Cannot reduce stock below zero. Current: ${currentProd.stockCount}, Delta: $adjustment"))
         }
 
-        products[idx] = currentProd.copy(stockCount = candidate)
+        products[idx] = currentProd.copy(stockCount = candidate, stockCountExact = BigDecimal.valueOf(candidate.toLong()))
         val movement = StockMovement(
             id = "sm_${System.currentTimeMillis()}",
             productId = productId,
@@ -309,18 +358,20 @@ class OfflineDemoTraderRepository(
             resultingStock = candidate
         )
         stockMovements.add(0, movement)
+        _productsFlow.value = products.toList()
+        _stockMovementsFlow.value = stockMovements.toList()
         return Result.success(movement)
     }
 
     override fun getInvoices(): List<InvoiceRecord> = invoices.toList()
 
-    override fun recordSale(invoice: InvoiceRecord): Result<InvoiceRecord> {
+    override suspend fun recordSale(invoice: InvoiceRecord): Result<InvoiceRecord> {
         // 1. Line item validation
         if (invoice.items.isEmpty()) {
             return Result.failure(IllegalArgumentException("Invoice must contain at least one item."))
         }
         for (item in invoice.items) {
-            if (item.quantity <= 0) {
+            if (item.quantity <= BigDecimal.ZERO) {
                 return Result.failure(IllegalArgumentException("Item quantity must be greater than zero. Found: ${item.quantity} for product ${item.product.nameEn}"))
             }
             if (item.product.priceIls < 0.0) {
@@ -352,10 +403,10 @@ class OfflineDemoTraderRepository(
             .groupBy { it.product.id }
 
         for ((productId, lines) in aggregateDemand) {
-            val totalDemanded = lines.sumOf { it.quantity }
+            val totalDemanded = lines.fold(BigDecimal.ZERO) { acc, it -> acc.add(it.quantity) }
             val catalogProd = products.firstOrNull { it.id == productId }
                 ?: return Result.failure(NoSuchElementException("Product not in catalog: $productId"))
-            if (catalogProd.stockCount < totalDemanded) {
+            if (catalogProd.stockCountExact < totalDemanded) {
                 return Result.failure(
                     IllegalStateException("المخزون غير كافٍ للصنف ${catalogProd.nameAr}. المتوفر: ${catalogProd.stockCount}، المطلوب إجمالاً: $totalDemanded | Insufficient stock for ${catalogProd.nameEn}. Available: ${catalogProd.stockCount}, Demanded: $totalDemanded")
                 )
@@ -429,12 +480,12 @@ class OfflineDemoTraderRepository(
         // 7. Truthfully deduct physical inventory by aggregate SKU demand
         val timestamp = invoice.timestamp.ifEmpty { WesternFormatters.currentTimestamp() }
         for ((productId, lines) in aggregateDemand) {
-            val totalDemanded = lines.sumOf { it.quantity }
+            val totalDemanded = lines.fold(BigDecimal.ZERO) { acc, it -> acc.add(it.quantity) }
             val idx = products.indexOfFirst { it.id == productId }
             if (idx >= 0) {
-                val currentStock = products[idx].stockCount
-                val resultingStock = currentStock - totalDemanded
-                products[idx] = products[idx].copy(stockCount = resultingStock)
+                val currentStockExact = products[idx].stockCountExact
+                val resultingStockExact = currentStockExact.subtract(totalDemanded)
+                products[idx] = products[idx].copy(stockCount = resultingStockExact.toInt(), stockCountExact = resultingStockExact)
                 stockMovements.add(
                     0,
                     StockMovement(
@@ -444,7 +495,7 @@ class OfflineDemoTraderRepository(
                         delta = -totalDemanded,
                         reasonAr = "مبيعات فاتورة #INV-${invoice.invoiceNumber}",
                         reasonEn = "Sales Invoice #INV-${invoice.invoiceNumber}",
-                        resultingStock = resultingStock
+                        resultingStock = resultingStockExact
                     )
                 )
             }
@@ -454,18 +505,16 @@ class OfflineDemoTraderRepository(
         if (customer != null) {
             val custIdx = customers.indexOfFirst { it.id == customer.id }
             val newDebtAdded = remainingDebit
-            val newTotalPurchases = BigDecimal(customer.totalPurchasesIls.toString())
+            val newTotalPurchases = (customer.totalPurchasesExact ?: BigDecimal.ZERO)
                 .add(declaredNet)
                 .setScale(2, RoundingMode.HALF_UP)
-                .toDouble()
-            val newBalance = BigDecimal(customer.balanceIls.toString())
+            val newBalance = (customer.balanceExact ?: BigDecimal.ZERO)
                 .add(newDebtAdded)
                 .setScale(2, RoundingMode.HALF_UP)
-                .toDouble()
 
             customers[custIdx] = customer.copy(
-                balanceIls = newBalance,
-                totalPurchasesIls = newTotalPurchases
+                balanceExact = newBalance,
+                totalPurchasesExact = newTotalPurchases
             )
 
             val netCashApplied = declaredNet
@@ -495,20 +544,27 @@ class OfflineDemoTraderRepository(
                     invoiceNumber = invoice.invoiceNumber,
                     debitIls = invoice.netTotalIls,
                     creditIls = netCashApplied,
-                    runningBalanceIls = newBalance,
+                    runningBalanceIls = newBalance.toDouble(),
                     note = invoice.customerNote
                 )
             )
         }
 
         invoices.add(0, invoice)
+        _invoicesFlow.value = invoices.toList()
+        _productsFlow.value = products.toList()
+        _stockMovementsFlow.value = stockMovements.toList()
+        if (customer != null) {
+            _customersFlow.value = customers.toList()
+            _customerTransactionsFlow.value = customerTransactions.toList()
+        }
         return Result.success(invoice)
     }
 
     override fun getCustomers(): List<Customer> = customers.toList()
     override fun getCustomerTransactions(): List<CustomerTransaction> = customerTransactions.toList()
 
-    override fun recordCustomerPayment(
+    override suspend fun recordCustomerPayment(
         customerId: String,
         amountIls: Double,
         note: String,
@@ -533,13 +589,11 @@ class OfflineDemoTraderRepository(
 
         val currentCust = customers[idx]
         val amountExact = BigDecimal(amountIls.toString()).setScale(2, RoundingMode.HALF_UP)
-        // Exact decimal math preserving overpayments (negative balance = customer credit deposit / advance)
-        val newBalance = BigDecimal(currentCust.balanceIls.toString())
+        val newBalance = (currentCust.balanceExact ?: BigDecimal.ZERO)
             .subtract(amountExact)
             .setScale(2, RoundingMode.HALF_UP)
-            .toDouble()
 
-        customers[idx] = currentCust.copy(balanceIls = newBalance)
+        customers[idx] = currentCust.copy(balanceExact = newBalance)
 
         val tx = CustomerTransaction(
             id = if (paymentId.isNotBlank()) paymentId else "ctx_${System.currentTimeMillis()}",
@@ -550,14 +604,16 @@ class OfflineDemoTraderRepository(
             invoiceNumber = null,
             debitIls = 0.0,
             creditIls = amountExact.toDouble(),
-            runningBalanceIls = newBalance,
+            runningBalanceIls = newBalance.toDouble(),
             note = note.ifEmpty { "سند قبض نقدي بالصندوق" }
         )
         customerTransactions.add(0, tx)
+        _customersFlow.value = customers.toList()
+        _customerTransactionsFlow.value = customerTransactions.toList()
         return Result.success(tx)
     }
 
-    override fun createCustomer(name: String, phone: String, address: String, creditLimitIls: Double): Result<Customer> {
+    override suspend fun createCustomer(name: String, phone: String, address: String, creditLimitIls: Double): Result<Customer> {
         if (name.isBlank()) return Result.failure(IllegalArgumentException("Customer name cannot be empty."))
         val safeLimit = if (creditLimitIls > 0.0) {
             BigDecimal(creditLimitIls.toString()).setScale(2, RoundingMode.HALF_UP).toDouble()
@@ -574,10 +630,11 @@ class OfflineDemoTraderRepository(
             totalPurchasesIls = 0.0
         )
         customers.add(0, newCust)
+        _customersFlow.value = customers.toList()
         return Result.success(newCust)
     }
 
-    override fun updateCustomer(
+    override suspend fun updateCustomer(
         customerId: String,
         name: String,
         phone: String,
@@ -589,16 +646,17 @@ class OfflineDemoTraderRepository(
         val idx = customers.indexOfFirst { it.id == customerId }
         if (idx == -1) return Result.failure(NoSuchElementException("Customer not found: $customerId"))
         val existing = customers[idx]
-        val exactLimit = BigDecimal(creditLimitIls.toString()).setScale(2, RoundingMode.HALF_UP).toDouble()
+        val exactLimit = BigDecimal(creditLimitIls.toString()).setScale(2, RoundingMode.HALF_UP)
         val updated = existing.copy(
             nameAr = name.trim(),
             nameEn = name.trim(),
-            phone = phone.trim().ifEmpty { existing.phone },
-            addressAr = address.trim().ifEmpty { existing.addressAr },
-            addressEn = address.trim().ifEmpty { existing.addressEn },
-            creditLimitIls = exactLimit
+            phone = phone.trim().ifEmpty { existing.phone ?: "" },
+            addressAr = address.trim().ifEmpty { existing.addressAr ?: "" },
+            addressEn = address.trim().ifEmpty { existing.addressEn ?: "" },
+            creditLimitExact = exactLimit
         )
         customers[idx] = updated
+        _customersFlow.value = customers.toList()
         return Result.success(updated)
     }
 
@@ -606,7 +664,7 @@ class OfflineDemoTraderRepository(
     override fun getPurchaseBills(): List<PurchaseBill> = purchaseBills.toList()
     override fun getSupplierPayments(): List<SupplierPayment> = supplierPayments.toList()
 
-    override fun saveSupplier(
+    override suspend fun saveSupplier(
         supplierId: String?,
         name: String,
         company: String,
@@ -634,6 +692,7 @@ class OfflineDemoTraderRepository(
                 phone = cleanPhone
             )
             suppliers[idx] = updated
+            _suppliersFlow.value = suppliers.toList()
             return Result.success(updated)
         } else {
             val created = Supplier(
@@ -646,11 +705,12 @@ class OfflineDemoTraderRepository(
                 balanceOwedIls = 0.0
             )
             suppliers.add(0, created)
+            _suppliersFlow.value = suppliers.toList()
             return Result.success(created)
         }
     }
 
-    override fun recordPurchaseBill(
+    override suspend fun recordPurchaseBill(
         supplierId: String,
         itemsSummary: String,
         totalIls: Double,
@@ -719,8 +779,8 @@ class OfflineDemoTraderRepository(
             billNumber = nextBillNum,
             supplierId = supplierId,
             date = WesternFormatters.currentDate(),
-            totalIls = totalExact.toDouble(),
-            paidIls = paidExact.toDouble(),
+            totalExact = totalExact,
+            paidExact = paidExact,
             itemsSummary = itemsSummary,
             isReceived = false, // Text-only bills require physical itemized audit before marking goods received
             lines = synthesizedLines,
@@ -730,17 +790,18 @@ class OfflineDemoTraderRepository(
         )
 
         val currentSup = suppliers[idx]
-        val newBalance = BigDecimal(currentSup.balanceOwedIls.toString())
+        val newBalance = (currentSup.balanceOwedExact ?: BigDecimal.ZERO)
             .add(payableAdded)
             .setScale(2, RoundingMode.HALF_UP)
-            .toDouble()
 
-        suppliers[idx] = currentSup.copy(balanceOwedIls = newBalance)
+        suppliers[idx] = currentSup.copy(balanceOwedExact = newBalance)
         purchaseBills.add(0, bill)
+        _suppliersFlow.value = suppliers.toList()
+        _purchasesFlow.value = purchaseBills.toList()
         return Result.success(bill)
     }
 
-    override fun recordStructuredPurchaseBill(
+    override suspend fun recordStructuredPurchaseBill(
         supplierId: String,
         lines: List<PurchaseLineItem>,
         paidNowIls: Double,
@@ -789,7 +850,7 @@ class OfflineDemoTraderRepository(
 
         // Derive authoritative total strictly from exact priced structured lines with entered cost
         val totalExact = validatedLines.fold(BigDecimal.ZERO) { acc, line ->
-            acc.add(BigDecimal(line.unitCostIls.toString()).multiply(BigDecimal(line.quantity.toString())))
+            acc.add(line.totalCostExact)
         }.setScale(2, RoundingMode.HALF_UP)
 
         if (totalExact <= BigDecimal.ZERO) {
@@ -813,28 +874,29 @@ class OfflineDemoTraderRepository(
             billNumber = nextBillNum,
             supplierId = supplierId,
             date = WesternFormatters.currentDate(),
-            totalIls = totalExact.toDouble(),
-            paidIls = paidExact.toDouble(),
+            totalExact = totalExact,
+            paidExact = paidExact,
             itemsSummary = summaryStr,
             isReceived = false, // Physical stock receipt requires separate GRN
             lines = validatedLines,
             expectedProductId = validatedLines.firstOrNull()?.productId,
-            expectedQuantity = validatedLines.sumOf { it.quantity },
+            expectedQuantity = validatedLines.sumOf { l -> l.quantity },
             receivedQuantity = 0
         )
 
         val currentSup = suppliers[idx]
-        val newBalance = BigDecimal(currentSup.balanceOwedIls.toString())
+        val newBalance = (currentSup.balanceOwedExact ?: BigDecimal.ZERO)
             .add(payableAdded)
             .setScale(2, RoundingMode.HALF_UP)
-            .toDouble()
 
-        suppliers[idx] = currentSup.copy(balanceOwedIls = newBalance)
+        suppliers[idx] = currentSup.copy(balanceOwedExact = newBalance)
         purchaseBills.add(0, bill)
+        _suppliersFlow.value = suppliers.toList()
+        _purchasesFlow.value = purchaseBills.toList()
         return Result.success(bill)
     }
 
-    override fun confirmPhysicalGoodsReceipt(
+    override suspend fun confirmPhysicalGoodsReceipt(
         billId: String,
         productId: String,
         receivedQty: Int,
@@ -950,7 +1012,7 @@ class OfflineDemoTraderRepository(
 
         // 4. Atomically increment physical stock
         val newStock = prod.stockCount + receivedQty
-        products[prodIdx] = prod.copy(stockCount = newStock)
+        products[prodIdx] = prod.copy(stockCount = newStock, stockCountExact = BigDecimal.valueOf(newStock.toLong()))
 
         val noteSuffix = batchNote.trim().takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: ""
         val receiptTypeAr = if (updatedLine.isReceived) "سند استلام بضاعة مخزني" else "سند استلام جزئي (+${WesternFormatters.formatInt(receivedQty)}/${WesternFormatters.formatInt(targetLine.quantity)})"
@@ -967,6 +1029,9 @@ class OfflineDemoTraderRepository(
             resultingStock = newStock
         )
         stockMovements.add(0, movement)
+        _productsFlow.value = products.toList()
+        _purchasesFlow.value = purchaseBills.toList()
+        _stockMovementsFlow.value = stockMovements.toList()
         if (operationId.isNotBlank()) {
             recordedGrnOperations[operationId] = RecordedGrnOperation(
                 billId = billId,
@@ -980,7 +1045,7 @@ class OfflineDemoTraderRepository(
         return Result.success(movement)
     }
 
-    override fun recordSupplierPayment(
+    override suspend fun recordSupplierPayment(
         supplierId: String,
         amountIls: Double,
         note: String,
@@ -1018,12 +1083,11 @@ class OfflineDemoTraderRepository(
         }
 
         val currentSup = suppliers[idx]
-        val newOwed = BigDecimal(currentSup.balanceOwedIls.toString())
+        val newOwed = (currentSup.balanceOwedExact ?: BigDecimal.ZERO)
             .subtract(amountExact)
             .setScale(2, RoundingMode.HALF_UP)
-            .toDouble()
 
-        suppliers[idx] = currentSup.copy(balanceOwedIls = newOwed)
+        suppliers[idx] = currentSup.copy(balanceOwedExact = newOwed)
 
         val paymentGeneratedId = if (paymentId.isNotBlank()) paymentId else "spay_${System.currentTimeMillis()}"
         val payment = SupplierPayment(
@@ -1034,6 +1098,8 @@ class OfflineDemoTraderRepository(
             note = note.ifEmpty { "سداد نقدي من الصندوق" }
         )
         supplierPayments.add(0, payment)
+        _suppliersFlow.value = suppliers.toList()
+        _supplierPaymentsFlow.value = supplierPayments.toList()
         if (paymentId.isNotBlank()) {
             recordedSupplierPayments[paymentId] = payment
         }
@@ -1042,7 +1108,7 @@ class OfflineDemoTraderRepository(
 
     override fun getExpenses(): List<ExpenseEntry> = expenses.toList()
 
-    override fun recordExpense(
+    override suspend fun recordExpense(
         title: String,
         category: ExpenseCategory,
         amountIls: Double,
@@ -1063,6 +1129,7 @@ class OfflineDemoTraderRepository(
             amountIls = BigDecimal(amountIls.toString()).setScale(2, RoundingMode.HALF_UP).toDouble()
         )
         expenses.add(0, exp)
+        _expensesFlow.value = expenses.toList()
         return Result.success(exp)
     }
 }

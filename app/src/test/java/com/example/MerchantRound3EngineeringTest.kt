@@ -688,7 +688,7 @@ class MerchantRound3EngineeringTest {
     // =========================================================================
 
     @Test
-    fun atomicSync_verifiesSingleAtomicEmission() {
+    fun atomicSync_verifiesSingleAtomicEmission(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val viewModel = TraderViewModel(repo)
         var emissions = 0
@@ -748,7 +748,7 @@ class MerchantRound3EngineeringTest {
     }
 
     @Test
-    fun grnReplay_firstFailureDoesNotCache_editedRetryWithSameIdSucceeds() {
+    fun grnReplay_firstFailureDoesNotCache_editedRetryWithSameIdSucceeds(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val viewModel = TraderViewModel(repo)
         val bill = viewModel.uiState.value.purchaseBills.first { it.expectedProductId != null && it.pendingQuantity > 0 }
@@ -793,7 +793,7 @@ class MerchantRound3EngineeringTest {
     }
 
     @Test
-    fun supplierPayment_overpaymentPreservesNegativeBalanceAsStoreCredit() {
+    fun supplierPayment_overpaymentPreservesNegativeBalanceAsStoreCredit(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val viewModel = TraderViewModel(repo)
         val supplier = viewModel.uiState.value.suppliers.first { it.balanceOwedIls > 0 }
@@ -813,7 +813,7 @@ class MerchantRound3EngineeringTest {
     }
 
     @Test
-    fun structuredPurchase_duplicateSkuAggregatesCorrectly_rejectsInvalidCostOrQty() {
+    fun structuredPurchase_duplicateSkuAggregatesCorrectly_rejectsInvalidCostOrQty(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val supplier = repo.getSuppliers().first()
 

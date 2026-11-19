@@ -151,10 +151,10 @@ fun SuppliersScreen(
 
             TraderUiState.normalizeForSearch(s.nameAr).contains(q) ||
                 TraderUiState.normalizeForSearch(s.nameEn).contains(q) ||
-                TraderUiState.normalizeForSearch(s.companyAr).contains(q) ||
-                TraderUiState.normalizeForSearch(s.companyEn).contains(q) ||
-                s.phone.replace("-", "").contains(q.replace("-", "")) ||
-                s.phone.contains(q)
+                TraderUiState.normalizeForSearch(s.companyAr ?: "").contains(q) ||
+                TraderUiState.normalizeForSearch(s.companyEn ?: "").contains(q) ||
+                (s.phone ?: "").replace("-", "").contains(q.replace("-", "")) ||
+                (s.phone ?: "").contains(q)
         }
     }
 
@@ -630,7 +630,7 @@ private fun SupplierDirectoryRow(
                 ) {
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                         Text(
-                            text = supplier.phone,
+                            text = supplier.phone ?: "",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontFamily = MonoFontFamily,
                                 fontWeight = FontWeight.SemiBold
@@ -782,7 +782,7 @@ fun SupplierDetailScreen(
                     ) {
                         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                             Text(
-                                text = supplier.phone,
+                                text = supplier.phone ?: "",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.SemiBold

@@ -136,6 +136,55 @@ class AppLaunchTargetResolverTest {
     }
 
     @Test
+    fun testFullShellWithValidOriginRoutesToFullShell() {
+        val target = AppLaunchTargetResolver.resolve(
+            isDebug = false,
+            staffReadWorkspace = false,
+            configuredOrigin = "https://api.smalltrader.example",
+            demoModeOptIn = false,
+            allowHttpLoopback = false,
+            fullShell = true
+        )
+        assertEquals(AppLaunchTarget.FULL_SHELL, target)
+    }
+
+    @Test
+    fun testFullShellWithInvalidOrBlankOriginRoutesToUnconfigured() {
+        val targetBlank = AppLaunchTargetResolver.resolve(
+            isDebug = false,
+            staffReadWorkspace = false,
+            configuredOrigin = "",
+            demoModeOptIn = false,
+            allowHttpLoopback = false,
+            fullShell = true
+        )
+        assertEquals(AppLaunchTarget.UNCONFIGURED, targetBlank)
+
+        val targetInvalid = AppLaunchTargetResolver.resolve(
+            isDebug = false,
+            staffReadWorkspace = false,
+            configuredOrigin = "not_a_url",
+            demoModeOptIn = false,
+            allowHttpLoopback = false,
+            fullShell = true
+        )
+        assertEquals(AppLaunchTarget.UNCONFIGURED, targetInvalid)
+    }
+
+    @Test
+    fun testFullShellFalsePreservesStaffWorkspace() {
+        val target = AppLaunchTargetResolver.resolve(
+            isDebug = false,
+            staffReadWorkspace = false,
+            configuredOrigin = "https://api.smalltrader.example",
+            demoModeOptIn = false,
+            allowHttpLoopback = false,
+            fullShell = false
+        )
+        assertEquals(AppLaunchTarget.STAFF_WORKSPACE, target)
+    }
+
+    @Test
     fun testExistingStaffReadWorkspacePilotConfigBackcompatWithValidOrigin() {
         val target = AppLaunchTargetResolver.resolve(
             isDebug = false,

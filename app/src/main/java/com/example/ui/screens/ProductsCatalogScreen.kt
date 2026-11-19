@@ -1162,7 +1162,7 @@ fun ProductDetailScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Text(
-                                        text = "${WesternFormatters.formatInt(product.minStockThreshold)} ${product.unit(lang)}",
+                                        text = "${product.minStockThreshold?.let { WesternFormatters.formatInt(it) } ?: "—"} ${product.unit(lang)}",
                                         style = MaterialTheme.typography.titleSmall.copy(
                                             fontFamily = MonoFontFamily,
                                             fontWeight = FontWeight.SemiBold
@@ -1287,7 +1287,7 @@ fun ProductDetailScreen(
                                 )
                                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                                     Text(
-                                        text = product.lotBatchCode.ifBlank { "—" },
+                                        text = (product.lotBatchCode ?: "").ifBlank { "—" },
                                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
@@ -2043,14 +2043,14 @@ private fun StockCountTransferPreviewDialog(
             ) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
-                    color = TraderTheme.financial.warningContainer.copy(alpha = 0.5f),
-                    border = BorderStroke(1.dp, TraderTheme.financial.warning.copy(alpha = 0.4f)),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = lang.tr(
-                            "معاينة نموذجية (Shallow Preview): التعديل الفردي لحركة الصنف يعمل فعلياً من شاشة الصنف، بينما جلسات الجرد الجماعي والتحويل بين المستودعات مرتبطة مستقبلاً بنواة Laravel /api/v1.",
-                            "Shallow Preview: Single-item stock adjustment is live in Product Detail, whereas bulk count sessions and inter-warehouse transfers connect to Laravel /api/v1 in backend integration."
+                            "التعديل المباشر لحركة ومخزون الصنف متاح من بطاقة تفاصيل الصنف.",
+                            "Direct stock adjustments and movements are managed from the Product Detail screen."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -2158,14 +2158,14 @@ private fun StockMovementRow(
             Spacer(modifier = Modifier.width(12.dp))
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = "${if (isPositive) "+" else ""}${WesternFormatters.formatInt(sm.delta)}",
+                    text = "${if (isPositive) "+" else ""}${WesternFormatters.formatQuantity(sm.delta)}",
                     style = MaterialTheme.typography.titleSmall.copy(
                         fontWeight = FontWeight.Bold
                     ),
                     color = if (isPositive) TraderTheme.financial.income else TraderTheme.financial.debit
                 )
                 Text(
-                    text = "${lang.tr("الرصيد:", "Stock:")} ${WesternFormatters.formatInt(sm.resultingStock)}",
+                    text = "${lang.tr("الرصيد:", "Stock:")} ${WesternFormatters.formatQuantity(sm.resultingStock)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

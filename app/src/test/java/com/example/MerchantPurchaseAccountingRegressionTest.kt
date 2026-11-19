@@ -49,7 +49,7 @@ class MerchantPurchaseAccountingRegressionTest {
      * stock is NOT modified until physical GRN receipt.
      */
     @Test
-    fun regressionP0_1_repeatSku_differentCosts_exactPricedLines_total40_payable40_stockUnchangedUntilGrn() {
+    fun regressionP0_1_repeatSku_differentCosts_exactPricedLines_total40_payable40_stockUnchangedUntilGrn(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val supplier = repo.getSuppliers().first()
         val trackedProduct = repo.getProducts().first { it.id == "p_olive_oil" && it.isStockTracked }
@@ -70,7 +70,7 @@ class MerchantPurchaseAccountingRegressionTest {
                     state = state,
                     onDismiss = { isDismissed = true },
                     onConfirmStructuredBill = { supId, lines, paidNow, note ->
-                        val res = repo.recordStructuredPurchaseBill(supId, lines, paidNow, repo.getCurrentSession(), note)
+                        val res = kotlinx.coroutines.runBlocking { repo.recordStructuredPurchaseBill(supId, lines, paidNow, repo.getCurrentSession(), note) }
                         if (res.isSuccess) {
                             submittedBill = res.getOrNull()
                         }
@@ -157,7 +157,7 @@ class MerchantPurchaseAccountingRegressionTest {
      * P0 #1: GRN receiving line identity, partial receiving, and idempotent replay.
      */
     @Test
-    fun regressionP0_1_grn_receivingLineIdentity_partialReceiving_and_idempotentReplay() {
+    fun regressionP0_1_grn_receivingLineIdentity_partialReceiving_and_idempotentReplay(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val supplier = repo.getSuppliers().first()
         val trackedProduct = repo.getProducts().first { it.id == "p_olive_oil" }
@@ -238,7 +238,7 @@ class MerchantPurchaseAccountingRegressionTest {
      * P0 #1: Fractional cost and exact cent rounding (e.g. 3 @ 10.33 = 30.99, 7 @ 5.07 = 35.49 -> 66.48).
      */
     @Test
-    fun regressionP0_1_fractionalCost_and_centRounding() {
+    fun regressionP0_1_fractionalCost_and_centRounding(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val supplier = repo.getSuppliers().first()
 
@@ -260,7 +260,7 @@ class MerchantPurchaseAccountingRegressionTest {
      * Blank unit cost is rejected / invalid and does not silently default.
      */
     @Test
-    fun regressionP1_explicitZeroCost_supportedMixedWithPaidGoods_blankCostRejected() {
+    fun regressionP1_explicitZeroCost_supportedMixedWithPaidGoods_blankCostRejected(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val supplier = repo.getSuppliers().first()
         val freeLine = PurchaseLineItem(productId = "p_zaatar_jenin", quantity = 5, unitCostIls = 0.0)
@@ -352,7 +352,7 @@ class MerchantPurchaseAccountingRegressionTest {
      * P0 #2: Advance payment and overpayment contract verification.
      */
     @Test
-    fun regressionP0_2_advancePayment_and_overpayment_contract() {
+    fun regressionP0_2_advancePayment_and_overpayment_contract(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val supplier = repo.getSuppliers().first()
         val line = PurchaseLineItem(productId = "p_olive_oil", quantity = 1, unitCostIls = 50.0)
@@ -476,7 +476,7 @@ class MerchantPurchaseAccountingRegressionTest {
      * Re-opening GRN on fully received line verifies Confirm is DISABLED (no original quantity fallback).
      */
     @Test
-    fun regressionP0_grn_purchasesPath_composeToViewModelToRepo_secondLineSelected_exactSecondReceived_confirmDisabledWhenFullyReceived() {
+    fun regressionP0_grn_purchasesPath_composeToViewModelToRepo_secondLineSelected_exactSecondReceived_confirmDisabledWhenFullyReceived(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val supplier = repo.getSuppliers().first()
         val trackedProduct = repo.getProducts().first { it.id == "p_olive_oil" && it.isStockTracked }
@@ -576,7 +576,7 @@ class MerchantPurchaseAccountingRegressionTest {
      * Verifies the SuppliersScreen / SupplierDetailScreen callback wiring carries lineId.
      */
     @Test
-    fun regressionP0_grn_suppliersPath_composeToViewModelToRepo_secondLineSelected_exactSecondReceived() {
+    fun regressionP0_grn_suppliersPath_composeToViewModelToRepo_secondLineSelected_exactSecondReceived(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val supplier = repo.getSuppliers().first()
         val trackedProduct = repo.getProducts().first { it.id == "p_olive_oil" && it.isStockTracked }
@@ -658,7 +658,7 @@ class MerchantPurchaseAccountingRegressionTest {
      * and multiline mandatory lineId enforcement.
      */
     @Test
-    fun regressionP0_grn_negativeCases_idempotentOperationGuards_and_multilineMandatoryLineId() {
+    fun regressionP0_grn_negativeCases_idempotentOperationGuards_and_multilineMandatoryLineId(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val supplier = repo.getSuppliers().first()
         val trackedProduct = repo.getProducts().first { it.id == "p_olive_oil" && it.isStockTracked }

@@ -83,6 +83,8 @@ data class TraderUiState(
     val selectedCustomerId: String? = null,
     val cashInputText: String = "",
     val isSubmittingSale: Boolean = false,
+    val isActionBusy: Boolean = false,
+    val currentSaleClientEventId: String = java.util.UUID.randomUUID().toString(),
     val checkoutErrorAr: String? = null,
     val checkoutErrorEn: String? = null,
 
@@ -218,7 +220,10 @@ data class TraderUiState(
         }
 
     val basketItemCount: Int
-        get() = basket.sumOf { it.quantity }
+        get() = basket.fold(BigDecimal.ZERO) { acc, item -> acc + item.quantity }.toInt()
+
+    val basketItemCountExact: BigDecimal
+        get() = basket.fold(BigDecimal.ZERO) { acc, item -> acc + item.quantity }
 
     val basketSubtotalIls: Double
         get() = basket.fold(BigDecimal.ZERO) { acc, item ->
@@ -282,7 +287,10 @@ data class TraderUiState(
         get() = customers.firstOrNull { it.id == selectedCustomerId }
 
     val stockUnitsToDeduct: Int
-        get() = basket.filter { it.product.isStockTracked }.sumOf { it.quantity }
+        get() = basket.filter { it.product.isStockTracked }.fold(BigDecimal.ZERO) { acc, item -> acc + item.quantity }.toInt()
+
+    val stockUnitsToDeductExact: BigDecimal
+        get() = basket.filter { it.product.isStockTracked }.fold(BigDecimal.ZERO) { acc, item -> acc + item.quantity }
 
     val customLinesCount: Int
         get() = basket.count { !it.product.isStockTracked }
@@ -453,7 +461,10 @@ data class TraderUiState(
         get() = currentScreen in CHECKOUT_FLOW_DESTINATIONS
 
     fun quantityInBasket(productId: String): Int =
-        basket.firstOrNull { it.product.id == productId }?.quantity ?: 0
+        basket.firstOrNull { it.product.id == productId }?.quantity?.toInt() ?: 0
+
+    fun quantityInBasketExact(productId: String): BigDecimal =
+        basket.firstOrNull { it.product.id == productId }?.quantity ?: BigDecimal.ZERO
 
     fun supplierActionMessage(lang: AppLanguage): String =
         if (lang == AppLanguage.AR) lastSupplierActionMessageAr.orEmpty() else lastSupplierActionMessageEn.orEmpty()

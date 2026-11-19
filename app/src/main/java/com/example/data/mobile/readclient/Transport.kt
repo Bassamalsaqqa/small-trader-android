@@ -7,7 +7,9 @@ import java.util.Locale
 
 enum class HttpMethod {
     GET,
-    POST
+    POST,
+    PUT,
+    DELETE
 }
 
 /**
@@ -130,12 +132,50 @@ interface ReadClientTransport {
 object EndpointSecurity {
 
     private val ALLOWED_PATH_PATTERNS = listOf(
+        // Auth
         Regex("""^/api/mobile/v1/auth/challenge$"""),
         Regex("""^/api/mobile/v1/auth/login$"""),
         Regex("""^/api/mobile/v1/auth/logout$"""),
+        // Session
+        Regex("""^/api/mobile/v1/session$"""),
+        Regex("""^/api/mobile/v1/sessions$"""),
+        Regex("""^/api/mobile/v1/sessions/[0-9a-fA-F-]{36}$"""),
+        // Companies V1
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/bootstrap$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/home$"""),
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/products$"""),
-        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers$""")
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/products/[0-7][0-9A-HJKMNP-TV-Z]{25}$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/products/[0-7][0-9A-HJKMNP-TV-Z]{25}/movements$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/inventory/adjustments$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/inventory/transfers/preview$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers/[0-7][0-9A-HJKMNP-TV-Z]{25}$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers/[0-7][0-9A-HJKMNP-TV-Z]{25}/statement$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers/[0-7][0-9A-HJKMNP-TV-Z]{25}/payments$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers/[0-7][0-9A-HJKMNP-TV-Z]{25}$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers/[0-7][0-9A-HJKMNP-TV-Z]{25}/payments$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/[0-7][0-9A-HJKMNP-TV-Z]{25}$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/draft$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/preview$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/[0-7][0-9A-HJKMNP-TV-Z]{25}/execute$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/returns/preview$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/returns$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases/[0-7][0-9A-HJKMNP-TV-Z]{25}$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases/[0-7][0-9A-HJKMNP-TV-Z]{25}/grn$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases/returns/preview$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases/returns$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/expenses$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/expenses/categories$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/reports/shift-summary$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/reports/shift-close$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/reports/treasury$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/settings/business$"""),
+        // Companies V2
+        Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/online-cash$"""),
+        Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/offline-events/[0-9a-fA-F-]{36}/status$""")
     )
 
     fun validateBaseOrigin(origin: String, allowHttpLoopback: Boolean = false): String {
@@ -203,22 +243,70 @@ object EndpointSecurity {
     }
 
     fun validateMethodAndPath(method: HttpMethod, path: String) {
+        validatePath(path)
         when (method) {
             HttpMethod.POST -> {
-                require(
-                    path == "/api/mobile/v1/auth/challenge" ||
-                    path == "/api/mobile/v1/auth/login" ||
-                    path == "/api/mobile/v1/auth/logout"
-                ) {
-                    "Unauthorized POST endpoint: '$path'. Only challenge, login, and logout support POST."
+                val isChallenge = path == "/api/mobile/v1/auth/challenge"
+                val isLogin = path == "/api/mobile/v1/auth/login"
+                val isLogout = path == "/api/mobile/v1/auth/logout"
+                val isPostEndpoint = isChallenge || isLogin || isLogout ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/products$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/inventory/adjustments$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/inventory/transfers/preview$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers/[0-7][0-9A-HJKMNP-TV-Z]{25}/payments$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers/[0-7][0-9A-HJKMNP-TV-Z]{25}/payments$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/draft$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/preview$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/[0-7][0-9A-HJKMNP-TV-Z]{25}/execute$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/returns/preview$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/returns$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases/[0-7][0-9A-HJKMNP-TV-Z]{25}/grn$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases/returns/preview$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases/returns$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/expenses$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/reports/shift-close$""").matches(path) ||
+                    Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/online-cash$""").matches(path)
+                require(isPostEndpoint) {
+                    "Unauthorized POST endpoint: '$path'."
                 }
             }
             HttpMethod.GET -> {
-                val isBootstrap = Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/bootstrap$""").matches(path)
-                val isProducts = Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/products$""").matches(path)
-                val isCustomers = Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers$""").matches(path)
-                require(isBootstrap || isProducts || isCustomers) {
-                    "Unauthorized GET endpoint: '$path'. Only bootstrap, products, and customers support GET."
+                val isNotAllowedGet = path == "/api/mobile/v1/auth/login" ||
+                    path == "/api/mobile/v1/auth/challenge" ||
+                    path == "/api/mobile/v1/auth/logout" ||
+                    path.endsWith("/sales/online-cash") ||
+                    path.endsWith("/inventory/adjustments") ||
+                    path.endsWith("/shift-close") ||
+                    path.endsWith("/payments") ||
+                    path.endsWith("/execute") ||
+                    path.endsWith("/grn") ||
+                    path.endsWith("/sales/invoices/preview") ||
+                    path.endsWith("/sales/invoices/draft") ||
+                    path.endsWith("/sales/returns") ||
+                    path.endsWith("/sales/returns/preview") ||
+                    path.endsWith("/purchases/returns") ||
+                    path.endsWith("/purchases/returns/preview")
+                require(!isNotAllowedGet) {
+                    "Unauthorized GET endpoint: '$path'."
+                }
+            }
+            HttpMethod.PUT -> {
+                val isPutEndpoint =
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/products/[0-7][0-9A-HJKMNP-TV-Z]{25}$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers/[0-7][0-9A-HJKMNP-TV-Z]{25}$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers/[0-7][0-9A-HJKMNP-TV-Z]{25}$""").matches(path) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/[0-7][0-9A-HJKMNP-TV-Z]{25}$""").matches(path)
+                require(isPutEndpoint) {
+                    "Unauthorized PUT endpoint: '$path'."
+                }
+            }
+            HttpMethod.DELETE -> {
+                val isDeleteEndpoint = Regex("""^/api/mobile/v1/sessions/[0-9a-fA-F-]{36}$""").matches(path)
+                require(isDeleteEndpoint) {
+                    "Unauthorized DELETE endpoint: '$path'."
                 }
             }
         }

@@ -19,7 +19,8 @@ import com.example.data.mobile.readclient.EndpointSecurity
 enum class AppLaunchTarget {
     STAFF_WORKSPACE,
     DEMO_TRADER,
-    UNCONFIGURED
+    UNCONFIGURED,
+    FULL_SHELL
 }
 
 object AppLaunchTargetResolver {
@@ -33,6 +34,7 @@ object AppLaunchTargetResolver {
      * @param configuredOrigin Base URL/origin of the backend server (BuildConfig.STAFF_WORKSPACE_ORIGIN).
      * @param demoModeOptIn Explicit opt-in flag for demo mode (e.g. BuildConfig.DEMO_MODE_ENABLED).
      * @param allowHttpLoopback Whether cleartext HTTP loopback is permitted (debug-only).
+     * @param fullShell Whether to launch the full authenticated trader app shell.
      * @return The resolved [AppLaunchTarget].
      */
     fun resolve(
@@ -40,13 +42,19 @@ object AppLaunchTargetResolver {
         staffReadWorkspace: Boolean,
         configuredOrigin: String,
         demoModeOptIn: Boolean = false,
-        allowHttpLoopback: Boolean = false
+        allowHttpLoopback: Boolean = false,
+        fullShell: Boolean = false
     ): AppLaunchTarget {
         val trimmedOrigin = configuredOrigin.trim()
         val hasValidOrigin = trimmedOrigin.isNotBlank() && isValidOrigin(
             origin = trimmedOrigin,
             allowHttpLoopback = isDebug && allowHttpLoopback
         )
+
+        // If fullShell is explicitly requested and valid origin is provided, route to FULL_SHELL
+        if (fullShell && hasValidOrigin) {
+            return AppLaunchTarget.FULL_SHELL
+        }
 
         // 1. Explicit staff workspace pilot flag or valid origin configured:
         // If staffReadWorkspace is set OR a valid origin is provided, this app instance is designated for Staff.

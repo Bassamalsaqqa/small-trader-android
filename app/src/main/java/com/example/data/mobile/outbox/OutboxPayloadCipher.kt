@@ -36,7 +36,7 @@ class OutboxPayloadCipher internal constructor(private val engine: SessionCrypto
         val output = ByteArrayOutputStream()
         DataOutputStream(output).use { stream ->
             listOf("small_trader:economic_outbox:1", event.companyId, event.actorId,
-                event.deviceId, event.clientEventId, event.deviceLeaseId, event.capturedAt,
+                event.deviceId, event.clientEventId, event.deviceLeaseId ?: "online:intent:v2", event.capturedAt,
                 event.payloadDigest, event.eventVersion.toString()).forEach {
                 val bytes = it.toByteArray(Charsets.UTF_8)
                 if (bytes.size > 4096) throw OutboxStorageException(OutboxStorageError.OVERSIZED)
