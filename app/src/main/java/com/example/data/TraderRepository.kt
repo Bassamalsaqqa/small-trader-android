@@ -151,12 +151,16 @@ interface TraderRepository {
     val shiftSummaryFlow: StateFlow<ShiftSummaryReportResponse?> get() = MutableStateFlow(null)
     val treasuryReportFlow: StateFlow<TreasuryReportResponse?> get() = MutableStateFlow(null)
     val serverInvoicesFlow: StateFlow<List<SalesInvoiceListItem>> get() = MutableStateFlow(emptyList())
-    val invoicesHasMoreGapFlow: StateFlow<Boolean> get() = MutableStateFlow(false)
+    val invoicesHasMoreFlow: StateFlow<Boolean> get() = MutableStateFlow(false)
+    val invoicesNextCursorFlow: StateFlow<String?> get() = MutableStateFlow(null)
+    val isInvoicesLoadingFlow: StateFlow<Boolean> get() = MutableStateFlow(false)
+    val invoicesHasMoreGapFlow: StateFlow<Boolean> get() = invoicesHasMoreFlow
 
     suspend fun refreshHomeMetrics(): Result<HomeResponse?> = Result.success(null)
     suspend fun refreshShiftSummary(): Result<ShiftSummaryReportResponse?> = Result.success(null)
     suspend fun refreshTreasuryReport(): Result<TreasuryReportResponse?> = Result.success(null)
     suspend fun refreshInvoices(query: SalesInvoicesQuery = SalesInvoicesQuery()): Result<List<InvoiceRecord>> = Result.success(emptyList())
+    suspend fun loadMoreInvoices(): Result<List<InvoiceRecord>> = Result.success(emptyList())
 
     suspend fun getSalesInvoiceDetail(invoicePublicId: String): Result<SalesInvoiceDetailResponse> =
         Result.failure(UnsupportedOperationException("Invoice detail read not supported in this repository mode"))

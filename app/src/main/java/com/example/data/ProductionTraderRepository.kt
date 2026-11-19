@@ -436,8 +436,21 @@ class ProductionTraderRepository(
     private val _serverInvoicesFlow = MutableStateFlow<List<SalesInvoiceListItem>>(emptyList())
     override val serverInvoicesFlow: StateFlow<List<SalesInvoiceListItem>> = _serverInvoicesFlow.asStateFlow()
 
+    private val _invoicesHasMoreFlow = MutableStateFlow<Boolean>(false)
+    override val invoicesHasMoreFlow: StateFlow<Boolean> = _invoicesHasMoreFlow.asStateFlow()
+
+    private val _invoicesNextCursorFlow = MutableStateFlow<String?>(null)
+    override val invoicesNextCursorFlow: StateFlow<String?> = _invoicesNextCursorFlow.asStateFlow()
+
+    private val _isInvoicesLoadingFlow = MutableStateFlow<Boolean>(false)
+    override val isInvoicesLoadingFlow: StateFlow<Boolean> = _isInvoicesLoadingFlow.asStateFlow()
+
     private val _invoicesHasMoreGapFlow = MutableStateFlow<Boolean>(false)
     override val invoicesHasMoreGapFlow: StateFlow<Boolean> = _invoicesHasMoreGapFlow.asStateFlow()
+
+    private var activeInvoicesQuery: SalesInvoicesQuery = SalesInvoicesQuery()
+    private var activeInvoicesGeneration: Long? = null
+    private var activeInvoicesCompanyId: ServerUlid = companyId
 
     init {
         if (autoRefresh) refreshFromBackend()
@@ -1221,12 +1234,27 @@ class ProductionTraderRepository(
 
     override suspend fun refreshInvoices(query: SalesInvoicesQuery): Result<List<InvoiceRecord>> = withContext(ioDispatcher) {
         val client = merchantReadClient ?: return@withContext Result.failure(IllegalStateException("MerchantReadClient not configured"))
+        _isInvoicesLoadingFlow.value = true
+        activeInvoicesQuery = query
+        activeInvoicesGeneration = retainedGeneration
+        activeInvoicesCompanyId = companyId
+
+        val startGen = retainedGeneration
+        val startCompanyId = companyId
+        val startQuery = query
+
         try {
             val res = client.getSalesInvoices(companyId, query, retainedGeneration = retainedGeneration)
+            if (retainedGeneration != startGen || companyId != startCompanyId || activeInvoicesQuery != startQuery) {
+                return@withContext Result.failure(IllegalStateException("Stale invoices refresh completion ignored"))
+            }
+
             when (res) {
                 is MerchantReadResult.Success -> {
                     val serverList = res.value.invoices
                     _serverInvoicesFlow.value = serverList
+                    _invoicesNextCursorFlow.value = res.value.nextCursor
+                    _invoicesHasMoreFlow.value = res.value.hasMore
                     _invoicesHasMoreGapFlow.value = res.value.hasMore
 
                     val currentLocal = _invoicesFlow.value
@@ -1234,9 +1262,7 @@ class ProductionTraderRepository(
                     // Identify local outbox invoices that must not be dropped:
                     // Any pending/unreconciled local record, including unknown ACK events
                     val pendingOutbox = currentLocal.filter { local ->
-                        val isConfirmed = local.outboxStatus == "CONFIRMED" && local.serverInvoiceUlid != null
-                        val isReconciledOnServer = isConfirmed && serverList.any { it.id.value == local.serverInvoiceUlid }
-                        !isReconciledOnServer
+                        !local.clientEventId.isNullOrBlank() && local.outboxStatus != "CONFIRMED"
                     }
 
                     // Map server list, merging with matching local outbox invoice by real ULID / ID / clientEventId
@@ -1274,6 +1300,92 @@ class ProductionTraderRepository(
             }
         } catch (e: Exception) {
             Result.failure(e)
+        } finally {
+            _isInvoicesLoadingFlow.value = false
+        }
+    }
+
+    override suspend fun loadMoreInvoices(): Result<List<InvoiceRecord>> = withContext(ioDispatcher) {
+        val client = merchantReadClient ?: return@withContext Result.failure(IllegalStateException("MerchantReadClient not configured"))
+        if (_isInvoicesLoadingFlow.value) {
+            return@withContext Result.success(_invoicesFlow.value)
+        }
+        val nextCursor = _invoicesNextCursorFlow.value
+        if (!_invoicesHasMoreFlow.value || nextCursor.isNullOrBlank()) {
+            return@withContext Result.success(_invoicesFlow.value)
+        }
+
+        _isInvoicesLoadingFlow.value = true
+        val startGen = retainedGeneration
+        val startCompanyId = companyId
+        val startQuery = activeInvoicesQuery
+        val loadMoreQuery = startQuery.copy(cursor = nextCursor)
+
+        try {
+            val res = client.getSalesInvoices(companyId, loadMoreQuery, retainedGeneration = startGen)
+            if (retainedGeneration != startGen || companyId != startCompanyId || activeInvoicesQuery != startQuery) {
+                return@withContext Result.failure(IllegalStateException("Stale load more completion ignored due to scope/filter change"))
+            }
+
+            when (res) {
+                is MerchantReadResult.Success -> {
+                    val newServerList = res.value.invoices
+                    val existingServerList = _serverInvoicesFlow.value
+
+                    val existingServerIds = existingServerList.map { it.id.value }.toSet()
+                    val dedupedNewServerList = newServerList.filter { !existingServerIds.contains(it.id.value) }
+                    val combinedServerList = existingServerList + dedupedNewServerList
+                    _serverInvoicesFlow.value = combinedServerList
+
+                    _invoicesNextCursorFlow.value = res.value.nextCursor
+                    _invoicesHasMoreFlow.value = res.value.hasMore
+                    _invoicesHasMoreGapFlow.value = res.value.hasMore
+
+                    val currentLocal = _invoicesFlow.value
+                    val pendingOutbox = currentLocal.filter { local ->
+                        !local.clientEventId.isNullOrBlank() && local.outboxStatus != "CONFIRMED"
+                    }
+
+                    val existingDomainIds = currentLocal.mapNotNull { it.serverInvoiceUlid ?: it.id }.toSet()
+                    val newDomainRecords = mutableListOf<InvoiceRecord>()
+                    for (serverItem in dedupedNewServerList) {
+                        if (!existingDomainIds.contains(serverItem.id.value)) {
+                            val localMatch = currentLocal.firstOrNull { local ->
+                                local.serverInvoiceUlid == serverItem.id.value ||
+                                local.id == serverItem.id.value ||
+                                (!local.clientEventId.isNullOrBlank() && local.clientEventId == serverItem.id.value)
+                            }
+                            newDomainRecords.add(MerchantReadAdapter.toDomainInvoiceRecord(serverItem, localMatch))
+                        }
+                    }
+
+                    val updatedList = currentLocal + newDomainRecords
+                    _invoicesFlow.value = updatedList
+                    Result.success(updatedList)
+                }
+                is MerchantReadResult.Forbidden -> {
+                    Result.failure(SecurityException("Forbidden: ${res.error?.message ?: "Missing sales.invoice.view permission"}"))
+                }
+                is MerchantReadResult.AuthDenial -> {
+                    Result.failure(SecurityException("Authentication denied: ${res.error?.message ?: "UNAUTHENTICATED"}"))
+                }
+                is MerchantReadResult.NetworkError -> {
+                    Result.failure(java.io.IOException("Network error during load more invoices: ${res.message}"))
+                }
+                is MerchantReadResult.SchemaError -> {
+                    Result.failure(IllegalStateException("Schema validation error in load more invoices: ${res.message}"))
+                }
+                is MerchantReadResult.HttpError -> {
+                    Result.failure(RuntimeException("HTTP error ${res.statusCode}: ${res.error?.message}"))
+                }
+                else -> {
+                    Result.failure(RuntimeException("Failed to load more invoices: $res"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        } finally {
+            _isInvoicesLoadingFlow.value = false
         }
     }
 

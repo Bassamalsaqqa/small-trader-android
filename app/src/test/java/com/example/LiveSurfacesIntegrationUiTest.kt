@@ -47,6 +47,7 @@ import com.example.viewmodel.TraderViewModel
 import java.math.BigDecimal
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -509,11 +510,11 @@ class LiveSurfacesIntegrationUiTest {
     }
 
     // -------------------------------------------------------------------------
-    // 6. Invoices History has_more Gap Honesty
+    // 6. Invoices History Load More Action & Pagination Honesty
     // -------------------------------------------------------------------------
 
     @Test
-    fun invoicesHistoryScreen_rendersLimitationBanner_whenHasMoreGapIsTrue() {
+    fun invoicesHistoryScreen_rendersLoadMoreButton_andHandlesClick() {
         val session = UserSession(
             id = "usr_mgr_1",
             name = "Manager",
@@ -527,24 +528,29 @@ class LiveSurfacesIntegrationUiTest {
         val state = TraderUiState(
             currentSession = session,
             invoices = emptyList(),
+            liveInvoicesHasMore = true,
             liveInvoicesHasMoreGap = true,
             language = AppLanguage.EN
         )
+
+        var loadMoreClicked = false
 
         composeTestRule.setContent {
             SmallTraderTheme(darkTheme = false, isRtl = false) {
                 InvoicesHistoryScreen(
                     state = state,
                     onOpenInvoice = {},
-                    onStartNewSale = {}
+                    onStartNewSale = {},
+                    onLoadMore = { loadMoreClicked = true }
                 )
             }
         }
 
-        // Limitation banner must be visible
-        composeTestRule.onAllNodes(hasScrollAction() and SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange))[0].performScrollToNode(hasTestTag("invoice_history_has_more_banner"))
-        composeTestRule.onNodeWithTag("invoice_history_has_more_banner").assertIsDisplayed()
-        composeTestRule.onNodeWithText("More records exist on server — pagination unavailable", substring = true).assertIsDisplayed()
+        // Accessible Load More Icon Button must be displayed with 48dp touch target and respond to click
+        composeTestRule.onAllNodes(hasScrollAction() and SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange))[0].performScrollToNode(hasTestTag("invoice_history_load_more_button"))
+        composeTestRule.onNodeWithTag("invoice_history_load_more_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("invoice_history_load_more_button").performClick()
+        assertTrue(loadMoreClicked)
     }
 
     // -------------------------------------------------------------------------

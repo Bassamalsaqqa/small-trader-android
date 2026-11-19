@@ -178,6 +178,7 @@ class MerchantReadClientWireTest {
                 "company_id": "${companyId.value}",
                 "count": 1,
                 "has_more": false,
+                "next_cursor": null,
                 "invoices": [
                     {
                         "id": "${invoiceId.value}",
@@ -217,6 +218,7 @@ class MerchantReadClientWireTest {
         val list = (result as MerchantReadResult.Success).value
         assertEquals(1, list.count)
         assertFalse(list.hasMore)
+        assertNull(list.nextCursor)
         val item = list.invoices[0]
         assertEquals("INV-1001", item.invoiceNumber)
         assertEquals(BigDecimal("220.40"), item.total)
@@ -232,6 +234,111 @@ class MerchantReadClientWireTest {
         assertEquals(customerId.value, mock.lastRequest!!.queryParams["customer_id"])
         assertEquals("2026-11-01", mock.lastRequest!!.queryParams["date_from"])
         assertEquals("2026-11-18", mock.lastRequest!!.queryParams["date_to"])
+        assertNull(mock.lastRequest!!.queryParams["cursor"])
+    }
+
+    @Test
+    fun testSalesInvoicesList_WithOpaqueCursor_PreservedUnchanged() {
+        val mock = MockTransport()
+        val opaqueCursorIn = "eyJ2IjoxLCJjIjoiMDFKQ1Y4WDkiLCJmaCI6ImFiYzEyMyIsInAiOiIwMUpDLi4ifQ.sig123"
+        val opaqueCursorOut = "eyJ2IjoxLCJjIjoiMDFKQ1Y4WDkiLCJmaCI6ImFiYzEyMyIsInAiOiIwMUpELi4ifQ.sig456"
+
+        mock.nextResponse = TransportResponse(
+            statusCode = 200,
+            headers = mapOf("Content-Type" to "application/json"),
+            body = """
+            {
+                "company_id": "${companyId.value}",
+                "count": 1,
+                "has_more": true,
+                "next_cursor": "$opaqueCursorOut",
+                "invoices": [
+                    {
+                        "id": "${invoiceId.value}",
+                        "invoice_number": "INV-1002",
+                        "status": "posted",
+                        "customer_id": "${customerId.value}",
+                        "customer_name": "Customer 2",
+                        "date": "2026-11-16",
+                        "subtotal": "50.00",
+                        "discount": "0.00",
+                        "tax": "0.00",
+                        "total": "50.00",
+                        "paid": "50.00",
+                        "remaining": "0.00",
+                        "currency": "USD",
+                        "currency_minor_units": 2,
+                        "payment_status": "PAID_CASH",
+                        "created_at": "2026-11-16T12:00:00Z"
+                    }
+                ]
+            }
+            """.trimIndent()
+        )
+
+        val client = MerchantReadClient(mock, "https://api.example.com")
+        val query = SalesInvoicesQuery(
+            limit = 20,
+            status = "PAID_CASH",
+            cursor = opaqueCursorIn
+        )
+        val result = client.getSalesInvoices(companyId, query = query, token = validToken)
+
+        assertTrue(result.toString(), result is MerchantReadResult.Success)
+        val list = (result as MerchantReadResult.Success).value
+        assertTrue(list.hasMore)
+        assertEquals(opaqueCursorOut, list.nextCursor)
+
+        // Verify that exact opaque cursor was forwarded in GET query parameter without decode or offset invention
+        assertEquals(opaqueCursorIn, mock.lastRequest!!.queryParams["cursor"])
+        assertEquals("20", mock.lastRequest!!.queryParams["limit"])
+        assertEquals("PAID_CASH", mock.lastRequest!!.queryParams["status"])
+    }
+
+    @Test
+    fun testSalesInvoicesList_MissingRequiredNextCursor_FailsSchema() {
+        val mock = MockTransport()
+        // Omission of required next_cursor in wire response
+        mock.nextResponse = TransportResponse(
+            statusCode = 200,
+            headers = mapOf("Content-Type" to "application/json"),
+            body = """
+            {
+                "company_id": "${companyId.value}",
+                "count": 0,
+                "has_more": false,
+                "invoices": []
+            }
+            """.trimIndent()
+        )
+
+        val client = MerchantReadClient(mock, "https://api.example.com")
+        val result = client.getSalesInvoices(companyId, token = validToken)
+
+        assertTrue("Expected SchemaError when required next_cursor is absent", result is MerchantReadResult.SchemaError)
+    }
+
+    @Test
+    fun testSalesInvoicesQuery_BoundsValidation() {
+        // Exceeding 255 chars in cursor must throw IllegalArgumentException
+        val longCursor = "a".repeat(256)
+        try {
+            SalesInvoicesQuery(cursor = longCursor)
+            org.junit.Assert.fail("Expected IllegalArgumentException for cursor > 255 chars")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("255") == true)
+        }
+
+        // Limit bounds: 0 or 101 must throw
+        try {
+            SalesInvoicesQuery(limit = 0)
+            org.junit.Assert.fail("Expected IllegalArgumentException for limit = 0")
+        } catch (_: IllegalArgumentException) {}
+
+        try {
+            SalesInvoicesQuery(limit = 101)
+            org.junit.Assert.fail("Expected IllegalArgumentException for limit = 101")
+        } catch (_: IllegalArgumentException) {}
     }
 
     // ------------------------------------------------------------------------

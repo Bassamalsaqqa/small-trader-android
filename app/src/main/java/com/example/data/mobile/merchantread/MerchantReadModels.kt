@@ -609,6 +609,7 @@ class SalesInvoiceListResponse(
     val companyId: ServerUlid,
     val count: Int,
     val hasMore: Boolean,
+    val nextCursor: String? = null,
     invoices: List<SalesInvoiceListItem>
 ) {
     val invoices: List<SalesInvoiceListItem> = Collections.unmodifiableList(invoices.toList())
@@ -616,27 +617,31 @@ class SalesInvoiceListResponse(
     init {
         require(count >= 0) { "count must be non-negative, got $count" }
         require(invoices.size == count) { "invoices list size (${invoices.size}) does not match count ($count)" }
+        if (nextCursor != null) {
+            require(nextCursor.length <= 255) { "next_cursor exceeds maximum 255 characters, got ${nextCursor.length}" }
+        }
     }
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is SalesInvoiceListResponse) return false
-        return companyId == other.companyId && count == other.count && hasMore == other.hasMore && invoices == other.invoices
+        return companyId == other.companyId && count == other.count && hasMore == other.hasMore && nextCursor == other.nextCursor && invoices == other.invoices
     }
 
     override fun hashCode(): Int {
         var result = companyId.hashCode()
         result = 31 * result + count
         result = 31 * result + hasMore.hashCode()
+        result = 31 * result + (nextCursor?.hashCode() ?: 0)
         result = 31 * result + invoices.hashCode()
         return result
     }
 
     override fun toString(): String =
-        "SalesInvoiceListResponse(companyId=$companyId, count=$count, hasMore=$hasMore)"
+        "SalesInvoiceListResponse(companyId=$companyId, count=$count, hasMore=$hasMore, nextCursor=${if (nextCursor != null) "[OPAQUE]" else "null"})"
 
     companion object {
-        private val ALLOWED_KEYS = setOf("company_id", "count", "has_more", "invoices")
+        private val ALLOWED_KEYS = setOf("company_id", "count", "has_more", "next_cursor", "invoices")
 
         fun fromStrictJson(obj: StrictJsonObject): SalesInvoiceListResponse {
             MerchantReadValidationUtils.checkAllowedKeys(obj, ALLOWED_KEYS, "SalesInvoiceListResponse")
@@ -646,6 +651,7 @@ class SalesInvoiceListResponse(
                 companyId = MerchantReadValidationUtils.requireUlid(obj, "company_id"),
                 count = MerchantReadValidationUtils.requireInt(obj, "count", min = 0),
                 hasMore = MerchantReadValidationUtils.requireBoolean(obj, "has_more"),
+                nextCursor = MerchantReadValidationUtils.requireNullableString(obj, "next_cursor", minLength = 1, maxLength = 255),
                 invoices = items
             )
         }

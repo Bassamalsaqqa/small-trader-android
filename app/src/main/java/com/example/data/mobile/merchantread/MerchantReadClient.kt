@@ -32,7 +32,8 @@ data class SalesInvoicesQuery(
     val search: String? = null,
     val customerId: ServerUlid? = null,
     val dateFrom: String? = null,
-    val dateTo: String? = null
+    val dateTo: String? = null,
+    val cursor: String? = null
 ) {
     init {
         require(limit in 1..100) { "limit must be between 1 and 100, got $limit" }
@@ -52,6 +53,11 @@ data class SalesInvoicesQuery(
         if (dateTo != null) {
             MerchantReadValidationUtils.validateDateString(dateTo, "date_to")
         }
+        if (cursor != null) {
+            require(cursor.length <= 255) {
+                "cursor exceeds maximum 255 characters, got ${cursor.length}"
+            }
+        }
     }
 
     fun toQueryParams(): Map<String, String> {
@@ -62,13 +68,14 @@ data class SalesInvoicesQuery(
         if (customerId != null) map["customer_id"] = customerId.value
         if (dateFrom != null) map["date_from"] = dateFrom
         if (dateTo != null) map["date_to"] = dateTo
+        if (cursor != null && cursor.isNotBlank()) map["cursor"] = cursor
         return map
     }
 
     companion object {
         private val ALLOWED_STATUSES = setOf(
-            "DRAFT", "POSTED", "VOID", "PAID_CASH", "PARTIAL", "ON_CREDIT",
-            "draft", "posted", "void"
+            "DRAFT", "POSTED", "VOID", "PAID_CASH", "PAID", "PARTIAL", "ON_CREDIT",
+            "draft", "posted", "void", "paid"
         )
     }
 }

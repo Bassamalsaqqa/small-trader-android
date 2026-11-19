@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -51,7 +53,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -1714,7 +1718,8 @@ fun calculateFilteredInvoicesPaidTotalIls(invoices: List<InvoiceRecord>): Double
 fun InvoicesHistoryScreen(
     state: TraderUiState,
     onOpenInvoice: (InvoiceRecord) -> Unit,
-    onStartNewSale: () -> Unit
+    onStartNewSale: () -> Unit,
+    onLoadMore: () -> Unit = {}
 ) {
     val lang = state.language
     var searchQuery by remember { mutableStateOf("") }
@@ -2193,38 +2198,35 @@ fun InvoicesHistoryScreen(
                     )
                 }
             }
-            if (state.liveInvoicesHasMoreGap) {
+            if (state.liveInvoicesHasMore || state.liveInvoicesHasMoreGap) {
                 item {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                            .testTag("invoice_history_has_more_banner")
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Row(
+                        FilledTonalIconButton(
+                            onClick = onLoadMore,
+                            enabled = !state.isLiveInvoicesLoading,
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                                .testTag("invoice_history_load_more_button"),
+                            shape = RoundedCornerShape(12.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Warning,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = lang.tr(
-                                    "تتوفر سجلات إضافية على الخادم — التحميل الإضافي غير متاح حالياً",
-                                    "More records exist on server — pagination unavailable"
-                                ),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            if (state.isLiveInvoicesLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.ExpandMore,
+                                    contentDescription = lang.tr("تحميل المزيد من الفواتير", "Load more invoices"),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
                         }
                     }
                 }

@@ -115,6 +115,7 @@ class ProductionTraderRepositoryReadWireTest {
                     "company_id": "${companyId.value}",
                     "count": 2,
                     "has_more": false,
+                    "next_cursor": null,
                     "invoices": [
                         {
                             "id": "01JCV8X9M2NQW3TYZ4R5S6789E",
@@ -259,11 +260,12 @@ class ProductionTraderRepositoryReadWireTest {
     }
 
     // ------------------------------------------------------------------------
-    // 2. Bounded Paging has_more Without Cursor Test
+    // 2. Bounded Paging has_more and next_cursor Test
     // ------------------------------------------------------------------------
     @Test
-    fun testRefreshInvoices_SurfacesBoundedPagingHasMoreWithoutCursorGap() = runBlocking {
+    fun testRefreshInvoices_SurfacesBoundedPagingHasMoreWithCursor() = runBlocking {
         val transport = QueueMockTransport()
+        val nextCursorToken = "eyJ2IjoxLCJjIjoiMDFKQ1Y4WDkiLCJmaCI6ImFiYzEyMyIsInAiOiIwMUpDLi4ifQ.cursor_sig"
         transport.responseQueue.add(
             TransportResponse(
                 statusCode = 200,
@@ -273,6 +275,7 @@ class ProductionTraderRepositoryReadWireTest {
                     "company_id": "${companyId.value}",
                     "count": 1,
                     "has_more": true,
+                    "next_cursor": "$nextCursorToken",
                     "invoices": [
                         {
                             "id": "01JCV8X9M2NQW3TYZ4R5S6789G",
@@ -302,8 +305,10 @@ class ProductionTraderRepositoryReadWireTest {
         val result = repo.refreshInvoices(SalesInvoicesQuery(limit = 1))
 
         assertTrue(result.exceptionOrNull()?.toString() ?: "Expected success", result.isSuccess)
-        // has_more without cursor is surfaced faithfully
+        // has_more and next_cursor are surfaced faithfully
+        assertTrue(repo.invoicesHasMoreFlow.value)
         assertTrue(repo.invoicesHasMoreGapFlow.value)
+        assertEquals(nextCursorToken, repo.invoicesNextCursorFlow.value)
 
         // Ensure request did not invent offset or page parameter
         val req = transport.requests.last()
@@ -610,5 +615,418 @@ class ProductionTraderRepositoryReadWireTest {
         assertEquals(401, (res as MerchantReadResult.AuthDenial).statusCode)
         assertEquals("UNAUTHENTICATED", res.error.code)
         assertTrue(res.error.message.contains("generation changed"))
+    }
+
+    // ------------------------------------------------------------------------
+    // 8. Keyset Cursor Pagination: Meaningful Two-Page Load & Real ULID Deduplication
+    // ------------------------------------------------------------------------
+    @Test
+    fun testPagination_MeaningfulTwoPageLoad_AppendsAndDedupesRealULID() = runBlocking {
+        val transport = QueueMockTransport()
+        val cursorPage1 = "eyJ2IjoxLCJjIjoiMDFKQ1Y4WDkiLCJmaCI6ImFiYzEyMyIsInAiOiIwMUpDLi4ifQ.page1"
+
+        // Page 1 Response: 2 invoices, has_more = true, next_cursor = cursorPage1
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """
+                {
+                    "company_id": "${companyId.value}",
+                    "count": 2,
+                    "has_more": true,
+                    "next_cursor": "$cursorPage1",
+                    "invoices": [
+                        {
+                            "id": "01JCV8X9M2NQW3TYZ4R5S67891",
+                            "invoice_number": "INV-101",
+                            "status": "posted",
+                            "customer_id": "${customerId.value}",
+                            "customer_name": "Customer 1",
+                            "date": "2026-11-18",
+                            "subtotal": "100.00",
+                            "discount": "0.00",
+                            "tax": "0.00",
+                            "total": "100.00",
+                            "paid": "100.00",
+                            "remaining": "0.00",
+                            "currency": "ILS",
+                            "currency_minor_units": 2,
+                            "payment_status": "PAID_CASH",
+                            "created_at": "2026-11-18T10:00:00Z"
+                        },
+                        {
+                            "id": "01JCV8X9M2NQW3TYZ4R5S67892",
+                            "invoice_number": "INV-102",
+                            "status": "posted",
+                            "customer_id": "${customerId.value}",
+                            "customer_name": "Customer 2",
+                            "date": "2026-11-18",
+                            "subtotal": "50.00",
+                            "discount": "0.00",
+                            "tax": "0.00",
+                            "total": "50.00",
+                            "paid": "50.00",
+                            "remaining": "0.00",
+                            "currency": "ILS",
+                            "currency_minor_units": 2,
+                            "payment_status": "PAID_CASH",
+                            "created_at": "2026-11-18T09:00:00Z"
+                        }
+                    ]
+                }
+                """.trimIndent()
+            )
+        )
+
+        // Page 2 Response: 2 invoices (one duplicate of INV-102 to verify ULID deduplication, one new INV-103), has_more = false
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """
+                {
+                    "company_id": "${companyId.value}",
+                    "count": 2,
+                    "has_more": false,
+                    "next_cursor": null,
+                    "invoices": [
+                        {
+                            "id": "01JCV8X9M2NQW3TYZ4R5S67892",
+                            "invoice_number": "INV-102",
+                            "status": "posted",
+                            "customer_id": "${customerId.value}",
+                            "customer_name": "Customer 2",
+                            "date": "2026-11-18",
+                            "subtotal": "50.00",
+                            "discount": "0.00",
+                            "tax": "0.00",
+                            "total": "50.00",
+                            "paid": "50.00",
+                            "remaining": "0.00",
+                            "currency": "ILS",
+                            "currency_minor_units": 2,
+                            "payment_status": "PAID_CASH",
+                            "created_at": "2026-11-18T09:00:00Z"
+                        },
+                        {
+                            "id": "01JCV8X9M2NQW3TYZ4R5S67893",
+                            "invoice_number": "INV-103",
+                            "status": "posted",
+                            "customer_id": "${customerId.value}",
+                            "customer_name": "Customer 3",
+                            "date": "2026-11-18",
+                            "subtotal": "75.00",
+                            "discount": "0.00",
+                            "tax": "0.00",
+                            "total": "75.00",
+                            "paid": "75.00",
+                            "remaining": "0.00",
+                            "currency": "ILS",
+                            "currency_minor_units": 2,
+                            "payment_status": "PAID_CASH",
+                            "created_at": "2026-11-18T08:00:00Z"
+                        }
+                    ]
+                }
+                """.trimIndent()
+            )
+        )
+
+        val (repo, _) = createRepository(transport)
+
+        // 1. First Page Refresh
+        val firstPageResult = repo.refreshInvoices(SalesInvoicesQuery(limit = 2))
+        assertTrue(firstPageResult.isSuccess)
+        assertEquals(2, repo.invoicesFlow.value.size)
+        assertTrue(repo.invoicesHasMoreFlow.value)
+        assertEquals(cursorPage1, repo.invoicesNextCursorFlow.value)
+
+        // 2. Load More Action
+        val loadMoreResult = repo.loadMoreInvoices()
+        assertTrue(loadMoreResult.isSuccess)
+
+        // Verifies deduped append: 3 unique invoices total (INV-101, INV-102, INV-103)
+        assertEquals(3, repo.invoicesFlow.value.size)
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S67891", repo.invoicesFlow.value[0].id)
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S67892", repo.invoicesFlow.value[1].id)
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S67893", repo.invoicesFlow.value[2].id)
+
+        // Exhaustion reached
+        assertFalse(repo.invoicesHasMoreFlow.value)
+        assertFalse(repo.invoicesHasMoreGapFlow.value)
+        assertNull(repo.invoicesNextCursorFlow.value)
+
+        // Verify that the second request sent cursorPage1
+        val secondReq = transport.requests.last()
+        assertEquals(HttpMethod.GET, secondReq.method)
+        assertEquals(cursorPage1, secondReq.queryParams["cursor"])
+    }
+
+    // ------------------------------------------------------------------------
+    // 9. Keyset Cursor Pagination: Exhaustion Avoids Unnecessary Network Calls
+    // ------------------------------------------------------------------------
+    @Test
+    fun testPagination_ExhaustedPagingDoesNotQueryServer() = runBlocking {
+        val transport = QueueMockTransport()
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """
+                {
+                    "company_id": "${companyId.value}",
+                    "count": 0,
+                    "has_more": false,
+                    "next_cursor": null,
+                    "invoices": []
+                }
+                """.trimIndent()
+            )
+        )
+
+        val (repo, _) = createRepository(transport)
+        repo.refreshInvoices()
+        assertEquals(1, transport.requests.size)
+        assertFalse(repo.invoicesHasMoreFlow.value)
+        assertNull(repo.invoicesNextCursorFlow.value)
+
+        // Calling loadMore on exhausted pagination must be a no-op
+        val res = repo.loadMoreInvoices()
+        assertTrue(res.isSuccess)
+        assertEquals(1, transport.requests.size) // No extra request dispatched
+    }
+
+    // ------------------------------------------------------------------------
+    // 10. Keyset Cursor Pagination: Error Retains Previous Invoices (No Data Wipe)
+    // ------------------------------------------------------------------------
+    @Test
+    fun testPagination_ErrorRetainsPreviousInvoices() = runBlocking {
+        val transport = QueueMockTransport()
+        val cursorPage1 = "cursor_1"
+
+        // Page 1 succeeds
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """
+                {
+                    "company_id": "${companyId.value}",
+                    "count": 1,
+                    "has_more": true,
+                    "next_cursor": "$cursorPage1",
+                    "invoices": [
+                        {
+                            "id": "01JCV8X9M2NQW3TYZ4R5S67891",
+                            "invoice_number": "INV-101",
+                            "status": "posted",
+                            "customer_id": "${customerId.value}",
+                            "date": "2026-11-18",
+                            "subtotal": "100.00",
+                            "discount": "0.00",
+                            "tax": "0.00",
+                            "total": "100.00",
+                            "paid": "100.00",
+                            "remaining": "0.00",
+                            "currency": "ILS",
+                            "currency_minor_units": 2,
+                            "payment_status": "PAID_CASH",
+                            "created_at": null
+                        }
+                    ]
+                }
+                """.trimIndent()
+            )
+        )
+
+        // Page 2 fails with 500 error
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 500,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """{"error":{"code":"INTERNAL_SERVER_ERROR","message":"Database timeout"}}"""
+            )
+        )
+
+        val (repo, _) = createRepository(transport)
+        repo.refreshInvoices(SalesInvoicesQuery(limit = 1))
+        assertEquals(1, repo.invoicesFlow.value.size)
+
+        // Load more fails
+        val failResult = repo.loadMoreInvoices()
+        assertFalse(failResult.isSuccess)
+
+        // Previous invoices must be strictly retained (never wiped!)
+        assertEquals(1, repo.invoicesFlow.value.size)
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S67891", repo.invoicesFlow.value[0].id)
+    }
+
+    // ------------------------------------------------------------------------
+    // 11. Keyset Cursor Pagination: Filter Changed Resets Pagination Per Filter
+    // ------------------------------------------------------------------------
+    @Test
+    fun testPagination_FilterChangedResetsPaginationPerFilter() = runBlocking {
+        val transport = QueueMockTransport()
+        val cursorA = "cursor_filter_a"
+        val cursorB = "cursor_filter_b"
+
+        // Response for Filter A (All)
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """
+                {
+                    "company_id": "${companyId.value}",
+                    "count": 1,
+                    "has_more": true,
+                    "next_cursor": "$cursorA",
+                    "invoices": [
+                        {
+                            "id": "01JCV8X9M2NQW3TYZ4R5S67891",
+                            "invoice_number": "INV-101",
+                            "status": "posted",
+                            "customer_id": "${customerId.value}",
+                            "date": "2026-11-18",
+                            "subtotal": "100.00",
+                            "discount": "0.00",
+                            "tax": "0.00",
+                            "total": "100.00",
+                            "paid": "100.00",
+                            "remaining": "0.00",
+                            "currency": "ILS",
+                            "currency_minor_units": 2,
+                            "payment_status": "PAID_CASH",
+                            "created_at": null
+                        }
+                    ]
+                }
+                """.trimIndent()
+            )
+        )
+
+        // Response for Filter B (status = PAID_CASH)
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """
+                {
+                    "company_id": "${companyId.value}",
+                    "count": 1,
+                    "has_more": true,
+                    "next_cursor": "$cursorB",
+                    "invoices": [
+                        {
+                            "id": "01JCV8X9M2NQW3TYZ4R5S67892",
+                            "invoice_number": "INV-201",
+                            "status": "posted",
+                            "customer_id": "${customerId.value}",
+                            "date": "2026-11-18",
+                            "subtotal": "200.00",
+                            "discount": "0.00",
+                            "tax": "0.00",
+                            "total": "200.00",
+                            "paid": "200.00",
+                            "remaining": "0.00",
+                            "currency": "ILS",
+                            "currency_minor_units": 2,
+                            "payment_status": "PAID_CASH",
+                            "created_at": null
+                        }
+                    ]
+                }
+                """.trimIndent()
+            )
+        )
+
+        val (repo, _) = createRepository(transport)
+
+        // Query with Filter A
+        repo.refreshInvoices(SalesInvoicesQuery(limit = 1))
+        assertEquals(cursorA, repo.invoicesNextCursorFlow.value)
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S67891", repo.invoicesFlow.value.first().id)
+
+        // Query with Filter B (different status)
+        repo.refreshInvoices(SalesInvoicesQuery(limit = 1, status = "PAID_CASH"))
+        // Previous server list is replaced with Filter B results and cursor resets to cursorB
+        assertEquals(cursorB, repo.invoicesNextCursorFlow.value)
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S67892", repo.invoicesFlow.value.first().id)
+        assertNull(transport.requests.last().queryParams["cursor"]) // Fresh refresh starts with cursor = null
+    }
+
+    // ------------------------------------------------------------------------
+    // 12. Keyset Cursor Pagination: Deduplicate Pending Outbox with Real History
+    // ------------------------------------------------------------------------
+    @Test
+    fun testPagination_HistoryPreservesUnknownAckUntilDigestStatusConfirmation() = runBlocking {
+        val transport = QueueMockTransport()
+        val (repo, _) = createRepository(transport)
+
+        // Stage a local pending invoice with UNKNOWN_ACK in repository
+        val localPending = InvoiceRecord(
+            id = "local-pending-merge", invoiceNumber = 0, timestamp = "2026-11-18 15:00:00",
+            items = emptyList(), subtotalExact = BigDecimal("120"), discountExact = BigDecimal.ZERO,
+            netTotalExact = BigDecimal("120"), cashReceivedExact = BigDecimal("120"),
+            changeReturnedExact = BigDecimal.ZERO, customerNote = "",
+            cashierNameAr = "", cashierNameEn = "", isPaidInFull = true,
+            clientEventId = "550e8400-e29b-41d4-a716-446655440012", outboxStatus = "UNKNOWN_ACK"
+        )
+        val field = ProductionTraderRepository::class.java.getDeclaredField("_invoicesFlow").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val flow = field.get(repo) as kotlinx.coroutines.flow.MutableStateFlow<List<InvoiceRecord>>
+        flow.value = listOf(localPending)
+
+        assertEquals(1, repo.invoicesFlow.value.size)
+        val localEventId = localPending.clientEventId
+
+        // Server returns matching invoice with official ULID
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """
+                {
+                    "company_id": "${companyId.value}",
+                    "count": 1,
+                    "has_more": false,
+                    "next_cursor": null,
+                    "invoices": [
+                        {
+                            "id": "01JCV8X9M2NQW3TYZ4R5S6789A",
+                            "invoice_number": "INV-SERVER-999",
+                            "status": "posted",
+                            "customer_id": "${customerId.value}",
+                            "customer_name": "Tariq Hardware",
+                            "date": "2026-11-18",
+                            "subtotal": "120.00",
+                            "discount": "0.00",
+                            "tax": "0.00",
+                            "total": "120.00",
+                            "paid": "120.00",
+                            "remaining": "0.00",
+                            "currency": "ILS",
+                            "currency_minor_units": 2,
+                            "payment_status": "PAID_CASH",
+                            "created_at": "2026-11-18T15:00:00Z"
+                        }
+                    ]
+                }
+                """.trimIndent()
+            )
+        )
+
+        // Refresh invoices
+        repo.refreshInvoices()
+
+        // Local record and server record merge; no duplicate invoices
+        val mergedList = repo.invoicesFlow.value
+        assertEquals(2, mergedList.size)
+        assertEquals("UNKNOWN_ACK", mergedList.first { it.clientEventId == localEventId }.outboxStatus)
+        val mergedInvoice = mergedList.first { it.serverInvoiceUlid == "01JCV8X9M2NQW3TYZ4R5S6789A" }
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S6789A", mergedInvoice.id)
+        assertEquals("INV-SERVER-999", mergedInvoice.serverInvoiceNumber)
+        assertEquals("CONFIRMED", mergedInvoice.outboxStatus)
     }
 }

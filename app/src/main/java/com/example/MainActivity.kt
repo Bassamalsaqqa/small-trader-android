@@ -307,7 +307,8 @@ fun SmallTraderApp(
                                     } else {
                                         traderViewModel.startFreshSale()
                                     }
-                                }
+                                },
+                                onLoadMore = { traderViewModel.loadMoreInvoices() }
                             )
                         }
 

@@ -473,8 +473,32 @@ class TraderViewModel(
             }
         }
         viewModelScope.launch {
-            repository.invoicesHasMoreGapFlow.collect { hasMore ->
-                _uiState.update { current -> current.copy(liveInvoicesHasMoreGap = hasMore) }
+            repository.invoicesHasMoreFlow.collect { hasMore ->
+                _uiState.update { current ->
+                    current.copy(
+                        liveInvoicesHasMore = hasMore,
+                        liveInvoicesHasMoreGap = hasMore
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            repository.invoicesNextCursorFlow.collect { cursor ->
+                _uiState.update { current -> current.copy(liveInvoicesNextCursor = cursor) }
+            }
+        }
+        viewModelScope.launch {
+            repository.isInvoicesLoadingFlow.collect { loading ->
+                _uiState.update { current -> current.copy(isLiveInvoicesLoading = loading) }
+            }
+        }
+    }
+
+    fun loadMoreInvoices(onComplete: ((Boolean) -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = repository.loadMoreInvoices()
+            withContext(Dispatchers.Main) {
+                onComplete?.invoke(result.isSuccess)
             }
         }
     }
