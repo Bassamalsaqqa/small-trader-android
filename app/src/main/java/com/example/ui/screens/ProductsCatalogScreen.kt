@@ -710,7 +710,9 @@ fun ProductDetailScreen(
     onAdjustStock: (productId: String, delta: Int, reason: String) -> Unit,
     onAddToBasket: (Product) -> Unit = {},
     onDismissFeedback: (() -> Unit)? = null,
-    onSaveProduct: ((productId: String?, nameAr: String, category: ProductCategory, unitAr: String, barcode: String, priceIls: Double, costIls: Double, minStockThreshold: Int, initialStock: Int, warehouseAr: String, lotBatchCode: String, expiryDate: String?, isWeightedDisplayOnly: Boolean) -> Unit)? = null
+    onSaveProduct: ((productId: String?, nameAr: String, category: ProductCategory, unitAr: String, barcode: String, priceIls: Double, costIls: Double, minStockThreshold: Int, initialStock: Int, warehouseAr: String, lotBatchCode: String, expiryDate: String?, isWeightedDisplayOnly: Boolean) -> Unit)? = null,
+    onUpdatePriceWithResult: ((productId: String, newPrice: Double, onComplete: (Boolean) -> Unit) -> Unit)? = null,
+    onAdjustStockWithResult: ((productId: String, delta: Int, reason: String, onComplete: (Boolean) -> Unit) -> Unit)? = null
 ) {
     val lang = state.language
     val product = state.selectedProductForDetail ?: return
@@ -1526,11 +1528,17 @@ fun ProductDetailScreen(
                 Button(
                     onClick = {
                         if (parsedPrice > 0.0) {
-                            onUpdatePrice(product.id, parsedPrice)
-                            isEditPriceOpen = false
+                            if (onUpdatePriceWithResult != null) {
+                                onUpdatePriceWithResult(product.id, parsedPrice) { success ->
+                                    if (success) isEditPriceOpen = false
+                                }
+                            } else {
+                                onUpdatePrice(product.id, parsedPrice)
+                                isEditPriceOpen = false
+                            }
                         }
                     },
-                    enabled = parsedPrice > 0.0,
+                    enabled = parsedPrice > 0.0 && !state.isActionBusy,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.testTag("confirm_price_update_button")
                 ) {
@@ -1706,11 +1714,17 @@ fun ProductDetailScreen(
                 Button(
                     onClick = {
                         if (isResultValid) {
-                            onAdjustStock(product.id, signedDelta, stockReasonText.trim())
-                            isAdjustStockOpen = false
+                            if (onAdjustStockWithResult != null) {
+                                onAdjustStockWithResult(product.id, signedDelta, stockReasonText.trim()) { success ->
+                                    if (success) isAdjustStockOpen = false
+                                }
+                            } else {
+                                onAdjustStock(product.id, signedDelta, stockReasonText.trim())
+                                isAdjustStockOpen = false
+                            }
                         }
                     },
-                    enabled = isResultValid,
+                    enabled = isResultValid && !state.isActionBusy,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.testTag("confirm_stock_adjust_button")
                 ) {

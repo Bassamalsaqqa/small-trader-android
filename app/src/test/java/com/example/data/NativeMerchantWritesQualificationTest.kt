@@ -1317,7 +1317,7 @@ class NativeMerchantWritesQualificationTest {
     // -------------------------------------------------------------------------
     @Test
     fun test18_stableOperationIdsOriginateInViewModelAndPersistAcrossRetries(): Unit = runBlocking {
-        val testDispatcher = StandardTestDispatcher()
+        val testDispatcher = kotlinx.coroutines.test.UnconfinedTestDispatcher()
         Dispatchers.setMain(testDispatcher)
         try {
             var failNextCall = true
@@ -1359,26 +1359,33 @@ class NativeMerchantWritesQualificationTest {
             assertNotNull("Initial draftExpenseOperationId must be generated", initialOpId)
 
             // Attempt 1: Call fails on server 500
+            val done1 = kotlinx.coroutines.CompletableDeferred<Boolean>()
             val res1 = vm.addExpense(
                 title = "Office Supplies",
                 category = ExpenseCategory.TRANSPORT,
                 amountIls = 10.0,
-                categoryId = "01JMBCAT000000000000000001"
+                categoryId = "01JMBCAT000000000000000001",
+                onComplete = { done1.complete(it) }
             )
             assertFalse("Attempt 1 must fail on server 500", res1)
+            assertFalse(kotlinx.coroutines.withTimeout(5000) { done1.await() })
+            kotlinx.coroutines.withTimeout(5000) { while (vm.uiState.value.isActionBusy) kotlinx.coroutines.delay(1) }
             // On failure, draftExpenseOperationId must be retained identically
             val retryOpId = vm.uiState.value.draftExpenseOperationId
             assertEquals("Draft operation ID must be retained on failure across retries", initialOpId, retryOpId)
 
             // Attempt 2: Retry succeeds
             failNextCall = false
+            val done2 = kotlinx.coroutines.CompletableDeferred<Boolean>()
             val res2 = vm.addExpense(
                 title = "Office Supplies",
                 category = ExpenseCategory.TRANSPORT,
                 amountIls = 10.0,
-                categoryId = "01JMBCAT000000000000000001"
+                categoryId = "01JMBCAT000000000000000001",
+                onComplete = { done2.complete(it) }
             )
-            assertTrue("Attempt 2 retry must succeed", res2)
+            assertFalse("Async launch must not claim immediate success", res2)
+            assertTrue("Attempt 2 retry must succeed", kotlinx.coroutines.withTimeout(5000) { done2.await() })
             // On success, draftExpenseOperationId must rotate to fresh ID
             val successOpId = vm.uiState.value.draftExpenseOperationId
             assertTrue("Draft operation ID must rotate to new UUID after authoritative success", successOpId != initialOpId)

@@ -441,49 +441,39 @@ class TraderViewModel(
         }
     }
 
-    fun updateProductPrice(productId: String, newPriceIls: Double): Boolean {
-        if (_uiState.value.isActionBusy) return false
-        _uiState.update { it.copy(isActionBusy = true) }
-
-        if (repository is OfflineDemoTraderRepository) {
-            val session = _uiState.value.currentSession
-            val result = kotlinx.coroutines.runBlocking { repository.updateProductPrice(productId, newPriceIls, session) }
-            _uiState.update { it.copy(isActionBusy = false) }
-            return if (result.isSuccess) {
-                syncFromRepository()
-                val formattedPrice = WesternFormatters.formatIls(newPriceIls)
-                _uiState.update {
-                    it.copy(
-                        lastInventoryActionMessageAr = "تم تحديث سعر البيع إلى $formattedPrice",
-                        lastInventoryActionMessageEn = "Selling price updated to $formattedPrice",
-                        isInventoryActionError = false
-                    )
-                }
-                true
+    private fun acquireActionLock(): Boolean {
+        var acquired = false
+        _uiState.update { current ->
+            if (current.isActionBusy) {
+                acquired = false
+                current
             } else {
-                val rawErr = result.exceptionOrNull()?.message ?: "Price update rejected"
-                val parts = rawErr.split(" | ", limit = 2)
-                val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-                val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-                _uiState.update {
-                    it.copy(
-                        lastInventoryActionMessageAr = errAr,
-                        lastInventoryActionMessageEn = errEn,
-                        isInventoryActionError = true
-                    )
-                }
-                showBanner(errAr, errEn, isError = true)
-                false
+                acquired = true
+                current.copy(isActionBusy = true)
             }
         }
+        return acquired
+    }
 
-        viewModelScope.launch {
+    private fun releaseActionLock() {
+        _uiState.update { it.copy(isActionBusy = false) }
+    }
+
+    fun updateProductPrice(
+        productId: String,
+        newPriceIls: Double,
+        onComplete: (Boolean) -> Unit = {}
+    ): Boolean {
+        if (!acquireActionLock()) {
+            onComplete(false)
+            return false
+        }
+
+        if (repository is OfflineDemoTraderRepository) {
             try {
                 val session = _uiState.value.currentSession
-                val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                    repository.updateProductPrice(productId, newPriceIls, session)
-                }
-                if (result.isSuccess) {
+                val result = kotlinx.coroutines.runBlocking { repository.updateProductPrice(productId, newPriceIls, session) }
+                val success = if (result.isSuccess) {
                     syncFromRepository()
                     val formattedPrice = WesternFormatters.formatIls(newPriceIls)
                     _uiState.update {
@@ -493,6 +483,7 @@ class TraderViewModel(
                             isInventoryActionError = false
                         )
                     }
+                    true
                 } else {
                     val rawErr = result.exceptionOrNull()?.message ?: "Price update rejected"
                     val parts = rawErr.split(" | ", limit = 2)
@@ -506,54 +497,157 @@ class TraderViewModel(
                         )
                     }
                     showBanner(errAr, errEn, isError = true)
+                    false
                 }
+                onComplete(success)
+                return success
+            } finally {
+                releaseActionLock()
+            }
+        }
+
+        viewModelScope.launch {
+            try {
+                val session = _uiState.value.currentSession
+                val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    repository.updateProductPrice(productId, newPriceIls, session)
+                }
+                val success = if (result.isSuccess) {
+                    syncFromRepository()
+                    val formattedPrice = WesternFormatters.formatIls(newPriceIls)
+                    _uiState.update {
+                        it.copy(
+                            lastInventoryActionMessageAr = "تم تحديث سعر البيع إلى $formattedPrice",
+                            lastInventoryActionMessageEn = "Selling price updated to $formattedPrice",
+                            isInventoryActionError = false
+                        )
+                    }
+                    true
+                } else {
+                    val rawErr = result.exceptionOrNull()?.message ?: "Price update rejected"
+                    val parts = rawErr.split(" | ", limit = 2)
+                    val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    _uiState.update {
+                        it.copy(
+                            lastInventoryActionMessageAr = errAr,
+                            lastInventoryActionMessageEn = errEn,
+                            isInventoryActionError = true
+                        )
+                    }
+                    showBanner(errAr, errEn, isError = true)
+                    false
+                }
+                onComplete(success)
             } catch (e: Exception) {
                 val err = e.message ?: "Price update failed"
                 showBanner(err, err, isError = true)
+                onComplete(false)
             } finally {
-                _uiState.update { it.copy(isActionBusy = false) }
+                releaseActionLock()
             }
         }
         return false
     }
 
-    fun adjustProductStock(productId: String, adjustment: Int, reason: String, operationId: String = ""): Boolean {
-        if (_uiState.value.isActionBusy) return false
-        _uiState.update { it.copy(isActionBusy = true) }
+    fun adjustProductStock(
+        productId: String,
+        adjustment: Int,
+        reason: String,
+        operationId: String = "",
+        onComplete: (Boolean) -> Unit = {}
+    ): Boolean {
+        if (!acquireActionLock()) {
+            onComplete(false)
+            return false
+        }
 
         val opId = if (operationId.isNotBlank()) operationId else _uiState.value.draftStockAdjustOperationId
         val session = _uiState.value.currentSession
-        val result = kotlinx.coroutines.runBlocking { repository.adjustProductStock(productId, adjustment, reason, session, opId) }
-        _uiState.update { it.copy(isActionBusy = false) }
-        return if (result.isSuccess) {
-            val movement = result.getOrNull()
-            syncFromRepository()
-            val signedDelta = if (adjustment > 0) "+${WesternFormatters.formatInt(adjustment)}" else WesternFormatters.formatInt(adjustment)
-            val newStock = movement?.resultingStockExact ?: (_uiState.value.products.firstOrNull { it.id == productId }?.stockCountExact ?: BigDecimal.ZERO)
-            _uiState.update {
-                it.copy(
-                    draftStockAdjustOperationId = repository.rotateDraftOperationId("inventory.adjustment"),
-                    lastInventoryActionMessageAr = "تم تسجيل حركة المخزون ($signedDelta) — الرصيد الحالي: ${WesternFormatters.formatQuantity(newStock)}",
-                    lastInventoryActionMessageEn = "Stock movement recorded ($signedDelta) — Current stock: ${WesternFormatters.formatQuantity(newStock)}",
-                    isInventoryActionError = false
-                )
+
+        if (repository is OfflineDemoTraderRepository) {
+            try {
+                val result = kotlinx.coroutines.runBlocking { repository.adjustProductStock(productId, adjustment, reason, session, opId) }
+                val success = if (result.isSuccess) {
+                    val movement = result.getOrNull()
+                    syncFromRepository()
+                    val signedDelta = if (adjustment > 0) "+${WesternFormatters.formatInt(adjustment)}" else WesternFormatters.formatInt(adjustment)
+                    val newStock = movement?.resultingStockExact ?: (_uiState.value.products.firstOrNull { it.id == productId }?.stockCountExact ?: BigDecimal.ZERO)
+                    _uiState.update {
+                        it.copy(
+                            draftStockAdjustOperationId = repository.rotateDraftOperationId("inventory.adjustment"),
+                            lastInventoryActionMessageAr = "تم تسجيل حركة المخزون ($signedDelta) — الرصيد الحالي: ${WesternFormatters.formatQuantity(newStock)}",
+                            lastInventoryActionMessageEn = "Stock movement recorded ($signedDelta) — Current stock: ${WesternFormatters.formatQuantity(newStock)}",
+                            isInventoryActionError = false
+                        )
+                    }
+                    true
+                } else {
+                    val rawErr = result.exceptionOrNull()?.message ?: "Stock adjustment rejected"
+                    val parts = rawErr.split(" | ", limit = 2)
+                    val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    _uiState.update {
+                        it.copy(
+                            lastInventoryActionMessageAr = errAr,
+                            lastInventoryActionMessageEn = errEn,
+                            isInventoryActionError = true
+                        )
+                    }
+                    showBanner(errAr, errEn, isError = true)
+                    false
+                }
+                onComplete(success)
+                return success
+            } finally {
+                releaseActionLock()
             }
-            true
-        } else {
-            val rawErr = result.exceptionOrNull()?.message ?: "Stock adjustment rejected"
-            val parts = rawErr.split(" | ", limit = 2)
-            val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-            val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-            _uiState.update {
-                it.copy(
-                    lastInventoryActionMessageAr = errAr,
-                    lastInventoryActionMessageEn = errEn,
-                    isInventoryActionError = true
-                )
-            }
-            showBanner(errAr, errEn, isError = true)
-            false
         }
+
+        viewModelScope.launch {
+            try {
+                val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    repository.adjustProductStock(productId, adjustment, reason, session, opId)
+                }
+                val success = if (result.isSuccess) {
+                    val movement = result.getOrNull()
+                    syncFromRepository()
+                    val signedDelta = if (adjustment > 0) "+${WesternFormatters.formatInt(adjustment)}" else WesternFormatters.formatInt(adjustment)
+                    val newStock = movement?.resultingStockExact ?: (_uiState.value.products.firstOrNull { it.id == productId }?.stockCountExact ?: BigDecimal.ZERO)
+                    _uiState.update {
+                        it.copy(
+                            draftStockAdjustOperationId = repository.rotateDraftOperationId("inventory.adjustment"),
+                            lastInventoryActionMessageAr = "تم تسجيل حركة المخزون ($signedDelta) — الرصيد الحالي: ${WesternFormatters.formatQuantity(newStock)}",
+                            lastInventoryActionMessageEn = "Stock movement recorded ($signedDelta) — Current stock: ${WesternFormatters.formatQuantity(newStock)}",
+                            isInventoryActionError = false
+                        )
+                    }
+                    true
+                } else {
+                    val rawErr = result.exceptionOrNull()?.message ?: "Stock adjustment rejected"
+                    val parts = rawErr.split(" | ", limit = 2)
+                    val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    _uiState.update {
+                        it.copy(
+                            lastInventoryActionMessageAr = errAr,
+                            lastInventoryActionMessageEn = errEn,
+                            isInventoryActionError = true
+                        )
+                    }
+                    showBanner(errAr, errEn, isError = true)
+                    false
+                }
+                onComplete(success)
+            } catch (e: Exception) {
+                val err = e.message ?: "Stock adjustment failed"
+                showBanner(err, err, isError = true)
+                onComplete(false)
+            } finally {
+                releaseActionLock()
+            }
+        }
+        return false
     }
 
     fun restockProduct(productId: String, amount: Int = 10) {
@@ -1168,81 +1262,131 @@ class TraderViewModel(
         }
     }
 
-    fun confirmCustomerCollection(customerId: String, paymentAmountIls: Double, note: String, paymentId: String): Boolean {
-        val saved = recordCustomerPayment(customerId, paymentAmountIls, note, paymentId)
+    fun confirmCustomerCollection(
+        customerId: String,
+        paymentAmountIls: Double,
+        note: String,
+        paymentId: String,
+        onComplete: (Boolean) -> Unit = {}
+    ): Boolean {
+        val saved = recordCustomerPayment(customerId, paymentAmountIls, note, paymentId) { success ->
+            if (success) navigateTo(TraderScreen.CUSTOMER_DETAIL)
+            onComplete(success)
+        }
         if (saved) navigateTo(TraderScreen.CUSTOMER_DETAIL)
         return saved
     }
 
-    fun recordCustomerPayment(customerId: String, paymentAmountIls: Double, note: String, paymentId: String = ""): Boolean {
-        if (_uiState.value.isActionBusy) return false
-        _uiState.update { it.copy(isActionBusy = true) }
+    fun recordCustomerPayment(
+        customerId: String,
+        paymentAmountIls: Double,
+        note: String,
+        paymentId: String = "",
+        onComplete: (Boolean) -> Unit = {}
+    ): Boolean {
+        if (!acquireActionLock()) {
+            onComplete(false)
+            return false
+        }
         val pid = if (paymentId.isNotBlank()) paymentId else _uiState.value.draftCustomerPaymentOperationId
 
-        val result = kotlinx.coroutines.runBlocking { repository.recordCustomerPayment(customerId, paymentAmountIls, note, pid) }
-        _uiState.update { it.copy(isActionBusy = false) }
-        return if (result.isSuccess) {
-            syncCustomers()
-            _uiState.update { state ->
-                val updatedCust = state.customers.firstOrNull { it.id == customerId }
-                val paidStr = WesternFormatters.formatIls(paymentAmountIls)
-                val newBal = updatedCust?.balanceIls ?: 0.0
-                val msgAr = when {
-                    newBal > 0.005 -> "تم قبض $paidStr نقداً — المتبقي على الزبون: ${WesternFormatters.formatIls(newBal)}"
-                    newBal < -0.005 -> "تم قبض $paidStr نقداً — أصبح للزبون رصيد مقدم: ${WesternFormatters.formatIls(-newBal)}"
-                    else -> "تم قبض $paidStr نقداً — أصبح الحساب خالصاً (0.00 ₪)"
-                }
-                val msgEn = when {
-                    newBal > 0.005 -> "Collected $paidStr in cash — Remaining debt: ${WesternFormatters.formatIls(newBal)}"
-                    newBal < -0.005 -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatIls(-newBal)}"
-                    else -> "Collected $paidStr in cash — Account is now settled (0.00 ₪)"
-                }
-                state.copy(
-                    draftCustomerPaymentOperationId = repository.rotateDraftOperationId("customer_payment"),
-                    isPaymentCollectionDialogOpen = false,
-                    selectedCustomerForDetail = updatedCust,
-                    lastCustomerPaymentMessageAr = msgAr,
-                    lastCustomerPaymentMessageEn = msgEn
-                )
-            }
-            true
-        } else {
-            val err = result.exceptionOrNull()?.message ?: "Payment rejected"
-            showBanner(err, err, isError = true)
-            false
-        }
-    }
-
-    fun createCustomer(name: String, phone: String, address: String) {
-        if (_uiState.value.isActionBusy) return
-        _uiState.update { it.copy(isActionBusy = true) }
-
         if (repository is OfflineDemoTraderRepository) {
-            val result = kotlinx.coroutines.runBlocking { repository.createCustomer(name, phone, address) }
-            _uiState.update { it.copy(isActionBusy = false) }
-            if (result.isSuccess) {
-                val created = result.getOrNull()
-                syncCustomers()
-                _uiState.update {
-                    it.copy(
-                        isAddCustomerDialogOpen = false,
-                        lastCustomerPaymentMessageAr = if (created != null) "تمت إضافة الزبون «${created.nameAr}» إلى دفتر الحسابات" else null,
-                        lastCustomerPaymentMessageEn = if (created != null) "Added customer \"${created.nameEn}\" to ledger" else null
-                    )
+            try {
+                val result = kotlinx.coroutines.runBlocking { repository.recordCustomerPayment(customerId, paymentAmountIls, note, pid) }
+                val success = if (result.isSuccess) {
+                    syncCustomers()
+                    _uiState.update { state ->
+                        val updatedCust = state.customers.firstOrNull { it.id == customerId }
+                        val paidStr = WesternFormatters.formatIls(paymentAmountIls)
+                        val newBal = updatedCust?.balanceIls ?: 0.0
+                        val msgAr = when {
+                            newBal > 0.005 -> "تم قبض $paidStr نقداً — المتبقي على الزبون: ${WesternFormatters.formatIls(newBal)}"
+                            newBal < -0.005 -> "تم قبض $paidStr نقداً — أصبح للزبون رصيد مقدم: ${WesternFormatters.formatIls(-newBal)}"
+                            else -> "تم قبض $paidStr نقداً — أصبح الحساب خالصاً (0.00 ₪)"
+                        }
+                        val msgEn = when {
+                            newBal > 0.005 -> "Collected $paidStr in cash — Remaining debt: ${WesternFormatters.formatIls(newBal)}"
+                            newBal < -0.005 -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatIls(-newBal)}"
+                            else -> "Collected $paidStr in cash — Account is now settled (0.00 ₪)"
+                        }
+                        state.copy(
+                            draftCustomerPaymentOperationId = repository.rotateDraftOperationId("customer_payment"),
+                            isPaymentCollectionDialogOpen = false,
+                            selectedCustomerForDetail = updatedCust,
+                            lastCustomerPaymentMessageAr = msgAr,
+                            lastCustomerPaymentMessageEn = msgEn
+                        )
+                    }
+                    true
+                } else {
+                    val err = result.exceptionOrNull()?.message ?: "Payment rejected"
+                    showBanner(err, err, isError = true)
+                    false
                 }
-            } else {
-                val err = result.exceptionOrNull()?.message ?: "Customer creation failed"
-                showBanner(err, err, isError = true)
+                onComplete(success)
+                return success
+            } finally {
+                releaseActionLock()
             }
-            return
         }
 
         viewModelScope.launch {
             try {
                 val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                    repository.createCustomer(name, phone, address)
+                    repository.recordCustomerPayment(customerId, paymentAmountIls, note, pid)
                 }
-                if (result.isSuccess) {
+                val success = if (result.isSuccess) {
+                    syncCustomers()
+                    _uiState.update { state ->
+                        val updatedCust = state.customers.firstOrNull { it.id == customerId }
+                        val paidStr = WesternFormatters.formatIls(paymentAmountIls)
+                        val newBal = updatedCust?.balanceIls ?: 0.0
+                        val msgAr = when {
+                            newBal > 0.005 -> "تم قبض $paidStr نقداً — المتبقي على الزبون: ${WesternFormatters.formatIls(newBal)}"
+                            newBal < -0.005 -> "تم قبض $paidStr نقداً — أصبح للزبون رصيد مقدم: ${WesternFormatters.formatIls(-newBal)}"
+                            else -> "تم قبض $paidStr نقداً — أصبح الحساب خالصاً (0.00 ₪)"
+                        }
+                        val msgEn = when {
+                            newBal > 0.005 -> "Collected $paidStr in cash — Remaining debt: ${WesternFormatters.formatIls(newBal)}"
+                            newBal < -0.005 -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatIls(-newBal)}"
+                            else -> "Collected $paidStr in cash — Account is now settled (0.00 ₪)"
+                        }
+                        state.copy(
+                            draftCustomerPaymentOperationId = repository.rotateDraftOperationId("customer_payment"),
+                            isPaymentCollectionDialogOpen = false,
+                            selectedCustomerForDetail = updatedCust,
+                            lastCustomerPaymentMessageAr = msgAr,
+                            lastCustomerPaymentMessageEn = msgEn
+                        )
+                    }
+                    true
+                } else {
+                    val err = result.exceptionOrNull()?.message ?: "Payment rejected"
+                    showBanner(err, err, isError = true)
+                    false
+                }
+                onComplete(success)
+            } catch (e: Exception) {
+                val err = e.message ?: "Payment rejected"
+                showBanner(err, err, isError = true)
+                onComplete(false)
+            } finally {
+                releaseActionLock()
+            }
+        }
+        return false
+    }
+
+    fun createCustomer(name: String, phone: String, address: String, onComplete: (Boolean) -> Unit = {}) {
+        if (!acquireActionLock()) {
+            onComplete(false)
+            return
+        }
+
+        if (repository is OfflineDemoTraderRepository) {
+            try {
+                val result = kotlinx.coroutines.runBlocking { repository.createCustomer(name, phone, address) }
+                val success = if (result.isSuccess) {
                     val created = result.getOrNull()
                     syncCustomers()
                     _uiState.update {
@@ -1252,15 +1396,47 @@ class TraderViewModel(
                             lastCustomerPaymentMessageEn = if (created != null) "Added customer \"${created.nameEn}\" to ledger" else null
                         )
                     }
+                    true
                 } else {
                     val err = result.exceptionOrNull()?.message ?: "Customer creation failed"
                     showBanner(err, err, isError = true)
+                    false
                 }
+                onComplete(success)
+            } finally {
+                releaseActionLock()
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    repository.createCustomer(name, phone, address)
+                }
+                val success = if (result.isSuccess) {
+                    val created = result.getOrNull()
+                    syncCustomers()
+                    _uiState.update {
+                        it.copy(
+                            isAddCustomerDialogOpen = false,
+                            lastCustomerPaymentMessageAr = if (created != null) "تمت إضافة الزبون «${created.nameAr}» إلى دفتر الحسابات" else null,
+                            lastCustomerPaymentMessageEn = if (created != null) "Added customer \"${created.nameEn}\" to ledger" else null
+                        )
+                    }
+                    true
+                } else {
+                    val err = result.exceptionOrNull()?.message ?: "Customer creation failed"
+                    showBanner(err, err, isError = true)
+                    false
+                }
+                onComplete(success)
             } catch (e: Exception) {
                 val err = e.message ?: "Customer creation failed"
                 showBanner(err, err, isError = true)
+                onComplete(false)
             } finally {
-                _uiState.update { it.copy(isActionBusy = false) }
+                releaseActionLock()
             }
         }
     }
@@ -1312,64 +1488,138 @@ class TraderViewModel(
         totalIls: Double,
         paidNowIls: Double,
         expectedProductId: String? = null,
-        expectedQuantity: Int = 0
+        expectedQuantity: Int = 0,
+        onComplete: (Boolean) -> Unit = {}
     ): Boolean {
-        if (_uiState.value.isActionBusy) return false
-        _uiState.update { it.copy(isActionBusy = true) }
+        if (!acquireActionLock()) {
+            onComplete(false)
+            return false
+        }
 
         val session = _uiState.value.currentSession
-        val result = kotlinx.coroutines.runBlocking {
-            repository.recordPurchaseBill(
-                supplierId = supplierId,
-                itemsSummary = itemsSummary,
-                totalIls = totalIls,
-                paidNowIls = paidNowIls,
-                operator = session,
-                expectedProductId = expectedProductId,
-                expectedQuantity = expectedQuantity
-            )
-        }
-        _uiState.update { it.copy(isActionBusy = false) }
-        return if (result.isSuccess) {
-            val bill = result.getOrNull()
-            syncSuppliersAndPurchases()
-            _uiState.update { state ->
-                val billCode = bill?.let { WesternFormatters.formatBillCode(it.billNumber) } ?: ""
-                val remStr = bill?.let { WesternFormatters.formatIls(it.remainingPayableIls) } ?: ""
-                val stockNoteAr = if (expectedProductId != null && expectedQuantity > 0) {
-                    " — مسجل بانتظار استلام (${WesternFormatters.formatInt(expectedQuantity)} وحدة) مخزنياً"
-                } else {
-                    " — قيد مالي فقط دون إضافة مخزون تلقائي"
+        if (repository is OfflineDemoTraderRepository) {
+            try {
+                val result = kotlinx.coroutines.runBlocking {
+                    repository.recordPurchaseBill(
+                        supplierId = supplierId,
+                        itemsSummary = itemsSummary,
+                        totalIls = totalIls,
+                        paidNowIls = paidNowIls,
+                        operator = session,
+                        expectedProductId = expectedProductId,
+                        expectedQuantity = expectedQuantity
+                    )
                 }
-                val stockNoteEn = if (expectedProductId != null && expectedQuantity > 0) {
-                    " — pending physical goods receipt (${expectedQuantity} units)"
+                val success = if (result.isSuccess) {
+                    val bill = result.getOrNull()
+                    syncSuppliersAndPurchases()
+                    _uiState.update { state ->
+                        val billCode = bill?.let { WesternFormatters.formatBillCode(it.billNumber) } ?: ""
+                        val remStr = bill?.let { WesternFormatters.formatIls(it.remainingPayableIls) } ?: ""
+                        val stockNoteAr = if (expectedProductId != null && expectedQuantity > 0) {
+                            " — مسجل بانتظار استلام (${WesternFormatters.formatInt(expectedQuantity)} وحدة) مخزنياً"
+                        } else {
+                            " — قيد مالي فقط دون إضافة مخزون تلقائي"
+                        }
+                        val stockNoteEn = if (expectedProductId != null && expectedQuantity > 0) {
+                            " — pending physical goods receipt (${expectedQuantity} units)"
+                        } else {
+                            " — financial entry only, stock not auto-incremented"
+                        }
+                        state.copy(
+                            isReceivePurchaseDialogOpen = false,
+                            selectedSupplierForDetail = state.suppliers.firstOrNull { it.id == supplierId },
+                            lastSupplierActionMessageAr = "تم قيد فاتورة الشراء $billCode (المتبقي للمورد: $remStr)$stockNoteAr",
+                            lastSupplierActionMessageEn = "Purchase bill $billCode recorded (Payable added: $remStr)$stockNoteEn",
+                            isSupplierActionError = false
+                        )
+                    }
+                    true
                 } else {
-                    " — financial entry only, stock not auto-incremented"
+                    val rawErr = result.exceptionOrNull()?.message ?: "Purchase bill rejected"
+                    val parts = rawErr.split(" | ", limit = 2)
+                    val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    _uiState.update {
+                        it.copy(
+                            lastSupplierActionMessageAr = errAr,
+                            lastSupplierActionMessageEn = errEn,
+                            isSupplierActionError = true
+                        )
+                    }
+                    showBanner(errAr, errEn, isError = true)
+                    false
                 }
-                state.copy(
-                    isReceivePurchaseDialogOpen = false,
-                    selectedSupplierForDetail = state.suppliers.firstOrNull { it.id == supplierId },
-                    lastSupplierActionMessageAr = "تم قيد فاتورة الشراء $billCode (المتبقي للمورد: $remStr)$stockNoteAr",
-                    lastSupplierActionMessageEn = "Purchase bill $billCode recorded (Payable added: $remStr)$stockNoteEn",
-                    isSupplierActionError = false
-                )
+                onComplete(success)
+                return success
+            } finally {
+                releaseActionLock()
             }
-            true
-        } else {
-            val rawErr = result.exceptionOrNull()?.message ?: "Purchase bill rejected"
-            val parts = rawErr.split(" | ", limit = 2)
-            val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-            val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-            _uiState.update {
-                it.copy(
-                    lastSupplierActionMessageAr = errAr,
-                    lastSupplierActionMessageEn = errEn,
-                    isSupplierActionError = true
-                )
-            }
-            showBanner(errAr, errEn, isError = true)
-            false
         }
+
+        viewModelScope.launch {
+            try {
+                val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    repository.recordPurchaseBill(
+                        supplierId = supplierId,
+                        itemsSummary = itemsSummary,
+                        totalIls = totalIls,
+                        paidNowIls = paidNowIls,
+                        operator = session,
+                        expectedProductId = expectedProductId,
+                        expectedQuantity = expectedQuantity
+                    )
+                }
+                val success = if (result.isSuccess) {
+                    val bill = result.getOrNull()
+                    syncSuppliersAndPurchases()
+                    _uiState.update { state ->
+                        val billCode = bill?.let { WesternFormatters.formatBillCode(it.billNumber) } ?: ""
+                        val remStr = bill?.let { WesternFormatters.formatIls(it.remainingPayableIls) } ?: ""
+                        val stockNoteAr = if (expectedProductId != null && expectedQuantity > 0) {
+                            " — مسجل بانتظار استلام (${WesternFormatters.formatInt(expectedQuantity)} وحدة) مخزنياً"
+                        } else {
+                            " — قيد مالي فقط دون إضافة مخزون تلقائي"
+                        }
+                        val stockNoteEn = if (expectedProductId != null && expectedQuantity > 0) {
+                            " — pending physical goods receipt (${expectedQuantity} units)"
+                        } else {
+                            " — financial entry only, stock not auto-incremented"
+                        }
+                        state.copy(
+                            isReceivePurchaseDialogOpen = false,
+                            selectedSupplierForDetail = state.suppliers.firstOrNull { it.id == supplierId },
+                            lastSupplierActionMessageAr = "تم قيد فاتورة الشراء $billCode (المتبقي للمورد: $remStr)$stockNoteAr",
+                            lastSupplierActionMessageEn = "Purchase bill $billCode recorded (Payable added: $remStr)$stockNoteEn",
+                            isSupplierActionError = false
+                        )
+                    }
+                    true
+                } else {
+                    val rawErr = result.exceptionOrNull()?.message ?: "Purchase bill rejected"
+                    val parts = rawErr.split(" | ", limit = 2)
+                    val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    _uiState.update {
+                        it.copy(
+                            lastSupplierActionMessageAr = errAr,
+                            lastSupplierActionMessageEn = errEn,
+                            isSupplierActionError = true
+                        )
+                    }
+                    showBanner(errAr, errEn, isError = true)
+                    false
+                }
+                onComplete(success)
+            } catch (e: Exception) {
+                val err = e.message ?: "Purchase bill rejected"
+                showBanner(err, err, isError = true)
+                onComplete(false)
+            } finally {
+                releaseActionLock()
+            }
+        }
+        return false
     }
 
     fun recordStructuredPurchaseBill(
@@ -1377,119 +1627,255 @@ class TraderViewModel(
         lines: List<PurchaseLineItem>,
         paidNowIls: Double,
         note: String = "",
-        operationId: String = ""
+        operationId: String = "",
+        onComplete: (Result<PurchaseBill>) -> Unit = {}
     ): Result<PurchaseBill> {
-        if (_uiState.value.isActionBusy) return Result.failure(IllegalStateException("Action in progress"))
-        _uiState.update { it.copy(isActionBusy = true) }
+        if (!acquireActionLock()) {
+            val err = Result.failure<PurchaseBill>(IllegalStateException("Action in progress"))
+            onComplete(err)
+            return err
+        }
 
         val opId = if (operationId.isNotBlank()) operationId else _uiState.value.draftPurchaseOperationId
         val session = _uiState.value.currentSession
-        val result = kotlinx.coroutines.runBlocking {
-            repository.recordStructuredPurchaseBill(supplierId, lines, paidNowIls, session, note, opId)
-        }
-        _uiState.update { it.copy(isActionBusy = false) }
-        if (result.isSuccess) {
-            val created = result.getOrNull()
-            val updatedSuppliers = repository.getSuppliers()
-            val updatedBills = repository.getPurchaseBills()
-            val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
-            _uiState.update { state ->
-                state.copy(
-                    draftPurchaseOperationId = repository.rotateDraftOperationId("purchase"),
-                    suppliers = updatedSuppliers,
-                    purchaseBills = updatedBills,
-                    selectedSupplierForDetail = updatedSup ?: state.selectedSupplierForDetail,
-                    lastSupplierActionMessageAr = "تم اعتماد فاتورة الشراء #${created?.billNumber ?: ""} بنجاح",
-                    lastSupplierActionMessageEn = "Purchase bill #${created?.billNumber ?: ""} recorded successfully",
-                    isSupplierActionError = false
-                )
+
+        if (repository is OfflineDemoTraderRepository) {
+            try {
+                val result = kotlinx.coroutines.runBlocking {
+                    repository.recordStructuredPurchaseBill(supplierId, lines, paidNowIls, session, note, opId)
+                }
+                if (result.isSuccess) {
+                    val created = result.getOrNull()
+                    val updatedSuppliers = repository.getSuppliers()
+                    val updatedBills = repository.getPurchaseBills()
+                    val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
+                    _uiState.update { state ->
+                        state.copy(
+                            draftPurchaseOperationId = repository.rotateDraftOperationId("purchase"),
+                            isReceivePurchaseDialogOpen = false,
+                            suppliers = updatedSuppliers,
+                            purchaseBills = updatedBills,
+                            selectedSupplierForDetail = updatedSup ?: state.selectedSupplierForDetail,
+                            lastSupplierActionMessageAr = "تم اعتماد فاتورة الشراء #${created?.billNumber ?: ""} بنجاح",
+                            lastSupplierActionMessageEn = "Purchase bill #${created?.billNumber ?: ""} recorded successfully",
+                            isSupplierActionError = false
+                        )
+                    }
+                } else {
+                    val rawErr = result.exceptionOrNull()?.message ?: "Purchase bill rejected"
+                    val parts = rawErr.split(" | ", limit = 2)
+                    val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    _uiState.update {
+                        it.copy(
+                            lastSupplierActionMessageAr = errAr,
+                            lastSupplierActionMessageEn = errEn,
+                            isSupplierActionError = true
+                        )
+                    }
+                    showBanner(errAr, errEn, isError = true)
+                }
+                onComplete(result)
+                return result
+            } finally {
+                releaseActionLock()
             }
-        } else {
-            val rawErr = result.exceptionOrNull()?.message ?: "Purchase bill rejected"
-            val parts = rawErr.split(" | ", limit = 2)
-            val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-            val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-            _uiState.update {
-                it.copy(
-                    lastSupplierActionMessageAr = errAr,
-                    lastSupplierActionMessageEn = errEn,
-                    isSupplierActionError = true
-                )
-            }
-            showBanner(errAr, errEn, isError = true)
         }
-        return result
+
+        viewModelScope.launch {
+            try {
+                val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    repository.recordStructuredPurchaseBill(supplierId, lines, paidNowIls, session, note, opId)
+                }
+                if (result.isSuccess) {
+                    val created = result.getOrNull()
+                    val updatedSuppliers = repository.getSuppliers()
+                    val updatedBills = repository.getPurchaseBills()
+                    val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
+                    _uiState.update { state ->
+                        state.copy(
+                            draftPurchaseOperationId = repository.rotateDraftOperationId("purchase"),
+                            isReceivePurchaseDialogOpen = false,
+                            suppliers = updatedSuppliers,
+                            purchaseBills = updatedBills,
+                            selectedSupplierForDetail = updatedSup ?: state.selectedSupplierForDetail,
+                            lastSupplierActionMessageAr = "تم اعتماد فاتورة الشراء #${created?.billNumber ?: ""} بنجاح",
+                            lastSupplierActionMessageEn = "Purchase bill #${created?.billNumber ?: ""} recorded successfully",
+                            isSupplierActionError = false
+                        )
+                    }
+                } else {
+                    val rawErr = result.exceptionOrNull()?.message ?: "Purchase bill rejected"
+                    val parts = rawErr.split(" | ", limit = 2)
+                    val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    _uiState.update {
+                        it.copy(
+                            lastSupplierActionMessageAr = errAr,
+                            lastSupplierActionMessageEn = errEn,
+                            isSupplierActionError = true
+                        )
+                    }
+                    showBanner(errAr, errEn, isError = true)
+                }
+                onComplete(result)
+            } catch (e: Exception) {
+                val err = Result.failure<PurchaseBill>(e)
+                val msg = e.message ?: "Purchase bill rejected"
+                showBanner(msg, msg, isError = true)
+                onComplete(err)
+            } finally {
+                releaseActionLock()
+            }
+        }
+        return Result.failure(IllegalStateException("Action in progress"))
     }
 
     fun paySupplierAmountResult(
         supplierId: String,
         amountIls: Double,
         note: String = "سداد نقدي للمورد من الصندوق",
-        paymentId: String = ""
+        paymentId: String = "",
+        onComplete: (Result<SupplierPayment>) -> Unit = {}
     ): Result<SupplierPayment> {
-        if (_uiState.value.isActionBusy) return Result.failure(IllegalStateException("Action in progress"))
-        _uiState.update { it.copy(isActionBusy = true) }
+        if (!acquireActionLock()) {
+            val err = Result.failure<SupplierPayment>(IllegalStateException("Action in progress"))
+            onComplete(err)
+            return err
+        }
 
         val pid = if (paymentId.isNotBlank()) paymentId else _uiState.value.draftSupplierPaymentOperationId
         val session = _uiState.value.currentSession
-        val result = kotlinx.coroutines.runBlocking {
-            repository.recordSupplierPayment(supplierId, amountIls, note, session, pid)
+
+        if (repository is OfflineDemoTraderRepository) {
+            try {
+                val result = kotlinx.coroutines.runBlocking {
+                    repository.recordSupplierPayment(supplierId, amountIls, note, session, pid)
+                }
+                if (result.isSuccess) {
+                    val updatedSuppliers = repository.getSuppliers()
+                    val updatedBills = repository.getPurchaseBills()
+                    val updatedPayments = repository.getSupplierPayments()
+                    val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
+                    val paidStr = WesternFormatters.formatIls(amountIls)
+                    val newOwed = updatedSup?.balanceOwedIls ?: 0.0
+                    val msgAr = when {
+                        newOwed > 0.005 -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatIls(newOwed)}"
+                        newOwed < -0.005 -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatIls(-newOwed)}"
+                        else -> "تم صرف $paidStr للمورد — أصبح حساب المورد خالصاً (0.00 ₪)"
+                    }
+                    val msgEn = when {
+                        newOwed > 0.005 -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatIls(newOwed)}"
+                        newOwed < -0.005 -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatIls(-newOwed)}"
+                        else -> "Paid $paidStr to supplier — Supplier account settled (0.00 ₪)"
+                    }
+                    _uiState.update { state ->
+                        state.copy(
+                            draftSupplierPaymentOperationId = repository.rotateDraftOperationId("supplier_payment"),
+                            suppliers = updatedSuppliers,
+                            purchaseBills = updatedBills,
+                            supplierPayments = updatedPayments,
+                            selectedSupplierForDetail = updatedSup ?: state.selectedSupplierForDetail,
+                            lastSupplierActionMessageAr = msgAr,
+                            lastSupplierActionMessageEn = msgEn,
+                            isSupplierActionError = false
+                        )
+                    }
+                } else {
+                    val rawErr = result.exceptionOrNull()?.message ?: "Supplier disbursement rejected"
+                    val parts = rawErr.split(" | ", limit = 2)
+                    val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    _uiState.update {
+                        it.copy(
+                            lastSupplierActionMessageAr = errAr,
+                            lastSupplierActionMessageEn = errEn,
+                            isSupplierActionError = true
+                        )
+                    }
+                    showBanner(errAr, errEn, isError = true)
+                }
+                onComplete(result)
+                return result
+            } finally {
+                releaseActionLock()
+            }
         }
-        _uiState.update { it.copy(isActionBusy = false) }
-        if (result.isSuccess) {
-            val updatedSuppliers = repository.getSuppliers()
-            val updatedBills = repository.getPurchaseBills()
-            val updatedPayments = repository.getSupplierPayments()
-            val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
-            val paidStr = WesternFormatters.formatIls(amountIls)
-            val newOwed = updatedSup?.balanceOwedIls ?: 0.0
-            val msgAr = when {
-                newOwed > 0.005 -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatIls(newOwed)}"
-                newOwed < -0.005 -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatIls(-newOwed)}"
-                else -> "تم صرف $paidStr للمورد — أصبح حساب المورد خالصاً (0.00 ₪)"
+
+        viewModelScope.launch {
+            try {
+                val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    repository.recordSupplierPayment(supplierId, amountIls, note, session, pid)
+                }
+                if (result.isSuccess) {
+                    val updatedSuppliers = repository.getSuppliers()
+                    val updatedBills = repository.getPurchaseBills()
+                    val updatedPayments = repository.getSupplierPayments()
+                    val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
+                    val paidStr = WesternFormatters.formatIls(amountIls)
+                    val newOwed = updatedSup?.balanceOwedIls ?: 0.0
+                    val msgAr = when {
+                        newOwed > 0.005 -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatIls(newOwed)}"
+                        newOwed < -0.005 -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatIls(-newOwed)}"
+                        else -> "تم صرف $paidStr للمورد — أصبح حساب المورد خالصاً (0.00 ₪)"
+                    }
+                    val msgEn = when {
+                        newOwed > 0.005 -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatIls(newOwed)}"
+                        newOwed < -0.005 -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatIls(-newOwed)}"
+                        else -> "Paid $paidStr to supplier — Supplier account settled (0.00 ₪)"
+                    }
+                    _uiState.update { state ->
+                        state.copy(
+                            draftSupplierPaymentOperationId = repository.rotateDraftOperationId("supplier_payment"),
+                            suppliers = updatedSuppliers,
+                            purchaseBills = updatedBills,
+                            supplierPayments = updatedPayments,
+                            selectedSupplierForDetail = updatedSup ?: state.selectedSupplierForDetail,
+                            lastSupplierActionMessageAr = msgAr,
+                            lastSupplierActionMessageEn = msgEn,
+                            isSupplierActionError = false
+                        )
+                    }
+                } else {
+                    val rawErr = result.exceptionOrNull()?.message ?: "Supplier disbursement rejected"
+                    val parts = rawErr.split(" | ", limit = 2)
+                    val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    _uiState.update {
+                        it.copy(
+                            lastSupplierActionMessageAr = errAr,
+                            lastSupplierActionMessageEn = errEn,
+                            isSupplierActionError = true
+                        )
+                    }
+                    showBanner(errAr, errEn, isError = true)
+                }
+                onComplete(result)
+            } catch (e: Exception) {
+                val err = Result.failure<SupplierPayment>(e)
+                val msg = e.message ?: "Supplier payment rejected"
+                showBanner(msg, msg, isError = true)
+                onComplete(err)
+            } finally {
+                releaseActionLock()
             }
-            val msgEn = when {
-                newOwed > 0.005 -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatIls(newOwed)}"
-                newOwed < -0.005 -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatIls(-newOwed)}"
-                else -> "Paid $paidStr to supplier — Supplier account settled (0.00 ₪)"
-            }
-            _uiState.update { state ->
-                state.copy(
-                    draftSupplierPaymentOperationId = repository.rotateDraftOperationId("supplier_payment"),
-                    suppliers = updatedSuppliers,
-                    purchaseBills = updatedBills,
-                    supplierPayments = updatedPayments,
-                    selectedSupplierForDetail = updatedSup ?: state.selectedSupplierForDetail,
-                    lastSupplierActionMessageAr = msgAr,
-                    lastSupplierActionMessageEn = msgEn,
-                    isSupplierActionError = false
-                )
-            }
-        } else {
-            val rawErr = result.exceptionOrNull()?.message ?: "Supplier disbursement rejected"
-            val parts = rawErr.split(" | ", limit = 2)
-            val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-            val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-            _uiState.update {
-                it.copy(
-                    lastSupplierActionMessageAr = errAr,
-                    lastSupplierActionMessageEn = errEn,
-                    isSupplierActionError = true
-                )
-            }
-            showBanner(errAr, errEn, isError = true)
         }
-        return result
+        return Result.failure(IllegalStateException("Action in progress"))
     }
 
     fun paySupplierAmount(
         supplierId: String,
         amountIls: Double,
         note: String = "سداد نقدي للمورد من الصندوق",
-        paymentId: String = ""
-    ): Boolean = paySupplierAmountResult(supplierId, amountIls, note, paymentId).isSuccess
+        paymentId: String = "",
+        onComplete: (Boolean) -> Unit = {}
+    ): Boolean {
+        val result = paySupplierAmountResult(supplierId, amountIls, note, paymentId) { res ->
+            onComplete(res.isSuccess)
+        }
+        return result.isSuccess
+    }
 
-    // Expenses & Cash Outflow
     fun openAddExpenseDialog(open: Boolean) {
         if (open && !_uiState.value.currentSession.canManageExpenses()) return
         _uiState.update { it.copy(isAddExpenseDialogOpen = open) }
@@ -1510,48 +1896,104 @@ class TraderViewModel(
         category: ExpenseCategory,
         amountIls: Double,
         categoryId: String? = null,
-        operationId: String = ""
+        operationId: String = "",
+        onComplete: (Boolean) -> Unit = {}
     ): Boolean {
-        if (_uiState.value.isActionBusy) return false
-        _uiState.update { it.copy(isActionBusy = true) }
+        if (!acquireActionLock()) {
+            onComplete(false)
+            return false
+        }
 
         val opId = if (operationId.isNotBlank()) operationId else _uiState.value.draftExpenseOperationId
-        val result = kotlinx.coroutines.runBlocking {
-            repository.recordExpense(title, category, amountIls, _uiState.value.currentSession, categoryId, opId)
-        }
-        _uiState.update { it.copy(isActionBusy = false) }
-        return if (result.isSuccess) {
-            val recorded = result.getOrNull()
-            syncExpenses()
-            val amtStr = WesternFormatters.formatIls(recorded?.amountIls ?: amountIls)
-            _uiState.update {
-                it.copy(
-                    draftExpenseOperationId = repository.rotateDraftOperationId("expense"),
-                    isAddExpenseDialogOpen = false,
-                    lastExpenseActionMessageAr = "تم تسجيل وصرف $amtStr (${category.labelAr}) من نقد الصندوق لليوم",
-                    lastExpenseActionMessageEn = "Recorded and disbursed $amtStr (${category.labelEn}) from today's cash drawer",
-                    isExpenseActionError = false
-                )
+        val session = _uiState.value.currentSession
+
+        if (repository is OfflineDemoTraderRepository) {
+            try {
+                val result = kotlinx.coroutines.runBlocking {
+                    repository.recordExpense(title, category, amountIls, session, categoryId, opId)
+                }
+                val success = if (result.isSuccess) {
+                    val recorded = result.getOrNull()
+                    syncExpenses()
+                    val amtStr = WesternFormatters.formatIls(recorded?.amountIls ?: amountIls)
+                    _uiState.update {
+                        it.copy(
+                            draftExpenseOperationId = repository.rotateDraftOperationId("expense"),
+                            isAddExpenseDialogOpen = false,
+                            lastExpenseActionMessageAr = "تم تسجيل وصرف $amtStr (${category.labelAr}) من نقد الصندوق لليوم",
+                            lastExpenseActionMessageEn = "Recorded and disbursed $amtStr (${category.labelEn}) from today's cash drawer",
+                            isExpenseActionError = false
+                        )
+                    }
+                    true
+                } else {
+                    val rawErr = result.exceptionOrNull()?.message ?: "Expense rejected"
+                    val parts = rawErr.split(" | ", limit = 2)
+                    val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    _uiState.update {
+                        it.copy(
+                            lastExpenseActionMessageAr = errAr,
+                            lastExpenseActionMessageEn = errEn,
+                            isExpenseActionError = true
+                        )
+                    }
+                    showBanner(errAr, errEn, isError = true)
+                    false
+                }
+                onComplete(success)
+                return success
+            } finally {
+                releaseActionLock()
             }
-            true
-        } else {
-            val rawErr = result.exceptionOrNull()?.message ?: "Expense rejected"
-            val parts = rawErr.split(" | ", limit = 2)
-            val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-            val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-            _uiState.update {
-                it.copy(
-                    lastExpenseActionMessageAr = errAr,
-                    lastExpenseActionMessageEn = errEn,
-                    isExpenseActionError = true
-                )
-            }
-            showBanner(errAr, errEn, isError = true)
-            false
         }
+
+        viewModelScope.launch {
+            try {
+                val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    repository.recordExpense(title, category, amountIls, session, categoryId, opId)
+                }
+                val success = if (result.isSuccess) {
+                    val recorded = result.getOrNull()
+                    syncExpenses()
+                    val amtStr = WesternFormatters.formatIls(recorded?.amountIls ?: amountIls)
+                    _uiState.update {
+                        it.copy(
+                            draftExpenseOperationId = repository.rotateDraftOperationId("expense"),
+                            isAddExpenseDialogOpen = false,
+                            lastExpenseActionMessageAr = "تم تسجيل وصرف $amtStr (${category.labelAr}) من نقد الصندوق لليوم",
+                            lastExpenseActionMessageEn = "Recorded and disbursed $amtStr (${category.labelEn}) from today's cash drawer",
+                            isExpenseActionError = false
+                        )
+                    }
+                    true
+                } else {
+                    val rawErr = result.exceptionOrNull()?.message ?: "Expense rejected"
+                    val parts = rawErr.split(" | ", limit = 2)
+                    val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    _uiState.update {
+                        it.copy(
+                            lastExpenseActionMessageAr = errAr,
+                            lastExpenseActionMessageEn = errEn,
+                            isExpenseActionError = true
+                        )
+                    }
+                    showBanner(errAr, errEn, isError = true)
+                    false
+                }
+                onComplete(success)
+            } catch (e: Exception) {
+                val err = e.message ?: "Expense rejected"
+                showBanner(err, err, isError = true)
+                onComplete(false)
+            } finally {
+                releaseActionLock()
+            }
+        }
+        return false
     }
 
-    // Bluetooth Thermal Printer Simulation & Document Sharing
     fun setPrinterSheetOpen(open: Boolean) {
         _uiState.update { it.copy(isPrinterSheetOpen = open) }
     }
@@ -1739,74 +2181,82 @@ class TraderViewModel(
     fun saveProduct(
         productId: String?,
         nameAr: String,
-        nameEn: String = nameAr,
-        category: ProductCategory = ProductCategory.PANTRY,
-        unitAr: String = "قطعة",
-        unitEn: String = unitAr,
-        barcode: String = "",
+        nameEn: String = "",
+        category: ProductCategory,
+        unitAr: String,
+        unitEn: String = "",
+        barcode: String,
         priceIls: Double,
-        costIls: Double = 0.0,
-        minStockThreshold: Int = 5,
-        initialStock: Int = 0,
+        costIls: Double,
+        minStockThreshold: Int,
+        initialStock: Int,
         warehouseAr: String = "المستودع الرئيسي - نابلس",
         lotBatchCode: String = "LOT-2026-A",
         expiryDate: String? = null,
-        isWeightedDisplayOnly: Boolean = false
+        isWeightedDisplayOnly: Boolean = false,
+        onComplete: (Boolean) -> Unit = {}
     ): Boolean {
-        if (_uiState.value.isActionBusy) return false
-        _uiState.update { it.copy(isActionBusy = true) }
+        if (!acquireActionLock()) {
+            onComplete(false)
+            return false
+        }
 
         if (repository is OfflineDemoTraderRepository) {
-            val session = _uiState.value.currentSession
-            val result = kotlinx.coroutines.runBlocking {
-                repository.saveProduct(
-                    productId = productId,
-                    nameAr = nameAr,
-                    nameEn = nameEn,
-                    category = category,
-                    unitAr = unitAr,
-                    unitEn = unitEn,
-                    barcode = barcode,
-                    priceIls = priceIls,
-                    costIls = costIls,
-                    minStockThreshold = minStockThreshold,
-                    initialStock = initialStock,
-                    warehouseAr = warehouseAr,
-                    lotBatchCode = lotBatchCode,
-                    expiryDate = expiryDate,
-                    isWeightedDisplayOnly = isWeightedDisplayOnly,
-                    operator = session
-                )
-            }
-            _uiState.update { it.copy(isActionBusy = false) }
-            return if (result.isSuccess) {
-                val saved = result.getOrNull()
-                syncFromRepository()
-                _uiState.update { state ->
-                    val actionAr = if (productId == null) "تمت إضافة الصنف «${saved?.nameAr}» إلى الكتالوج" else "تم حفظ تعديلات الصنف «${saved?.nameAr}»"
-                    val actionEn = if (productId == null) "Added product \"${saved?.nameEn}\" to catalog" else "Saved changes for \"${saved?.nameEn}\""
-                    state.copy(
-                        selectedProductForDetail = saved ?: state.selectedProductForDetail,
-                        lastInventoryActionMessageAr = actionAr,
-                        lastInventoryActionMessageEn = actionEn,
-                        isInventoryActionError = false
+            try {
+                val session = _uiState.value.currentSession
+                val result = kotlinx.coroutines.runBlocking {
+                    repository.saveProduct(
+                        productId = productId,
+                        nameAr = nameAr,
+                        nameEn = nameEn,
+                        category = category,
+                        unitAr = unitAr,
+                        unitEn = unitEn,
+                        barcode = barcode,
+                        priceIls = priceIls,
+                        costIls = costIls,
+                        minStockThreshold = minStockThreshold,
+                        initialStock = initialStock,
+                        warehouseAr = warehouseAr,
+                        lotBatchCode = lotBatchCode,
+                        expiryDate = expiryDate,
+                        isWeightedDisplayOnly = isWeightedDisplayOnly,
+                        operator = session
                     )
                 }
-                true
-            } else {
-                val rawErr = result.exceptionOrNull()?.message ?: "Product save failed"
-                val parts = rawErr.split(" | ", limit = 2)
-                val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-                val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-                _uiState.update {
-                    it.copy(
-                        lastInventoryActionMessageAr = errAr,
-                        lastInventoryActionMessageEn = errEn,
-                        isInventoryActionError = true
-                    )
+                val success = if (result.isSuccess) {
+                    val saved = result.getOrNull()
+                    syncFromRepository()
+                    _uiState.update { state ->
+                        val actionAr = if (productId == null) "تمت إضافة الصنف «${saved?.nameAr}» إلى الكتالوج" else "تم حفظ تعديلات الصنف «${saved?.nameAr}»"
+                        val actionEn = if (productId == null) "Added product ${saved?.nameEn} to catalog" else "Saved changes for ${saved?.nameEn}"
+                        state.copy(
+                            selectedProductForDetail = saved ?: state.selectedProductForDetail,
+                            lastInventoryActionMessageAr = actionAr,
+                            lastInventoryActionMessageEn = actionEn,
+                            isInventoryActionError = false
+                        )
+                    }
+                    true
+                } else {
+                    val rawErr = result.exceptionOrNull()?.message ?: "Product save failed"
+                    val parts = rawErr.split(" | ", limit = 2)
+                    val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    _uiState.update {
+                        it.copy(
+                            lastInventoryActionMessageAr = errAr,
+                            lastInventoryActionMessageEn = errEn,
+                            isInventoryActionError = true
+                        )
+                    }
+                    showBanner(errAr, errEn, isError = true)
+                    false
                 }
-                showBanner(errAr, errEn, isError = true)
-                false
+                onComplete(success)
+                return success
+            } finally {
+                releaseActionLock()
             }
         }
 
@@ -1833,12 +2283,12 @@ class TraderViewModel(
                         operator = session
                     )
                 }
-                if (result.isSuccess) {
+                val success = if (result.isSuccess) {
                     val saved = result.getOrNull()
                     syncFromRepository()
                     _uiState.update { state ->
                         val actionAr = if (productId == null) "تمت إضافة الصنف «${saved?.nameAr}» إلى الكتالوج" else "تم حفظ تعديلات الصنف «${saved?.nameAr}»"
-                        val actionEn = if (productId == null) "Added product \"${saved?.nameEn}\" to catalog" else "Saved changes for \"${saved?.nameEn}\""
+                        val actionEn = if (productId == null) "Added product ${saved?.nameEn} to catalog" else "Saved changes for ${saved?.nameEn}"
                         state.copy(
                             selectedProductForDetail = saved ?: state.selectedProductForDetail,
                             lastInventoryActionMessageAr = actionAr,
@@ -1846,6 +2296,7 @@ class TraderViewModel(
                             isInventoryActionError = false
                         )
                     }
+                    true
                 } else {
                     val rawErr = result.exceptionOrNull()?.message ?: "Product save failed"
                     val parts = rawErr.split(" | ", limit = 2)
@@ -1859,12 +2310,15 @@ class TraderViewModel(
                         )
                     }
                     showBanner(errAr, errEn, isError = true)
+                    false
                 }
+                onComplete(success)
             } catch (e: Exception) {
                 val err = e.message ?: "Product save failed"
                 showBanner(err, err, isError = true)
+                onComplete(false)
             } finally {
-                _uiState.update { it.copy(isActionBusy = false) }
+                releaseActionLock()
             }
         }
         return false
@@ -2000,31 +2454,39 @@ class TraderViewModel(
         name: String,
         phone: String,
         address: String,
-        creditLimitIls: Double = 1000.0
+        creditLimitIls: Double = 1000.0,
+        onComplete: (Boolean) -> Unit = {}
     ): Boolean {
-        if (_uiState.value.isActionBusy) return false
-        _uiState.update { it.copy(isActionBusy = true) }
+        if (!acquireActionLock()) {
+            onComplete(false)
+            return false
+        }
 
         if (repository is OfflineDemoTraderRepository) {
-            val result = kotlinx.coroutines.runBlocking {
-                repository.updateCustomer(customerId, name, phone, address, creditLimitIls)
-            }
-            _uiState.update { it.copy(isActionBusy = false) }
-            return if (result.isSuccess) {
-                val updated = result.getOrNull()
-                syncFromRepository()
-                _uiState.update { state ->
-                    state.copy(
-                        selectedCustomerForDetail = updated ?: state.selectedCustomerForDetail,
-                        lastCustomerPaymentMessageAr = "تم تحديث بيانات الزبون «${updated?.nameAr}» وسقف الائتمان (${WesternFormatters.formatIls(creditLimitIls)})",
-                        lastCustomerPaymentMessageEn = "Updated customer \"${updated?.nameEn}\" and credit limit (${WesternFormatters.formatIls(creditLimitIls)})"
-                    )
+            try {
+                val result = kotlinx.coroutines.runBlocking {
+                    repository.updateCustomer(customerId, name, phone, address, creditLimitIls)
                 }
-                true
-            } else {
-                val err = result.exceptionOrNull()?.message ?: "Customer update failed"
-                showBanner(err, err, isError = true)
-                false
+                val success = if (result.isSuccess) {
+                    val updated = result.getOrNull()
+                    syncFromRepository()
+                    _uiState.update { state ->
+                        state.copy(
+                            selectedCustomerForDetail = updated ?: state.selectedCustomerForDetail,
+                            lastCustomerPaymentMessageAr = "تم تحديث بيانات الزبون «${updated?.nameAr}» وسقف الائتمان (${WesternFormatters.formatIls(creditLimitIls)})",
+                            lastCustomerPaymentMessageEn = "Updated customer ${updated?.nameEn} and credit limit (${WesternFormatters.formatIls(creditLimitIls)})"
+                        )
+                    }
+                    true
+                } else {
+                    val err = result.exceptionOrNull()?.message ?: "Customer update failed"
+                    showBanner(err, err, isError = true)
+                    false
+                }
+                onComplete(success)
+                return success
+            } finally {
+                releaseActionLock()
             }
         }
 
@@ -2033,25 +2495,29 @@ class TraderViewModel(
                 val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
                     repository.updateCustomer(customerId, name, phone, address, creditLimitIls)
                 }
-                if (result.isSuccess) {
+                val success = if (result.isSuccess) {
                     val updated = result.getOrNull()
                     syncFromRepository()
                     _uiState.update { state ->
                         state.copy(
                             selectedCustomerForDetail = updated ?: state.selectedCustomerForDetail,
                             lastCustomerPaymentMessageAr = "تم تحديث بيانات الزبون «${updated?.nameAr}» وسقف الائتمان (${WesternFormatters.formatIls(creditLimitIls)})",
-                            lastCustomerPaymentMessageEn = "Updated customer \"${updated?.nameEn}\" and credit limit (${WesternFormatters.formatIls(creditLimitIls)})"
+                            lastCustomerPaymentMessageEn = "Updated customer ${updated?.nameEn} and credit limit (${WesternFormatters.formatIls(creditLimitIls)})"
                         )
                     }
+                    true
                 } else {
                     val err = result.exceptionOrNull()?.message ?: "Customer update failed"
                     showBanner(err, err, isError = true)
+                    false
                 }
+                onComplete(success)
             } catch (e: Exception) {
                 val err = e.message ?: "Customer update failed"
                 showBanner(err, err, isError = true)
+                onComplete(false)
             } finally {
-                _uiState.update { it.copy(isActionBusy = false) }
+                releaseActionLock()
             }
         }
         return false
@@ -2100,60 +2566,26 @@ class TraderViewModel(
         supplierId: String?,
         name: String,
         company: String,
-        phone: String
+        phone: String,
+        onComplete: (Boolean) -> Unit = {}
     ): Boolean {
-        if (_uiState.value.isActionBusy) return false
-        _uiState.update { it.copy(isActionBusy = true) }
-
-        if (repository is OfflineDemoTraderRepository) {
-            val session = _uiState.value.currentSession
-            val result = kotlinx.coroutines.runBlocking {
-                repository.saveSupplier(supplierId, name, company, phone, session)
-            }
-            _uiState.update { it.copy(isActionBusy = false) }
-            return if (result.isSuccess) {
-                val saved = result.getOrNull()
-                syncFromRepository()
-                _uiState.update { state ->
-                    val msgAr = if (supplierId == null) "تمت إضافة المورد «${saved?.nameAr}»" else "تم تحديث بيانات المورد «${saved?.nameAr}»"
-                    val msgEn = if (supplierId == null) "Added supplier \"${saved?.nameEn}\"" else "Updated supplier \"${saved?.nameEn}\""
-                    state.copy(
-                        selectedSupplierForDetail = saved ?: state.selectedSupplierForDetail,
-                        lastSupplierActionMessageAr = msgAr,
-                        lastSupplierActionMessageEn = msgEn,
-                        isSupplierActionError = false
-                    )
-                }
-                true
-            } else {
-                val rawErr = result.exceptionOrNull()?.message ?: "Supplier save failed"
-                val parts = rawErr.split(" | ", limit = 2)
-                val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-                val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-                _uiState.update {
-                    it.copy(
-                        lastSupplierActionMessageAr = errAr,
-                        lastSupplierActionMessageEn = errEn,
-                        isSupplierActionError = true
-                    )
-                }
-                showBanner(errAr, errEn, isError = true)
-                false
-            }
+        if (!acquireActionLock()) {
+            onComplete(false)
+            return false
         }
 
-        viewModelScope.launch {
+        if (repository is OfflineDemoTraderRepository) {
             try {
                 val session = _uiState.value.currentSession
-                val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                val result = kotlinx.coroutines.runBlocking {
                     repository.saveSupplier(supplierId, name, company, phone, session)
                 }
-                if (result.isSuccess) {
+                val success = if (result.isSuccess) {
                     val saved = result.getOrNull()
                     syncFromRepository()
                     _uiState.update { state ->
                         val msgAr = if (supplierId == null) "تمت إضافة المورد «${saved?.nameAr}»" else "تم تحديث بيانات المورد «${saved?.nameAr}»"
-                        val msgEn = if (supplierId == null) "Added supplier \"${saved?.nameEn}\"" else "Updated supplier \"${saved?.nameEn}\""
+                        val msgEn = if (supplierId == null) "Added supplier ${saved?.nameEn}" else "Updated supplier ${saved?.nameEn}"
                         state.copy(
                             selectedSupplierForDetail = saved ?: state.selectedSupplierForDetail,
                             lastSupplierActionMessageAr = msgAr,
@@ -2161,6 +2593,7 @@ class TraderViewModel(
                             isSupplierActionError = false
                         )
                     }
+                    true
                 } else {
                     val rawErr = result.exceptionOrNull()?.message ?: "Supplier save failed"
                     val parts = rawErr.split(" | ", limit = 2)
@@ -2174,12 +2607,57 @@ class TraderViewModel(
                         )
                     }
                     showBanner(errAr, errEn, isError = true)
+                    false
                 }
+                onComplete(success)
+                return success
+            } finally {
+                releaseActionLock()
+            }
+        }
+
+        viewModelScope.launch {
+            try {
+                val session = _uiState.value.currentSession
+                val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    repository.saveSupplier(supplierId, name, company, phone, session)
+                }
+                val success = if (result.isSuccess) {
+                    val saved = result.getOrNull()
+                    syncFromRepository()
+                    _uiState.update { state ->
+                        val msgAr = if (supplierId == null) "تمت إضافة المورد «${saved?.nameAr}»" else "تم تحديث بيانات المورد «${saved?.nameAr}»"
+                        val msgEn = if (supplierId == null) "Added supplier ${saved?.nameEn}" else "Updated supplier ${saved?.nameEn}"
+                        state.copy(
+                            selectedSupplierForDetail = saved ?: state.selectedSupplierForDetail,
+                            lastSupplierActionMessageAr = msgAr,
+                            lastSupplierActionMessageEn = msgEn,
+                            isSupplierActionError = false
+                        )
+                    }
+                    true
+                } else {
+                    val rawErr = result.exceptionOrNull()?.message ?: "Supplier save failed"
+                    val parts = rawErr.split(" | ", limit = 2)
+                    val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    _uiState.update {
+                        it.copy(
+                            lastSupplierActionMessageAr = errAr,
+                            lastSupplierActionMessageEn = errEn,
+                            isSupplierActionError = true
+                        )
+                    }
+                    showBanner(errAr, errEn, isError = true)
+                    false
+                }
+                onComplete(success)
             } catch (e: Exception) {
                 val err = e.message ?: "Supplier save failed"
                 showBanner(err, err, isError = true)
+                onComplete(false)
             } finally {
-                _uiState.update { it.copy(isActionBusy = false) }
+                releaseActionLock()
             }
         }
         return false
@@ -2191,52 +2669,114 @@ class TraderViewModel(
         receivedQty: BigDecimal,
         batchNote: String = "",
         operationId: String = "",
-        lineId: String? = null
+        lineId: String? = null,
+        onComplete: (Result<StockMovement>) -> Unit = {}
     ): Result<StockMovement> {
-        if (_uiState.value.isActionBusy) return Result.failure(IllegalStateException("Action in progress"))
-        _uiState.update { it.copy(isActionBusy = true) }
+        if (!acquireActionLock()) {
+            val err = Result.failure<StockMovement>(IllegalStateException("Action in progress"))
+            onComplete(err)
+            return err
+        }
 
         val opId = if (operationId.isNotBlank()) operationId else _uiState.value.draftGrnOperationId
         val session = _uiState.value.currentSession
-        val result = kotlinx.coroutines.runBlocking {
-            repository.confirmPhysicalGoodsReceipt(billId, productId, receivedQty, batchNote, session, opId, lineId)
-        }
-        _uiState.update { it.copy(isActionBusy = false) }
-        if (result.isSuccess) {
-            val movement = result.getOrNull()
-            val updatedProducts = repository.getProducts()
-            val updatedSuppliers = repository.getSuppliers()
-            val updatedBills = repository.getPurchaseBills()
-            val prod = updatedProducts.firstOrNull { it.id == productId }
-            val resultingStock = movement?.resultingStockExact ?: BigDecimal.ZERO
-            _uiState.update { state ->
-                state.copy(
-                    draftGrnOperationId = repository.rotateDraftOperationId("goods_receipt_note"),
-                    products = updatedProducts,
-                    stockMovements = repository.getStockMovements(),
-                    suppliers = updatedSuppliers,
-                    purchaseBills = updatedBills,
-                    supplierPayments = repository.getSupplierPayments(),
-                    lastSupplierActionMessageAr = "تم اعتماد سند الاستلام المخزني (+${WesternFormatters.formatQuantity(receivedQty)} من «${prod?.nameAr ?: ""}») — المخزون الحالي: ${WesternFormatters.formatQuantity(resultingStock)}",
-                    lastSupplierActionMessageEn = "Physical Goods Receipt confirmed (+${WesternFormatters.formatQuantity(receivedQty)} of \"${prod?.nameEn ?: ""}\") — Stock: ${WesternFormatters.formatQuantity(resultingStock)}",
-                    isSupplierActionError = false
-                )
+
+        if (repository is OfflineDemoTraderRepository) {
+            try {
+                val result = kotlinx.coroutines.runBlocking {
+                    repository.confirmPhysicalGoodsReceipt(billId, productId, receivedQty, batchNote, session, opId, lineId)
+                }
+                if (result.isSuccess) {
+                    val movement = result.getOrNull()
+                    val updatedProducts = repository.getProducts()
+                    val updatedSuppliers = repository.getSuppliers()
+                    val updatedBills = repository.getPurchaseBills()
+                    val prod = updatedProducts.firstOrNull { it.id == productId }
+                    val resultingStock = movement?.resultingStockExact ?: BigDecimal.ZERO
+                    _uiState.update { state ->
+                        state.copy(
+                            draftGrnOperationId = repository.rotateDraftOperationId("goods_receipt_note"),
+                            products = updatedProducts,
+                            stockMovements = repository.getStockMovements(),
+                            suppliers = updatedSuppliers,
+                            purchaseBills = updatedBills,
+                            supplierPayments = repository.getSupplierPayments(),
+                            lastSupplierActionMessageAr = "تم اعتماد سند الاستلام المخزني (+${WesternFormatters.formatQuantity(receivedQty)} من «${prod?.nameAr ?: ""}») — المخزون الحالي: ${WesternFormatters.formatQuantity(resultingStock)}",
+                            lastSupplierActionMessageEn = "Physical Goods Receipt confirmed (+${WesternFormatters.formatQuantity(receivedQty)} of \"${prod?.nameEn ?: ""}\") — Stock: ${WesternFormatters.formatQuantity(resultingStock)}",
+                            isSupplierActionError = false
+                        )
+                    }
+                } else {
+                    val rawErr = result.exceptionOrNull()?.message ?: "Goods receipt rejected"
+                    val parts = rawErr.split(" | ", limit = 2)
+                    val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    _uiState.update {
+                        it.copy(
+                            lastSupplierActionMessageAr = errAr,
+                            lastSupplierActionMessageEn = errEn,
+                            isSupplierActionError = true
+                        )
+                    }
+                    showBanner(errAr, errEn, isError = true)
+                }
+                onComplete(result)
+                return result
+            } finally {
+                releaseActionLock()
             }
-        } else {
-            val rawErr = result.exceptionOrNull()?.message ?: "Goods receipt rejected"
-            val parts = rawErr.split(" | ", limit = 2)
-            val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-            val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
-            _uiState.update {
-                it.copy(
-                    lastSupplierActionMessageAr = errAr,
-                    lastSupplierActionMessageEn = errEn,
-                    isSupplierActionError = true
-                )
-            }
-            showBanner(errAr, errEn, isError = true)
         }
-        return result
+
+        viewModelScope.launch {
+            try {
+                val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    repository.confirmPhysicalGoodsReceipt(billId, productId, receivedQty, batchNote, session, opId, lineId)
+                }
+                if (result.isSuccess) {
+                    val movement = result.getOrNull()
+                    val updatedProducts = repository.getProducts()
+                    val updatedSuppliers = repository.getSuppliers()
+                    val updatedBills = repository.getPurchaseBills()
+                    val prod = updatedProducts.firstOrNull { it.id == productId }
+                    val resultingStock = movement?.resultingStockExact ?: BigDecimal.ZERO
+                    _uiState.update { state ->
+                        state.copy(
+                            draftGrnOperationId = repository.rotateDraftOperationId("goods_receipt_note"),
+                            products = updatedProducts,
+                            stockMovements = repository.getStockMovements(),
+                            suppliers = updatedSuppliers,
+                            purchaseBills = updatedBills,
+                            supplierPayments = repository.getSupplierPayments(),
+                            lastSupplierActionMessageAr = "تم اعتماد سند الاستلام المخزني (+${WesternFormatters.formatQuantity(receivedQty)} من «${prod?.nameAr ?: ""}») — المخزون الحالي: ${WesternFormatters.formatQuantity(resultingStock)}",
+                            lastSupplierActionMessageEn = "Physical Goods Receipt confirmed (+${WesternFormatters.formatQuantity(receivedQty)} of \"${prod?.nameEn ?: ""}\") — Stock: ${WesternFormatters.formatQuantity(resultingStock)}",
+                            isSupplierActionError = false
+                        )
+                    }
+                } else {
+                    val rawErr = result.exceptionOrNull()?.message ?: "Goods receipt rejected"
+                    val parts = rawErr.split(" | ", limit = 2)
+                    val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    _uiState.update {
+                        it.copy(
+                            lastSupplierActionMessageAr = errAr,
+                            lastSupplierActionMessageEn = errEn,
+                            isSupplierActionError = true
+                        )
+                    }
+                    showBanner(errAr, errEn, isError = true)
+                }
+                onComplete(result)
+            } catch (e: Exception) {
+                val err = Result.failure<StockMovement>(e)
+                val msg = e.message ?: "Goods receipt rejected"
+                showBanner(msg, msg, isError = true)
+                onComplete(err)
+            } finally {
+                releaseActionLock()
+            }
+        }
+        return Result.failure(IllegalStateException("Action in progress"))
     }
 
     fun confirmPhysicalGoodsReceiptResult(
@@ -2245,8 +2785,9 @@ class TraderViewModel(
         receivedQty: Int,
         batchNote: String = "",
         operationId: String = "",
-        lineId: String? = null
-    ): Result<StockMovement> = confirmPhysicalGoodsReceiptResult(billId, productId, BigDecimal(receivedQty), batchNote, operationId, lineId)
+        lineId: String? = null,
+        onComplete: (Result<StockMovement>) -> Unit = {}
+    ): Result<StockMovement> = confirmPhysicalGoodsReceiptResult(billId, productId, BigDecimal(receivedQty), batchNote, operationId, lineId, onComplete)
 
     fun confirmPhysicalGoodsReceipt(
         billId: String,
@@ -2254,8 +2795,14 @@ class TraderViewModel(
         receivedQty: Int,
         batchNote: String = "",
         operationId: String = "",
-        lineId: String? = null
-    ): Boolean = confirmPhysicalGoodsReceiptResult(billId, productId, receivedQty, batchNote, operationId, lineId).isSuccess
+        lineId: String? = null,
+        onComplete: (Boolean) -> Unit = {}
+    ): Boolean {
+        val result = confirmPhysicalGoodsReceiptResult(billId, productId, BigDecimal(receivedQty), batchNote, operationId, lineId) { res ->
+            onComplete(res.isSuccess)
+        }
+        return result.isSuccess
+    }
 
     fun updateStartingDrawerCash(openingIls: Double): Boolean {
         val session = _uiState.value.currentSession

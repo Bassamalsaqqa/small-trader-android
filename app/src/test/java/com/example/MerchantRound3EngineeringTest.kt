@@ -702,6 +702,7 @@ class MerchantRound3EngineeringTest {
         assertTrue("Customer creation must succeed", addRes.isSuccess)
 
         viewModel.syncFromRepository()
+        kotlinx.coroutines.yield()
         // Must emit at most 1 update, never intermediate empty lists or multi-step flickers
         assertEquals("syncFromRepository must perform a single atomic state transition", beforeEmissions + 1, emissions)
         assertEquals("Repository updates must be reflected in state", 1, viewModel.uiState.value.customers.count { it.phone == "0599123456" })

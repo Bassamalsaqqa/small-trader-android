@@ -113,7 +113,8 @@ fun PurchasesScreen(
     onNewPurchase: () -> Unit,
     onSupplier: (Supplier) -> Unit,
     onConfirmPhysicalGoodsReceipt: ((String, String, Int, String) -> Boolean)? = null,
-    onConfirmPhysicalGoodsReceiptResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String, lineId: String?) -> Result<StockMovement>)? = null
+    onConfirmPhysicalGoodsReceiptResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String, lineId: String?) -> Result<StockMovement>)? = null,
+    onConfirmPhysicalGoodsReceiptWithResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String, lineId: String?, onComplete: (Result<StockMovement>) -> Unit) -> Unit)? = null
 ) {
     if (!state.currentSession.canManageSuppliers()) return
     val lang = state.language
@@ -142,7 +143,8 @@ fun PurchasesScreen(
             onBack = { selectedBillId = null },
             onSupplier = { supplier -> selectedBillId = null; onSupplier(supplier) },
             onConfirmPhysicalGoodsReceipt = onConfirmPhysicalGoodsReceipt,
-            onConfirmPhysicalGoodsReceiptResult = onConfirmPhysicalGoodsReceiptResult
+            onConfirmPhysicalGoodsReceiptResult = onConfirmPhysicalGoodsReceiptResult,
+            onConfirmPhysicalGoodsReceiptWithResult = onConfirmPhysicalGoodsReceiptWithResult
         )
         }
     } else {
@@ -725,7 +727,8 @@ private fun PurchaseBillDetailView(
     onBack: () -> Unit,
     onSupplier: (Supplier) -> Unit,
     onConfirmPhysicalGoodsReceipt: ((String, String, Int, String) -> Boolean)?,
-    onConfirmPhysicalGoodsReceiptResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String, lineId: String?) -> Result<StockMovement>)? = null
+    onConfirmPhysicalGoodsReceiptResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String, lineId: String?) -> Result<StockMovement>)? = null,
+    onConfirmPhysicalGoodsReceiptWithResult: ((String, String, Int, String, String, String?, (Result<StockMovement>) -> Unit) -> Unit)? = null
 ) {
     var isGrnDialogOpen by rememberSaveable { mutableStateOf(false) }
 
@@ -1244,7 +1247,7 @@ private fun PurchaseBillDetailView(
 
     // Direct PhysicalGoodsReceiptDialog reuse via internal visibility in SuppliersScreen
     if (isGrnDialogOpen && hasLinkedSku) {
-        if (onConfirmPhysicalGoodsReceiptResult != null) {
+        if (onConfirmPhysicalGoodsReceiptWithResult != null || onConfirmPhysicalGoodsReceiptResult != null) {
             PhysicalGoodsReceiptDialog(
                 bill = bill,
                 products = state.products,
@@ -1252,12 +1255,26 @@ private fun PurchaseBillDetailView(
                 onDismiss = { isGrnDialogOpen = false },
                 errorMessage = if (state.isSupplierActionError) lang.tr(state.lastSupplierActionMessageAr.orEmpty(), state.lastSupplierActionMessageEn.orEmpty()).takeIf { it.isNotBlank() } else null,
                 onConfirmGrnResult = { operationId, productId, receivedQty, batchNote, lineId ->
-                    val res = onConfirmPhysicalGoodsReceiptResult(bill.id, productId, receivedQty, batchNote, operationId, lineId)
-                    if (res.isSuccess) {
-                        isGrnDialogOpen = false
+                    if (onConfirmPhysicalGoodsReceiptResult != null) {
+                        val res = onConfirmPhysicalGoodsReceiptResult(bill.id, productId, receivedQty, batchNote, operationId, lineId)
+                        if (res.isSuccess) {
+                            isGrnDialogOpen = false
+                        }
+                        res
+                    } else {
+                        Result.failure(Exception("Handler not provided"))
                     }
-                    res
-                }
+                },
+                onConfirmGrnWithResult = if (onConfirmPhysicalGoodsReceiptWithResult != null) {
+                    { operationId, productId, receivedQty, batchNote, lineId, onComplete ->
+                        onConfirmPhysicalGoodsReceiptWithResult(bill.id, productId, receivedQty, batchNote, operationId, lineId) { res ->
+                            if (res.isSuccess) {
+                                isGrnDialogOpen = false
+                            }
+                            onComplete(res)
+                        }
+                    }
+                } else null
             )
         } else {
             PhysicalGoodsReceiptDialog(

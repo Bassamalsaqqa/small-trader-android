@@ -115,6 +115,7 @@ fun SuppliersScreen(
     onOpenReceivePurchaseDialog: () -> Unit,
     onDismissFeedback: (() -> Unit)? = null,
     onSaveSupplier: ((supplierId: String?, name: String, company: String, phone: String) -> Unit)? = null,
+    onSaveSupplierWithResult: ((supplierId: String?, name: String, company: String, phone: String, onComplete: (Boolean) -> Unit) -> Unit)? = null,
     launchCreate: Boolean = false,
     onLaunchConsumed: () -> Unit = {}
 ) {
@@ -232,7 +233,7 @@ fun SuppliersScreen(
 
                     if (canManageSuppliers) {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            if (onSaveSupplier != null) {
+                            if (onSaveSupplierWithResult != null || onSaveSupplier != null) {
                                 OutlinedButton(
                                     onClick = { isAddSupplierOpen = true },
                                     shape = RoundedCornerShape(10.dp),
@@ -555,15 +556,23 @@ fun SuppliersScreen(
         }
     }
 
-    if (isAddSupplierOpen && onSaveSupplier != null) {
+    if (isAddSupplierOpen && (onSaveSupplierWithResult != null || onSaveSupplier != null)) {
         createDraft.SaveableStateProvider("new_supplier_form") {
             SupplierEditorDialog(
                 initialSupplier = null,
                 lang = lang,
                 onDismiss = { isAddSupplierOpen = false },
                 onSave = { name, company, phone ->
-                    onSaveSupplier(null, name, company, phone)
-                    isAddSupplierOpen = false
+                    if (onSaveSupplierWithResult != null) {
+                        onSaveSupplierWithResult(null, name, company, phone) { success ->
+                            if (success) {
+                                isAddSupplierOpen = false
+                            }
+                        }
+                    } else {
+                        onSaveSupplier?.invoke(null, name, company, phone)
+                        isAddSupplierOpen = false
+                    }
                 }
             )
         }
@@ -700,11 +709,14 @@ fun SupplierDetailScreen(
     onOpenReceivePurchaseDialog: () -> Unit,
     onDismissFeedback: (() -> Unit)? = null,
     onSaveSupplier: ((supplierId: String?, name: String, company: String, phone: String) -> Unit)? = null,
+    onSaveSupplierWithResult: ((supplierId: String?, name: String, company: String, phone: String, onComplete: (Boolean) -> Unit) -> Unit)? = null,
     launchPayment: Boolean = false,
     onLaunchConsumed: () -> Unit = {},
     onConfirmGoodsReceipt: ((billId: String, productId: String, receivedQty: Int, batchNote: String) -> Boolean)? = null,
     onPaySupplierResult: ((supplier: Supplier, amount: Double, paymentId: String) -> Result<SupplierPayment>)? = null,
-    onConfirmGoodsReceiptResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String, lineId: String?) -> Result<StockMovement>)? = null
+    onPaySupplierWithResult: ((supplier: Supplier, amount: Double, paymentId: String, onComplete: (Result<SupplierPayment>) -> Unit) -> Unit)? = null,
+    onConfirmGoodsReceiptResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String, lineId: String?) -> Result<StockMovement>)? = null,
+    onConfirmGoodsReceiptWithResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String, lineId: String?, onComplete: (Result<StockMovement>) -> Unit) -> Unit)? = null
 ) {
     val paymentDraft = rememberSaveableStateHolder()
     val lang = state.language
@@ -1122,14 +1134,22 @@ fun SupplierDetailScreen(
         }
     }
 
-    if (isEditSupplierOpen && onSaveSupplier != null) {
+    if (isEditSupplierOpen && (onSaveSupplierWithResult != null || onSaveSupplier != null)) {
         SupplierEditorDialog(
             initialSupplier = supplier,
             lang = lang,
             onDismiss = { isEditSupplierOpen = false },
             onSave = { name, company, phone ->
-                onSaveSupplier(supplier.id, name, company, phone)
-                isEditSupplierOpen = false
+                if (onSaveSupplierWithResult != null) {
+                    onSaveSupplierWithResult(supplier.id, name, company, phone) { success ->
+                        if (success) {
+                            isEditSupplierOpen = false
+                        }
+                    }
+                } else {
+                    onSaveSupplier?.invoke(supplier.id, name, company, phone)
+                    isEditSupplierOpen = false
+                }
             }
         )
     }
@@ -1143,7 +1163,7 @@ fun SupplierDetailScreen(
     }
 
     // Physical Goods Receipt (GRN) Dialog
-    if (activeBillForGrn != null && (onConfirmGoodsReceiptResult != null || onConfirmGoodsReceipt != null)) {
+    if (activeBillForGrn != null && (onConfirmGoodsReceiptWithResult != null || onConfirmGoodsReceiptResult != null || onConfirmGoodsReceipt != null)) {
         val currentGrnBill = activeBillForGrn!!
         PhysicalGoodsReceiptDialog(
             bill = currentGrnBill,
@@ -1177,6 +1197,16 @@ fun SupplierDetailScreen(
                     }
                 }
             },
+            onConfirmGrnWithResult = if (onConfirmGoodsReceiptWithResult != null) {
+                { operationId, productId, receivedQty, batchNote, lineId, onComplete ->
+                    onConfirmGoodsReceiptWithResult(currentGrnBill.id, productId, receivedQty, batchNote, operationId, lineId) { res ->
+                        if (res.isSuccess) {
+                            activeBillForGrn = null
+                        }
+                        onComplete(res)
+                    }
+                }
+            } else null,
             errorMessage = if (state.isSupplierActionError) state.supplierActionMessage(lang) else null
         )
     }
@@ -1204,7 +1234,17 @@ fun SupplierDetailScreen(
                             Result.failure(Exception(state.supplierActionMessage(lang).ifBlank { "Supplier payment failed" }))
                         }
                     }
-                }
+                },
+                onPaySupplierWithResult = if (onPaySupplierWithResult != null) {
+                    { sup, amount, paymentId, onComplete ->
+                        onPaySupplierWithResult(sup, amount, paymentId) { res ->
+                            if (res.isSuccess) {
+                                isPayDialogOpen = false
+                            }
+                            onComplete(res)
+                        }
+                    }
+                } else null
             )
         }
     }

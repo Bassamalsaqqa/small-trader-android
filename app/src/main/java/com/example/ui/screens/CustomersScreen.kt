@@ -714,6 +714,7 @@ fun CustomerDetailScreen(
     onOpenInvoice: ((InvoiceRecord) -> Unit)? = null,
     onDismissFeedback: (() -> Unit)? = null,
     onUpdateCustomer: ((customerId: String, name: String, phone: String, address: String, creditLimitIls: Double) -> Unit)? = null,
+    onUpdateCustomerWithResult: ((customerId: String, name: String, phone: String, address: String, creditLimitIls: Double, onComplete: (Boolean) -> Unit) -> Unit)? = null,
     onFormatStatementText: ((String) -> String)? = null
 ) {
     val lang = state.language
@@ -1172,14 +1173,20 @@ fun CustomerDetailScreen(
         }
     }
 
-    if (isEditCustomerOpen && onUpdateCustomer != null) {
+    if (isEditCustomerOpen && (onUpdateCustomerWithResult != null || onUpdateCustomer != null)) {
         EditCustomerDialog(
             customer = customer,
             lang = lang,
             onDismiss = { isEditCustomerOpen = false },
             onConfirmUpdate = { name, phone, address, creditLimitIls ->
-                onUpdateCustomer(customer.id, name, phone, address, creditLimitIls)
-                isEditCustomerOpen = false
+                if (onUpdateCustomerWithResult != null) {
+                    onUpdateCustomerWithResult(customer.id, name, phone, address, creditLimitIls) { success ->
+                        if (success) isEditCustomerOpen = false
+                    }
+                } else {
+                    onUpdateCustomer?.invoke(customer.id, name, phone, address, creditLimitIls)
+                    isEditCustomerOpen = false
+                }
             }
         )
     }
@@ -1864,14 +1871,16 @@ fun CustomerPaymentCollectionDialog(
 fun AddCustomerDialog(
     lang: AppLanguage,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, phone: String, address: String) -> Unit
+    onConfirm: (name: String, phone: String, address: String) -> Unit,
+    onConfirmWithResult: ((name: String, phone: String, address: String, onComplete: (Boolean) -> Unit) -> Unit)? = null
 ) {
     var newCustName by rememberSaveable { mutableStateOf("") }
     var newCustPhone by rememberSaveable { mutableStateOf("") }
     var newCustAddr by rememberSaveable { mutableStateOf("") }
+    var isSubmitting by rememberSaveable { mutableStateOf(false) }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
         shape = RoundedCornerShape(12.dp),
         title = {
             Text(
@@ -1928,8 +1937,25 @@ fun AddCustomerDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(newCustName.trim(), newCustPhone.trim(), newCustAddr.trim()) },
-                enabled = newCustName.isNotBlank(),
+                onClick = {
+                    if (!isSubmitting && newCustName.isNotBlank()) {
+                        val trimmedName = newCustName.trim()
+                        val trimmedPhone = newCustPhone.trim()
+                        val trimmedAddr = newCustAddr.trim()
+                        if (onConfirmWithResult != null) {
+                            isSubmitting = true
+                            onConfirmWithResult(trimmedName, trimmedPhone, trimmedAddr) { success ->
+                                isSubmitting = false
+                                if (success) {
+                                    onDismiss()
+                                }
+                            }
+                        } else {
+                            onConfirm(trimmedName, trimmedPhone, trimmedAddr)
+                        }
+                    }
+                },
+                enabled = !isSubmitting && newCustName.isNotBlank(),
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -1947,7 +1973,8 @@ fun AddCustomerDialog(
         },
         dismissButton = {
             TextButton(
-                onClick = onDismiss,
+                onClick = { if (!isSubmitting) onDismiss() },
+                enabled = !isSubmitting,
                 modifier = Modifier.heightIn(min = 48.dp)
             ) {
                 Text(lang.tr("إلغاء", "Cancel"))

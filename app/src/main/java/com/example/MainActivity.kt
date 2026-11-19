@@ -184,6 +184,9 @@ fun SmallTraderApp(
                             },
                             onConfirmPhysicalGoodsReceiptResult = { billId, productId, qty, note, operationId, lineId ->
                                 traderViewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, operationId, lineId)
+                            },
+                            onConfirmPhysicalGoodsReceiptWithResult = { billId, productId, qty, note, operationId, lineId, onComplete ->
+                                traderViewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, operationId, lineId, onComplete = onComplete)
                             }
                         )
                         TraderScreen.HOME -> {
@@ -351,8 +354,14 @@ fun SmallTraderApp(
                                 onUpdatePrice = { productId, newPrice ->
                                     traderViewModel.updateProductPrice(productId, newPrice)
                                 },
+                                onUpdatePriceWithResult = { productId, newPrice, onComplete ->
+                                    traderViewModel.updateProductPrice(productId, newPrice, onComplete)
+                                },
                                 onAdjustStock = { productId, delta, reason ->
                                     traderViewModel.adjustProductStock(productId, delta, reason)
+                                },
+                                onAdjustStockWithResult = { productId, delta, reason, onComplete ->
+                                    traderViewModel.adjustProductStock(productId, delta, reason, onComplete = onComplete)
                                 },
                                 onAddToBasket = { prod ->
                                     traderViewModel.addProductToBasket(prod, 1)
@@ -409,6 +418,9 @@ fun SmallTraderApp(
                                 onUpdateCustomer = { cid, name, phone, addr, limit ->
                                     traderViewModel.updateCustomer(cid, name, phone, addr, limit)
                                 },
+                                onUpdateCustomerWithResult = { cid, name, phone, addr, limit, onComplete ->
+                                    traderViewModel.updateCustomer(cid, name, phone, addr, limit, onComplete)
+                                },
                                 onFormatStatementText = { cid ->
                                     state.customers.firstOrNull { it.id == cid }?.let {
                                         traderViewModel.formatCustomerStatementText(it)
@@ -424,6 +436,9 @@ fun SmallTraderApp(
                                 onOpenReceivePurchaseDialog = { traderViewModel.openReceivePurchaseDialog(true) },
                                 onDismissFeedback = traderViewModel::dismissSupplierFeedback,
                                 onSaveSupplier = traderViewModel::saveSupplier,
+                                onSaveSupplierWithResult = { sid, name, comp, phone, onComplete ->
+                                    traderViewModel.saveSupplier(sid, name, comp, phone, onComplete)
+                                },
                                 launchCreate = state.pendingAction == MerchantAction.SUPPLIER,
                                 onLaunchConsumed = traderViewModel::consumeAction
                             )
@@ -435,11 +450,20 @@ fun SmallTraderApp(
                                 onBack = { traderViewModel.navigateBack() },
                                 onPaySupplier = { sup, amount -> traderViewModel.paySupplierAmount(sup.id, amount) },
                                 onPaySupplierResult = { sup, amount, paymentId -> traderViewModel.paySupplierAmountResult(sup.id, amount, paymentId = paymentId) },
+                                onPaySupplierWithResult = { sup, amount, paymentId, onComplete ->
+                                    traderViewModel.paySupplierAmountResult(sup.id, amount, paymentId = paymentId, onComplete = onComplete)
+                                },
                                 onOpenReceivePurchaseDialog = { traderViewModel.openReceivePurchaseDialog(true) },
                                 onDismissFeedback = traderViewModel::dismissSupplierFeedback,
                                 onSaveSupplier = traderViewModel::saveSupplier,
+                                onSaveSupplierWithResult = { sid, name, comp, phone, onComplete ->
+                                    traderViewModel.saveSupplier(sid, name, comp, phone, onComplete)
+                                },
                                 onConfirmGoodsReceipt = traderViewModel::confirmPhysicalGoodsReceipt,
                                 onConfirmGoodsReceiptResult = { billId, productId, qty, note, opId, lineId -> traderViewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, opId, lineId) },
+                                onConfirmGoodsReceiptWithResult = { billId, productId, qty, note, opId, lineId, onComplete ->
+                                    traderViewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, opId, lineId, onComplete = onComplete)
+                                },
                                 launchPayment = state.pendingAction == MerchantAction.PAY,
                                 onLaunchConsumed = traderViewModel::consumeAction
                             )
@@ -629,6 +653,9 @@ fun SmallTraderApp(
                         onDismiss = { traderViewModel.openAddCustomerDialog(false) },
                         onConfirm = { name, phone, address ->
                             traderViewModel.createCustomer(name, phone, address)
+                        },
+                        onConfirmWithResult = { name, phone, address, onComplete ->
+                            traderViewModel.createCustomer(name, phone, address, onComplete)
                         }
                     )
                     }
@@ -663,12 +690,32 @@ fun SmallTraderApp(
                                 expectedQuantity = expectedQty
                             )
                         },
+                        onConfirmBillWithResult = { supplierId, itemsSummary, totalIls, paidNowIls, expectedProductId, expectedQty, onComplete ->
+                            traderViewModel.recordPurchaseBill(
+                                supplierId = supplierId,
+                                itemsSummary = itemsSummary,
+                                totalIls = totalIls,
+                                paidNowIls = paidNowIls,
+                                expectedProductId = expectedProductId,
+                                expectedQuantity = expectedQty,
+                                onComplete = onComplete
+                            )
+                        },
                         onConfirmStructuredBill = { supplierId, lines, paidNowIls, note ->
                             traderViewModel.recordStructuredPurchaseBill(
                                 supplierId = supplierId,
                                 lines = lines,
                                 paidNowIls = paidNowIls,
                                 note = note
+                            )
+                        },
+                        onConfirmStructuredBillWithResult = { supplierId, lines, paidNowIls, note, onComplete ->
+                            traderViewModel.recordStructuredPurchaseBill(
+                                supplierId = supplierId,
+                                lines = lines,
+                                paidNowIls = paidNowIls,
+                                note = note,
+                                onComplete = onComplete
                             )
                         }
                     )
