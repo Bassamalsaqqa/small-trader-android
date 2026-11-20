@@ -1,5 +1,9 @@
 package com.example.ui.staff
 
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.autofill.AutofillType
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -67,13 +71,15 @@ import com.example.ui.theme.PrimaryBlueLight
  * and is cleared immediately upon submission or screen navigation.
  * Fresh challenge acquisition is orchestrated automatically behind the scenes.
  */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun StaffSignInScreen(
     uiState: StaffWorkspaceUiState,
-    onSignIn: (email: String, passwordOverride: String) -> Unit,
+    onSignIn: (email: String, passwordOverride: String, rememberSession: Boolean) -> Unit,
     onToggleLanguage: () -> Unit,
     onToggleTheme: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    initialRememberSession: Boolean = false
 ) {
     val lang = uiState.language
     val passwordFocus = remember { FocusRequester() }
@@ -82,6 +88,7 @@ fun StaffSignInScreen(
     // Transient in-memory inputs (never saved to SavedStateHandle, disk, or logs)
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var rememberSession by remember { mutableStateOf(initialRememberSession) }
     var isPasswordVisible by remember { mutableStateOf(false) }
 
     Box(
@@ -194,6 +201,7 @@ fun StaffSignInScreen(
                         onValueChange = { email = it },
                         modifier = Modifier
                             .fillMaxWidth()
+                            .credentialAutofill(listOf(AutofillType.Username, AutofillType.EmailAddress)) { email = it }
                             .testTag("staff_signin_email_input"),
                         label = { Text(lang.tr("البريد الإلكتروني", "Email address")) },
                         leadingIcon = {
@@ -218,6 +226,7 @@ fun StaffSignInScreen(
                         onValueChange = { password = it },
                         modifier = Modifier
                             .fillMaxWidth()
+                            .credentialAutofill(listOf(AutofillType.Password)) { password = it }
                             .focusRequester(passwordFocus)
                             .testTag("staff_signin_password_input"),
                         label = { Text(lang.tr("كلمة المرور", "Password")) },
@@ -247,14 +256,38 @@ fun StaffSignInScreen(
                                 if (!uiState.isSubmitting && email.isNotBlank() && password.isNotBlank()) {
                                     val pwdToSubmit = password
                                     password = ""
-                                    onSignIn(email, pwdToSubmit)
+                                    onSignIn(email, pwdToSubmit, rememberSession)
                                 }
                             }
                         ),
                         enabled = !uiState.isSubmitting
                     )
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .toggleable(
+                                value = rememberSession,
+                                enabled = !uiState.isSubmitting,
+                                role = Role.Checkbox,
+                                onValueChange = { rememberSession = it }
+                            )
+                            .testTag("staff_signin_remember"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(checked = rememberSession, onCheckedChange = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = lang.tr("إبقاء تسجيل الدخول", "Keep me signed in"),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     // Submit Button (min 48dp touch target)
                     Button(
@@ -262,7 +295,7 @@ fun StaffSignInScreen(
                             focusManager.clearFocus()
                             val pwdToSubmit = password
                             password = ""
-                            onSignIn(email, pwdToSubmit)
+                            onSignIn(email, pwdToSubmit, rememberSession)
                         },
                         modifier = Modifier
                             .fillMaxWidth()

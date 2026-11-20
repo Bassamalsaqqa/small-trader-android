@@ -104,8 +104,8 @@ fun AuthenticatedTraderApp(
                 StaffWorkspacePhase.SIGN_IN -> {
                     StaffSignInScreen(
                         uiState = uiState,
-                        onSignIn = { email, password ->
-                            staffViewModel.signIn(email, password)
+                        onSignIn = { email, password, rememberSession ->
+                            staffViewModel.signIn(email, password, rememberSession = rememberSession)
                         },
                         onToggleLanguage = { staffViewModel.toggleLanguage() },
                         onToggleTheme = { staffViewModel.toggleTheme() }

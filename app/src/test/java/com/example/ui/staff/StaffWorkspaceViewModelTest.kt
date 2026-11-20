@@ -593,7 +593,7 @@ class StaffWorkspaceViewModelTest {
             assertEquals(StaffWorkspacePhase.SIGN_IN, vm.uiState.value.phase)
 
             // 2. Perform sign in: triggers wire challenge -> login -> bootstrap -> products & customers
-            vm.signIn("cashier@smalltrader.example", passwordOverride = "CorrectHorseBatteryStaple123!")
+            vm.signIn("cashier@smalltrader.example", passwordOverride = "CorrectHorseBatteryStaple123!", rememberSession = true)
             advanceUntilIdle()
 
             // Verify sequential requests over wire
@@ -818,7 +818,7 @@ class StaffWorkspaceViewModelTest {
             )
             advanceUntilIdle()
 
-            vm.signIn("cashier@smalltrader.example", passwordOverride = "CorrectHorseBatteryStaple123!")
+            vm.signIn("cashier@smalltrader.example", passwordOverride = "CorrectHorseBatteryStaple123!", rememberSession = true)
             advanceUntilIdle()
             assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
             assertTrue(env.sessionStore.hasSessionFile())
@@ -833,6 +833,55 @@ class StaffWorkspaceViewModelTest {
             assertTrue(state.customers.isEmpty())
             assertNull(state.activeCompany)
             assertNull(state.staffActor)
+        } finally {
+            env.tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun realCoordinator_signIn_withRememberSessionFalse_staysSessionOnlyWithoutPersistingToDisk() = runTest(testDispatcher) {
+        val env = setupRealCoordinator()
+        try {
+            val fixtures = locateFixturesDir()
+            val challengeJson = File(fixtures, "golden-auth-challenge.json").readText(Charsets.UTF_8)
+            val challengeRes = StrictJsonParser.parse(challengeJson).asObject().require("response")
+            val loginJson = File(fixtures, "golden-auth-login.json").readText(Charsets.UTF_8)
+            val loginRes = StrictJsonParser.parse(loginJson).asObject().require("response")
+            val bootstrapJson = File(fixtures, "golden-bootstrap.json").readText(Charsets.UTF_8)
+            val productJson = File(fixtures, "golden-product-catalog.json").readText(Charsets.UTF_8)
+            val customerJson = File(fixtures, "golden-customer-directory.json").readText(Charsets.UTF_8)
+
+            env.transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/challenge")] = {
+                TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(challengeRes))
+            }
+            env.transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/login")] = {
+                TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(loginRes))
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/bootstrap")] = {
+                TransportResponse(statusCode = 200, body = bootstrapJson)
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/products")] = {
+                TransportResponse(statusCode = 200, body = productJson)
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/customers")] = {
+                TransportResponse(statusCode = 200, body = customerJson)
+            }
+
+            val vm = StaffWorkspaceViewModel(
+                coordinator = env.coordinator,
+                configuredOrigin = "https://api.smalltrader.example",
+                ioDispatcher = testDispatcher
+            )
+            advanceUntilIdle()
+
+            vm.signIn("cashier@smalltrader.example", passwordOverride = "CorrectHorseBatteryStaple123!", rememberSession = false)
+            advanceUntilIdle()
+
+            val state = vm.uiState.value
+            assertEquals(StaffWorkspacePhase.READ_READY, state.phase)
+            assertFalse("Session must not be persisted to disk when rememberSession is false", env.sessionStore.hasSessionFile())
+            assertEquals(2, state.products.size)
+            assertEquals(2, state.customers.size)
         } finally {
             env.tempDir.deleteRecursively()
         }
@@ -1441,7 +1490,7 @@ class FakeStaffSessionCoordinator(
         return restoreResult ?: CoordinatorResult.Success(StaffAuthState.LoggedOut, generation = currentGeneration)
     }
 
-    override fun requestChallenge(appVersion: String): CoordinatorResult<AuthChallengeResponse> {
+    override fun requestChallenge(appVersion: String, rememberSession: Boolean): CoordinatorResult<AuthChallengeResponse> {
         return CoordinatorResult.Success(
             AuthChallengeResponse(
                 challengeId = ClientUuid("3fa85f64-5717-4562-b3fc-2c963f66afa7"),

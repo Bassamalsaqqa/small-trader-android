@@ -75,8 +75,8 @@ fun StaffWorkspaceApp(
                 StaffWorkspacePhase.SIGN_IN -> {
                     StaffSignInScreen(
                         uiState = uiState,
-                        onSignIn = { email, password ->
-                            viewModel.signIn(email, password)
+                        onSignIn = { email, password, rememberSession ->
+                            viewModel.signIn(email, password, rememberSession = rememberSession)
                         },
                         onToggleLanguage = { viewModel.toggleLanguage() },
                         onToggleTheme = { viewModel.toggleTheme() }

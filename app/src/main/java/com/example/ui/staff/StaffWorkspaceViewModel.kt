@@ -522,7 +522,8 @@ class StaffWorkspaceViewModel(
     fun signIn(
         email: String,
         passwordOverride: String? = null,
-        deviceName: String = "Android Staff Device"
+        deviceName: String = "Android Staff Device",
+        rememberSession: Boolean = false
     ) {
         val coord = coordinator ?: run {
             _uiState.update {
@@ -564,7 +565,7 @@ class StaffWorkspaceViewModel(
             // Step 1: Real challenge request
             val challengeResult = try {
                 withContext(ioDispatcher) {
-                    coord.requestChallenge()
+                    coord.requestChallenge(rememberSession = rememberSession)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -578,6 +579,14 @@ class StaffWorkspaceViewModel(
 
             if (challengeResult !is CoordinatorResult.Success) {
                 clearTransientCredentials()
+                val locked = coord.authState as? StaffAuthState.Locked
+                if (locked != null) {
+                    _uiState.update {
+                        it.copy(phase = StaffWorkspacePhase.LOCKED, isSubmitting = false,
+                            lockedReason = extractLockReasonMessage(locked.reason))
+                    }
+                    return@launch
+                }
                 _uiState.update {
                     it.copy(
                         isSubmitting = false,

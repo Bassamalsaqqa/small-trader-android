@@ -56,7 +56,7 @@ interface StaffSessionCoordinator {
     /**
      * Requests an authentication challenge nonce and TTL from the server.
      */
-    fun requestChallenge(appVersion: String = "1.0"): CoordinatorResult<AuthChallengeResponse>
+    fun requestChallenge(appVersion: String = "1.0", rememberSession: Boolean = false): CoordinatorResult<AuthChallengeResponse>
 
     /**
      * Authenticates staff with credentials and active challenge nonce.
@@ -178,6 +178,7 @@ class DefaultStaffSessionCoordinator(
 
     // Retain private lifecycle credential context across transient errors
     private var activeTokenContext: String? = null
+    private var persistSession = false
     private var activeChallenge: AuthChallengeResponse? = null
     private var pendingLoginSuccess: PendingLoginContext? = null
 
@@ -236,7 +237,7 @@ class DefaultStaffSessionCoordinator(
             }
 
             try {
-                if (persist) sessionStore.saveSession(record)
+                if (persist && persistSession) sessionStore.saveSession(record)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: VirtualMachineError) {
@@ -506,6 +507,7 @@ class DefaultStaffSessionCoordinator(
                 synchronized(stateLock) {
                     if (opGen != generation.get()) return CoordinatorResult.StaleOperation()
                     activeTokenContext = record.token
+                    persistSession = true
                 }
                 val companyId = record.selectedCompanyId
                 if (companyId == null) {
@@ -562,7 +564,10 @@ class DefaultStaffSessionCoordinator(
         }
     }
 
-    override fun requestChallenge(appVersion: String): CoordinatorResult<AuthChallengeResponse> {
+    override fun requestChallenge(appVersion: String, rememberSession: Boolean): CoordinatorResult<AuthChallengeResponse> =
+        acquireChallenge(appVersion, rememberSession)
+
+    private fun acquireChallenge(appVersion: String, rememberSession: Boolean?): CoordinatorResult<AuthChallengeResponse> {
         val opGen: Long
         val deviceId: ClientUuid
 
@@ -576,6 +581,21 @@ class DefaultStaffSessionCoordinator(
 
             opGen = generation.incrementAndGet()
             activeChallenge = null
+            if (rememberSession != null) {
+                activeTokenContext = null
+                pendingLoginSuccess = null
+                persistSession = rememberSession
+                // A fresh credential attempt replaces any prior remembered identity,
+                // even if acquiring the challenge or authenticating subsequently fails.
+                try {
+                    sessionStore.clearSession()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    _authState = StaffAuthState.Locked(LockReason.StorageClearFailed("Could not remove remembered session"))
+                    return CoordinatorResult.Error("Session clear failed")
+                }
+            }
 
             deviceId = try {
                 installationId
@@ -805,7 +825,7 @@ class DefaultStaffSessionCoordinator(
             "mfa_code and recovery_code are mutually exclusive; submitting both simultaneously is rejected"
         }
 
-        val freshChallengeResult = requestChallenge()
+        val freshChallengeResult = acquireChallenge("1.0", rememberSession = null)
         if (freshChallengeResult !is CoordinatorResult.Success) {
             return CoordinatorResult.Error("Failed to acquire fresh challenge for MFA retry")
         }
@@ -924,6 +944,7 @@ class DefaultStaffSessionCoordinator(
             activeTokenContext = null
             activeChallenge = null
             pendingLoginSuccess = null
+            persistSession = false
 
             // Deny reads even if the local purge itself is cancelled or fails.
             _authState = StaffAuthState.Locked(LockReason.StorageClearFailed(clearErrorReason))

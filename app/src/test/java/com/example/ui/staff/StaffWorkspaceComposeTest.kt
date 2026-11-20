@@ -42,6 +42,7 @@ class StaffWorkspaceComposeTest {
 
     @Test
     fun signInScreen_rendersInputs_andSubmitsCredentials() {
+        var remembered = false
         var submittedEmail = ""
         var submittedPassword = ""
         val uiState = StaffWorkspaceUiState(
@@ -53,7 +54,8 @@ class StaffWorkspaceComposeTest {
             SmallTraderTheme(darkTheme = false, isRtl = true) {
                 StaffSignInScreen(
                     uiState = uiState,
-                    onSignIn = { email, pwd ->
+                    onSignIn = { email, pwd, choice ->
+                        remembered = choice
                         submittedEmail = email
                         submittedPassword = pwd
                     },
@@ -67,10 +69,12 @@ class StaffWorkspaceComposeTest {
         composeTestRule.onNodeWithTag("staff_signin_email_input").performTextInput("staff@al-zaytouna.ps")
         composeTestRule.onNodeWithTag("staff_signin_password_input").performTextInput("Pass1234!")
 
+        composeTestRule.onNodeWithTag("staff_signin_remember").performClick()
         // Click submit button
         composeTestRule.onNodeWithTag("staff_signin_submit_button").performClick()
         composeTestRule.waitForIdle()
 
+        assertEquals(true, remembered)
         assertEquals("staff@al-zaytouna.ps", submittedEmail)
         assertEquals("Pass1234!", submittedPassword)
     }
@@ -385,7 +389,7 @@ class StaffWorkspaceComposeTest {
                 StaffSignInScreen(
                     uiState = uiState,
                     modifier = Modifier.height(320.dp),
-                    onSignIn = { email, pwd ->
+                    onSignIn = { email, pwd, _ ->
                         submittedEmail = email
                         submittedPassword = pwd
                     },

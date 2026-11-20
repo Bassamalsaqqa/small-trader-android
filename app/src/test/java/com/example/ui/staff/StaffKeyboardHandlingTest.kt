@@ -17,6 +17,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 class StaffKeyboardHandlingTest {
 
     @get:Rule
@@ -24,6 +25,7 @@ class StaffKeyboardHandlingTest {
 
     @Test
     fun signInScreen_imeActionsAndTransientMemoryClearing_verified() {
+        lateinit var tree: androidx.compose.ui.autofill.AutofillTree
         var submittedEmail = ""
         var submittedPassword = ""
 
@@ -33,10 +35,12 @@ class StaffKeyboardHandlingTest {
         )
 
         composeTestRule.setContent {
+            tree = androidx.compose.ui.platform.LocalAutofillTree.current
             SmallTraderTheme(darkTheme = false, isRtl = true) {
                 StaffSignInScreen(
                     uiState = uiState,
-                    onSignIn = { email, pwd ->
+                    onSignIn = { email, pwd, remembered ->
+                        assertFalse(remembered)
                         submittedEmail = email
                         submittedPassword = pwd
                     },
@@ -47,13 +51,18 @@ class StaffKeyboardHandlingTest {
         }
 
         // Email field accepts input and performs Next action
-        composeTestRule.onNodeWithTag("staff_signin_email_input").performTextInput("cashier@al-zaytouna.ps")
+        composeTestRule.runOnIdle {
+            val username = tree.children.values.single { androidx.compose.ui.autofill.AutofillType.Username in it.autofillTypes }
+            assertTrue(androidx.compose.ui.autofill.AutofillType.EmailAddress in username.autofillTypes)
+            tree.performAutofill(username.id, "cashier@al-zaytouna.ps")
+            val password = tree.children.values.single { androidx.compose.ui.autofill.AutofillType.Password in it.autofillTypes }
+            tree.performAutofill(password.id, "StrongPass123!")
+        }
         composeTestRule.onNodeWithTag("staff_signin_email_input").performImeAction()
 
         composeTestRule.onNodeWithTag("staff_signin_password_input").assertIsFocused()
 
         // Password field accepts input and performs Done action triggering submission
-        composeTestRule.onNodeWithTag("staff_signin_password_input").performTextInput("StrongPass123!")
         composeTestRule.onNodeWithTag("staff_signin_password_input").performImeAction()
         composeTestRule.waitForIdle()
 
