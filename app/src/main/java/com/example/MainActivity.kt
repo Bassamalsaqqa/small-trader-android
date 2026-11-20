@@ -169,10 +169,13 @@ fun SmallTraderApp(
                     (if (screen in com.example.viewmodel.TraderUiState.CHECKOUT_FLOW_DESTINATIONS) saleScreenStates else screenStates).SaveableStateProvider(screen.name) {
                     if (TraderNavigationPolicy.allows(state.currentSession, screen)) when (screen) {
                         TraderScreen.PEOPLE -> PeopleHubScreen(state,
-                            customers = { CustomersScreen(state, traderViewModel::selectCustomerForDetail,
+                            customers = {
+                                androidx.compose.runtime.LaunchedEffect(traderViewModel) { traderViewModel.loadScreen(TraderScreen.CUSTOMERS) }
+                                CustomersScreen(state, traderViewModel::selectCustomerForDetail,
                                 { traderViewModel.openAddCustomerDialog(true) },
                                 { customer -> traderViewModel.assignCustomerToSale(customer); traderViewModel.navigateTo(TraderScreen.NEW_SALE) },
-                                traderViewModel::openPaymentCollectionForCustomer, traderViewModel::dismissCustomerFeedback) },
+                                traderViewModel::openPaymentCollectionForCustomer, traderViewModel::dismissCustomerFeedback,
+                                onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.CUSTOMERS, retry = true) }) },
                             suppliers = { SuppliersScreen(state, traderViewModel::selectSupplierForDetail,
                                 { traderViewModel.openReceivePurchaseDialog(true) }, traderViewModel::dismissSupplierFeedback, traderViewModel::saveSupplier) })
                         TraderScreen.PURCHASES -> PurchasesScreen(
@@ -190,6 +193,7 @@ fun SmallTraderApp(
                             }
                         )
                         TraderScreen.HOME -> {
+                            androidx.compose.runtime.LaunchedEffect(traderViewModel) { traderViewModel.loadScreen(TraderScreen.HOME) }
                             HomeScreen(
                                 state = state,
                                 onStartNewSale = { traderViewModel.navigateTo(TraderScreen.NEW_SALE) },
@@ -213,7 +217,8 @@ fun SmallTraderApp(
                                 onNavigateToExpenses = { traderViewModel.navigateTo(TraderScreen.EXPENSES) },
                                 onNavigateToReports = { traderViewModel.navigateTo(TraderScreen.FINANCIAL_REPORTS) },
                                 onNavigateToSettings = { traderViewModel.navigateTo(TraderScreen.BUSINESS_SETTINGS) },
-                                onOpenPurchase = { traderViewModel.openMerchantAction(MerchantAction.PURCHASE) }
+                                onOpenPurchase = { traderViewModel.openMerchantAction(MerchantAction.PURCHASE) },
+                                onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.HOME, retry = true) }
                             )
                         }
 
@@ -313,6 +318,7 @@ fun SmallTraderApp(
                         }
 
                         TraderScreen.PRODUCTS_CATALOG -> {
+                            androidx.compose.runtime.LaunchedEffect(traderViewModel) { traderViewModel.loadScreen(TraderScreen.PRODUCTS_CATALOG) }
                             ProductsCatalogScreen(
                                 state = state,
                                 onSearchChange = traderViewModel::updateSearchQuery,
@@ -328,6 +334,7 @@ fun SmallTraderApp(
                                 onOpenPurchases = { traderViewModel.navigateTo(TraderScreen.PURCHASES) },
                                 launchLowStock = state.inventoryLowStockRequested,
                                 onLowStockConsumed = traderViewModel::consumeLowStockRequest,
+                                onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.PRODUCTS_CATALOG, retry = true) },
                                 onSaveProduct = { pid, nameAr, cat, unitAr, barcode, price, cost, minThreshold, initialStock, warehouse, lot, expiry, isWeighted ->
                                     traderViewModel.saveProduct(
                                         productId = pid,
@@ -390,6 +397,7 @@ fun SmallTraderApp(
                         }
 
                         TraderScreen.CUSTOMERS -> {
+                            androidx.compose.runtime.LaunchedEffect(traderViewModel) { traderViewModel.loadScreen(TraderScreen.CUSTOMERS) }
                             CustomersScreen(
                                 state = state,
                                 onCustomerClick = traderViewModel::selectCustomerForDetail,
@@ -401,7 +409,8 @@ fun SmallTraderApp(
                                 onQuickCollectPayment = { cust ->
                                     traderViewModel.openPaymentCollectionForCustomer(cust)
                                 },
-                                onDismissFeedback = traderViewModel::dismissCustomerFeedback
+                                onDismissFeedback = traderViewModel::dismissCustomerFeedback,
+                                onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.CUSTOMERS, retry = true) }
                             )
                         }
 

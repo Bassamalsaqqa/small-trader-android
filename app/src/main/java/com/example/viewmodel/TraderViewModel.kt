@@ -167,6 +167,7 @@ class TraderViewModel(
                 }
             } catch (_: Exception) {}
         }
+
     }
 
     private var printJob: Job? = null
@@ -586,6 +587,24 @@ class TraderViewModel(
             repository.refreshHomeMetrics()
             repository.refreshShiftSummary()
             repository.refreshTreasuryReport()
+        }
+    }
+
+    fun loadScreen(screen: TraderScreen, retry: Boolean = false) {
+        val state = _uiState.value
+        if (state.currentSession.isDemoSession) return
+        val previous = state.readStatus[screen]
+        if (previous != null && !(retry && previous == ReadStatus.FAILED)) return
+        _uiState.update { it.copy(readStatus = it.readStatus + (screen to ReadStatus.LOADING)) }
+        viewModelScope.launch {
+            val result = when (screen) {
+                TraderScreen.HOME -> repository.refreshHomeMetrics()
+                TraderScreen.PRODUCTS_CATALOG -> repository.refreshProducts()
+                TraderScreen.CUSTOMERS -> repository.refreshCustomers()
+                else -> error("Unsupported read screen")
+            }
+            val status = if (result.isSuccess) ReadStatus.READY else ReadStatus.FAILED
+            _uiState.update { it.copy(readStatus = it.readStatus + (screen to status)) }
         }
     }
 

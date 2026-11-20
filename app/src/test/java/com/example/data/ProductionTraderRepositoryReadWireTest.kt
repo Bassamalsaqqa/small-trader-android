@@ -1029,4 +1029,19 @@ class ProductionTraderRepositoryReadWireTest {
         assertEquals("INV-SERVER-999", mergedInvoice.serverInvoiceNumber)
         assertEquals("CONFIRMED", mergedInvoice.outboxStatus)
     }
+
+    @Test
+    fun failedProductReadCanRetryWithoutFetchingOtherScreens() = runBlocking {
+        val transport = QueueMockTransport()
+        val (repo, _) = createRepository(transport)
+        transport.responseQueue += TransportResponse(500, emptyMap(), "{}")
+        assertTrue(repo.refreshProducts().isFailure)
+        transport.responseQueue += TransportResponse(200, emptyMap(), """
+            {"company_id":"${companyId.value}","catalog_snapshot_version":"1","generated_at":"2026-11-20T00:00:00Z",
+             "products":[],"has_more":false,"next_cursor":null}
+        """.trimIndent())
+        assertTrue(repo.refreshProducts().isSuccess)
+        assertTrue(repo.productsFlow.value.isEmpty())
+        assertEquals(List(2) { "/api/mobile/v1/companies/${companyId.value}/products" }, transport.requests.map { it.path })
+    }
 }

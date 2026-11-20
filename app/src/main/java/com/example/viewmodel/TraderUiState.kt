@@ -44,6 +44,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+enum class ReadStatus { LOADING, FAILED, READY }
+
 data class TraderUiState(
     // Mobile V1 Merchant Live Read Authoritative Projections
     val liveHomeMetrics: com.example.data.mobile.merchantread.LiveHomeMetrics? = null,
@@ -56,6 +58,7 @@ data class TraderUiState(
     val selectedCustomerStatement: com.example.data.mobile.merchantread.LiveCustomerStatement? = null,
     val selectedProductHistory: com.example.data.mobile.merchantread.LiveStockMovementHistory? = null,
     val selectedInvoiceDetail: com.example.data.mobile.merchantread.LiveInvoiceRecord? = null,
+    val readStatus: Map<TraderScreen, ReadStatus> = emptyMap(),
 
     val language: AppLanguage = AppLanguage.AR,
     val isDarkTheme: Boolean = false,
@@ -167,6 +170,9 @@ data class TraderUiState(
     val printProgressFraction: Float = 0f,
     val receiptPaperWidthMm: Int = 58
 ) {
+    fun readStatusFor(screen: TraderScreen): ReadStatus =
+        readStatus[screen] ?: if (currentSession.isDemoSession) ReadStatus.READY else ReadStatus.LOADING
+
     private fun matchesSearchQuery(product: Product, normalizedQuery: String): Boolean {
         if (normalizedQuery.isEmpty()) return true
         return ProductSearch.computeScore(product, normalizedQuery) > 0

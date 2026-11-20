@@ -155,7 +155,8 @@ interface TraderRepository {
     val invoicesNextCursorFlow: StateFlow<String?> get() = MutableStateFlow(null)
     val isInvoicesLoadingFlow: StateFlow<Boolean> get() = MutableStateFlow(false)
     val invoicesHasMoreGapFlow: StateFlow<Boolean> get() = invoicesHasMoreFlow
-
+    suspend fun refreshProducts(): Result<Unit> = Result.success(Unit)
+    suspend fun refreshCustomers(): Result<Unit> = Result.success(Unit)
     suspend fun refreshHomeMetrics(): Result<HomeResponse?> = Result.success(null)
     suspend fun refreshShiftSummary(): Result<ShiftSummaryReportResponse?> = Result.success(null)
     suspend fun refreshTreasuryReport(): Result<TreasuryReportResponse?> = Result.success(null)

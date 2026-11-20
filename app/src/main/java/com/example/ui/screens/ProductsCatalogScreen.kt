@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import java.math.BigDecimal
+import com.example.viewmodel.ReadStatus
+import com.example.model.TraderScreen
 import androidx.compose.material3.CircularProgressIndicator
 import com.example.data.mobile.merchantread.LiveStockMovementHistory
 import com.example.data.mobile.merchantread.StockMovementItem
@@ -107,9 +109,11 @@ fun ProductsCatalogScreen(
     onOpenPurchases: () -> Unit = {},
     launchLowStock: Boolean = false,
     onLowStockConsumed: () -> Unit = {},
-    onSaveProduct: ((productId: String?, nameAr: String, category: ProductCategory, unitAr: String, barcode: String, priceIls: Double, costIls: Double, minStockThreshold: Int, initialStock: Int, warehouseAr: String, lotBatchCode: String, expiryDate: String?, isWeightedDisplayOnly: Boolean) -> Unit)? = null
+    onSaveProduct: ((productId: String?, nameAr: String, category: ProductCategory, unitAr: String, barcode: String, priceIls: Double, costIls: Double, minStockThreshold: Int, initialStock: Int, warehouseAr: String, lotBatchCode: String, expiryDate: String?, isWeightedDisplayOnly: Boolean) -> Unit)? = null,
+    onRetryRefresh: (() -> Unit)? = null
 ) {
     val createDraft = rememberSaveableStateHolder()
+    val readStatus = state.readStatusFor(TraderScreen.PRODUCTS_CATALOG)
     val lang = state.language
     val canManageInventory = state.currentSession.canManageInventory()
     var stockFilter by rememberSaveable { mutableStateOf(CatalogStockFilter.ALL) }
@@ -495,26 +499,54 @@ fun ProductsCatalogScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = lang.tr(
-                            "لا توجد أصناف مطابقة للبحث أو التصنيف المحدد",
-                            "No products match the current search or filter"
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (state.searchQuery.isNotBlank() ||
-                        state.selectedCategory != ProductCategory.ALL ||
-                        stockFilter != CatalogStockFilter.ALL
-                    ) {
-                        TextButton(
-                            onClick = {
-                                onSearchChange("")
-                                onCategorySelect(ProductCategory.ALL)
-                                stockFilter = CatalogStockFilter.ALL
+                    if (readStatus == ReadStatus.LOADING) {
+                        CircularProgressIndicator()
+                    } else if (readStatus == ReadStatus.FAILED && state.products.isEmpty()) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Text(
+                            text = lang.tr("تعذر تحديث الأصناف من الخادم", "Could not refresh products from server"),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        if (onRetryRefresh != null) {
+                            TextButton(
+                                onClick = onRetryRefresh,
+                                modifier = Modifier.heightIn(min = 44.dp)
+                            ) {
+                                Text(
+                                    text = lang.tr("إعادة المحاولة", "Retry"),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
+                        }
+                    } else {
+                        Text(
+                            text = lang.tr(
+                                "لا توجد أصناف مطابقة للبحث أو التصنيف المحدد",
+                                "No products match the current search or filter"
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (state.searchQuery.isNotBlank() ||
+                            state.selectedCategory != ProductCategory.ALL ||
+                            stockFilter != CatalogStockFilter.ALL
                         ) {
-                            Text(lang.tr("إعادة ضبط الفلاتر وعرض الكل", "Reset Filters & Show All"))
+                            TextButton(
+                                onClick = {
+                                    onSearchChange("")
+                                    onCategorySelect(ProductCategory.ALL)
+                                    stockFilter = CatalogStockFilter.ALL
+                                }
+                            ) {
+                                Text(lang.tr("إعادة ضبط الفلاتر وعرض الكل", "Reset Filters & Show All"))
+                            }
                         }
                     }
                 }

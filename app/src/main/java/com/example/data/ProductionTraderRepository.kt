@@ -499,75 +499,69 @@ class ProductionTraderRepository(
         }
     }
 
-    private suspend fun refreshProducts() {
+    override suspend fun refreshProducts(): Result<Unit> = withContext(ioDispatcher) {
         try {
             val allItems = mutableListOf<ProductCatalogItem>()
             var cursor: String? = null
             var pages = 0
-            var loadFailed = false
             do {
-                val res = apiClient.getProducts(companyId, limit = 50, cursor = cursor)
-                if (res.isSuccess) {
-                    val page = res.getOrThrow()
-                    allItems.addAll(page.products)
-                    cursor = page.nextCursor
-                    pages++
-                } else {
-                    _lastRefreshError.value = res.exceptionOrNull()?.message
-                    loadFailed = true
-                    break
-                }
+                requireActiveScope()
+                val page = apiClient.getProducts(companyId, limit = 50, cursor = cursor).getOrThrow()
+                require(page.companyId == companyId)
+                allItems.addAll(page.products)
+                cursor = page.nextCursor
+                pages++
+                check(!page.hasMore || cursor != null)
             } while (cursor != null && pages < 100)
-
-            if (!loadFailed || allItems.isNotEmpty()) {
-                val mapped = allItems.map { item -> mapProductFromCatalog(item) }
-                _productsFlow.value = mapped
-            }
-        } catch (e: Exception) {
-            _lastRefreshError.value = e.message
+            requireActiveScope()
+            check(cursor == null)
+            val mapped = allItems.map { item -> mapProductFromCatalog(item) }
+            _productsFlow.value = mapped
+            Result.success(Unit)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Result.failure(error)
         }
     }
 
-    private suspend fun refreshCustomers() {
+    override suspend fun refreshCustomers(): Result<Unit> = withContext(ioDispatcher) {
         try {
             val allItems = mutableListOf<CustomerDirectoryItem>()
             var cursor: String? = null
             var pages = 0
-            var loadFailed = false
             do {
-                val res = apiClient.getCustomers(companyId, limit = 50, cursor = cursor)
-                if (res.isSuccess) {
-                    val page = res.getOrThrow()
-                    allItems.addAll(page.customers)
-                    cursor = page.nextCursor
-                    pages++
-                } else {
-                    _lastRefreshError.value = res.exceptionOrNull()?.message
-                    loadFailed = true
-                    break
-                }
+                requireActiveScope()
+                val page = apiClient.getCustomers(companyId, limit = 50, cursor = cursor).getOrThrow()
+                require(page.companyId == companyId)
+                allItems.addAll(page.customers)
+                cursor = page.nextCursor
+                pages++
+                check(!page.hasMore || cursor != null)
             } while (cursor != null && pages < 100)
-
-            if (!loadFailed || allItems.isNotEmpty()) {
-                val mapped = allItems.map { item ->
-                    Customer(
-                        id = item.id.value,
-                        nameAr = item.name,
-                        nameEn = item.name,
-                        phone = item.phone,
-                        addressAr = null,
-                        addressEn = null,
-                        balanceExact = null,
-                        creditLimitExact = null,
-                        totalPurchasesExact = null,
-                        isWalkIn = item.isWalkIn,
-                        code = item.code
-                    )
-                }
-                _customersFlow.value = mapped
+            requireActiveScope()
+            check(cursor == null)
+            val mapped = allItems.map { item ->
+                Customer(
+                    id = item.id.value,
+                    nameAr = item.name,
+                    nameEn = item.name,
+                    phone = item.phone,
+                    addressAr = null,
+                    addressEn = null,
+                    balanceExact = null,
+                    creditLimitExact = null,
+                    totalPurchasesExact = null,
+                    isWalkIn = item.isWalkIn,
+                    code = item.code
+                )
             }
-        } catch (e: Exception) {
-            _lastRefreshError.value = e.message
+            _customersFlow.value = mapped
+            Result.success(Unit)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Result.failure(error)
         }
     }
 
@@ -2329,7 +2323,7 @@ class ProductionTraderRepository(
 
             val cmu = authoritativeMinorUnits ?: run {
                 val elem = settingsObj?.properties?.get("default_currency_minor_units")
-                    ?: throw IllegalStateException("Failed to obtain authoritative default_currency_minor_units from business settings: ${settingsRes.exceptionOrNull()?.message}")
+                    ?: throw (settingsRes.exceptionOrNull() ?: IllegalStateException("Missing currency precision in business settings"))
                 val parsed = when (elem) {
                     is com.example.data.mobile.contract.StrictJsonNumber -> elem.asInt()
                     is com.example.data.mobile.contract.StrictJsonString -> elem.value.toIntOrNull()

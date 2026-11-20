@@ -31,6 +31,7 @@ import com.example.ui.staff.StaffOfflineScreen
 import com.example.ui.staff.StaffOutboxRecoveryScreen
 import com.example.ui.staff.StaffSignInScreen
 import com.example.ui.staff.StaffStorageFailedScreen
+import com.example.ui.staff.TraderRepositoryLoadFailedScreen
 import com.example.ui.staff.StaffUnconfiguredScreen
 import com.example.ui.staff.StaffWorkspacePhase
 import com.example.ui.staff.StaffWorkspaceViewModel
@@ -140,56 +141,66 @@ fun AuthenticatedTraderApp(
                         val generation = coord.currentGeneration
 
                         var loadAttempt by remember(companyId, actorId, deviceId, generation) { androidx.compose.runtime.mutableIntStateOf(0) }
-                        val repositoryLoad by androidx.compose.runtime.produceState<Result<ProductionTraderRepository>?>(
-                            initialValue = null, companyId, actorId, deviceId, generation, loadAttempt
-                        ) {
-                            var created: ProductionTraderRepository? = null
-                            try {
-                                val loaded = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                            val db = OutboxDatabase.buildDatabase(context.applicationContext)
-                            val outboxRepo = OutboxRepositoryImpl(database = db)
-                            val cryptoEngine = AndroidKeyStoreCryptoEngine()
-                            val commandStore = RoomMerchantCommandStore(db, cryptoEngine)
-                            val authScopeProvider: () -> CurrentAuthScope? = {
-                                val currentCoord = staffViewModel.getCoordinator()
-                                val currentReady = currentCoord?.authState as? StaffAuthState.ReadReady
-                                if (currentReady != null && currentCoord.isScopeActive(currentCoord.currentGeneration, currentReady.bootstrap.companyId)) {
-                                    CurrentAuthScope(
-                                        companyId = currentReady.bootstrap.companyId,
-                                        actorId = currentReady.session.actorUlid,
-                                        deviceId = currentReady.session.deviceUuid,
-                                        generation = currentCoord.currentGeneration,
-                                        token = currentReady.session.token
-                                    )
-                                } else {
-                                    null
+                        val repositoryLoad by androidx.compose.runtime.key(companyId, actorId, deviceId, generation, loadAttempt) {
+                            androidx.compose.runtime.produceState<Result<ProductionTraderRepository>?>(
+                                initialValue = null
+                            ) {
+                                var created: ProductionTraderRepository? = null
+                                try {
+                                    val loaded = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                        val db = OutboxDatabase.buildDatabase(context.applicationContext)
+                                        val outboxRepo = OutboxRepositoryImpl(database = db)
+                                        val cryptoEngine = AndroidKeyStoreCryptoEngine()
+                                        val commandStore = RoomMerchantCommandStore(db, cryptoEngine)
+                                        val authScopeProvider: () -> CurrentAuthScope? = {
+                                            val currentCoord = staffViewModel.getCoordinator()
+                                            val currentReady = currentCoord?.authState as? StaffAuthState.ReadReady
+                                            if (currentReady != null && currentCoord.isScopeActive(currentCoord.currentGeneration, currentReady.bootstrap.companyId)) {
+                                                CurrentAuthScope(
+                                                    companyId = currentReady.bootstrap.companyId,
+                                                    actorId = currentReady.session.actorUlid,
+                                                    deviceId = currentReady.session.deviceUuid,
+                                                    generation = currentCoord.currentGeneration,
+                                                    token = currentReady.session.token
+                                                )
+                                            } else {
+                                                null
+                                            }
+                                        }
+                                        try { ProductionTraderRepository.fromReadReady(
+                                            readReady = readyState,
+                                            outboxRepository = outboxRepo,
+                                            transport = transport,
+                                            baseOrigin = configuredOrigin,
+                                            commandStore = commandStore,
+                                            authScopeProvider = authScopeProvider,
+                                            onClose = { db.close() }
+                                        ).also { created = it } } catch (error: Exception) { db.close(); throw error }
+                                    }
+                                    created = loaded
+                                    value = Result.success(loaded)
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                    created?.close()
+                                    throw cancelled
+                                } catch (error: Exception) {
+                                    created?.close()
+                                    value = Result.failure(error)
                                 }
-                            }
-                            try { ProductionTraderRepository.fromReadReady(
-                                readReady = readyState,
-                                outboxRepository = outboxRepo,
-                                transport = transport,
-                                baseOrigin = configuredOrigin,
-                                commandStore = commandStore,
-                                authScopeProvider = authScopeProvider,
-                                onClose = { db.close() }
-                            ).also { created = it } } catch (error: Exception) { db.close(); throw error }
-                                }
-                                created = loaded
-                                value = Result.success(loaded)
-                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                                created?.close()
-                                throw cancelled
-                            } catch (error: Exception) {
-                                created?.close()
-                                value = Result.failure(error)
                             }
                         }
                         val repository = repositoryLoad?.getOrNull()
                         if (repository == null) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                if (repositoryLoad == null) CircularProgressIndicator()
-                                else androidx.compose.material3.IconButton(onClick = { loadAttempt++ }) { androidx.compose.material3.Text("↻", color = MaterialTheme.colorScheme.error) }
+                            if (repositoryLoad == null) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator()
+                                }
+                            } else {
+                                TraderRepositoryLoadFailedScreen(
+                                    error = repositoryLoad?.exceptionOrNull(),
+                                    lang = uiState.language,
+                                    onRetry = { loadAttempt++ },
+                                    onSignOut = { staffViewModel.logout() }
+                                )
                             }
                             return@Box
                         }

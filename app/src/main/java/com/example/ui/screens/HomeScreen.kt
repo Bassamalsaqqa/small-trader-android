@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import com.example.viewmodel.ReadStatus
+import com.example.model.TraderScreen
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -109,8 +111,10 @@ fun HomeScreen(
     onNavigateToReports: () -> Unit,
     onNavigateToSettings: () -> Unit,
     modifier: Modifier = Modifier,
-    onOpenPurchase: () -> Unit = onNavigateToSuppliers
+    onOpenPurchase: () -> Unit = onNavigateToSuppliers,
+    onRetryRefresh: () -> Unit = {}
 ) {
+    val readStatus = state.readStatusFor(TraderScreen.HOME)
     val lang = state.language
     val canViewReports = state.currentSession.canViewReports()
     val canManageSuppliers = state.currentSession.canManageSuppliers()
@@ -146,6 +150,52 @@ fun HomeScreen(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        if (readStatus == ReadStatus.LOADING) {
+            item { androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        } else if (readStatus == ReadStatus.FAILED) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("home_refresh_error_banner")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.WarningAmber,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Text(
+                            text = lang.tr("تعذر تحديث البيانات من الخادم", "Could not refresh data from server"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = onRetryRefresh,
+                            modifier = Modifier.heightIn(min = 44.dp)
+                        ) {
+                            Text(
+                                text = lang.tr("إعادة المحاولة", "Retry"),
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // 1. TOP STORE IDENTITY & OPERATOR WELCOME CARD (STRICTLY CARD-CONTAINED)
         item {
             Surface(
@@ -983,7 +1033,11 @@ fun HomeScreen(
                         }
                     } else {
                         Text(
-                            text = lang.tr("لا توجد فواتير مسجلة اليوم بعد.", "No invoices recorded yet today."),
+                            text = if (isLiveSession && liveMetrics == null) {
+                                lang.tr("الفواتير الأخيرة غير متاحة.", "Recent invoices are unavailable.")
+                            } else {
+                                lang.tr("لا توجد فواتير مسجلة اليوم بعد.", "No invoices recorded yet today.")
+                            },
                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(16.dp)

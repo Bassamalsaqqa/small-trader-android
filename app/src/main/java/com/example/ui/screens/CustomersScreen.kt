@@ -1,6 +1,9 @@
 package com.example.ui.screens
 
 import java.math.BigDecimal
+import androidx.compose.material.icons.filled.Warning
+import com.example.viewmodel.ReadStatus
+import com.example.model.TraderScreen
 import androidx.compose.material3.CircularProgressIndicator
 import com.example.data.mobile.merchantread.LiveCustomerStatement
 import com.example.data.mobile.merchantread.CustomerStatementCurrencySummary
@@ -125,8 +128,10 @@ fun CustomersScreen(
     onOpenAddCustomerDialog: () -> Unit,
     onStartSaleForCustomer: (Customer) -> Unit,
     onQuickCollectPayment: ((Customer) -> Unit)? = null,
-    onDismissFeedback: (() -> Unit)? = null
+    onDismissFeedback: (() -> Unit)? = null,
+    onRetryRefresh: (() -> Unit)? = null
 ) {
+    val readStatus = state.readStatusFor(TraderScreen.CUSTOMERS)
     val lang = state.language
     val financial = TraderTheme.financial
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -481,34 +486,62 @@ fun CustomersScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = null,
-                        modifier = Modifier.size(42.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                    )
-                    Text(
-                        text = if (searchQuery.isNotBlank() || selectedFilter != CustomerBalanceFilter.ALL) {
-                            lang.tr("لا يوجد زبائن مطابقين للبحث أو التصفية", "No matching customers found")
-                        } else {
-                            lang.tr("لا يوجد زبائن مسجلين حالياً", "No registered customers yet")
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    if (searchQuery.isNotBlank() || selectedFilter != CustomerBalanceFilter.ALL) {
-                        TextButton(
-                            onClick = {
-                                searchQuery = ""
-                                selectedFilter = CustomerBalanceFilter.ALL
+                    if (readStatus == ReadStatus.LOADING) {
+                        CircularProgressIndicator()
+                    } else if (readStatus == ReadStatus.FAILED && state.customers.isEmpty()) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(42.dp)
+                        )
+                        Text(
+                            text = lang.tr("تعذر تحديث الزبائن من الخادم", "Could not refresh customers from server"),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        if (onRetryRefresh != null) {
+                            TextButton(
+                                onClick = onRetryRefresh,
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            ) {
+                                Text(
+                                    text = lang.tr("إعادة المحاولة", "Retry"),
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            modifier = Modifier.size(42.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        )
+                        Text(
+                            text = if (searchQuery.isNotBlank() || selectedFilter != CustomerBalanceFilter.ALL) {
+                                lang.tr("لا يوجد زبائن مطابقين للبحث أو التصفية", "No matching customers found")
+                            } else {
+                                lang.tr("لا يوجد زبائن مسجلين حالياً", "No registered customers yet")
                             },
-                            modifier = Modifier.heightIn(min = 48.dp)
-                        ) {
-                            Text(
-                                text = lang.tr("عرض كل الزبائن", "Show All Customers"),
-                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
-                            )
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (searchQuery.isNotBlank() || selectedFilter != CustomerBalanceFilter.ALL) {
+                            TextButton(
+                                onClick = {
+                                    searchQuery = ""
+                                    selectedFilter = CustomerBalanceFilter.ALL
+                                },
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            ) {
+                                Text(
+                                    text = lang.tr("عرض كل الزبائن", "Show All Customers"),
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
                         }
                     }
                 }

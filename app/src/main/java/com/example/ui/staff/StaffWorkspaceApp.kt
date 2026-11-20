@@ -2,7 +2,10 @@ package com.example.ui.staff
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -101,6 +104,9 @@ fun StaffWorkspaceApp(
                 StaffWorkspacePhase.READ_READY -> {
                     StaffWorkspaceScreen(
                         uiState = uiState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .windowInsetsPadding(WindowInsets.safeDrawing),
                         onSelectTab = { viewModel.selectTab(it) },
                         onLoadMoreProducts = { viewModel.loadProducts(loadMore = true) },
                         onRefreshProducts = { viewModel.loadProducts(refresh = true) },

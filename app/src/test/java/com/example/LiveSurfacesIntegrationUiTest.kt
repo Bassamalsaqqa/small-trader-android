@@ -1,5 +1,6 @@
 package com.example
 
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasScrollAction
@@ -75,6 +76,40 @@ class LiveSurfacesIntegrationUiTest {
 
     @get:Rule
     val composeTestRule = createComposeRule()
+
+    @Test
+    fun customerReadFailureOffersRealRetryBeforeShowingEmptyDirectory() {
+        val demo = OfflineDemoTraderRepository()
+        var reads = 0
+        val repository = object : com.example.data.TraderRepository by demo {
+            override fun getCurrentSession() = demo.getCurrentSession().copy(isDemoSession = false)
+            override fun getCustomers() = emptyList<Customer>()
+            override val customersFlow = kotlinx.coroutines.flow.MutableStateFlow(emptyList<Customer>())
+            override suspend fun refreshCustomers(): Result<Unit> {
+                reads++
+                return if (reads == 1) Result.failure(IllegalStateException("private diagnostic"))
+                else Result.success(Unit)
+            }
+        }
+        val vm = TraderViewModel(repository)
+        val screen = com.example.model.TraderScreen.CUSTOMERS
+        composeTestRule.setContent {
+            val state = vm.uiState.collectAsState().value.copy(language = AppLanguage.EN)
+            androidx.compose.runtime.LaunchedEffect(vm) { vm.loadScreen(screen) }
+            SmallTraderTheme(darkTheme = false, isRtl = false) {
+                com.example.ui.screens.CustomersScreen(
+                    state, {}, {}, {}, onRetryRefresh = { vm.loadScreen(screen, retry = true) }
+                )
+            }
+        }
+        composeTestRule.onNodeWithText("Could not refresh customers from server").assertExists()
+        composeTestRule.onNodeWithText("private diagnostic").assertDoesNotExist()
+        composeTestRule.onNodeWithText("No registered customers yet").assertDoesNotExist()
+        composeTestRule.onNodeWithText("Retry").performClick()
+        composeTestRule.onNodeWithText("No registered customers yet").assertExists()
+        composeTestRule.onNodeWithText("Retry").assertDoesNotExist()
+        assertEquals(2, reads)
+    }
 
     // -------------------------------------------------------------------------
     // 1. Authoritative Home Metrics vs Local Stats

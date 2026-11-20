@@ -6,13 +6,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -43,7 +46,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -72,6 +76,7 @@ fun StaffSignInScreen(
     modifier: Modifier = Modifier
 ) {
     val lang = uiState.language
+    val passwordFocus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
 
     // Transient in-memory inputs (never saved to SavedStateHandle, disk, or logs)
@@ -82,15 +87,17 @@ fun StaffSignInScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.Center
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 20.dp),
+                .padding(horizontal = 24.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Top
         ) {
             // Language & Theme header row
             Row(
@@ -198,7 +205,7 @@ fun StaffSignInScreen(
                             imeAction = ImeAction.Next
                         ),
                         keyboardActions = KeyboardActions(
-                            onNext = { focusManager.moveFocus(FocusDirection.Down) }
+                            onNext = { passwordFocus.requestFocus() }
                         ),
                         enabled = !uiState.isSubmitting
                     )
@@ -211,6 +218,7 @@ fun StaffSignInScreen(
                         onValueChange = { password = it },
                         modifier = Modifier
                             .fillMaxWidth()
+                            .focusRequester(passwordFocus)
                             .testTag("staff_signin_password_input"),
                         label = { Text(lang.tr("كلمة المرور", "Password")) },
                         leadingIcon = {
@@ -236,7 +244,7 @@ fun StaffSignInScreen(
                         keyboardActions = KeyboardActions(
                             onDone = {
                                 focusManager.clearFocus()
-                                if (email.isNotBlank() && password.isNotBlank()) {
+                                if (!uiState.isSubmitting && email.isNotBlank() && password.isNotBlank()) {
                                     val pwdToSubmit = password
                                     password = ""
                                     onSignIn(email, pwdToSubmit)
