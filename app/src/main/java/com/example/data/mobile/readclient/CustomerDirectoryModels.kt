@@ -20,13 +20,15 @@ import java.util.Collections
  */
 data class CustomerDirectoryItem(
     val id: ServerUlid,
-    val code: String,
+    val code: String?,
     val name: String,
     val phone: String?,
     val isWalkIn: Boolean
 ) {
     init {
-        validateStringBounds(code, "customer.code", minLength = 1, maxLength = 64)
+        if (code != null) {
+            validateStringBounds(code, "customer.code", minLength = 1, maxLength = 64)
+        }
         validateStringBounds(name, "customer.name", minLength = 1, maxLength = 255)
         if (phone != null) {
             validateStringBounds(phone, "customer.phone", minLength = 1, maxLength = 64)
@@ -34,7 +36,7 @@ data class CustomerDirectoryItem(
     }
 
     override fun toString(): String =
-        "CustomerDirectoryItem(id=$id, code='$code', name='[REDACTED]', phone='[REDACTED]', isWalkIn=$isWalkIn)"
+        "CustomerDirectoryItem(id=$id, code=${if (code != null) "'$code'" else "null"}, name='[REDACTED]', phone='[REDACTED]', isWalkIn=$isWalkIn)"
 
     companion object {
         private val ALLOWED_KEYS = setOf("id", "code", "name", "phone", "is_walk_in")
@@ -43,7 +45,7 @@ data class CustomerDirectoryItem(
             checkAllowedKeys(obj, ALLOWED_KEYS, "CustomerDirectoryItem")
             return CustomerDirectoryItem(
                 id = requireUlid(obj, "id"),
-                code = requireString(obj, "code", minLength = 1, maxLength = 64),
+                code = requireNullableString(obj, "code", minLength = 1, maxLength = 64),
                 name = requireString(obj, "name", minLength = 1, maxLength = 255),
                 phone = optionalString(obj, "phone", minLength = 1, maxLength = 64),
                 isWalkIn = requireBoolean(obj, "is_walk_in")

@@ -1,0 +1,515 @@
+package com.example.data.mobile.client
+
+import com.example.data.mobile.contract.ClientUuid
+import com.example.data.mobile.contract.MoneyAmount
+import com.example.data.mobile.contract.NonnegativeDecimalQuantity
+import com.example.data.mobile.contract.PositiveDecimalQuantity
+import com.example.data.mobile.contract.ServerUlid
+import com.example.data.mobile.contract.StrictJsonArray
+import com.example.data.mobile.contract.StrictJsonBoolean
+import com.example.data.mobile.contract.StrictJsonNull
+import com.example.data.mobile.contract.StrictJsonNumber
+import com.example.data.mobile.contract.StrictJsonElement
+import com.example.data.mobile.contract.StrictJsonObject
+import com.example.data.mobile.contract.StrictJsonParser
+import com.example.data.mobile.contract.StrictJsonString
+import com.example.data.mobile.readclient.CustomerDirectoryItem
+import com.example.data.mobile.readclient.CustomerDirectoryResponse
+import com.example.data.mobile.readclient.HttpMethod
+import com.example.data.mobile.readclient.ProductCatalogItem
+import com.example.data.mobile.readclient.ProductCatalogResponse
+import com.example.data.mobile.readclient.ReadClientTransport
+import com.example.data.mobile.readclient.TransportRequest
+import com.example.data.mobile.readclient.http.HttpTransportException
+import java.math.BigDecimal
+import java.math.RoundingMode
+import java.util.UUID
+
+/**
+ * Typed client for native Mobile V1 and V2 merchant domain endpoints.
+ * All requests enforce strict endpoint security allowlisting, token authorization,
+ * exact decimal serialization without floating point conversion, and safe error parsing.
+ */
+class MobileMerchantApiClient(
+    private val transport: ReadClientTransport,
+    val baseOrigin: String,
+    private val tokenProvider: () -> String
+) {
+
+    private fun authHeaders(idempotencyKey: String? = null): Map<String, String> {
+        val headers = mutableMapOf(
+            "Accept" to "application/json",
+            "Authorization" to "Bearer ${tokenProvider()}"
+        )
+        if (idempotencyKey != null) {
+            headers["Idempotency-Key"] = idempotencyKey
+        }
+        return headers
+    }
+
+    private fun execute(
+        method: HttpMethod,
+        path: String,
+        body: String? = null,
+        idempotencyKey: String? = null,
+        queryParams: Map<String, String> = emptyMap()
+    ): Result<StrictJsonObject> {
+        val request = TransportRequest(
+            method = method,
+            path = path,
+            baseOrigin = baseOrigin,
+            queryParams = queryParams,
+            headers = authHeaders(idempotencyKey),
+            body = body
+        )
+        return try {
+            val response = transport.execute(request)
+            if (response.statusCode in 200..299) {
+                if (response.body.isBlank()) {
+                    Result.success(StrictJsonObject(emptyMap()))
+                } else {
+                    val root = StrictJsonParser.parse(response.body)
+                    if (root is StrictJsonObject) {
+                        Result.success(root)
+                    } else {
+                        Result.success(StrictJsonObject(mapOf("data" to root)))
+                    }
+                }
+            } else {
+                val errorMsg = parseErrorMessage(response.body, response.statusCode)
+                Result.failure(HttpTransportException(HttpTransportException.CATEGORY_SERVER_ERROR, errorMsg))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun parseErrorMessage(body: String, statusCode: Int): String {
+        return try {
+            val obj = StrictJsonParser.parseObject(body)
+            obj.properties["message"]?.asString()
+                ?: obj.properties["error"]?.asString()
+                ?: "HTTP $statusCode"
+        } catch (_: Exception) {
+            "HTTP $statusCode"
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Products
+    // -------------------------------------------------------------------------
+
+    fun getProducts(companyId: ServerUlid, limit: Int = 30, cursor: String? = null): Result<ProductCatalogResponse> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/products"
+        val params = mutableMapOf("limit" to limit.coerceIn(1, 100).toString())
+        if (cursor != null) params["cursor"] = cursor
+        val request = TransportRequest(
+            method = HttpMethod.GET,
+            path = path,
+            baseOrigin = baseOrigin,
+            queryParams = params,
+            headers = authHeaders()
+        )
+        return try {
+            val response = transport.execute(request)
+            if (response.statusCode in 200..299) {
+                val obj = StrictJsonParser.parseObject(response.body)
+                Result.success(ProductCatalogResponse.fromStrictJson(obj))
+            } else {
+                Result.failure(HttpTransportException(HttpTransportException.CATEGORY_SERVER_ERROR, parseErrorMessage(response.body, response.statusCode)))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun createProduct(
+        companyId: ServerUlid,
+        nameAr: String,
+        nameEn: String,
+        barcode: String,
+        priceIls: BigDecimal,
+        costIls: BigDecimal?,
+        unitId: ServerUlid?
+    ): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/products"
+        val payload = buildString {
+            append("{")
+            append("\"name_ar\":\"").append(escapeJson(nameAr)).append("\",")
+            append("\"name_en\":\"").append(escapeJson(nameEn)).append("\",")
+            append("\"barcode\":\"").append(escapeJson(barcode)).append("\",")
+            append("\"price_ils\":\"").append(priceIls.setScale(2, RoundingMode.HALF_UP).toPlainString()).append("\"")
+            if (costIls != null) {
+                append(",\"cost_ils\":\"").append(costIls.setScale(2, RoundingMode.HALF_UP).toPlainString()).append("\"")
+            }
+            if (unitId != null) {
+                append(",\"base_unit_id\":\"").append(unitId.value).append("\"")
+            }
+            append("}")
+        }
+        return execute(HttpMethod.POST, path, body = payload, idempotencyKey = UUID.randomUUID().toString())
+    }
+
+    fun updateProduct(
+        companyId: ServerUlid,
+        productId: ServerUlid,
+        nameAr: String,
+        nameEn: String,
+        barcode: String,
+        priceIls: BigDecimal,
+        costIls: BigDecimal?
+    ): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/products/${productId.value}"
+        val payload = buildString {
+            append("{")
+            append("\"name_ar\":\"").append(escapeJson(nameAr)).append("\",")
+            append("\"name_en\":\"").append(escapeJson(nameEn)).append("\",")
+            append("\"barcode\":\"").append(escapeJson(barcode)).append("\",")
+            append("\"price_ils\":\"").append(priceIls.setScale(2, RoundingMode.HALF_UP).toPlainString()).append("\"")
+            if (costIls != null) {
+                append(",\"cost_ils\":\"").append(costIls.setScale(2, RoundingMode.HALF_UP).toPlainString()).append("\"")
+            }
+            append("}")
+        }
+        return execute(HttpMethod.PUT, path, body = payload)
+    }
+
+    fun getProduct(companyId: ServerUlid, productId: ServerUlid): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/products/${productId.value}"
+        return execute(HttpMethod.GET, path)
+    }
+
+    fun getProductMovements(companyId: ServerUlid, productId: ServerUlid): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/products/${productId.value}/movements"
+        return execute(HttpMethod.GET, path)
+    }
+
+    fun adjustStock(
+        companyId: ServerUlid,
+        productId: ServerUlid,
+        warehouseId: ServerUlid,
+        delta: BigDecimal,
+        reason: String,
+        idempotencyKey: String? = null
+    ): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/inventory/adjustments"
+        val payload = buildString {
+            append("{")
+            append("\"product_id\":\"").append(productId.value).append("\",")
+            append("\"warehouse_id\":\"").append(warehouseId.value).append("\",")
+            append("\"delta\":\"").append(delta.stripTrailingZeros().toPlainString()).append("\",")
+            append("\"reason\":\"").append(escapeJson(reason)).append("\"")
+            append("}")
+        }
+        val key = idempotencyKey ?: UUID.randomUUID().toString()
+        return execute(HttpMethod.POST, path, body = payload, idempotencyKey = key)
+    }
+
+    // -------------------------------------------------------------------------
+    // Customers
+    // -------------------------------------------------------------------------
+
+    fun getCustomers(companyId: ServerUlid, limit: Int = 30, cursor: String? = null): Result<CustomerDirectoryResponse> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/customers"
+        val params = mutableMapOf("limit" to limit.coerceIn(1, 100).toString())
+        if (cursor != null) params["cursor"] = cursor
+        val request = TransportRequest(
+            method = HttpMethod.GET,
+            path = path,
+            baseOrigin = baseOrigin,
+            queryParams = params,
+            headers = authHeaders()
+        )
+        return try {
+            val response = transport.execute(request)
+            if (response.statusCode in 200..299) {
+                val obj = StrictJsonParser.parseObject(response.body)
+                Result.success(CustomerDirectoryResponse.fromStrictJson(obj))
+            } else {
+                Result.failure(HttpTransportException(HttpTransportException.CATEGORY_SERVER_ERROR, parseErrorMessage(response.body, response.statusCode)))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun getCustomer(companyId: ServerUlid, customerId: ServerUlid): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/customers/${customerId.value}"
+        return execute(HttpMethod.GET, path)
+    }
+
+    fun createCustomer(
+        companyId: ServerUlid,
+        nameAr: String,
+        phone: String?,
+        creditLimit: BigDecimal?
+    ): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/customers"
+        val payload = buildString {
+            append("{")
+            append("\"name_ar\":\"").append(escapeJson(nameAr)).append("\"")
+            if (!phone.isNullOrBlank()) {
+                append(",\"phone\":\"").append(escapeJson(phone)).append("\"")
+            }
+            if (creditLimit != null) {
+                append(",\"credit_limit\":\"").append(creditLimit.setScale(2, RoundingMode.HALF_UP).toPlainString()).append("\"")
+            }
+            append("}")
+        }
+        return execute(HttpMethod.POST, path, body = payload, idempotencyKey = UUID.randomUUID().toString())
+    }
+
+    fun recordCustomerPayment(
+        companyId: ServerUlid,
+        customerId: ServerUlid,
+        amount: BigDecimal,
+        cashAccountId: ServerUlid?,
+        note: String,
+        idempotencyKey: String? = null
+    ): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/customers/${customerId.value}/payments"
+        val payload = buildString {
+            append("{")
+            append("\"amount\":\"").append(amount.setScale(6, RoundingMode.HALF_UP).toPlainString()).append("\",")
+            if (cashAccountId != null) {
+                append("\"money_account_id\":\"").append(cashAccountId.value).append("\",")
+            }
+            append("\"notes\":\"").append(escapeJson(note)).append("\",")
+            append("\"note\":\"").append(escapeJson(note)).append("\"")
+            append("}")
+        }
+        val key = idempotencyKey ?: UUID.randomUUID().toString()
+        return execute(HttpMethod.POST, path, body = payload, idempotencyKey = key)
+    }
+
+    // -------------------------------------------------------------------------
+    // Suppliers
+    // -------------------------------------------------------------------------
+
+    fun getSuppliers(companyId: ServerUlid): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/suppliers"
+        return execute(HttpMethod.GET, path)
+    }
+
+    fun getSupplier(companyId: ServerUlid, supplierId: ServerUlid): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/suppliers/${supplierId.value}"
+        return execute(HttpMethod.GET, path)
+    }
+
+    fun createSupplier(
+        companyId: ServerUlid,
+        nameAr: String,
+        company: String?,
+        phone: String?,
+        idempotencyKey: String? = null
+    ): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/suppliers"
+        val payload = buildString {
+            append("{")
+            append("\"name_ar\":\"").append(escapeJson(nameAr)).append("\"")
+            if (!company.isNullOrBlank()) {
+                append(",\"company_name\":\"").append(escapeJson(company)).append("\"")
+            }
+            if (!phone.isNullOrBlank()) {
+                append(",\"phone\":\"").append(escapeJson(phone)).append("\"")
+            }
+            append("}")
+        }
+        val key = idempotencyKey ?: UUID.randomUUID().toString()
+        return execute(HttpMethod.POST, path, body = payload, idempotencyKey = key)
+    }
+
+    fun recordSupplierPayment(
+        companyId: ServerUlid,
+        supplierId: ServerUlid,
+        amount: BigDecimal,
+        cashAccountId: ServerUlid?,
+        note: String,
+        idempotencyKey: String? = null
+    ): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/suppliers/${supplierId.value}/payments"
+        val payload = buildString {
+            append("{")
+            append("\"amount\":\"").append(amount.setScale(6, RoundingMode.HALF_UP).toPlainString()).append("\",")
+            if (cashAccountId != null) {
+                append("\"money_account_id\":\"").append(cashAccountId.value).append("\",")
+            }
+            append("\"notes\":\"").append(escapeJson(note)).append("\",")
+            append("\"note\":\"").append(escapeJson(note)).append("\"")
+            append("}")
+        }
+        val key = idempotencyKey ?: UUID.randomUUID().toString()
+        return execute(HttpMethod.POST, path, body = payload, idempotencyKey = key)
+    }
+
+    // -------------------------------------------------------------------------
+    // Purchases & GRN
+    // -------------------------------------------------------------------------
+
+    fun getPurchases(companyId: ServerUlid): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/purchases"
+        return execute(HttpMethod.GET, path)
+    }
+
+    fun getPurchase(companyId: ServerUlid, purchaseId: ServerUlid): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/purchases/${purchaseId.value}"
+        return execute(HttpMethod.GET, path)
+    }
+
+    fun createPurchase(
+        companyId: ServerUlid,
+        supplierId: ServerUlid,
+        linesJson: String,
+        paidNow: BigDecimal = BigDecimal.ZERO,
+        billNumber: String? = null,
+        accountId: ServerUlid? = null,
+        idempotencyKey: String? = null
+    ): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/purchases"
+        val payload = buildString {
+            append("{")
+            append("\"supplier_id\":\"").append(supplierId.value).append("\",")
+            append("\"paid_now\":\"").append(paidNow.setScale(6, RoundingMode.HALF_UP).toPlainString()).append("\"")
+            if (!billNumber.isNullOrBlank()) {
+                append(",\"bill_number\":\"").append(escapeJson(billNumber)).append("\"")
+            }
+            if (accountId != null) {
+                append(",\"account_id\":\"").append(accountId.value).append("\"")
+            }
+            append(",\"lines\":").append(linesJson)
+            append("}")
+        }
+        val key = idempotencyKey ?: UUID.randomUUID().toString()
+        return execute(HttpMethod.POST, path, body = payload, idempotencyKey = key)
+    }
+
+    fun receiveGoods(
+        companyId: ServerUlid,
+        purchaseId: ServerUlid,
+        linesJson: String,
+        destinationWarehouseId: ServerUlid? = null,
+        receiptDate: String? = null,
+        notes: String? = null,
+        idempotencyKey: String? = null
+    ): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/purchases/${purchaseId.value}/grn"
+        val payload = buildString {
+            append("{")
+            append("\"lines\":").append(linesJson)
+            if (destinationWarehouseId != null) {
+                append(",\"destination_warehouse_id\":\"").append(destinationWarehouseId.value).append("\"")
+            }
+            if (!receiptDate.isNullOrBlank()) {
+                append(",\"receipt_date\":\"").append(escapeJson(receiptDate)).append("\"")
+            }
+            if (!notes.isNullOrBlank()) {
+                append(",\"notes\":\"").append(escapeJson(notes)).append("\"")
+            }
+            append("}")
+        }
+        val key = idempotencyKey ?: UUID.randomUUID().toString()
+        return execute(HttpMethod.POST, path, body = payload, idempotencyKey = key)
+    }
+
+    // -------------------------------------------------------------------------
+    // Expenses
+    // -------------------------------------------------------------------------
+
+    fun getExpenses(companyId: ServerUlid): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/expenses"
+        return execute(HttpMethod.GET, path)
+    }
+
+    fun getExpenseCategories(companyId: ServerUlid): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/expenses/categories"
+        return execute(HttpMethod.GET, path)
+    }
+
+    fun createExpense(
+        companyId: ServerUlid,
+        amount: BigDecimal,
+        categoryId: ServerUlid,
+        description: String,
+        idempotencyKey: String? = null
+    ): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/expenses"
+        val payload = buildString {
+            append("{")
+            append("\"amount\":\"").append(amount.setScale(6, RoundingMode.HALF_UP).toPlainString()).append("\",")
+            append("\"expense_category_id\":\"").append(categoryId.value).append("\",")
+            append("\"category_id\":\"").append(categoryId.value).append("\",")
+            append("\"description\":\"").append(escapeJson(description)).append("\"")
+            append("}")
+        }
+        val key = idempotencyKey ?: UUID.randomUUID().toString()
+        return execute(HttpMethod.POST, path, body = payload, idempotencyKey = key)
+    }
+
+    // -------------------------------------------------------------------------
+    // Command Receipts Status
+    // -------------------------------------------------------------------------
+
+    sealed class ReceiptStatusResult {
+        data class Found(val snapshot: StrictJsonObject) : ReceiptStatusResult()
+        object NotFound : ReceiptStatusResult()
+        data class Error(val exception: Throwable) : ReceiptStatusResult()
+    }
+
+    fun getReceiptStatus(
+        companyId: ServerUlid,
+        idempotencyKey: String
+    ): ReceiptStatusResult {
+        val path = "/api/mobile/v1/companies/${companyId.value}/receipts/$idempotencyKey/status"
+        val request = TransportRequest(
+            method = HttpMethod.GET,
+            path = path,
+            baseOrigin = baseOrigin,
+            headers = authHeaders()
+        )
+        return try {
+            val response = transport.execute(request)
+            when (response.statusCode) {
+                200 -> {
+                    val obj = StrictJsonParser.parseObject(response.body)
+                    ReceiptStatusResult.Found(obj)
+                }
+                404 -> ReceiptStatusResult.NotFound
+                else -> {
+                    val errorMsg = parseErrorMessage(response.body, response.statusCode)
+                    ReceiptStatusResult.Error(HttpTransportException(HttpTransportException.CATEGORY_SERVER_ERROR, errorMsg))
+                }
+            }
+        } catch (e: Exception) {
+            ReceiptStatusResult.Error(e)
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Reports & Settings
+    // -------------------------------------------------------------------------
+
+    fun getShiftSummary(companyId: ServerUlid): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/reports/shift-summary"
+        return execute(HttpMethod.GET, path)
+    }
+
+    fun closeShift(companyId: ServerUlid, countedPhysicalCash: BigDecimal): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/reports/shift-close"
+        val payload = "{\"counted_physical_cash\":\"${countedPhysicalCash.setScale(2, RoundingMode.HALF_UP).toPlainString()}\"}"
+        return execute(HttpMethod.POST, path, body = payload, idempotencyKey = UUID.randomUUID().toString())
+    }
+
+    fun getBusinessSettings(companyId: ServerUlid): Result<StrictJsonObject> {
+        val path = "/api/mobile/v1/companies/${companyId.value}/settings/business"
+        return execute(HttpMethod.GET, path)
+    }
+
+    private fun escapeJson(input: String): String {
+        return input.replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\b", "\\b")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
+    }
+}

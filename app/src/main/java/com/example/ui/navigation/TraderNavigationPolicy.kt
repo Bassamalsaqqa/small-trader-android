@@ -14,9 +14,25 @@ object TraderNavigationPolicy {
 }
 
 enum class MerchantAction { SALE, PURCHASE, COLLECT, PAY, PRODUCT, CUSTOMER, SUPPLIER, EXPENSE }
-fun MerchantAction.allowed(user: UserSession): Boolean = when (this) {
+fun MerchantAction.allowed(user: UserSession): Boolean {
+    user.permissions?.let { permissions ->
+        val permission = when (this) {
+            MerchantAction.SALE -> "sales.invoice.create"
+            MerchantAction.PURCHASE -> "purchasing.purchase.create"
+            MerchantAction.COLLECT -> "money.receipt.create"
+            MerchantAction.PAY -> "money.vendor_payment.create"
+            MerchantAction.PRODUCT -> "inventory.product.manage"
+            MerchantAction.CUSTOMER -> "customers.manage"
+            MerchantAction.SUPPLIER -> "vendors.manage"
+            MerchantAction.EXPENSE -> "money.expense.manage"
+        }
+        return permission in permissions
+    }
+    return when (this) {
     MerchantAction.PURCHASE, MerchantAction.PAY, MerchantAction.SUPPLIER -> user.canManageSuppliers()
     MerchantAction.PRODUCT -> user.canManageInventory()
     MerchantAction.EXPENSE -> user.canManageExpenses()
     else -> true
+}
+
 }

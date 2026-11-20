@@ -1161,7 +1161,7 @@ fun SimulatedBarcodeScannerSheet(
                     items(state.products, key = { it.id }) { product ->
                         val qtyInBasket = state.quantityInBasket(product.id)
                         val isOutOfStock = product.isStockTracked && product.stockCount <= 0
-                        val isMaxStock = product.isStockTracked && qtyInBasket >= product.stockCount
+                        val isMaxStock = product.isStockTracked && qtyInBasket >= product.stockCountInt
 
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Row(

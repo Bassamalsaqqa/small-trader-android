@@ -6,12 +6,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -75,15 +78,17 @@ fun StaffMfaScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.Center
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 20.dp),
+                .padding(horizontal = 24.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Top
         ) {
             Card(
                 modifier = Modifier
@@ -132,6 +137,7 @@ fun StaffMfaScreen(
                         horizontalArrangement = Arrangement.Center
                     ) {
                         FilterChip(
+                            enabled = !uiState.isSubmitting,
                             selected = uiState.mfaMode == MfaMode.TOTP,
                             onClick = { onSetMfaMode(MfaMode.TOTP) },
                             label = { Text(lang.tr("رمز تطبيق المصادقة", "Authenticator Code")) },
@@ -142,6 +148,7 @@ fun StaffMfaScreen(
                         )
                         Spacer(modifier = Modifier.size(8.dp))
                         FilterChip(
+                            enabled = !uiState.isSubmitting,
                             selected = uiState.mfaMode == MfaMode.RECOVERY_CODE,
                             onClick = { onSetMfaMode(MfaMode.RECOVERY_CODE) },
                             label = { Text(lang.tr("رمز الاسترداد", "Recovery Code")) },
@@ -195,7 +202,7 @@ fun StaffMfaScreen(
                             keyboardActions = KeyboardActions(
                                 onDone = {
                                     focusManager.clearFocus()
-                                    if (codeInput.isNotBlank()) {
+                                    if (!uiState.isSubmitting && codeInput.isNotBlank()) {
                                         val codeToSubmit = codeInput
                                         codeInput = ""
                                         onRetryWithMfa(codeToSubmit, false)
@@ -223,7 +230,7 @@ fun StaffMfaScreen(
                             keyboardActions = KeyboardActions(
                                 onDone = {
                                     focusManager.clearFocus()
-                                    if (codeInput.isNotBlank()) {
+                                    if (!uiState.isSubmitting && codeInput.isNotBlank()) {
                                         val codeToSubmit = codeInput
                                         codeInput = ""
                                         onRetryWithMfa(codeToSubmit, true)

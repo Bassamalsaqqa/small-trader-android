@@ -400,4 +400,86 @@ class ReadClientRevision2BoundariesTest {
             AuthLoginResult.fromStrictJson(StrictJsonParser.parse(mixedJson).asObject())
         }
     }
+
+    @Test
+    fun testProductCatalogAcceptsNullUnitPriceForUnpricedProduct() {
+        val unpricedProductJson = """
+            {
+              "id": "01JCV8X9M2NQW3TYZ4R5S6789A",
+              "sku": "SKU-UNPRICED-01",
+              "name": "Unpriced Product Test",
+              "unit_price": null,
+              "tax_rate": null,
+              "tax_rate_id": null,
+              "is_tracked": false,
+              "available_quantity": "0.000000",
+              "base_unit": {
+                "id": "01JCV8X9MBV4W5X6Y7Z8012345",
+                "code": "PCS",
+                "name": "Piece"
+              },
+              "default_unit": {
+                "unit_id": "01JCV8X9MBV4W5X6Y7Z8012345",
+                "product_unit_id": "01JCV8X9MBV4W5X6Y7Z8012345",
+                "conversion_to_base": "1.000000",
+                "sale_price": null
+              },
+              "units": [
+                {
+                  "product_unit_id": "01JCV8X9MBV4W5X6Y7Z8012345",
+                  "unit_id": "01JCV8X9MBV4W5X6Y7Z8012345",
+                  "code": "PCS",
+                  "name": "Piece",
+                  "conversion_to_base": "1.000000",
+                  "is_base": true,
+                  "is_default_sale": true,
+                  "sale_price": null
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val item = ProductCatalogItem.fromStrictJson(StrictJsonParser.parse(unpricedProductJson).asObject())
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S6789A", item.id.value)
+        assertEquals("SKU-UNPRICED-01", item.sku)
+        assertNull("unitPrice must be null for unpriced product", item.unitPrice)
+        assertNull("defaultUnit.salePrice must be null when unpriced", item.defaultUnit.salePrice)
+        assertNull("units[0].salePrice must be null when unpriced", item.units[0].salePrice)
+    }
+
+    @Test
+    fun testCustomerDirectoryAcceptsNullCode() {
+        val customerJson = """
+            {
+              "id": "01JCV8X9M2NQW3TYZ4R5S6789N",
+              "code": null,
+              "name": "Ahmad Customer Without Code",
+              "phone": "+970599112233",
+              "is_walk_in": false
+            }
+        """.trimIndent()
+
+        val item = CustomerDirectoryItem.fromStrictJson(StrictJsonParser.parse(customerJson).asObject())
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S6789N", item.id.value)
+        assertNull("Customer code must be null", item.code)
+        assertEquals("Ahmad Customer Without Code", item.name)
+        assertEquals("+970599112233", item.phone)
+        assertFalse(item.isWalkIn)
+    }
+
+    @Test
+    fun testCustomerDirectoryRejectsEmptyCode() {
+        val customerJson = """
+            {
+              "id": "01JCV8X9M2NQW3TYZ4R5S6789N",
+              "code": "",
+              "name": "Invalid Customer Empty Code",
+              "is_walk_in": false
+            }
+        """.trimIndent()
+
+        assertThrows(CanonicalSerializationException::class.java) {
+            CustomerDirectoryItem.fromStrictJson(StrictJsonParser.parse(customerJson).asObject())
+        }
+    }
 }

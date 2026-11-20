@@ -1,16 +1,21 @@
 package com.example.ui.staff
 
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudOff
@@ -591,6 +596,105 @@ fun StaffOutboxRecoveryScreen(
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Screen presented when loading the production merchant repository fails from ReadReady.
+ * Provides clear localized explanation, retry button, and explicit sign out action.
+ */
+@Composable
+fun TraderRepositoryLoadFailedScreen(
+    error: Throwable?,
+    lang: AppLanguage,
+    onRetry: () -> Unit,
+    onSignOut: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val localizedError = when {
+        error is java.io.IOException ->
+            lang.tr("تعذر الاتصال بالخادم. يرجى التحقق من الشبكة والمحاولة مجدداً.", "Could not connect to server. Please check your network and try again.")
+        error is SecurityException ->
+            lang.tr("يرجى تسجيل الدخول مجدداً.", "Please sign in again.")
+        else ->
+            lang.tr("تعذر تحميل مساحة العمل. يرجى إعادة المحاولة أو تسجيل الدخول مجدداً.", "Could not load the workspace. Please retry or sign in again.")
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .background(MaterialTheme.colorScheme.background)
+            .testTag("trader_load_failed_screen"),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    modifier = Modifier.size(52.dp),
+                    tint = MaterialTheme.colorScheme.error
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = lang.tr("تعذر تحميل مساحة التاجر", "Failed to Load Trader Workspace"),
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = localizedError,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = onRetry,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("trader_load_retry_button"),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlueLight)
+                ) {
+                    Text(
+                        text = lang.tr("إعادة المحاولة", "Retry"),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = onSignOut,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("trader_load_signout_button"),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(
+                        text = lang.tr("تسجيل الخروج", "Sign Out"),
+                        fontSize = 14.sp
+                    )
                 }
             }
         }

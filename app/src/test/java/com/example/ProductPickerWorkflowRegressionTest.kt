@@ -50,7 +50,7 @@ class ProductPickerWorkflowRegressionTest {
     val composeTestRule = createComposeRule()
 
     @Test
-    fun purchasePicker_completeWorkflow_searchSelectUnitAddDuplicateProductZeroCostRemoveAndSubmit() {
+    fun purchasePicker_completeWorkflow_searchSelectUnitAddDuplicateProductZeroCostRemoveAndSubmit(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val supplier = repo.getSuppliers().first()
         val trackedProduct = repo.getProducts().first { it.id == "p_olive_oil" && it.isStockTracked }
@@ -70,7 +70,7 @@ class ProductPickerWorkflowRegressionTest {
                     state = state,
                     onDismiss = { isDismissed = true },
                     onConfirmStructuredBill = { supId, lines, paidNow, note ->
-                        val res = repo.recordStructuredPurchaseBill(supId, lines, paidNow, repo.getCurrentSession(), note)
+                        val res = kotlinx.coroutines.runBlocking { repo.recordStructuredPurchaseBill(supId, lines, paidNow, repo.getCurrentSession(), note) }
                         if (res.isSuccess) {
                             submittedBill = res.getOrNull()
                         }

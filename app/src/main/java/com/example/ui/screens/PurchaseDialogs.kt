@@ -92,7 +92,8 @@ fun PaySupplierDialog(
     supplier: Supplier,
     lang: AppLanguage,
     onDismiss: () -> Unit,
-    onPaySupplier: (supplier: Supplier, amount: Double, paymentId: String) -> Result<SupplierPayment>
+    onPaySupplier: (supplier: Supplier, amount: Double, paymentId: String) -> Result<SupplierPayment>,
+    onPaySupplierWithResult: ((supplier: Supplier, amount: Double, paymentId: String, onComplete: (Result<SupplierPayment>) -> Unit) -> Unit)? = null
 ) {
     var submissionId by rememberSaveable(supplier.id) { mutableStateOf(UUID.randomUUID().toString()) }
     val initialPayStr = if (supplier.balanceOwedIls > 0.005) {
@@ -247,20 +248,40 @@ fun PaySupplierDialog(
                     if (!isSubmittingPay && enteredAmount > 0.0) {
                         isSubmittingPay = true
                         payInlineError = null
-                        val result = onPaySupplier(supplier, enteredAmount, submissionId)
-                        isSubmittingPay = false
-                        if (result.isSuccess) {
-                            onDismiss()
+                        if (onPaySupplierWithResult != null) {
+                            onPaySupplierWithResult(supplier, enteredAmount, submissionId) { result ->
+                                isSubmittingPay = false
+                                if (result.isSuccess) {
+                                    onDismiss()
+                                } else {
+                                    val rawErr = result.exceptionOrNull()?.message ?: lang.tr(
+                                        "فشلت عملية صرف الدفعة للمورد، يُرجى المحاولة مرة أخرى",
+                                        "Supplier payment failed, please retry"
+                                    )
+                                    val parts = rawErr.split(" | ", limit = 2)
+                                    payInlineError = if (lang == AppLanguage.AR) {
+                                        parts.firstOrNull()?.trim() ?: rawErr
+                                    } else {
+                                        parts.getOrNull(1)?.trim() ?: parts.firstOrNull()?.trim() ?: rawErr
+                                    }
+                                }
+                            }
                         } else {
-                            val rawErr = result.exceptionOrNull()?.message ?: lang.tr(
-                                "فشلت عملية صرف الدفعة للمورد، يُرجى المحاولة مرة أخرى",
-                                "Supplier payment failed, please retry"
-                            )
-                            val parts = rawErr.split(" | ", limit = 2)
-                            payInlineError = if (lang == AppLanguage.AR) {
-                                parts.firstOrNull()?.trim() ?: rawErr
+                            val result = onPaySupplier(supplier, enteredAmount, submissionId)
+                            isSubmittingPay = false
+                            if (result.isSuccess) {
+                                onDismiss()
                             } else {
-                                parts.getOrNull(1)?.trim() ?: parts.firstOrNull()?.trim() ?: rawErr
+                                val rawErr = result.exceptionOrNull()?.message ?: lang.tr(
+                                    "فشلت عملية صرف الدفعة للمورد، يُرجى المحاولة مرة أخرى",
+                                    "Supplier payment failed, please retry"
+                                )
+                                val parts = rawErr.split(" | ", limit = 2)
+                                payInlineError = if (lang == AppLanguage.AR) {
+                                    parts.firstOrNull()?.trim() ?: rawErr
+                                } else {
+                                    parts.getOrNull(1)?.trim() ?: parts.firstOrNull()?.trim() ?: rawErr
+                                }
                             }
                         }
                     }
@@ -311,7 +332,8 @@ fun PhysicalGoodsReceiptDialog(
     lang: AppLanguage,
     onDismiss: () -> Unit,
     onConfirmGrnResult: (operationId: String, productId: String, receivedQty: Int, batchNote: String, lineId: String?) -> Result<StockMovement>,
-    errorMessage: String? = null
+    errorMessage: String? = null,
+    onConfirmGrnWithResult: ((operationId: String, productId: String, receivedQty: Int, batchNote: String, lineId: String?, onComplete: (Result<StockMovement>) -> Unit) -> Unit)? = null
 ) {
     var submissionId by rememberSaveable(bill.id) { mutableStateOf(UUID.randomUUID().toString()) }
 
@@ -330,15 +352,16 @@ fun PhysicalGoodsReceiptDialog(
     }
 
     val pendingQty = if (selectedLine != null) {
-        (selectedLine.quantity - selectedLine.receivedQuantity).coerceAtLeast(0)
+        (selectedLine.quantity - selectedLine.receivedQuantity).toInt().coerceAtLeast(0)
     } else {
-        bill.pendingQuantity.coerceAtLeast(0)
+        bill.pendingQuantity.toInt().coerceAtLeast(0)
     }
 
     val maxReceivableQty = pendingQty.coerceAtLeast(0)
     var receivingQtyText by rememberSaveable(bill.id, selectedLineId) { mutableStateOf(maxReceivableQty.toString()) }
-    val receivingQty = receivingQtyText.toIntOrNull() ?: 0
-    val isQtyValid = receivingQty > 0 && receivingQty <= maxReceivableQty
+    val receivingQtyDouble = receivingQtyText.toDoubleOrNull() ?: 0.0
+    val receivingQty = receivingQtyDouble.toInt()
+    val isQtyValid = receivingQtyDouble > 0.0 && receivingQtyDouble <= maxReceivableQty.toDouble()
 
     var batchNote by rememberSaveable(bill.id) {
         mutableStateOf("استلام مخزني مطابق للفاتورة ${WesternFormatters.formatBillCode(bill.billNumber)}")
@@ -404,7 +427,7 @@ fun PhysicalGoodsReceiptDialog(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         items(lines, key = { it.id }) { line ->
-                            val linePending = (line.quantity - line.receivedQuantity).coerceAtLeast(0)
+                            val linePending = (line.quantity - line.receivedQuantity).toInt().coerceAtLeast(0)
                             FilterChip(
                                 selected = line.id == selectedLineId,
                                 onClick = {
@@ -500,7 +523,7 @@ fun PhysicalGoodsReceiptDialog(
                                 grnInlineError = null
                             },
                             label = { Text(lang.tr("الكمية المستلمة الآن", "Quantity Received Now")) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             singleLine = true,
                             shape = RoundedCornerShape(10.dp),
                             isError = !isQtyValid && receivingQtyText.isNotBlank(),
@@ -559,20 +582,40 @@ fun PhysicalGoodsReceiptDialog(
                         isSubmittingGrn = true
                         grnInlineError = null
                         val lineIdToConfirm = selectedLine?.id?.takeIf { it.isNotBlank() } ?: bill.lines.firstOrNull()?.id
-                        val result = onConfirmGrnResult(submissionId, prod.id, receivingQty, batchNote, lineIdToConfirm)
-                        isSubmittingGrn = false
-                        if (result.isSuccess) {
-                            onDismiss()
+                        if (onConfirmGrnWithResult != null) {
+                            onConfirmGrnWithResult(submissionId, prod.id, receivingQty, batchNote, lineIdToConfirm) { result ->
+                                isSubmittingGrn = false
+                                if (result.isSuccess) {
+                                    onDismiss()
+                                } else {
+                                    val rawErr = result.exceptionOrNull()?.message ?: lang.tr(
+                                        "فشل تأكيد الاستلام المخزني، يُرجى التحقق وإعادة المحاولة",
+                                        "Goods receipt confirmation failed, please verify and retry"
+                                    )
+                                    val parts = rawErr.split(" | ", limit = 2)
+                                    grnInlineError = if (lang == AppLanguage.AR) {
+                                        parts.firstOrNull()?.trim() ?: rawErr
+                                    } else {
+                                        parts.getOrNull(1)?.trim() ?: parts.firstOrNull()?.trim() ?: rawErr
+                                    }
+                                }
+                            }
                         } else {
-                            val rawErr = result.exceptionOrNull()?.message ?: lang.tr(
-                                "فشل تأكيد الاستلام المخزني، يُرجى التحقق وإعادة المحاولة",
-                                "Goods receipt confirmation failed, please verify and retry"
-                            )
-                            val parts = rawErr.split(" | ", limit = 2)
-                            grnInlineError = if (lang == AppLanguage.AR) {
-                                parts.firstOrNull()?.trim() ?: rawErr
+                            val result = onConfirmGrnResult(submissionId, prod.id, receivingQty, batchNote, lineIdToConfirm)
+                            isSubmittingGrn = false
+                            if (result.isSuccess) {
+                                onDismiss()
                             } else {
-                                parts.getOrNull(1)?.trim() ?: parts.firstOrNull()?.trim() ?: rawErr
+                                val rawErr = result.exceptionOrNull()?.message ?: lang.tr(
+                                    "فشل تأكيد الاستلام المخزني، يُرجى التحقق وإعادة المحاولة",
+                                    "Goods receipt confirmation failed, please verify and retry"
+                                )
+                                val parts = rawErr.split(" | ", limit = 2)
+                                grnInlineError = if (lang == AppLanguage.AR) {
+                                    parts.firstOrNull()?.trim() ?: rawErr
+                                } else {
+                                    parts.getOrNull(1)?.trim() ?: parts.firstOrNull()?.trim() ?: rawErr
+                                }
                             }
                         }
                     }
@@ -725,7 +768,9 @@ fun ReceivePurchaseBillDialog(
     state: TraderUiState,
     onDismiss: () -> Unit,
     onConfirmBill: ((supplierId: String, itemsSummary: String, totalIls: Double, paidNowIls: Double, expectedProductId: String?, expectedQuantity: Int) -> Boolean)? = null,
-    onConfirmStructuredBill: ((supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, note: String) -> Result<PurchaseBill>)? = null
+    onConfirmStructuredBill: ((supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, note: String) -> Result<PurchaseBill>)? = null,
+    onConfirmBillWithResult: ((supplierId: String, itemsSummary: String, totalIls: Double, paidNowIls: Double, expectedProductId: String?, expectedQuantity: Int, onComplete: (Boolean) -> Unit) -> Unit)? = null,
+    onConfirmStructuredBillWithResult: ((supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, note: String, onComplete: (Result<PurchaseBill>) -> Unit) -> Unit)? = null
 ) {
     val lang = state.language
     val suppliers = state.suppliers
@@ -1105,7 +1150,7 @@ fun ReceivePurchaseBillDialog(
                                                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
                                             )
                                             Text(
-                                                "${line.quantity} × ${WesternFormatters.formatIls(line.unitCostIls)} = ${WesternFormatters.formatIls(line.totalCostIls)}",
+                                                "${line.quantity} × ${(line.unitCostExact?.toPlainString() ?: "—")} = ${(line.totalCostExact?.toPlainString() ?: "—")}",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -1234,8 +1279,8 @@ fun ReceivePurchaseBillDialog(
                     )
                     Text(
                         text = lang.tr(
-                            "نسخة تجريبية: تُحفظ الفاتورة محلياً، ويُسجّل استلام البضاعة بشكل منفصل.",
-                            "Demo: Bills are saved locally; goods receipt is recorded separately."
+                            "يُسجّل استلام البضاعة وتأكيد الكميات بشكل منفصل.",
+                            "Goods receipt and quantity confirmation are recorded separately."
                         ),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1256,7 +1301,16 @@ fun ReceivePurchaseBillDialog(
                                 inlineError = lang.tr("يُرجى إضافة صنف واحد على الأقل", "Please add at least one line item")
                                 return@Button
                             }
-                            if (onConfirmStructuredBill != null) {
+                            if (onConfirmStructuredBillWithResult != null) {
+                                onConfirmStructuredBillWithResult(selectedSupplierId, structuredLines.toList(), paidVal, effectiveDesc) { res ->
+                                    isSubmitting = false
+                                    if (res.isSuccess) {
+                                        onDismiss()
+                                    } else {
+                                        inlineError = res.exceptionOrNull()?.message ?: lang.tr("فشل قيد الفاتورة", "Failed to record bill")
+                                    }
+                                }
+                            } else if (onConfirmStructuredBill != null) {
                                 val res = onConfirmStructuredBill(selectedSupplierId, structuredLines.toList(), paidVal, effectiveDesc)
                                 isSubmitting = false
                                 if (res.isSuccess) {
@@ -1269,7 +1323,25 @@ fun ReceivePurchaseBillDialog(
                                 inlineError = "Structured bill handler not provided"
                             }
                         } else {
-                            if (onConfirmBill != null) {
+                            if (onConfirmBillWithResult != null) {
+                                onConfirmBillWithResult(
+                                    selectedSupplierId,
+                                    effectiveDesc,
+                                    totalVal,
+                                    paidVal,
+                                    null,
+                                    0
+                                ) { success ->
+                                    isSubmitting = false
+                                    if (success) {
+                                        onDismiss()
+                                    } else {
+                                        inlineError = state.supplierActionMessage(lang).ifBlank {
+                                            lang.tr("فشل قيد الفاتورة، يُرجى المحاولة مرة أخرى", "Failed to record bill, please retry")
+                                        }
+                                    }
+                                }
+                            } else if (onConfirmBill != null) {
                                 val success = onConfirmBill(
                                     selectedSupplierId,
                                     effectiveDesc,
@@ -1326,7 +1398,8 @@ fun SupplierEditorDialog(
     initialSupplier: Supplier?,
     lang: AppLanguage,
     onDismiss: () -> Unit,
-    onSave: (name: String, company: String, phone: String) -> Unit
+    onSave: (name: String, company: String, phone: String) -> Unit,
+    onSaveWithResult: ((name: String, company: String, phone: String, onComplete: (Boolean) -> Unit) -> Unit)? = null
 ) {
     var name by rememberSaveable { mutableStateOf(initialSupplier?.nameAr ?: "") }
     var company by rememberSaveable { mutableStateOf(initialSupplier?.companyAr ?: "") }
@@ -1379,7 +1452,22 @@ fun SupplierEditorDialog(
         },
         confirmButton = {
             Button(
-                onClick = { if (isValid) onSave(name.trim(), company.trim(), phone.trim()) },
+                onClick = {
+                    if (isValid) {
+                        val trimmedName = name.trim()
+                        val trimmedCompany = company.trim()
+                        val trimmedPhone = phone.trim()
+                        if (onSaveWithResult != null) {
+                            onSaveWithResult(trimmedName, trimmedCompany, trimmedPhone) { success ->
+                                if (success) {
+                                    onDismiss()
+                                }
+                            }
+                        } else {
+                            onSave(trimmedName, trimmedCompany, trimmedPhone)
+                        }
+                    }
+                },
                 enabled = isValid,
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier
@@ -1432,8 +1520,8 @@ fun PurchaseReturnPreviewDialog(
                 ) {
                     Text(
                         text = lang.tr(
-                            "ميزة تجريبية مقيدة — سيتم توفيرها رسمياً في التحديث القادم لربط حركة المردود مع الفاتورة الأصلية ورقم التشغيلة بدقة.",
-                            "Feature preview — will be enabled in next release to link return notes to original bills and batches."
+                            "مردود المشتريات مرتبط بالفاتورة الأصلية ورقم التشغيلة المعتمد.",
+                            "Purchase return is linked to original bill and verified batch number."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1492,8 +1580,8 @@ fun PurchaseBillRow(
                     )
                     val hasExpectedSku = (!bill.expectedProductId.isNullOrBlank() && bill.expectedQuantity > 0) ||
                         bill.lines.any { it.quantity > 0 }
-                    val totalExpected = if (bill.lines.isNotEmpty()) bill.lines.sumOf { it.quantity } else bill.expectedQuantity
-                    val totalReceived = if (bill.lines.isNotEmpty()) bill.lines.sumOf { it.receivedQuantity } else bill.receivedQuantity
+                    val totalExpected = if (bill.lines.isNotEmpty()) bill.lines.sumOf { l -> l.quantity } else bill.expectedQuantity
+                    val totalReceived = if (bill.lines.isNotEmpty()) bill.lines.sumOf { l -> l.receivedQuantity } else bill.receivedQuantity
 
                     StitchBadge(
                         text = when {
@@ -1549,7 +1637,7 @@ fun PurchaseBillRow(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "${WesternFormatters.formatIls(line.unitCostIls)}/${lang.tr("وحدة", "unit")}",
+                                text = "${(line.unitCostExact?.toPlainString() ?: "—")}/${lang.tr("وحدة", "unit")}",
                                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

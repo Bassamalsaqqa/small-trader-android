@@ -6,9 +6,11 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
 import com.example.data.mobile.contract.ServerUlid
+import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.CustomerDirectoryResponse
 import com.example.data.mobile.readclient.EndpointSecurity
 import com.example.data.mobile.readclient.PaginationQuery
+import com.example.data.mobile.readclient.ProductCatalogItem
 import com.example.data.mobile.readclient.ProductCatalogResponse
 import com.example.data.mobile.outbox.OutboxHealthInspector
 import com.example.data.mobile.outbox.OutboxHealthResult
@@ -20,8 +22,12 @@ import com.example.data.mobile.session.LogoutResult
 import com.example.data.mobile.session.StaffAuthState
 import com.example.data.mobile.session.StaffSessionCoordinator
 import com.example.model.AppLanguage
+import com.example.ui.components.SearchableSelectorState
+import com.example.ui.components.SelectorFetchResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -101,6 +107,9 @@ class StaffWorkspaceViewModel(
     private var activeScopeCompanyId: String? = null
     private var activeScopeActorId: String? = null
     private var activeScopeDeviceId: String? = null
+
+    fun getCoordinator(): StaffSessionCoordinator? = coordinator
+    fun getReadReadyState(): StaffAuthState.ReadReady? = coordinator?.authState as? StaffAuthState.ReadReady
 
     init {
         if (coordinator != null && configuredOrigin.isNotBlank() && _uiState.value.phase == StaffWorkspacePhase.INITIALIZING) {
@@ -513,7 +522,8 @@ class StaffWorkspaceViewModel(
     fun signIn(
         email: String,
         passwordOverride: String? = null,
-        deviceName: String = "Android Staff Device"
+        deviceName: String = "Android Staff Device",
+        rememberSession: Boolean = false
     ) {
         val coord = coordinator ?: run {
             _uiState.update {
@@ -555,7 +565,7 @@ class StaffWorkspaceViewModel(
             // Step 1: Real challenge request
             val challengeResult = try {
                 withContext(ioDispatcher) {
-                    coord.requestChallenge()
+                    coord.requestChallenge(rememberSession = rememberSession)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -569,6 +579,14 @@ class StaffWorkspaceViewModel(
 
             if (challengeResult !is CoordinatorResult.Success) {
                 clearTransientCredentials()
+                val locked = coord.authState as? StaffAuthState.Locked
+                if (locked != null) {
+                    _uiState.update {
+                        it.copy(phase = StaffWorkspacePhase.LOCKED, isSubmitting = false,
+                            lockedReason = extractLockReasonMessage(locked.reason))
+                    }
+                    return@launch
+                }
                 _uiState.update {
                     it.copy(
                         isSubmitting = false,
@@ -1282,7 +1300,7 @@ class StaffWorkspaceViewModel(
             }
 
             val query = PaginationQuery(
-                limit = 50,
+                limit = 30,
                 cursor = cursor,
                 search = targetSearch
             )
@@ -1385,9 +1403,9 @@ class StaffWorkspaceViewModel(
     }
 
     /**
-     * Updates product search query and re-executes search with cursor and loading reset.
+     * Updates product search query with 250ms debounce (max) and rapid-typing cancellation.
      */
-    fun updateProductSearchQuery(query: String) {
+    fun updateProductSearchQuery(query: String, debounceMs: Long = 250L) {
         _uiState.update {
             it.copy(
                 productSearchQuery = query,
@@ -1395,7 +1413,122 @@ class StaffWorkspaceViewModel(
                 productsHasMore = false
             )
         }
-        loadProducts(refresh = true)
+        productsJob?.cancel()
+        val thisSeq = ++productRequestSeq
+        val activeCompany = _uiState.value.activeCompany ?: return
+        val companyUlid = try {
+            ServerUlid.parse(activeCompany.companyId)
+        } catch (_: Exception) {
+            return
+        }
+        val coord = coordinator ?: return
+        val opGen = coord.currentGeneration
+        val targetSearch = query.trim().ifBlank { null }
+
+        productsJob = viewModelScope.launch {
+            if (debounceMs > 0 && targetSearch != null) {
+                delay(debounceMs)
+            }
+            if (thisSeq != productRequestSeq) return@launch
+            if (opGen != coord.currentGeneration) return@launch
+            if (_uiState.value.activeCompany?.companyId != companyUlid.value) return@launch
+
+            _uiState.update {
+                it.copy(
+                    isProductsLoading = true,
+                    isProductsLoadingMore = false,
+                    productsError = null,
+                    productsNextCursor = null,
+                    productsHasMore = false
+                )
+            }
+
+            val queryParams = PaginationQuery(
+                limit = 30,
+                cursor = null,
+                search = targetSearch
+            )
+
+            val result = try {
+                withContext(ioDispatcher) {
+                    coord.getProducts(queryParams)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (e: Exception) {
+                CoordinatorResult.Error("Failed to load products")
+            } finally {
+                if (thisSeq == productRequestSeq && opGen == coord.currentGeneration) {
+                    _uiState.update {
+                        if (it.activeCompany?.companyId == companyUlid.value) {
+                            it.copy(isProductsLoading = false, isProductsLoadingMore = false)
+                        } else it
+                    }
+                }
+            }
+
+            if (thisSeq != productRequestSeq) return@launch
+            if (_uiState.value.activeCompany?.companyId != companyUlid.value) return@launch
+            if (opGen != coord.currentGeneration) return@launch
+
+            when (result) {
+                is CoordinatorResult.Success -> {
+                    if (coord.isScopeActive(opGen, companyUlid)) {
+                        val response = result.value
+                        _uiState.update { state ->
+                            if (state.activeCompany?.companyId != companyUlid.value) return@update state
+                            val deduped = response.products.distinctBy { it.id.value }
+                            state.copy(
+                                products = deduped,
+                                isProductsLoading = false,
+                                isProductsLoadingMore = false,
+                                productsNextCursor = response.nextCursor,
+                                productsHasMore = response.hasMore,
+                                productsError = null
+                            )
+                        }
+                    }
+                }
+                is CoordinatorResult.AuthDenied -> {
+                    clearListsImmediately()
+                    _uiState.update { state ->
+                        state.copy(
+                            phase = StaffWorkspacePhase.LOCKED,
+                            isProductsLoading = false,
+                            isProductsLoadingMore = false,
+                            lockedReason = "Authentication revoked or invalid (HTTP 401)"
+                        )
+                    }
+                }
+                is CoordinatorResult.Forbidden -> {
+                    clearListsImmediately()
+                    _uiState.update { state ->
+                        state.copy(
+                            phase = StaffWorkspacePhase.LOCKED,
+                            isProductsLoading = false,
+                            isProductsLoadingMore = false,
+                            lockedReason = "Tenant access forbidden (HTTP 403)"
+                        )
+                    }
+                }
+                is CoordinatorResult.Error -> {
+                    checkAndHandleAuthDenied(result.message)
+                    _uiState.update { state ->
+                        if (state.activeCompany?.companyId != companyUlid.value) return@update state
+                        state.copy(
+                            isProductsLoading = false,
+                            isProductsLoadingMore = false,
+                            productsError = if (state.language == AppLanguage.AR) "تعذر تحميل سجل الأصناف" else "Could not complete the request. Try again"
+                        )
+                    }
+                }
+                is CoordinatorResult.StaleOperation -> {
+                    // Obsolete operation discarded
+                }
+            }
+        }
     }
 
     /**
@@ -1443,7 +1576,7 @@ class StaffWorkspaceViewModel(
             }
 
             val query = PaginationQuery(
-                limit = 50,
+                limit = 30,
                 cursor = cursor,
                 search = targetSearch
             )
@@ -1546,9 +1679,9 @@ class StaffWorkspaceViewModel(
     }
 
     /**
-     * Updates customer directory search query and re-executes search with cursor and loading reset.
+     * Updates customer directory search query with 250ms debounce (max) and rapid-typing cancellation.
      */
-    fun updateCustomerSearchQuery(query: String) {
+    fun updateCustomerSearchQuery(query: String, debounceMs: Long = 250L) {
         _uiState.update {
             it.copy(
                 customerSearchQuery = query,
@@ -1556,7 +1689,323 @@ class StaffWorkspaceViewModel(
                 customersHasMore = false
             )
         }
-        loadCustomers(refresh = true)
+        customersJob?.cancel()
+        val thisSeq = ++customerRequestSeq
+        val activeCompany = _uiState.value.activeCompany ?: return
+        val companyUlid = try {
+            ServerUlid.parse(activeCompany.companyId)
+        } catch (_: Exception) {
+            return
+        }
+        val coord = coordinator ?: return
+        val opGen = coord.currentGeneration
+        val targetSearch = query.trim().ifBlank { null }
+
+        customersJob = viewModelScope.launch {
+            if (debounceMs > 0 && targetSearch != null) {
+                delay(debounceMs)
+            }
+            if (thisSeq != customerRequestSeq) return@launch
+            if (opGen != coord.currentGeneration) return@launch
+            if (_uiState.value.activeCompany?.companyId != companyUlid.value) return@launch
+
+            _uiState.update {
+                it.copy(
+                    isCustomersLoading = true,
+                    isCustomersLoadingMore = false,
+                    customersError = null,
+                    customersNextCursor = null,
+                    customersHasMore = false
+                )
+            }
+
+            val queryParams = PaginationQuery(
+                limit = 30,
+                cursor = null,
+                search = targetSearch
+            )
+
+            val result = try {
+                withContext(ioDispatcher) {
+                    coord.getCustomers(queryParams)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VirtualMachineError) {
+                throw e
+            } catch (e: Exception) {
+                CoordinatorResult.Error("Failed to load customers")
+            } finally {
+                if (thisSeq == customerRequestSeq && opGen == coord.currentGeneration) {
+                    _uiState.update {
+                        if (it.activeCompany?.companyId == companyUlid.value) {
+                            it.copy(isCustomersLoading = false, isCustomersLoadingMore = false)
+                        } else it
+                    }
+                }
+            }
+
+            if (thisSeq != customerRequestSeq) return@launch
+            if (_uiState.value.activeCompany?.companyId != companyUlid.value) return@launch
+            if (opGen != coord.currentGeneration) return@launch
+
+            when (result) {
+                is CoordinatorResult.Success -> {
+                    if (coord.isScopeActive(opGen, companyUlid)) {
+                        val response = result.value
+                        _uiState.update { state ->
+                            if (state.activeCompany?.companyId != companyUlid.value) return@update state
+                            val deduped = response.customers.distinctBy { it.id.value }
+                            state.copy(
+                                customers = deduped,
+                                isCustomersLoading = false,
+                                isCustomersLoadingMore = false,
+                                customersNextCursor = response.nextCursor,
+                                customersHasMore = response.hasMore,
+                                customersError = null
+                            )
+                        }
+                    }
+                }
+                is CoordinatorResult.AuthDenied -> {
+                    clearListsImmediately()
+                    _uiState.update { state ->
+                        state.copy(
+                            phase = StaffWorkspacePhase.LOCKED,
+                            isCustomersLoading = false,
+                            isCustomersLoadingMore = false,
+                            lockedReason = "Authentication revoked or invalid (HTTP 401)"
+                        )
+                    }
+                }
+                is CoordinatorResult.Forbidden -> {
+                    clearListsImmediately()
+                    _uiState.update { state ->
+                        state.copy(
+                            phase = StaffWorkspacePhase.LOCKED,
+                            isCustomersLoading = false,
+                            isCustomersLoadingMore = false,
+                            lockedReason = "Tenant access forbidden (HTTP 403)"
+                        )
+                    }
+                }
+                is CoordinatorResult.Error -> {
+                    checkAndHandleAuthDenied(result.message)
+                    _uiState.update { state ->
+                        if (state.activeCompany?.companyId != companyUlid.value) return@update state
+                        state.copy(
+                            isCustomersLoading = false,
+                            isCustomersLoadingMore = false,
+                            customersError = if (state.language == AppLanguage.AR) "تعذر تحميل دليل العملاء" else "Could not complete the request. Try again"
+                        )
+                    }
+                }
+                is CoordinatorResult.StaleOperation -> {
+                    // Obsolete operation discarded
+                }
+            }
+        }
+    }
+
+    /**
+     * Creates a reusable [SearchableSelectorState] for products bound to the current coordinator session.
+     */
+    fun createProductSelectorState(scope: CoroutineScope): SearchableSelectorState<ProductCatalogItem> {
+        lateinit var state: SearchableSelectorState<ProductCatalogItem>
+        state = SearchableSelectorState(
+            scope = scope,
+            debounceMs = 250L,
+            idSelector = { it.id.value },
+            companyScopeProvider = { _uiState.value.activeCompany?.companyId },
+            sessionGenerationProvider = { coordinator?.currentGeneration ?: 0L },
+            onFetchCandidates = { q, cursor, limit ->
+                val coord = coordinator ?: return@SearchableSelectorState SelectorFetchResult(emptyList(), hasMore = false)
+                val activeCompany = _uiState.value.activeCompany ?: return@SearchableSelectorState SelectorFetchResult(emptyList(), hasMore = false)
+                val capturedCompanyId = activeCompany.companyId
+                val capturedGen = coord.currentGeneration
+
+                val res = try {
+                    withContext(ioDispatcher) {
+                        coord.getProducts(PaginationQuery(limit = limit.coerceAtMost(30), cursor = cursor, search = q))
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: VirtualMachineError) {
+                    throw e
+                } catch (e: Exception) {
+                    CoordinatorResult.Error(e.message ?: "Failed to fetch products")
+                }
+
+                // Reject obsolete completions before mutating this reusable selector state.
+                if (capturedGen != coord.currentGeneration || _uiState.value.activeCompany?.companyId != capturedCompanyId) {
+                    return@SearchableSelectorState SelectorFetchResult(emptyList(), hasMore = false)
+                }
+
+                when (res) {
+                    is CoordinatorResult.Success -> {
+                        if (capturedGen != coord.currentGeneration || _uiState.value.activeCompany?.companyId != capturedCompanyId) {
+                            SelectorFetchResult(emptyList(), hasMore = false)
+                        } else {
+                            SelectorFetchResult(
+                                items = res.value.products,
+                                nextCursor = res.value.nextCursor,
+                                hasMore = res.value.hasMore
+                            )
+                        }
+                    }
+                    is CoordinatorResult.AuthDenied -> {
+                        state.invalidateScope()
+                        handleSelectorDenial(capturedGen, capturedCompanyId, isForbidden = false, isExpired = false)
+                        SelectorFetchResult(emptyList(), hasMore = false)
+                    }
+                    is CoordinatorResult.Forbidden -> {
+                        state.invalidateScope()
+                        handleSelectorDenial(capturedGen, capturedCompanyId, isForbidden = true, isExpired = false)
+                        SelectorFetchResult(emptyList(), hasMore = false)
+                    }
+                    is CoordinatorResult.Error -> {
+                        val isExpired = res.message.contains("expired", ignoreCase = true) ||
+                            coord.authState is StaffAuthState.LoggedOut
+                        val isLocked = coord.authState is StaffAuthState.Locked
+                        if (isExpired) {
+                            state.invalidateScope()
+                            handleSelectorDenial(capturedGen, capturedCompanyId, isForbidden = false, isExpired = true)
+                            SelectorFetchResult(emptyList(), hasMore = false)
+                        } else if (isLocked) {
+                            val isForbid = (coord.authState as StaffAuthState.Locked).reason is LockReason.MembershipDenied
+                            state.invalidateScope()
+                            handleSelectorDenial(capturedGen, capturedCompanyId, isForbidden = isForbid, isExpired = false)
+                            SelectorFetchResult(emptyList(), hasMore = false)
+                        } else {
+                            if (capturedGen == coord.currentGeneration && _uiState.value.activeCompany?.companyId == capturedCompanyId) {
+                                throw IllegalStateException(res.message)
+                            } else {
+                                SelectorFetchResult(emptyList(), hasMore = false)
+                            }
+                        }
+                    }
+                    is CoordinatorResult.StaleOperation -> {
+                        SelectorFetchResult(emptyList(), hasMore = false)
+                    }
+                }
+            }
+        )
+        return state
+    }
+
+    /**
+     * Creates a reusable [SearchableSelectorState] for customers bound to the current coordinator session.
+     */
+    fun createCustomerSelectorState(scope: CoroutineScope): SearchableSelectorState<CustomerDirectoryItem> {
+        lateinit var state: SearchableSelectorState<CustomerDirectoryItem>
+        state = SearchableSelectorState(
+            scope = scope,
+            debounceMs = 250L,
+            idSelector = { it.id.value },
+            companyScopeProvider = { _uiState.value.activeCompany?.companyId },
+            sessionGenerationProvider = { coordinator?.currentGeneration ?: 0L },
+            onFetchCandidates = { q, cursor, limit ->
+                val coord = coordinator ?: return@SearchableSelectorState SelectorFetchResult(emptyList(), hasMore = false)
+                val activeCompany = _uiState.value.activeCompany ?: return@SearchableSelectorState SelectorFetchResult(emptyList(), hasMore = false)
+                val capturedCompanyId = activeCompany.companyId
+                val capturedGen = coord.currentGeneration
+
+                val res = try {
+                    withContext(ioDispatcher) {
+                        coord.getCustomers(PaginationQuery(limit = limit.coerceAtMost(30), cursor = cursor, search = q))
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: VirtualMachineError) {
+                    throw e
+                } catch (e: Exception) {
+                    CoordinatorResult.Error(e.message ?: "Failed to fetch customers")
+                }
+
+                // Reject obsolete completions before mutating this reusable selector state.
+                if (capturedGen != coord.currentGeneration || _uiState.value.activeCompany?.companyId != capturedCompanyId) {
+                    return@SearchableSelectorState SelectorFetchResult(emptyList(), hasMore = false)
+                }
+
+                when (res) {
+                    is CoordinatorResult.Success -> {
+                        if (capturedGen != coord.currentGeneration || _uiState.value.activeCompany?.companyId != capturedCompanyId) {
+                            SelectorFetchResult(emptyList(), hasMore = false)
+                        } else {
+                            SelectorFetchResult(
+                                items = res.value.customers,
+                                nextCursor = res.value.nextCursor,
+                                hasMore = res.value.hasMore
+                            )
+                        }
+                    }
+                    is CoordinatorResult.AuthDenied -> {
+                        state.invalidateScope()
+                        handleSelectorDenial(capturedGen, capturedCompanyId, isForbidden = false, isExpired = false)
+                        SelectorFetchResult(emptyList(), hasMore = false)
+                    }
+                    is CoordinatorResult.Forbidden -> {
+                        state.invalidateScope()
+                        handleSelectorDenial(capturedGen, capturedCompanyId, isForbidden = true, isExpired = false)
+                        SelectorFetchResult(emptyList(), hasMore = false)
+                    }
+                    is CoordinatorResult.Error -> {
+                        val isExpired = res.message.contains("expired", ignoreCase = true) ||
+                            coord.authState is StaffAuthState.LoggedOut
+                        val isLocked = coord.authState is StaffAuthState.Locked
+                        if (isExpired) {
+                            state.invalidateScope()
+                            handleSelectorDenial(capturedGen, capturedCompanyId, isForbidden = false, isExpired = true)
+                            SelectorFetchResult(emptyList(), hasMore = false)
+                        } else if (isLocked) {
+                            val isForbid = (coord.authState as StaffAuthState.Locked).reason is LockReason.MembershipDenied
+                            state.invalidateScope()
+                            handleSelectorDenial(capturedGen, capturedCompanyId, isForbidden = isForbid, isExpired = false)
+                            SelectorFetchResult(emptyList(), hasMore = false)
+                        } else {
+                            if (capturedGen == coord.currentGeneration && _uiState.value.activeCompany?.companyId == capturedCompanyId) {
+                                throw IllegalStateException(res.message)
+                            } else {
+                                SelectorFetchResult(emptyList(), hasMore = false)
+                            }
+                        }
+                    }
+                    is CoordinatorResult.StaleOperation -> {
+                        SelectorFetchResult(emptyList(), hasMore = false)
+                    }
+                }
+            }
+        )
+        return state
+    }
+
+    /**
+     * Reusable [SearchableSelectorState] singletons bound to this ViewModel's scope and coordinator lifecycle.
+     */
+    val productSelectorState: SearchableSelectorState<ProductCatalogItem> by lazy {
+        createProductSelectorState(viewModelScope)
+    }
+
+    val customerSelectorState: SearchableSelectorState<CustomerDirectoryItem> by lazy {
+        createCustomerSelectorState(viewModelScope)
+    }
+
+    fun selectProduct(item: ProductCatalogItem?) {
+        _uiState.update { it.copy(selectedProduct = item) }
+    }
+
+    fun clearSelectedProduct() {
+        productSelectorState.clearSelection()
+        _uiState.update { it.copy(selectedProduct = null) }
+    }
+
+    fun selectCustomer(item: CustomerDirectoryItem?) {
+        _uiState.update { it.copy(selectedCustomer = item) }
+    }
+
+    fun clearSelectedCustomer() {
+        customerSelectorState.clearSelection()
+        _uiState.update { it.copy(selectedCustomer = null) }
     }
 
     /**
@@ -1565,6 +2014,8 @@ class StaffWorkspaceViewModel(
     private fun clearListsImmediately() {
         productRequestSeq++
         customerRequestSeq++
+        productSelectorState.invalidateScope()
+        customerSelectorState.invalidateScope()
         _uiState.update {
             it.copy(
                 products = emptyList(),
@@ -1573,12 +2024,61 @@ class StaffWorkspaceViewModel(
                 productsNextCursor = null,
                 productsHasMore = false,
                 productsError = null,
+                selectedProduct = null,
                 customers = emptyList(),
                 isCustomersLoading = false,
                 isCustomersLoadingMore = false,
                 customersNextCursor = null,
                 customersHasMore = false,
-                customersError = null
+                customersError = null,
+                selectedCustomer = null
+            )
+        }
+    }
+
+    /**
+     * Canonical handler for authentication denial (401), membership forbidden (403),
+     * and session expiration from selector candidate fetching and query operations.
+     *
+     * Validates that the captured request scope (session generation and company ID) matches
+     * the currently active session. Stale completions from previous sessions or switched
+     * companies are discarded to prevent wiping or locking fresh active state.
+     */
+    internal fun handleSelectorDenial(
+        requestGen: Long,
+        requestCompanyId: String,
+        isForbidden: Boolean = false,
+        isExpired: Boolean = false
+    ) {
+        val coord = coordinator ?: return
+        // Stale discard: ensure the response corresponds to the active session and active company
+        if (requestGen != coord.currentGeneration) {
+            return
+        }
+        val currentCompany = _uiState.value.activeCompany
+        if (currentCompany == null || currentCompany.companyId != requestCompanyId) {
+            return
+        }
+
+        // Active scope denial: clear cached lists, selected cards, and both selectors immediately
+        clearListsImmediately()
+
+        val lockReason = when {
+            isExpired -> "Session authentication revoked or expired"
+            isForbidden -> "Tenant access forbidden (HTTP 403)"
+            coord.authState is StaffAuthState.Locked -> extractLockReasonMessage((coord.authState as StaffAuthState.Locked).reason)
+            else -> "Authentication revoked or invalid (HTTP 401)"
+        }
+
+        _uiState.update { state ->
+            state.copy(
+                phase = StaffWorkspacePhase.LOCKED,
+                isSubmitting = false,
+                isProductsLoading = false,
+                isProductsLoadingMore = false,
+                isCustomersLoading = false,
+                isCustomersLoadingMore = false,
+                lockedReason = lockReason
             )
         }
     }
@@ -1595,6 +2095,14 @@ class StaffWorkspaceViewModel(
                 it.copy(
                     phase = StaffWorkspacePhase.LOCKED,
                     lockedReason = extractLockReasonMessage(state.reason)
+                )
+            }
+        } else if (state is StaffAuthState.LoggedOut || errorMessage.contains("expired", ignoreCase = true)) {
+            clearListsImmediately()
+            _uiState.update {
+                it.copy(
+                    phase = StaffWorkspacePhase.LOCKED,
+                    lockedReason = "Session authentication revoked or expired"
                 )
             }
         }

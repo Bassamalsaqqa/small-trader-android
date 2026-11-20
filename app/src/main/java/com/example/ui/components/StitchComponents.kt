@@ -64,10 +64,22 @@ object StitchBidiUtils {
         return "$prefix \u2066BILL-${String.format(Locale.US, "%04d", number)}\u2069"
     }
 
+    fun formatBillCode(code: String, prefix: String = "شراء"): String {
+        val clean = if (code.startsWith("#")) code.substring(1) else code
+        return "$prefix \u2066$clean\u2069"
+    }
+
     /**
      * Formats an ILS monetary amount with Western numerals and directional isolation.
      */
     fun formatIls(amount: Double): String {
+        return "\u2066${WesternFormatters.formatIls(amount)}\u2069"
+    }
+
+    /**
+     * Formats an exact BigDecimal ILS monetary amount with Western numerals and directional isolation.
+     */
+    fun formatIls(amount: java.math.BigDecimal?): String {
         return "\u2066${WesternFormatters.formatIls(amount)}\u2069"
     }
 }

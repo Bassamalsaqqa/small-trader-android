@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import com.example.viewmodel.ReadStatus
+import com.example.model.TraderScreen
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -62,8 +64,10 @@ import com.example.ui.components.StitchBadge
 import com.example.ui.components.StitchBadgeTone
 import com.example.ui.components.StitchBidiUtils
 import com.example.ui.components.StitchCard
+import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
+import java.math.BigDecimal
 
 /**
  * Calm, Analytics-Led Merchant Home Screen for Small Trader (التاجر الصغير).
@@ -107,14 +111,37 @@ fun HomeScreen(
     onNavigateToReports: () -> Unit,
     onNavigateToSettings: () -> Unit,
     modifier: Modifier = Modifier,
-    onOpenPurchase: () -> Unit = onNavigateToSuppliers
+    onOpenPurchase: () -> Unit = onNavigateToSuppliers,
+    onRetryRefresh: () -> Unit = {}
 ) {
+    val readStatus = state.readStatusFor(TraderScreen.HOME)
     val lang = state.language
     val canViewReports = state.currentSession.canViewReports()
     val canManageSuppliers = state.currentSession.canManageSuppliers()
     val hasActiveBasket = state.basketItemCount > 0
     val isDark = state.isDarkTheme
     var isSummaryExpanded by rememberSaveable { mutableStateOf(false) }
+
+    val isLiveSession = !state.currentSession.isDemoSession
+    val liveMetrics = state.liveHomeMetrics
+    val liveCurrency = liveMetrics?.businessInfo?.defaultCurrency ?: "ILS"
+
+    val salesTodayDisplay = when {
+        isLiveSession -> liveMetrics?.salesTodayTotal?.let { "${it.toPlainString()} $liveCurrency" } ?: "—"
+        else -> WesternFormatters.formatIls(state.todaySalesTotalIls)
+    }
+    val invoiceCountDisplay = when {
+        isLiveSession -> liveMetrics?.salesTodayCount?.let { WesternFormatters.formatInt(it) } ?: "—"
+        else -> WesternFormatters.formatInt(state.todayInvoiceCount)
+    }
+    val cashDrawerDisplay = when {
+        isLiveSession -> liveMetrics?.cashInDrawer?.let { "${it.toPlainString()} $liveCurrency" } ?: "—"
+        else -> WesternFormatters.formatIls(state.shiftCashSalesIls)
+    }
+    val creditSalesDisplay = when {
+        isLiveSession -> liveMetrics?.totalReceivables?.let { "${it.toPlainString()} $liveCurrency" } ?: "—"
+        else -> WesternFormatters.formatIls(state.shiftCreditSalesIls)
+    }
 
     LazyColumn(
         modifier = modifier
@@ -123,6 +150,52 @@ fun HomeScreen(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        if (readStatus == ReadStatus.LOADING) {
+            item { androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        } else if (readStatus == ReadStatus.FAILED) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("home_refresh_error_banner")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.WarningAmber,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Text(
+                            text = lang.tr("تعذر تحديث البيانات من الخادم", "Could not refresh data from server"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = onRetryRefresh,
+                            modifier = Modifier.heightIn(min = 44.dp)
+                        ) {
+                            Text(
+                                text = lang.tr("إعادة المحاولة", "Retry"),
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // 1. TOP STORE IDENTITY & OPERATOR WELCOME CARD (STRICTLY CARD-CONTAINED)
         item {
             Surface(
@@ -180,7 +253,12 @@ fun HomeScreen(
                                     modifier = Modifier.testTag("home_store_title")
                                 )
                                 Text(
-                                    text = "${state.businessInfo.name(lang)} • ${state.currentSession.name}",
+                                    text = if (isLiveSession && liveMetrics != null) {
+                                        val liveName = if (lang == AppLanguage.AR) liveMetrics.businessInfo.nameAr else liveMetrics.businessInfo.nameEn
+                                        "$liveName • ${state.currentSession.name}"
+                                    } else {
+                                        "${state.businessInfo.name(lang)} • ${state.currentSession.name}"
+                                    },
                                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
@@ -380,15 +458,26 @@ fun HomeScreen(
                                 ) {
                                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                         Text(
-                                            text = "${WesternFormatters.formatIls(state.todaySalesTotalIls)} • ${WesternFormatters.formatInt(state.todayInvoiceCount)} ${lang.tr("فاتورة", "invoices")}",
+                                            text = if (isLiveSession) {
+                                                "$salesTodayDisplay • $invoiceCountDisplay ${lang.tr("فاتورة", "invoices")}"
+                                            } else {
+                                                "${WesternFormatters.formatIls(state.todaySalesTotalIls)} • ${WesternFormatters.formatInt(state.todayInvoiceCount)} ${lang.tr("فاتورة", "invoices")}"
+                                            },
                                             style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold),
                                             color = MaterialTheme.colorScheme.primary
                                         )
                                         Text(
-                                            text = lang.tr(
-                                                "نقدي: ${WesternFormatters.formatIls(state.shiftCashSalesIls)} • آجل: ${WesternFormatters.formatIls(state.shiftCreditSalesIls)}",
-                                                "Cash: ${WesternFormatters.formatIls(state.shiftCashSalesIls)} • Credit: ${WesternFormatters.formatIls(state.shiftCreditSalesIls)}"
-                                            ),
+                                            text = if (isLiveSession) {
+                                                lang.tr(
+                                                    "الصندوق: $cashDrawerDisplay • الذمم: $creditSalesDisplay",
+                                                    "Drawer: $cashDrawerDisplay • Receivables: $creditSalesDisplay"
+                                                )
+                                            } else {
+                                                lang.tr(
+                                                    "نقدي: ${WesternFormatters.formatIls(state.shiftCashSalesIls)} • آجل: ${WesternFormatters.formatIls(state.shiftCreditSalesIls)}",
+                                                    "Cash: ${WesternFormatters.formatIls(state.shiftCashSalesIls)} • Credit: ${WesternFormatters.formatIls(state.shiftCreditSalesIls)}"
+                                                )
+                                            },
                                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -442,7 +531,7 @@ fun HomeScreen(
                                             fontWeight = FontWeight.Medium
                                         )
                                         Text(
-                                            text = WesternFormatters.formatIls(state.todaySalesTotalIls),
+                                            text = salesTodayDisplay,
                                             style = MaterialTheme.typography.headlineMedium.copy(fontSize = 24.sp),
                                             fontWeight = FontWeight.Bold,
                                             color = successText
@@ -455,7 +544,7 @@ fun HomeScreen(
                                         modifier = Modifier.padding(start = 8.dp)
                                     ) {
                                         Text(
-                                            text = "${WesternFormatters.formatInt(state.todayInvoiceCount)} ${lang.tr("فاتورة", "invoices")}",
+                                            text = "$invoiceCountDisplay ${lang.tr("فاتورة", "invoices")}",
                                             style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
                                             fontWeight = FontWeight.SemiBold,
                                             color = successText,
@@ -493,7 +582,7 @@ fun HomeScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = lang.tr("المقبوض نقداً", "Cash Received"),
+                                                text = if (isLiveSession) lang.tr("نقد الصندوق", "Drawer Cash") else lang.tr("المقبوض نقداً", "Cash Received"),
                                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
                                                 color = cashText,
                                                 fontWeight = FontWeight.Medium,
@@ -508,13 +597,13 @@ fun HomeScreen(
                                             )
                                         }
                                         Text(
-                                            text = WesternFormatters.formatIls(state.shiftCashSalesIls),
+                                            text = cashDrawerDisplay,
                                             style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
                                             fontWeight = FontWeight.Bold,
                                             color = cashText
                                         )
                                         Text(
-                                            text = lang.tr("مبيعات نقدية لليوم", "Today's cash sales"),
+                                            text = if (isLiveSession) lang.tr("الرصيد النقدي الحالي", "Current cash balance") else lang.tr("مبيعات نقدية لليوم", "Today's cash sales"),
                                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                             color = cashText.copy(alpha = 0.75f),
                                             maxLines = 1,
@@ -546,7 +635,7 @@ fun HomeScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = lang.tr("ذمم مؤجلة (آجل)", "Credit Sales"),
+                                                text = if (isLiveSession) lang.tr("ذمم مستحقة", "Receivables") else lang.tr("ذمم مؤجلة (آجل)", "Credit Sales"),
                                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
                                                 color = creditText,
                                                 fontWeight = FontWeight.Medium,
@@ -561,13 +650,13 @@ fun HomeScreen(
                                             )
                                         }
                                         Text(
-                                            text = WesternFormatters.formatIls(state.shiftCreditSalesIls),
+                                            text = creditSalesDisplay,
                                             style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
                                             fontWeight = FontWeight.Bold,
                                             color = creditText
                                         )
                                         Text(
-                                            text = lang.tr("فواتير ذمة لليوم", "Today's credit sales"),
+                                            text = if (isLiveSession) lang.tr("إجمالي ديون الزبائن", "Total receivables") else lang.tr("فواتير ذمة لليوم", "Today's credit sales"),
                                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                             color = creditText.copy(alpha = 0.75f),
                                             maxLines = 1,
@@ -887,7 +976,46 @@ fun HomeScreen(
                         thickness = 1.dp
                     )
 
-                    if (recentInvoices.isNotEmpty()) {
+                    if (isLiveSession && liveMetrics?.recentInvoices != null && liveMetrics.recentInvoices.isNotEmpty()) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            liveMetrics.recentInvoices.take(2).forEachIndexed { index, rec ->
+                                val invRecord = InvoiceRecord(
+                                    id = rec.id.value,
+                                    invoiceNumber = rec.invoiceNumber.filter { it.isDigit() }.toIntOrNull() ?: 0,
+                                    timestamp = rec.date,
+                                    items = emptyList(),
+                                    subtotalExact = rec.total,
+                                    discountExact = java.math.BigDecimal.ZERO,
+                                    netTotalExact = rec.total,
+                                    cashReceivedExact = rec.paid,
+                                    changeReturnedExact = java.math.BigDecimal.ZERO,
+                                    customerId = "",
+                                    customerNote = rec.customerName,
+                                    cashierNameAr = "",
+                                    cashierNameEn = "",
+                                    isPaidInFull = rec.isPaidInFull,
+                                    remainingDebitExact = rec.remaining,
+                                    serverInvoiceUlid = rec.id.value,
+                                    serverInvoiceNumber = rec.invoiceNumber,
+                                    serverPaymentUlid = null,
+                                    serverPaymentReceiptNumber = null,
+                                    serverPostedAt = rec.date,
+                                    outboxStatus = "CONFIRMED"
+                                )
+                                RecentLiveInvoiceRow(
+                                    invoice = rec,
+                                    lang = lang,
+                                    onClick = { onOpenInvoice(invRecord) }
+                                )
+                                if (index < 1 && liveMetrics.recentInvoices.size > 1) {
+                                    HorizontalDivider(
+                                        color = MaterialTheme.colorScheme.outlineVariant,
+                                        thickness = 1.dp
+                                    )
+                                }
+                            }
+                        }
+                    } else if (recentInvoices.isNotEmpty()) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             recentInvoices.forEachIndexed { index, invoice ->
                                 RecentInvoiceRow(
@@ -905,7 +1033,11 @@ fun HomeScreen(
                         }
                     } else {
                         Text(
-                            text = lang.tr("لا توجد فواتير مسجلة اليوم بعد.", "No invoices recorded yet today."),
+                            text = if (isLiveSession && liveMetrics == null) {
+                                lang.tr("الفواتير الأخيرة غير متاحة.", "Recent invoices are unavailable.")
+                            } else {
+                                lang.tr("لا توجد فواتير مسجلة اليوم بعد.", "No invoices recorded yet today.")
+                            },
                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(16.dp)
@@ -1036,6 +1168,101 @@ fun RecentInvoiceRow(
             ) {
                 Text(
                     text = WesternFormatters.formatIls(invoice.netTotalIls),
+                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                StitchBadge(
+                    text = statusLabel,
+                    tone = statusTone
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun RecentLiveInvoiceRow(
+    invoice: com.example.data.mobile.merchantread.HomeRecentInvoice,
+    lang: AppLanguage,
+    onClick: () -> Unit
+) {
+    val isPartial = invoice.paid > java.math.BigDecimal.ZERO && !invoice.isPaidInFull
+    val statusTone = when {
+        invoice.isPaidInFull -> StitchBadgeTone.SUCCESS
+        isPartial -> StitchBadgeTone.WARNING
+        else -> StitchBadgeTone.DANGER
+    }
+    val statusLabel = when {
+        invoice.isPaidInFull -> lang.tr("نقداً", "Cash")
+        isPartial -> lang.tr("سداد جزئي", "Partial")
+        else -> lang.tr("ذمة", "Credit")
+    }
+
+    Surface(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .testTag("recent_invoice_${invoice.invoiceNumber}"),
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Receipt,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = invoice.invoiceNumber,
+                        style = MaterialTheme.typography.titleSmall.copy(fontSize = 14.sp),
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${invoice.date} • ${invoice.customerName.ifBlank { lang.tr("زبون نقدي", "Cash Customer") }}",
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+                modifier = Modifier.padding(start = 8.dp)
+            ) {
+                Text(
+                    text = "${invoice.total.toPlainString()} ${invoice.currency}",
                     style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface

@@ -2,7 +2,10 @@ package com.example.ui.staff
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -72,8 +75,8 @@ fun StaffWorkspaceApp(
                 StaffWorkspacePhase.SIGN_IN -> {
                     StaffSignInScreen(
                         uiState = uiState,
-                        onSignIn = { email, password ->
-                            viewModel.signIn(email, password)
+                        onSignIn = { email, password, rememberSession ->
+                            viewModel.signIn(email, password, rememberSession = rememberSession)
                         },
                         onToggleLanguage = { viewModel.toggleLanguage() },
                         onToggleTheme = { viewModel.toggleTheme() }
@@ -101,6 +104,9 @@ fun StaffWorkspaceApp(
                 StaffWorkspacePhase.READ_READY -> {
                     StaffWorkspaceScreen(
                         uiState = uiState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .windowInsetsPadding(WindowInsets.safeDrawing),
                         onSelectTab = { viewModel.selectTab(it) },
                         onLoadMoreProducts = { viewModel.loadProducts(loadMore = true) },
                         onRefreshProducts = { viewModel.loadProducts(refresh = true) },
@@ -112,7 +118,13 @@ fun StaffWorkspaceApp(
                         onLogout = { viewModel.logout() },
                         onToggleLanguage = { viewModel.toggleLanguage() },
                         onToggleTheme = { viewModel.toggleTheme() },
-                        onRetryOutboxHealth = { viewModel.retryOutboxHealth() }
+                        onRetryOutboxHealth = { viewModel.retryOutboxHealth() },
+                        productSelectorState = viewModel.productSelectorState,
+                        customerSelectorState = viewModel.customerSelectorState,
+                        onSelectProduct = { viewModel.selectProduct(it) },
+                        onClearSelectedProduct = { viewModel.clearSelectedProduct() },
+                        onSelectCustomer = { viewModel.selectCustomer(it) },
+                        onClearSelectedCustomer = { viewModel.clearSelectedCustomer() }
                     )
                 }
                 StaffWorkspacePhase.LOCKED -> {

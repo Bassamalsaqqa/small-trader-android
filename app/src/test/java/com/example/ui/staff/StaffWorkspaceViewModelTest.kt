@@ -593,7 +593,7 @@ class StaffWorkspaceViewModelTest {
             assertEquals(StaffWorkspacePhase.SIGN_IN, vm.uiState.value.phase)
 
             // 2. Perform sign in: triggers wire challenge -> login -> bootstrap -> products & customers
-            vm.signIn("cashier@smalltrader.example", passwordOverride = "CorrectHorseBatteryStaple123!")
+            vm.signIn("cashier@smalltrader.example", passwordOverride = "CorrectHorseBatteryStaple123!", rememberSession = true)
             advanceUntilIdle()
 
             // Verify sequential requests over wire
@@ -818,7 +818,7 @@ class StaffWorkspaceViewModelTest {
             )
             advanceUntilIdle()
 
-            vm.signIn("cashier@smalltrader.example", passwordOverride = "CorrectHorseBatteryStaple123!")
+            vm.signIn("cashier@smalltrader.example", passwordOverride = "CorrectHorseBatteryStaple123!", rememberSession = true)
             advanceUntilIdle()
             assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
             assertTrue(env.sessionStore.hasSessionFile())
@@ -833,6 +833,55 @@ class StaffWorkspaceViewModelTest {
             assertTrue(state.customers.isEmpty())
             assertNull(state.activeCompany)
             assertNull(state.staffActor)
+        } finally {
+            env.tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun realCoordinator_signIn_withRememberSessionFalse_staysSessionOnlyWithoutPersistingToDisk() = runTest(testDispatcher) {
+        val env = setupRealCoordinator()
+        try {
+            val fixtures = locateFixturesDir()
+            val challengeJson = File(fixtures, "golden-auth-challenge.json").readText(Charsets.UTF_8)
+            val challengeRes = StrictJsonParser.parse(challengeJson).asObject().require("response")
+            val loginJson = File(fixtures, "golden-auth-login.json").readText(Charsets.UTF_8)
+            val loginRes = StrictJsonParser.parse(loginJson).asObject().require("response")
+            val bootstrapJson = File(fixtures, "golden-bootstrap.json").readText(Charsets.UTF_8)
+            val productJson = File(fixtures, "golden-product-catalog.json").readText(Charsets.UTF_8)
+            val customerJson = File(fixtures, "golden-customer-directory.json").readText(Charsets.UTF_8)
+
+            env.transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/challenge")] = {
+                TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(challengeRes))
+            }
+            env.transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/login")] = {
+                TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(loginRes))
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/bootstrap")] = {
+                TransportResponse(statusCode = 200, body = bootstrapJson)
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/products")] = {
+                TransportResponse(statusCode = 200, body = productJson)
+            }
+            env.transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S6789A/customers")] = {
+                TransportResponse(statusCode = 200, body = customerJson)
+            }
+
+            val vm = StaffWorkspaceViewModel(
+                coordinator = env.coordinator,
+                configuredOrigin = "https://api.smalltrader.example",
+                ioDispatcher = testDispatcher
+            )
+            advanceUntilIdle()
+
+            vm.signIn("cashier@smalltrader.example", passwordOverride = "CorrectHorseBatteryStaple123!", rememberSession = false)
+            advanceUntilIdle()
+
+            val state = vm.uiState.value
+            assertEquals(StaffWorkspacePhase.READ_READY, state.phase)
+            assertFalse("Session must not be persisted to disk when rememberSession is false", env.sessionStore.hasSessionFile())
+            assertEquals(2, state.products.size)
+            assertEquals(2, state.customers.size)
         } finally {
             env.tempDir.deleteRecursively()
         }
@@ -1001,6 +1050,390 @@ class StaffWorkspaceViewModelTest {
         assertEquals("", pendingSecret.get(vm))
     }
 
+    @Test
+    fun productSelector_authDenied401_locksUiAndClearsSelectionsAndLists() = runTest(testDispatcher) {
+        fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyId1, "Al-Zaytouna")
+        fakeCoordinator.restoreResult = CoordinatorResult.Success(fakeCoordinator.authState, generation = 1L, companyId = testCompanyId1)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher
+        )
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+
+        // Select an item so a card is visible
+        val initialProduct = fakeCoordinator.createProductItem("01JCV8X9M2NQW3TYZ4R5S67891", "SKU-DEF", "Default Olive Oil")
+        vm.selectProduct(initialProduct)
+        assertEquals(initialProduct, vm.uiState.value.selectedProduct)
+
+        // Force 401 on next product query
+        fakeCoordinator.getProductsResultProvider = {
+            fakeCoordinator.authState = StaffAuthState.Locked(LockReason.AuthDenied())
+            CoordinatorResult.AuthDenied()
+        }
+
+        // Trigger search on product selector
+        vm.productSelectorState.onQueryChanged("Olive")
+        advanceUntilIdle()
+
+        // UI transitions to LOCKED
+        val state = vm.uiState.value
+        assertEquals(StaffWorkspacePhase.LOCKED, state.phase)
+        assertTrue(state.lockedReason.orEmpty().contains("401") || state.lockedReason.orEmpty().contains("revoked"))
+        // Both selections and cached lists must be wiped immediately
+        assertNull(state.selectedProduct)
+        assertNull(state.selectedCustomer)
+        assertTrue(state.products.isEmpty())
+        assertTrue(state.customers.isEmpty())
+        assertTrue(vm.productSelectorState.candidates.isEmpty())
+        assertNull(vm.productSelectorState.selectedItem)
+    }
+
+    @Test
+    fun productSelector_forbidden403_locksUiAndClearsSelectionsAndLists() = runTest(testDispatcher) {
+        fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyId1, "Al-Zaytouna")
+        fakeCoordinator.restoreResult = CoordinatorResult.Success(fakeCoordinator.authState, generation = 1L, companyId = testCompanyId1)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher
+        )
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+
+        val initialProduct = fakeCoordinator.createProductItem("01JCV8X9M2NQW3TYZ4R5S67891", "SKU-DEF", "Default Olive Oil")
+        vm.selectProduct(initialProduct)
+        assertEquals(initialProduct, vm.uiState.value.selectedProduct)
+
+        // Force 403 Forbidden
+        fakeCoordinator.getProductsResultProvider = {
+            fakeCoordinator.authState = StaffAuthState.Locked(LockReason.MembershipDenied())
+            CoordinatorResult.Forbidden()
+        }
+
+        vm.productSelectorState.onQueryChanged("Olive")
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(StaffWorkspacePhase.LOCKED, state.phase)
+        assertTrue(state.lockedReason.orEmpty().contains("403") || state.lockedReason.orEmpty().contains("forbidden"))
+        assertNull(state.selectedProduct)
+        assertNull(state.selectedCustomer)
+        assertTrue(state.products.isEmpty())
+        assertTrue(state.customers.isEmpty())
+        assertTrue(vm.productSelectorState.candidates.isEmpty())
+    }
+
+    @Test
+    fun customerSelector_authDenied401_locksUiAndClearsSelectionsAndLists() = runTest(testDispatcher) {
+        fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyId1, "Al-Zaytouna")
+        fakeCoordinator.restoreResult = CoordinatorResult.Success(fakeCoordinator.authState, generation = 1L, companyId = testCompanyId1)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher
+        )
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+
+        val initialCustomer = CustomerDirectoryItem(
+            id = ServerUlid("01JCV8X9M2NQW3TYZ4R5S67898"),
+            code = "C-DEFAULT",
+            name = "Ahmad Al-Sakka",
+            phone = "0599111222",
+            isWalkIn = false
+        )
+        vm.selectCustomer(initialCustomer)
+        assertEquals(initialCustomer, vm.uiState.value.selectedCustomer)
+
+        fakeCoordinator.getCustomersResultProvider = {
+            fakeCoordinator.authState = StaffAuthState.Locked(LockReason.AuthDenied())
+            CoordinatorResult.AuthDenied()
+        }
+
+        vm.customerSelectorState.onQueryChanged("Ahmad")
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(StaffWorkspacePhase.LOCKED, state.phase)
+        assertTrue(state.lockedReason.orEmpty().contains("401") || state.lockedReason.orEmpty().contains("revoked"))
+        assertNull(state.selectedProduct)
+        assertNull(state.selectedCustomer)
+        assertTrue(state.products.isEmpty())
+        assertTrue(state.customers.isEmpty())
+        assertTrue(vm.customerSelectorState.candidates.isEmpty())
+        assertNull(vm.customerSelectorState.selectedItem)
+    }
+
+    @Test
+    fun customerSelector_forbidden403_locksUiAndClearsSelectionsAndLists() = runTest(testDispatcher) {
+        fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyId1, "Al-Zaytouna")
+        fakeCoordinator.restoreResult = CoordinatorResult.Success(fakeCoordinator.authState, generation = 1L, companyId = testCompanyId1)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher
+        )
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+
+        val initialCustomer = CustomerDirectoryItem(
+            id = ServerUlid("01JCV8X9M2NQW3TYZ4R5S67898"),
+            code = "C-DEFAULT",
+            name = "Ahmad Al-Sakka",
+            phone = "0599111222",
+            isWalkIn = false
+        )
+        vm.selectCustomer(initialCustomer)
+
+        fakeCoordinator.getCustomersResultProvider = {
+            fakeCoordinator.authState = StaffAuthState.Locked(LockReason.MembershipDenied())
+            CoordinatorResult.Forbidden()
+        }
+
+        vm.customerSelectorState.onQueryChanged("Ahmad")
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(StaffWorkspacePhase.LOCKED, state.phase)
+        assertTrue(state.lockedReason.orEmpty().contains("403") || state.lockedReason.orEmpty().contains("forbidden"))
+        assertNull(state.selectedProduct)
+        assertNull(state.selectedCustomer)
+        assertTrue(state.products.isEmpty())
+        assertTrue(state.customers.isEmpty())
+        assertTrue(vm.customerSelectorState.candidates.isEmpty())
+    }
+
+    @Test
+    fun productSelector_loadMore_authDenied401_locksUiAndClearsSelectionsAndLists() = runTest(testDispatcher) {
+        fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyId1, "Al-Zaytouna")
+        fakeCoordinator.restoreResult = CoordinatorResult.Success(fakeCoordinator.authState, generation = 1L, companyId = testCompanyId1)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher
+        )
+        advanceUntilIdle()
+
+        val item1 = fakeCoordinator.createProductItem("01JCV8X9M2NQW3TYZ4R5S67891", "SKU-1", "Olive Oil 1")
+        vm.selectProduct(item1)
+
+        // First page succeeds with hasMore = true
+        fakeCoordinator.getProductsResultProvider = {
+            CoordinatorResult.Success(
+                ProductCatalogResponse(
+                    companyId = testCompanyId1,
+                    catalogSnapshotVersion = "v1",
+                    generatedAt = "2026-11-10T12:00:00Z",
+                    nextCursor = "cursor_p2",
+                    hasMore = true,
+                    products = listOf(item1)
+                ),
+                generation = fakeCoordinator.currentGeneration,
+                companyId = testCompanyId1,
+                actorId = testActorId
+            )
+        }
+
+        vm.productSelectorState.onQueryChanged("Olive")
+        advanceUntilIdle()
+        assertEquals(1, vm.productSelectorState.candidates.size)
+        assertTrue(vm.productSelectorState.hasMore)
+
+        // Load more encounters 401 Auth Denial
+        fakeCoordinator.getProductsResultProvider = {
+            fakeCoordinator.authState = StaffAuthState.Locked(LockReason.AuthDenied())
+            CoordinatorResult.AuthDenied()
+        }
+
+        vm.productSelectorState.loadMore()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(StaffWorkspacePhase.LOCKED, state.phase)
+        assertNull(state.selectedProduct)
+        assertTrue(state.products.isEmpty())
+        assertTrue(vm.productSelectorState.candidates.isEmpty())
+    }
+
+    @Test
+    fun customerSelector_loadMore_authDenied401_locksUiAndClearsSelectionsAndLists() = runTest(testDispatcher) {
+        fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyId1, "Al-Zaytouna")
+        fakeCoordinator.restoreResult = CoordinatorResult.Success(fakeCoordinator.authState, generation = 1L, companyId = testCompanyId1)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher
+        )
+        advanceUntilIdle()
+
+        val c1 = CustomerDirectoryItem(
+            id = ServerUlid("01JCV8X9M2NQW3TYZ4R5S67898"),
+            code = "C-1",
+            name = "Ahmad Al-Sakka",
+            phone = "0599111222",
+            isWalkIn = false
+        )
+        vm.selectCustomer(c1)
+
+        fakeCoordinator.getCustomersResultProvider = {
+            CoordinatorResult.Success(
+                CustomerDirectoryResponse(
+                    companyId = testCompanyId1,
+                    generatedAt = "2026-11-10T12:00:00Z",
+                    nextCursor = "cursor_c2",
+                    hasMore = true,
+                    customers = listOf(c1)
+                ),
+                generation = fakeCoordinator.currentGeneration,
+                companyId = testCompanyId1,
+                actorId = testActorId
+            )
+        }
+
+        vm.customerSelectorState.onQueryChanged("Ahmad")
+        advanceUntilIdle()
+        assertEquals(1, vm.customerSelectorState.candidates.size)
+        assertTrue(vm.customerSelectorState.hasMore)
+
+        // Load more encounters 401 Auth Denial
+        fakeCoordinator.getCustomersResultProvider = {
+            fakeCoordinator.authState = StaffAuthState.Locked(LockReason.AuthDenied())
+            CoordinatorResult.AuthDenied()
+        }
+
+        vm.customerSelectorState.loadMore()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(StaffWorkspacePhase.LOCKED, state.phase)
+        assertNull(state.selectedCustomer)
+        assertTrue(state.customers.isEmpty())
+        assertTrue(vm.customerSelectorState.candidates.isEmpty())
+    }
+
+    @Test
+    fun productSelector_obsoleteFirstPage_afterCompanySwitch_discardedWithoutLockingFreshCompany() = runTest(testDispatcher) {
+        fakeCoordinator.companyNames[testCompanyId1] = "Company 1"
+        fakeCoordinator.companyNames[testCompanyId2] = "Company 2"
+        fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyId1, "Company 1")
+        fakeCoordinator.restoreResult = CoordinatorResult.Success(fakeCoordinator.authState, generation = 1L, companyId = testCompanyId1)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher
+        )
+        advanceUntilIdle()
+        assertEquals(StaffWorkspacePhase.READ_READY, vm.uiState.value.phase)
+        assertEquals(testCompanyId1.value, vm.uiState.value.activeCompany?.companyId)
+
+        // When query is triggered, company switches to testCompanyId2, then old query returns AuthDenied
+        fakeCoordinator.getProductsResultProvider = {
+            fakeCoordinator.switchCompany(testCompanyId2)
+            CoordinatorResult.AuthDenied()
+        }
+
+        vm.productSelectorState.onQueryChanged("Olive")
+        advanceUntilIdle()
+
+        // Obsolete query from old company must NOT lock or corrupt session
+        assertFalse(vm.uiState.value.phase == StaffWorkspacePhase.LOCKED)
+        assertEquals("Olive", vm.productSelectorState.query)
+
+        // Also verify handleSelectorDenial directly discards stale scope
+        vm.handleSelectorDenial(requestGen = 1L, requestCompanyId = testCompanyId1.value, isForbidden = false)
+        assertFalse(vm.uiState.value.phase == StaffWorkspacePhase.LOCKED)
+    }
+
+    @Test
+    fun productSelector_obsoleteLoadMore_afterCompanySwitch_discardedWithoutLockingFreshCompany() = runTest(testDispatcher) {
+        fakeCoordinator.companyNames[testCompanyId1] = "Company 1"
+        fakeCoordinator.companyNames[testCompanyId2] = "Company 2"
+        fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyId1, "Company 1")
+        fakeCoordinator.restoreResult = CoordinatorResult.Success(fakeCoordinator.authState, generation = 1L, companyId = testCompanyId1)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher
+        )
+        advanceUntilIdle()
+
+        val item1 = fakeCoordinator.createProductItem("01JCV8X9M2NQW3TYZ4R5S67891", "SKU-1", "Olive Oil 1")
+        fakeCoordinator.getProductsResultProvider = {
+            CoordinatorResult.Success(
+                ProductCatalogResponse(
+                    companyId = testCompanyId1,
+                    catalogSnapshotVersion = "v1",
+                    generatedAt = "2026-11-10T12:00:00Z",
+                    nextCursor = "cursor_p2",
+                    hasMore = true,
+                    products = listOf(item1)
+                ),
+                generation = fakeCoordinator.currentGeneration,
+                companyId = testCompanyId1,
+                actorId = testActorId
+            )
+        }
+
+        vm.productSelectorState.onQueryChanged("Olive")
+        advanceUntilIdle()
+        assertTrue(vm.productSelectorState.hasMore)
+
+        // On loadMore, switch company before returning 401
+        fakeCoordinator.getProductsResultProvider = {
+            fakeCoordinator.switchCompany(testCompanyId2)
+            CoordinatorResult.AuthDenied()
+        }
+
+        vm.productSelectorState.loadMore()
+        advanceUntilIdle()
+
+        // Obsolete loadMore 401 must NOT lock
+        assertFalse(vm.uiState.value.phase == StaffWorkspacePhase.LOCKED)
+        assertEquals("Olive", vm.productSelectorState.query)
+    }
+
+    @Test
+    fun productSelector_sessionExpired_locksSafelyWithoutRawDetails() = runTest(testDispatcher) {
+        fakeCoordinator.authState = fakeCoordinator.createReadReadyState(testCompanyId1, "Al-Zaytouna")
+        fakeCoordinator.restoreResult = CoordinatorResult.Success(fakeCoordinator.authState, generation = 1L, companyId = testCompanyId1)
+
+        val vm = StaffWorkspaceViewModel(
+            coordinator = fakeCoordinator,
+            configuredOrigin = "https://small-trader.example.com",
+            ioDispatcher = testDispatcher
+        )
+        advanceUntilIdle()
+
+        val initialProduct = fakeCoordinator.createProductItem("01JCV8X9M2NQW3TYZ4R5S67891", "SKU-DEF", "Default Olive Oil")
+        vm.selectProduct(initialProduct)
+
+        fakeCoordinator.getProductsResultProvider = {
+            fakeCoordinator.authState = StaffAuthState.LoggedOut
+            CoordinatorResult.Error("Session expired at 2026-11-10T12:00:00Z")
+        }
+
+        vm.productSelectorState.onQueryChanged("Olive")
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(StaffWorkspacePhase.LOCKED, state.phase)
+        assertEquals("Session authentication revoked or expired", state.lockedReason)
+        assertFalse(state.lockedReason.orEmpty().contains("2026-11-10"))
+        assertNull(state.selectedProduct)
+        assertTrue(state.products.isEmpty())
+        assertTrue(vm.productSelectorState.candidates.isEmpty())
+    }
+
 }
 
 private class RoutingMockTransport : ReadClientTransport {
@@ -1041,6 +1474,8 @@ class FakeStaffSessionCoordinator(
     var retryMfaResultProvider: ((String, String, String?, String?) -> CoordinatorResult<StaffAuthState>)? = null
     var getProductsHandler: ((PaginationQuery) -> ProductCatalogResponse)? = null
     var getCustomersHandler: ((PaginationQuery) -> CustomerDirectoryResponse)? = null
+    var getProductsResultProvider: ((PaginationQuery) -> CoordinatorResult<ProductCatalogResponse>)? = null
+    var getCustomersResultProvider: ((PaginationQuery) -> CoordinatorResult<CustomerDirectoryResponse>)? = null
     var forceAuthDenialOnProducts: Boolean = false
     var remoteRevocationStatus: RemoteRevocationStatus = RemoteRevocationStatus.Revoked
     val companyNames: MutableMap<ServerUlid, String> = mutableMapOf()
@@ -1055,7 +1490,7 @@ class FakeStaffSessionCoordinator(
         return restoreResult ?: CoordinatorResult.Success(StaffAuthState.LoggedOut, generation = currentGeneration)
     }
 
-    override fun requestChallenge(appVersion: String): CoordinatorResult<AuthChallengeResponse> {
+    override fun requestChallenge(appVersion: String, rememberSession: Boolean): CoordinatorResult<AuthChallengeResponse> {
         return CoordinatorResult.Success(
             AuthChallengeResponse(
                 challengeId = ClientUuid("3fa85f64-5717-4562-b3fc-2c963f66afa7"),
@@ -1111,6 +1546,9 @@ class FakeStaffSessionCoordinator(
     }
 
     override fun getProducts(query: PaginationQuery): CoordinatorResult<ProductCatalogResponse> {
+        getProductsResultProvider?.let { provider ->
+            return provider(query)
+        }
         if (forceAuthDenialOnProducts) {
             authState = StaffAuthState.Locked(LockReason.AuthDenied())
             return CoordinatorResult.AuthDenied()
@@ -1131,6 +1569,9 @@ class FakeStaffSessionCoordinator(
     }
 
     override fun getCustomers(query: PaginationQuery): CoordinatorResult<CustomerDirectoryResponse> {
+        getCustomersResultProvider?.let { provider ->
+            return provider(query)
+        }
         val ready = authState as? StaffAuthState.ReadReady
             ?: return CoordinatorResult.Error("Not in ReadReady state")
         val companyId = ready.session.selectedCompanyId ?: initialCompanyId

@@ -54,13 +54,14 @@ data class UserSession(
     val branchNameAr: String,
     val branchNameEn: String,
     val isDemoSession: Boolean = true,
-    val deviceSessionName: String = "POS Terminal (Demo)"
+    val deviceSessionName: String = "POS Terminal (Demo)",
+    val permissions: Set<String>? = null
 ) {
     fun branch(lang: AppLanguage): String = lang.tr(branchNameAr, branchNameEn)
-    fun canManageInventory(): Boolean = role == UserRole.OWNER || role == UserRole.MANAGER
-    fun canViewReports(): Boolean = role == UserRole.OWNER || role == UserRole.MANAGER
-    fun canManageSuppliers(): Boolean = role == UserRole.OWNER || role == UserRole.MANAGER
-    fun canManageExpenses(): Boolean = role == UserRole.OWNER || role == UserRole.MANAGER
+    fun canManageInventory(): Boolean = permissions?.any { it in setOf("inventory.product.manage", "inventory.stock.view", "inventory.stock.adjust") } ?: (role == UserRole.OWNER || role == UserRole.MANAGER)
+    fun canViewReports(): Boolean = permissions?.contains("reports.financial.view") ?: (role == UserRole.OWNER || role == UserRole.MANAGER)
+    fun canManageSuppliers(): Boolean = permissions?.contains("vendors.view") ?: (role == UserRole.OWNER || role == UserRole.MANAGER)
+    fun canManageExpenses(): Boolean = permissions?.any { it in setOf("money.expense.view", "money.expense.manage") } ?: (role == UserRole.OWNER || role == UserRole.MANAGER)
     fun canApplyDiscounts(): Boolean = true
 }
 
@@ -96,25 +97,133 @@ data class Product(
     val nameEn: String,
     val category: ProductCategory,
     val barcode: String,
-    val priceIls: Double,
-    val costIls: Double,
+    val priceExact: BigDecimal?,
+    val costExact: BigDecimal? = null,
     val unitAr: String,
     val unitEn: String,
     val stockCount: Int,
     val minStockThreshold: Int = 8,
     val accentHex: Long,
-    val isStockTracked: Boolean = true, // False for custom quick items / non-stock service lines
-    val warehouseAr: String = "المستودع الرئيسي - نابلس",
-    val warehouseEn: String = "Main Warehouse - Nablus",
-    val lotBatchCode: String = "LOT-2026-A",
+    val isStockTracked: Boolean = true,
+    val warehouseName: String? = null,
+    val lotBatchCode: String? = null,
     val expiryDate: String? = null,
-    val isWeightedDisplayOnly: Boolean = false
+    val isWeightedDisplayOnly: Boolean = false,
+    val productUnitId: String? = null,
+    val taxRateId: String? = null,
+    val taxRateExact: BigDecimal? = null,
+    val stockCountExact: BigDecimal = BigDecimal.valueOf(stockCount.toLong()),
+    val minStockThresholdExact: BigDecimal? = BigDecimal.valueOf(minStockThreshold.toLong()),
+    val conversionToBaseExact: BigDecimal = BigDecimal.ONE
 ) {
+    constructor(
+        id: String,
+        nameAr: String,
+        nameEn: String,
+        category: ProductCategory,
+        barcode: String,
+        priceIls: Double,
+        costIls: Double,
+        unitAr: String,
+        unitEn: String,
+        stockCount: Int,
+        minStockThreshold: Int = 8,
+        accentHex: Long,
+        isStockTracked: Boolean = true,
+        warehouseAr: String? = null,
+        warehouseEn: String? = null,
+        lotBatchCode: String? = null,
+        expiryDate: String? = null,
+        isWeightedDisplayOnly: Boolean = false
+    ) : this(
+        id = id,
+        nameAr = nameAr,
+        nameEn = nameEn,
+        category = category,
+        barcode = barcode,
+        priceExact = if (priceIls.isNaN() || priceIls.isInfinite()) null else BigDecimal(priceIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        costExact = if (costIls.isNaN() || costIls.isInfinite()) null else BigDecimal(costIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        unitAr = unitAr,
+        unitEn = unitEn,
+        stockCount = stockCount,
+        minStockThreshold = minStockThreshold,
+        accentHex = accentHex,
+        isStockTracked = isStockTracked,
+        warehouseName = warehouseAr ?: warehouseEn,
+        lotBatchCode = lotBatchCode,
+        expiryDate = expiryDate,
+        isWeightedDisplayOnly = isWeightedDisplayOnly,
+        productUnitId = null,
+        taxRateId = null,
+        taxRateExact = null,
+        stockCountExact = BigDecimal.valueOf(stockCount.toLong()),
+        minStockThresholdExact = BigDecimal.valueOf(minStockThreshold.toLong()),
+        conversionToBaseExact = BigDecimal.ONE
+    )
+
+    constructor(
+        id: String,
+        nameAr: String,
+        nameEn: String,
+        category: ProductCategory,
+        barcode: String,
+        priceExact: BigDecimal?,
+        costExact: BigDecimal? = null,
+        unitAr: String,
+        unitEn: String,
+        stockCountExact: BigDecimal,
+        minStockThresholdExact: BigDecimal? = BigDecimal.valueOf(8),
+        accentHex: Long,
+        isStockTracked: Boolean = true,
+        warehouseName: String? = null,
+        lotBatchCode: String? = null,
+        expiryDate: String? = null,
+        isWeightedDisplayOnly: Boolean = false,
+        productUnitId: String? = null,
+        taxRateId: String? = null,
+        taxRateExact: BigDecimal? = null,
+        conversionToBaseExact: BigDecimal = BigDecimal.ONE
+    ) : this(
+        id = id,
+        nameAr = nameAr,
+        nameEn = nameEn,
+        category = category,
+        barcode = barcode,
+        priceExact = priceExact,
+        costExact = costExact,
+        unitAr = unitAr,
+        unitEn = unitEn,
+        stockCount = stockCountExact.toInt(),
+        minStockThreshold = minStockThresholdExact?.toInt() ?: 8,
+        accentHex = accentHex,
+        isStockTracked = isStockTracked,
+        warehouseName = warehouseName,
+        lotBatchCode = lotBatchCode,
+        expiryDate = expiryDate,
+        isWeightedDisplayOnly = isWeightedDisplayOnly,
+        productUnitId = productUnitId,
+        taxRateId = taxRateId,
+        taxRateExact = taxRateExact,
+        stockCountExact = stockCountExact,
+        minStockThresholdExact = minStockThresholdExact,
+        conversionToBaseExact = conversionToBaseExact
+    )
+
+    val priceIls: Double get() = priceExact?.toDouble() ?: 0.0
+    val costIls: Double get() = costExact?.toDouble() ?: 0.0
+    val priceString: String get() = priceExact?.toPlainString() ?: ""
+    val costString: String? get() = costExact?.toPlainString()
+    val stockCountInt: Int get() = stockCount
+    val minStockThresholdInt: Int get() = minStockThreshold
+    val warehouseAr: String? get() = warehouseName
+    val warehouseEn: String? get() = warehouseName
+    val hasExplicitPrice: Boolean get() = priceExact != null
+
     fun name(lang: AppLanguage): String = lang.tr(nameAr, nameEn)
     fun unit(lang: AppLanguage): String = lang.tr(unitAr, unitEn)
-    fun warehouse(lang: AppLanguage): String = lang.tr(warehouseAr, warehouseEn)
+    fun warehouse(lang: AppLanguage): String = warehouseName ?: lang.tr("المستودع الرئيسي", "Main Warehouse")
     val isLowStock: Boolean
-        get() = isStockTracked && stockCount <= minStockThreshold
+        get() = isStockTracked && stockCountExact <= (minStockThresholdExact ?: BigDecimal.valueOf(8))
 
     val normalizedSearchTokens: String = ProductSearch.normalize("$nameAr $nameEn $unitAr $unitEn $barcode ${category.labelAr} ${category.labelEn}")
     val normalizedBarcode: String = ProductSearch.normalize(barcode)
@@ -132,13 +241,20 @@ data class Product(
 
 data class BasketItem(
     val product: Product,
-    val quantity: Int
+    val quantity: BigDecimal,
+    val unitPriceExact: BigDecimal = product.priceExact ?: BigDecimal.ZERO
 ) {
+    constructor(product: Product, quantity: Int) : this(
+        product = product,
+        quantity = BigDecimal.valueOf(quantity.toLong()),
+        unitPriceExact = product.priceExact ?: BigDecimal.ZERO
+    )
+
+    val lineTotalDecimal: BigDecimal
+        get() = quantity.multiply(unitPriceExact).setScale(2, RoundingMode.HALF_UP)
+
     val lineTotal: Double
-        get() = BigDecimal(product.priceIls.toString())
-            .multiply(BigDecimal(quantity.toString()))
-            .setScale(2, RoundingMode.HALF_UP)
-            .toDouble()
+        get() = lineTotalDecimal.toDouble()
 }
 
 data class SaleDraft(
@@ -155,8 +271,10 @@ data class SaleDraft(
     val netTotalIls: Double = items.sumOf { it.lineTotal }
 ) {
     fun title(lang: AppLanguage): String = lang.tr(titleAr, titleEn)
+    val totalQuantityDecimal: BigDecimal
+        get() = items.fold(BigDecimal.ZERO) { acc, it -> acc.add(it.quantity) }
     val totalQuantity: Int
-        get() = items.sumOf { it.quantity }
+        get() = totalQuantityDecimal.toInt()
 }
 
 enum class DiscountPreset(val labelAr: String, val labelEn: String) {
@@ -180,26 +298,93 @@ data class InvoiceRecord(
     val invoiceNumber: Int,
     val timestamp: String,
     val items: List<BasketItem>,
-    val subtotalIls: Double,
-    val discountIls: Double,
-    val netTotalIls: Double,
-    val cashReceivedIls: Double,
-    val changeReturnedIls: Double,
+    val subtotalExact: BigDecimal,
+    val discountExact: BigDecimal,
+    val netTotalExact: BigDecimal,
+    val cashReceivedExact: BigDecimal,
+    val changeReturnedExact: BigDecimal,
     val customerId: String? = null,
     val customerNote: String,
     val cashierNameAr: String,
     val cashierNameEn: String,
     val isPaidInFull: Boolean = true,
-    val remainingDebitIls: Double = 0.0,
-    val printCount: Int = 0
+    val remainingDebitExact: BigDecimal = BigDecimal.ZERO,
+    val printCount: Int = 0,
+    val clientEventId: String? = null,
+    val serverInvoiceUlid: String? = null,
+    val serverInvoiceNumber: String? = null,
+    val serverPaymentUlid: String? = null,
+    val serverPaymentReceiptNumber: String? = null,
+    val serverPostedAt: String? = null,
+    val outboxStatus: String? = null
 ) {
+    constructor(
+        id: String,
+        invoiceNumber: Int,
+        timestamp: String,
+        items: List<BasketItem>,
+        subtotalIls: Double,
+        discountIls: Double,
+        netTotalIls: Double,
+        cashReceivedIls: Double,
+        changeReturnedIls: Double,
+        customerId: String? = null,
+        customerNote: String,
+        cashierNameAr: String,
+        cashierNameEn: String,
+        isPaidInFull: Boolean = true,
+        remainingDebitIls: Double = 0.0,
+        printCount: Int = 0,
+        clientEventId: String? = null,
+        serverInvoiceUlid: String? = null,
+        serverInvoiceNumber: String? = null,
+        serverPaymentUlid: String? = null,
+        serverPaymentReceiptNumber: String? = null,
+        serverPostedAt: String? = null,
+        outboxStatus: String? = null
+    ) : this(
+        id = id,
+        invoiceNumber = invoiceNumber,
+        timestamp = timestamp,
+        items = items,
+        subtotalExact = BigDecimal(subtotalIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        discountExact = BigDecimal(discountIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        netTotalExact = BigDecimal(netTotalIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        cashReceivedExact = BigDecimal(cashReceivedIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        changeReturnedExact = BigDecimal(changeReturnedIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        customerId = customerId,
+        customerNote = customerNote,
+        cashierNameAr = cashierNameAr,
+        cashierNameEn = cashierNameEn,
+        isPaidInFull = isPaidInFull,
+        remainingDebitExact = BigDecimal(remainingDebitIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        printCount = printCount,
+        clientEventId = clientEventId,
+        serverInvoiceUlid = serverInvoiceUlid,
+        serverInvoiceNumber = serverInvoiceNumber,
+        serverPaymentUlid = serverPaymentUlid,
+        serverPaymentReceiptNumber = serverPaymentReceiptNumber,
+        serverPostedAt = serverPostedAt,
+        outboxStatus = outboxStatus
+    )
+
+    val subtotalIls: Double get() = subtotalExact.toDouble()
+    val discountIls: Double get() = discountExact.toDouble()
+    val netTotalIls: Double get() = netTotalExact.toDouble()
+    val cashReceivedIls: Double get() = cashReceivedExact.toDouble()
+    val changeReturnedIls: Double get() = changeReturnedExact.toDouble()
+    val remainingDebitIls: Double get() = remainingDebitExact.toDouble()
+
+    val totalQuantityDecimal: BigDecimal
+        get() = items.fold(BigDecimal.ZERO) { acc, it -> acc.add(it.quantity) }
+
     val totalQuantity: Int
-        get() = items.sumOf { it.quantity }
+        get() = totalQuantityDecimal.toInt()
 
     val paymentStatus: InvoicePaymentStatus
         get() = when {
-            isPaidInFull || remainingDebitIls <= 0.005 -> InvoicePaymentStatus.PAID_CASH
-            cashReceivedIls > 0.005 -> InvoicePaymentStatus.PARTIAL
+            isPaidInFull || remainingDebitExact <= BigDecimal("0.005") -> InvoicePaymentStatus.PAID_CASH
+            cashReceivedExact > BigDecimal("0.005") -> InvoicePaymentStatus.PARTIAL
             else -> InvoicePaymentStatus.ON_CREDIT
         }
 }
@@ -208,15 +393,43 @@ data class Customer(
     val id: String,
     val nameAr: String,
     val nameEn: String,
-    val phone: String,
-    val addressAr: String,
-    val addressEn: String,
-    val balanceIls: Double, // positive means customer owes store (debit)
-    val creditLimitIls: Double = 1000.0,
-    val totalPurchasesIls: Double = 0.0
+    val phone: String? = null,
+    val addressAr: String? = null,
+    val addressEn: String? = null,
+    val balanceExact: BigDecimal? = null,
+    val creditLimitExact: BigDecimal? = null,
+    val totalPurchasesExact: BigDecimal? = null,
+    val isWalkIn: Boolean = false,
+    val code: String? = null
 ) {
+    constructor(
+        id: String,
+        nameAr: String,
+        nameEn: String,
+        phone: String,
+        addressAr: String,
+        addressEn: String,
+        balanceIls: Double,
+        creditLimitIls: Double = 1000.0,
+        totalPurchasesIls: Double = 0.0
+    ) : this(
+        id = id,
+        nameAr = nameAr,
+        nameEn = nameEn,
+        phone = phone.ifBlank { null },
+        addressAr = addressAr.ifBlank { null },
+        addressEn = addressEn.ifBlank { null },
+        balanceExact = BigDecimal(balanceIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        creditLimitExact = BigDecimal(creditLimitIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        totalPurchasesExact = BigDecimal(totalPurchasesIls.toString()).setScale(2, RoundingMode.HALF_UP)
+    )
+
+    val balanceIls: Double get() = balanceExact?.toDouble() ?: 0.0
+    val creditLimitIls: Double get() = creditLimitExact?.toDouble() ?: 0.0
+    val totalPurchasesIls: Double get() = totalPurchasesExact?.toDouble() ?: 0.0
+
     fun name(lang: AppLanguage): String = lang.tr(nameAr, nameEn)
-    fun address(lang: AppLanguage): String = lang.tr(addressAr, addressEn)
+    fun address(lang: AppLanguage): String = lang.tr(addressAr ?: "", addressEn ?: "")
 }
 
 data class CustomerTransaction(
@@ -226,11 +439,39 @@ data class CustomerTransaction(
     val typeAr: String,
     val typeEn: String,
     val invoiceNumber: Int? = null,
-    val debitIls: Double,   // customer debt added
-    val creditIls: Double,  // customer payment paid
-    val runningBalanceIls: Double,
+    val debitExact: BigDecimal,
+    val creditExact: BigDecimal,
+    val runningBalanceExact: BigDecimal? = null,
     val note: String = ""
 ) {
+    constructor(
+        id: String,
+        customerId: String,
+        date: String,
+        typeAr: String,
+        typeEn: String,
+        invoiceNumber: Int? = null,
+        debitIls: Double,
+        creditIls: Double,
+        runningBalanceIls: Double,
+        note: String = ""
+    ) : this(
+        id = id,
+        customerId = customerId,
+        date = date,
+        typeAr = typeAr,
+        typeEn = typeEn,
+        invoiceNumber = invoiceNumber,
+        debitExact = BigDecimal(debitIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        creditExact = BigDecimal(creditIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        runningBalanceExact = BigDecimal(runningBalanceIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        note = note
+    )
+
+    val debitIls: Double get() = debitExact.toDouble()
+    val creditIls: Double get() = creditExact.toDouble()
+    val runningBalanceIls: Double? get() = runningBalanceExact?.toDouble()
+
     fun type(lang: AppLanguage): String = lang.tr(typeAr, typeEn)
 }
 
@@ -238,75 +479,218 @@ data class Supplier(
     val id: String,
     val nameAr: String,
     val nameEn: String,
-    val companyAr: String,
-    val companyEn: String,
-    val phone: String,
-    val balanceOwedIls: Double // store owes supplier (payable)
+    val companyAr: String? = null,
+    val companyEn: String? = null,
+    val phone: String? = null,
+    val balanceOwedExact: BigDecimal? = null
 ) {
+    constructor(
+        id: String,
+        nameAr: String,
+        nameEn: String,
+        companyAr: String,
+        companyEn: String,
+        phone: String,
+        balanceOwedIls: Double
+    ) : this(
+        id = id,
+        nameAr = nameAr,
+        nameEn = nameEn,
+        companyAr = companyAr.ifBlank { null },
+        companyEn = companyEn.ifBlank { null },
+        phone = phone.ifBlank { null },
+        balanceOwedExact = BigDecimal(balanceOwedIls.toString()).setScale(2, RoundingMode.HALF_UP)
+    )
+
+    val balanceOwedIls: Double get() = balanceOwedExact?.toDouble() ?: 0.0
+
     fun name(lang: AppLanguage): String = lang.tr(nameAr, nameEn)
-    fun company(lang: AppLanguage): String = lang.tr(companyAr, companyEn)
+    fun company(lang: AppLanguage): String = lang.tr(companyAr ?: "", companyEn ?: "")
 }
 
 data class PurchaseLineItem(
     val productId: String,
     val productNameAr: String = "",
     val productNameEn: String = "",
-    val quantity: Int,
-    val unitCostIls: Double,
+    val quantity: Int = 0,
+    val unitCostExact: BigDecimal? = null,
     val receivedQuantity: Int = 0,
-    val id: String = UUID.randomUUID().toString()
+    val id: String = UUID.randomUUID().toString(),
+    val quantityExact: BigDecimal = BigDecimal.valueOf(quantity.toLong()),
+    val receivedQuantityExact: BigDecimal = BigDecimal.valueOf(receivedQuantity.toLong())
 ) {
+    constructor(
+        productId: String,
+        productNameAr: String = "",
+        productNameEn: String = "",
+        quantity: Int,
+        unitCostIls: Double,
+        receivedQuantity: Int = 0,
+        id: String = UUID.randomUUID().toString()
+    ) : this(
+        productId = productId,
+        productNameAr = productNameAr,
+        productNameEn = productNameEn,
+        quantity = quantity,
+        unitCostExact = if (unitCostIls.isNaN() || unitCostIls.isInfinite()) {
+            null
+        } else {
+            try { BigDecimal(unitCostIls.toString()).setScale(2, RoundingMode.HALF_UP) } catch (_: Exception) { null }
+        },
+        receivedQuantity = receivedQuantity,
+        id = id,
+        quantityExact = BigDecimal.valueOf(quantity.toLong()),
+        receivedQuantityExact = BigDecimal.valueOf(receivedQuantity.toLong())
+    )
+
+    constructor(
+        productId: String,
+        productNameAr: String = "",
+        productNameEn: String = "",
+        quantityExact: BigDecimal,
+        unitCostExact: BigDecimal? = null,
+        receivedQuantityExact: BigDecimal = BigDecimal.ZERO,
+        id: String = UUID.randomUUID().toString()
+    ) : this(
+        productId = productId,
+        productNameAr = productNameAr,
+        productNameEn = productNameEn,
+        quantity = quantityExact.toInt(),
+        unitCostExact = unitCostExact,
+        receivedQuantity = receivedQuantityExact.toInt(),
+        id = id,
+        quantityExact = quantityExact,
+        receivedQuantityExact = receivedQuantityExact
+    )
+
     fun name(lang: AppLanguage): String = lang.tr(productNameAr, productNameEn)
 
-    val totalCostIls: Double
-        get() = BigDecimal(unitCostIls.toString())
-            .multiply(BigDecimal(quantity.toString()))
-            .setScale(2, RoundingMode.HALF_UP)
-            .toDouble()
-
-    val pendingQuantity: Int
-        get() = (quantity - receivedQuantity).coerceAtLeast(0)
-
-    val isReceived: Boolean
-        get() = quantity > 0 && receivedQuantity >= quantity
-
-    val isPartiallyReceived: Boolean
-        get() = !isReceived && receivedQuantity > 0
+    val unitCostIls: Double? get() = unitCostExact?.toDouble()
+    val totalCostExact: BigDecimal? get() = unitCostExact?.let { quantityExact.multiply(it).setScale(2, RoundingMode.HALF_UP) }
+    val totalCostIls: Double? get() = totalCostExact?.toDouble()
+    val pendingQuantity: Int get() = (quantity - receivedQuantity).coerceAtLeast(0)
+    val pendingQuantityExact: BigDecimal get() = (quantityExact - receivedQuantityExact).coerceAtLeast(BigDecimal.ZERO)
+    val isReceived: Boolean get() = quantityExact > BigDecimal.ZERO && receivedQuantityExact >= quantityExact
+    val isPartiallyReceived: Boolean get() = !isReceived && receivedQuantityExact > BigDecimal.ZERO
 }
 
 data class PurchaseBill(
     val id: String,
-    val billNumber: Int,
+    val billNumber: String,
     val supplierId: String,
-    val date: String,
-    val totalIls: Double,
-    val paidIls: Double,
-    val itemsSummary: String,
-    val isReceived: Boolean = false, // Truthful accounting: text-only bills are pending physical goods inspection
+    val date: String = "",
+    val totalExact: BigDecimal = BigDecimal.ZERO,
+    val paidExact: BigDecimal = BigDecimal.ZERO,
+    val itemsSummary: String = "",
+    val isReceived: Boolean = false,
     val lines: List<PurchaseLineItem> = emptyList(),
     val expectedProductId: String? = null,
     val expectedQuantity: Int = 0,
-    val receivedQuantity: Int = 0
+    val receivedQuantity: Int = 0,
+    val expectedQuantityExact: BigDecimal = BigDecimal.valueOf(expectedQuantity.toLong()),
+    val receivedQuantityExact: BigDecimal = BigDecimal.valueOf(receivedQuantity.toLong())
 ) {
-    val remainingPayableIls: Double
-        get() = BigDecimal(totalIls.toString())
-            .subtract(BigDecimal(paidIls.toString()))
-            .setScale(2, RoundingMode.HALF_UP)
-            .toDouble()
-            .coerceAtLeast(0.0)
+    val billNumberInt: Int get() = billNumber.filter { it.isDigit() }.toIntOrNull() ?: 0
+
+    constructor(
+        id: String,
+        supplierId: String,
+        billNumber: String,
+        totalCostIls: Double = 0.0,
+        paidNowIls: Double = 0.0,
+        date: String = "",
+        itemsSummary: String = "",
+        isReceived: Boolean = false,
+        lines: List<PurchaseLineItem> = emptyList()
+    ) : this(
+        id = id,
+        billNumber = billNumber,
+        supplierId = supplierId,
+        date = date,
+        totalExact = BigDecimal(totalCostIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        paidExact = BigDecimal(paidNowIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        itemsSummary = itemsSummary,
+        isReceived = isReceived,
+        lines = lines
+    )
+
+    constructor(
+        id: String,
+        billNumber: Int,
+        supplierId: String,
+        date: String,
+        totalIls: Double,
+        paidIls: Double,
+        itemsSummary: String,
+        isReceived: Boolean = false,
+        lines: List<PurchaseLineItem> = emptyList(),
+        expectedProductId: String? = null,
+        expectedQuantity: Int = 0,
+        receivedQuantity: Int = 0
+    ) : this(
+        id = id,
+        billNumber = billNumber.toString(),
+        supplierId = supplierId,
+        date = date,
+        totalExact = BigDecimal(totalIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        paidExact = BigDecimal(paidIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        itemsSummary = itemsSummary,
+        isReceived = isReceived,
+        lines = lines,
+        expectedProductId = expectedProductId,
+        expectedQuantity = expectedQuantity,
+        receivedQuantity = receivedQuantity,
+        expectedQuantityExact = BigDecimal.valueOf(expectedQuantity.toLong()),
+        receivedQuantityExact = BigDecimal.valueOf(receivedQuantity.toLong())
+    )
+
+    constructor(
+        id: String,
+        billNumber: Int,
+        supplierId: String,
+        date: String,
+        totalExact: BigDecimal,
+        paidExact: BigDecimal,
+        itemsSummary: String,
+        isReceived: Boolean = false,
+        lines: List<PurchaseLineItem> = emptyList(),
+        expectedProductId: String? = null,
+        expectedQuantityExact: BigDecimal,
+        receivedQuantityExact: BigDecimal = BigDecimal.ZERO
+    ) : this(
+        id = id,
+        billNumber = billNumber.toString(),
+        supplierId = supplierId,
+        date = date,
+        totalExact = totalExact,
+        paidExact = paidExact,
+        itemsSummary = itemsSummary,
+        isReceived = isReceived,
+        lines = lines,
+        expectedProductId = expectedProductId,
+        expectedQuantity = expectedQuantityExact.toInt(),
+        receivedQuantity = receivedQuantityExact.toInt(),
+        expectedQuantityExact = expectedQuantityExact,
+        receivedQuantityExact = receivedQuantityExact
+    )
+
+    val totalIls: Double get() = totalExact.toDouble()
+    val paidIls: Double get() = paidExact.toDouble()
+    val remainingPayableExact: BigDecimal get() = (totalExact - paidExact).coerceAtLeast(BigDecimal.ZERO)
+    val remainingPayableIls: Double get() = remainingPayableExact.toDouble()
 
     val effectiveLines: List<PurchaseLineItem>
         get() = if (lines.isNotEmpty()) {
             lines
-        } else if (!expectedProductId.isNullOrBlank() && expectedQuantity > 0) {
+        } else if (!expectedProductId.isNullOrBlank() && expectedQuantityExact > BigDecimal.ZERO) {
             listOf(
                 PurchaseLineItem(
                     productId = expectedProductId,
                     productNameAr = itemsSummary,
                     productNameEn = itemsSummary,
-                    quantity = expectedQuantity,
-                    unitCostIls = if (expectedQuantity > 0) (totalIls / expectedQuantity) else 0.0,
-                    receivedQuantity = receivedQuantity
+                    quantityExact = expectedQuantityExact,
+                    unitCostExact = if (expectedQuantityExact > BigDecimal.ZERO) totalExact.divide(expectedQuantityExact, 4, RoundingMode.HALF_UP) else BigDecimal.ZERO,
+                    receivedQuantityExact = receivedQuantityExact
                 )
             )
         } else {
@@ -320,17 +704,43 @@ data class PurchaseBill(
             (expectedQuantity - receivedQuantity).coerceAtLeast(0)
         }
 
+    val pendingQuantityExact: BigDecimal
+        get() = if (lines.isNotEmpty()) {
+            lines.fold(BigDecimal.ZERO) { acc, it -> acc.add(it.pendingQuantityExact) }
+        } else {
+            (expectedQuantityExact - receivedQuantityExact).coerceAtLeast(BigDecimal.ZERO)
+        }
+
     val isPartiallyReceived: Boolean
-        get() = !isReceived && (if (lines.isNotEmpty()) lines.any { it.receivedQuantity > 0 } else receivedQuantity > 0) && pendingQuantity > 0
+        get() = !isReceived && (
+            if (lines.isNotEmpty()) lines.any { it.isPartiallyReceived || it.isReceived } && lines.any { !it.isReceived }
+            else receivedQuantityExact > BigDecimal.ZERO && receivedQuantityExact < expectedQuantityExact
+        )
 }
 
 data class SupplierPayment(
     val id: String,
     val supplierId: String,
     val date: String,
-    val amountIls: Double,
+    val amountExact: BigDecimal,
     val note: String = "سداد نقدي من الصندوق"
-)
+) {
+    constructor(
+        id: String,
+        supplierId: String,
+        date: String,
+        amountIls: Double,
+        note: String = "سداد نقدي من الصندوق"
+    ) : this(
+        id = id,
+        supplierId = supplierId,
+        date = date,
+        amountExact = BigDecimal(amountIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        note = note
+    )
+
+    val amountIls: Double get() = amountExact.toDouble()
+}
 
 enum class ExpenseCategory(val labelAr: String, val labelEn: String) {
     RENT("إيجار المحل", "Store Rent"),
@@ -343,15 +753,43 @@ enum class ExpenseCategory(val labelAr: String, val labelEn: String) {
     fun label(lang: AppLanguage): String = lang.tr(labelAr, labelEn)
 }
 
+data class ServerExpenseCategory(
+    val id: String,
+    val nameAr: String,
+    val nameEn: String,
+    val code: String? = null
+) {
+    fun name(lang: AppLanguage): String = lang.tr(nameAr, nameEn)
+}
+
 data class ExpenseEntry(
     val id: String,
     val date: String,
     val titleAr: String,
     val titleEn: String,
     val category: ExpenseCategory,
-    val amountIls: Double,
+    val amountExact: BigDecimal,
     val paidFrom: String = "الصندوق الرئيسي (كاش)"
 ) {
+    constructor(
+        id: String,
+        date: String,
+        titleAr: String,
+        titleEn: String,
+        category: ExpenseCategory,
+        amountIls: Double,
+        paidFrom: String = "الصندوق الرئيسي (كاش)"
+    ) : this(
+        id = id,
+        date = date,
+        titleAr = titleAr,
+        titleEn = titleEn,
+        category = category,
+        amountExact = BigDecimal(amountIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        paidFrom = paidFrom
+    )
+
+    val amountIls: Double get() = amountExact.toDouble()
     fun title(lang: AppLanguage): String = lang.tr(titleAr, titleEn)
 }
 
@@ -359,11 +797,32 @@ data class StockMovement(
     val id: String,
     val productId: String,
     val date: String,
-    val delta: Int,
+    val deltaExact: BigDecimal,
     val reasonAr: String,
     val reasonEn: String,
-    val resultingStock: Int
+    val resultingStockExact: BigDecimal? = null
 ) {
+    constructor(
+        id: String,
+        productId: String,
+        date: String,
+        delta: Int,
+        reasonAr: String,
+        reasonEn: String,
+        resultingStock: Int
+    ) : this(
+        id = id,
+        productId = productId,
+        date = date,
+        deltaExact = BigDecimal.valueOf(delta.toLong()),
+        reasonAr = reasonAr,
+        reasonEn = reasonEn,
+        resultingStockExact = BigDecimal.valueOf(resultingStock.toLong())
+    )
+
+    val delta: Int get() = deltaExact.toInt()
+    val resultingStock: Int get() = resultingStockExact?.toInt() ?: 0
+
     fun reason(lang: AppLanguage): String = lang.tr(reasonAr, reasonEn)
 }
 
@@ -391,14 +850,28 @@ enum class PrinterStatus {
  * Uses exact BigDecimal math for financial totals.
  */
 object WesternFormatters {
+    fun formatExactOrPlain(value: java.math.BigDecimal?): String = value?.toPlainString() ?: "—"
+
     private val usSymbols = DecimalFormatSymbols(Locale.US)
     private val moneyFormat = DecimalFormat("#,##0.00", usSymbols)
     private val compactMoneyFormat = DecimalFormat("#,##0.##", usSymbols)
     private val intFormat = DecimalFormat("#,##0", usSymbols)
 
+    fun formatIls(amount: BigDecimal?): String {
+        if (amount == null) return "-- ₪"
+        val safe = if (amount.abs() < BigDecimal("0.005")) BigDecimal.ZERO else amount
+        return "${moneyFormat.format(safe)} ₪"
+    }
+
     fun formatIls(amount: Double): String {
         val safe = if (kotlin.math.abs(amount) < 0.005) 0.0 else amount
         return "${moneyFormat.format(safe)} ₪"
+    }
+
+    fun formatCompactIls(amount: BigDecimal?): String {
+        if (amount == null) return "-- ₪"
+        val safe = if (amount.abs() < BigDecimal("0.005")) BigDecimal.ZERO else amount
+        return "${compactMoneyFormat.format(safe)} ₪"
     }
 
     fun formatCompactIls(amount: Double): String {
@@ -406,15 +879,32 @@ object WesternFormatters {
         return "${compactMoneyFormat.format(safe)} ₪"
     }
 
+    fun formatNumber(amount: BigDecimal?): String {
+        if (amount == null) return "--"
+        val safe = if (amount.abs() < BigDecimal("0.005")) BigDecimal.ZERO else amount
+        return moneyFormat.format(safe)
+    }
+
     fun formatNumber(amount: Double): String {
         val safe = if (kotlin.math.abs(amount) < 0.005) 0.0 else amount
         return moneyFormat.format(safe)
     }
 
+    fun formatQuantity(qty: BigDecimal): String {
+        return if (qty.stripTrailingZeros().scale() <= 0) {
+            intFormat.format(qty.toLong())
+        } else {
+            qty.stripTrailingZeros().toPlainString()
+        }
+    }
+    fun formatQuantity(qty: Int): String = intFormat.format(qty)
+
     fun formatInt(value: Int): String = intFormat.format(value)
+    fun formatInt(value: BigDecimal): String = formatQuantity(value)
 
     fun formatInvoiceCode(number: Int): String = String.format(Locale.US, "#INV-%04d", number)
     fun formatBillCode(number: Int): String = String.format(Locale.US, "#BILL-%04d", number)
+    fun formatBillCode(code: String): String = if (code.startsWith("#")) code else "#$code"
 
     fun currentTimestamp(): String {
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
@@ -464,3 +954,9 @@ object WesternFormatters {
         return converted.replace(',', '.')
     }
 }
+
+operator fun BigDecimal.compareTo(other: Int): Int = this.compareTo(BigDecimal.valueOf(other.toLong()))
+operator fun BigDecimal.compareTo(other: Double): Int = this.compareTo(BigDecimal(other.toString()))
+operator fun BigDecimal.plus(other: Int): BigDecimal = this.add(BigDecimal.valueOf(other.toLong()))
+operator fun BigDecimal.minus(other: Int): BigDecimal = this.subtract(BigDecimal.valueOf(other.toLong()))
+operator fun BigDecimal.times(other: Int): BigDecimal = this.multiply(BigDecimal.valueOf(other.toLong()))

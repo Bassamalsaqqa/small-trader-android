@@ -186,7 +186,7 @@ class ReadClientGoldenParityTest {
         assertEquals("SKU-OLIVE-OIL-1L", p1.sku)
         assertEquals("6291041001234", p1.barcode)
         assertEquals("Extra Virgin Olive Oil 1L", p1.name)
-        assertEquals("25.000000", p1.unitPrice.toPlainString())
+        assertEquals("25.000000", p1.unitPrice?.toPlainString())
         assertNull("tax_rate must be null in golden catalog (no product default tax association)", p1.taxRate)
         assertNull("tax_rate_id must be null in golden catalog", p1.taxRateId)
         assertTrue(p1.isTracked)
@@ -211,7 +211,7 @@ class ReadClientGoldenParityTest {
         val p2 = catalog.products[1]
         assertEquals("SKU-FLOUR-BULK", p2.sku)
         assertNull(p2.barcode)
-        assertEquals("4.500000", p2.unitPrice.toPlainString())
+        assertEquals("4.500000", p2.unitPrice?.toPlainString())
         assertNull(p2.taxRate)
         assertNull(p2.taxRateId)
         assertEquals("520.500000", p2.availableQuantity.toPlainString())

@@ -356,5 +356,7 @@ class StrictJsonParser private constructor(private val src: String) {
             }
             return result
         }
+
+        fun parseObject(jsonStr: String): StrictJsonObject = parse(jsonStr).asObject()
     }
 }

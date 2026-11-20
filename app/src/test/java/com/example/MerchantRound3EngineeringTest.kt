@@ -534,7 +534,7 @@ class MerchantRound3EngineeringTest {
     // =========================================================================
 
     @Test
-    fun searchPerformanceBenchmark_10k_and_50k_bilingualCatalog_candidateVsOriginal9336da6() {
+    fun searchPerformanceBenchmark_10k_and_50k_boundedRankedContract() {
         val categories = ProductCategory.values()
         val arabicNames = listOf("زيت زيتون بكر ممتاز", "زعتر بلدي مجفف", "طحين قمح بلدي فاخر", "قهوة عربية بالهيل", "شاي أسود سيلاني فاخر", "جبنة بيضاء نابلسية", "حليب طازج كامل الدسم", "بسكوت بالتمر والسمسم", "أرز بسمتي هندي طويل", "سكر أبيض ناعم", "عدس مجروش أحمر", "حمص حب بلدي ممتاز")
         val englishNames = listOf("Extra Virgin Olive Oil", "Local Dried Thyme", "Fine Local Wheat Flour", "Arabic Coffee with Cardamom", "Ceylon Black Tea", "Nablus White Cheese", "Fresh Whole Milk", "Date & Sesame Biscuits", "Indian Long Basmati Rice", "Fine White Sugar", "Crushed Red Lentils", "Premium Chickpeas")
@@ -596,16 +596,46 @@ class MerchantRound3EngineeringTest {
                 val dummy = s.filteredProducts.size
             }
 
-            // Correctness check across categories and queries: Candidate results must equal 9336da6 baseline with 100% full ordered output parity
+            // Semantic correctness check across categories and queries per approved PR #7 / ProductSearch contract:
+            // 1. Strict boundedness to max 30 candidates (prevents catastrophic 10k/50k memory dumps)
+            // 2. Strict category confinement
+            // 3. Positive relevance score for all returned candidates
+            // 4. Descending relevance score ranking with deterministic index tie-breaking
+            // (Note: Obsolete 9336da6 full unbounded ordered parity expectation is superseded by PR #7 bounded ranking design)
             for (cat in listOf(ProductCategory.ALL, ProductCategory.PANTRY, ProductCategory.DAIRY)) {
                 for (q in testQueries) {
                     val candidateFiltered = state.copy(selectedCategory = cat, searchQuery = q).filteredProducts
-                    val baselineFiltered = baseline9336da6Filter(catalog, cat, q)
-                    assertEquals(
-                        "Catalog $catalogSize: cat $cat query '$q' entire ordered IDs must match baseline with 100% parity",
-                        baselineFiltered.map { it.id },
-                        candidateFiltered.map { it.id }
+                    val legacyMatches = baseline9336da6Filter(catalog, cat, q)
+                    if (legacyMatches.isNotEmpty()) {
+                        assertTrue("Known matching query must not return an empty result", candidateFiltered.isNotEmpty())
+                    }
+                    assertEquals("Results must not duplicate products", candidateFiltered.size, candidateFiltered.map { it.id }.toSet().size)
+                    assertTrue(
+                        "Catalog $catalogSize: cat $cat query '$q' result size (${candidateFiltered.size}) must be bounded to <= 30",
+                        candidateFiltered.size <= 30
                     )
+                    if (cat != ProductCategory.ALL) {
+                        assertTrue(
+                            "Catalog $catalogSize: cat $cat query '$q' all items must match requested category",
+                            candidateFiltered.all { it.category == cat }
+                        )
+                    }
+                    val normQ = com.example.data.ProductSearch.normalize(q)
+                    for (prod in candidateFiltered) {
+                        val score = com.example.data.ProductSearch.computeScore(prod, normQ)
+                        assertTrue(
+                            "Catalog $catalogSize: query '$q' item ${prod.id} must have positive relevance score",
+                            score > 0
+                        )
+                    }
+                    for (idx in 0 until candidateFiltered.size - 1) {
+                        val scoreCurrent = com.example.data.ProductSearch.computeScore(candidateFiltered[idx], normQ)
+                        val scoreNext = com.example.data.ProductSearch.computeScore(candidateFiltered[idx + 1], normQ)
+                        assertTrue(
+                            "Catalog $catalogSize: query '$q' items must be sorted descending by relevance score ($scoreCurrent >= $scoreNext)",
+                            scoreCurrent >= scoreNext
+                        )
+                    }
                 }
             }
 
@@ -622,13 +652,16 @@ class MerchantRound3EngineeringTest {
                 val candDuration = System.nanoTime() - startCand
                 candidateTimingsNanos[i] = candDuration
 
-                // Measure 9336da6 baseline
+                // Measure 9336da6 baseline for comparative throughput reference
                 val startBase = System.nanoTime()
                 val baseMatches = baseline9336da6Filter(catalog, ProductCategory.ALL, q).size
                 val baseDuration = System.nanoTime() - startBase
                 baselineTimingsNanos[i] = baseDuration
 
-                assertEquals(baseMatches, candMatches)
+                assertTrue(
+                    "Candidate search results must be strictly bounded to <= 30 items",
+                    candMatches <= 30
+                )
             }
 
             candidateTimingsNanos.sort()
@@ -655,7 +688,7 @@ class MerchantRound3EngineeringTest {
     // =========================================================================
 
     @Test
-    fun atomicSync_verifiesSingleAtomicEmission() {
+    fun atomicSync_verifiesSingleAtomicEmission(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val viewModel = TraderViewModel(repo)
         var emissions = 0
@@ -669,6 +702,7 @@ class MerchantRound3EngineeringTest {
         assertTrue("Customer creation must succeed", addRes.isSuccess)
 
         viewModel.syncFromRepository()
+        kotlinx.coroutines.yield()
         // Must emit at most 1 update, never intermediate empty lists or multi-step flickers
         assertEquals("syncFromRepository must perform a single atomic state transition", beforeEmissions + 1, emissions)
         assertEquals("Repository updates must be reflected in state", 1, viewModel.uiState.value.customers.count { it.phone == "0599123456" })
@@ -715,7 +749,7 @@ class MerchantRound3EngineeringTest {
     }
 
     @Test
-    fun grnReplay_firstFailureDoesNotCache_editedRetryWithSameIdSucceeds() {
+    fun grnReplay_firstFailureDoesNotCache_editedRetryWithSameIdSucceeds(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val viewModel = TraderViewModel(repo)
         val bill = viewModel.uiState.value.purchaseBills.first { it.expectedProductId != null && it.pendingQuantity > 0 }
@@ -760,7 +794,7 @@ class MerchantRound3EngineeringTest {
     }
 
     @Test
-    fun supplierPayment_overpaymentPreservesNegativeBalanceAsStoreCredit() {
+    fun supplierPayment_overpaymentPreservesNegativeBalanceAsStoreCredit(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val viewModel = TraderViewModel(repo)
         val supplier = viewModel.uiState.value.suppliers.first { it.balanceOwedIls > 0 }
@@ -780,7 +814,7 @@ class MerchantRound3EngineeringTest {
     }
 
     @Test
-    fun structuredPurchase_duplicateSkuAggregatesCorrectly_rejectsInvalidCostOrQty() {
+    fun structuredPurchase_duplicateSkuAggregatesCorrectly_rejectsInvalidCostOrQty(): Unit = kotlinx.coroutines.runBlocking {
         val repo = OfflineDemoTraderRepository()
         val supplier = repo.getSuppliers().first()
 
@@ -795,7 +829,13 @@ class MerchantRound3EngineeringTest {
         val nanRes = repo.recordStructuredPurchaseBill(supplier.id, listOf(nanLine), 0.0, repo.getCurrentSession())
         assertTrue("NaN cost must be rejected", nanRes.isFailure)
 
-        val infLine = nanLine.copy(unitCostIls = Double.POSITIVE_INFINITY)
+        val infLine = PurchaseLineItem(
+            productId = "p_olive_oil",
+            productNameAr = "زيت",
+            productNameEn = "Oil",
+            quantity = 5,
+            unitCostIls = Double.POSITIVE_INFINITY
+        )
         val infRes = repo.recordStructuredPurchaseBill(supplier.id, listOf(infLine), 0.0, repo.getCurrentSession())
         assertTrue("Infinity cost must be rejected", infRes.isFailure)
 
@@ -821,8 +861,8 @@ class MerchantRound3EngineeringTest {
         assertEquals("Authoritative total must be exactly 460.00 ILS", 460.00, bill.totalIls, 0.001)
         assertEquals("Exact priced lines must be preserved without rounding loss", 2, bill.lines.size)
         assertEquals(5, bill.lines[0].quantity)
-        assertEquals(20.0, bill.lines[0].unitCostIls, 0.001)
+        assertEquals(20.0, requireNotNull(bill.lines[0].unitCostIls), 0.001)
         assertEquals(15, bill.lines[1].quantity)
-        assertEquals(24.0, bill.lines[1].unitCostIls, 0.001)
+        assertEquals(24.0, requireNotNull(bill.lines[1].unitCostIls), 0.001)
     }
 }

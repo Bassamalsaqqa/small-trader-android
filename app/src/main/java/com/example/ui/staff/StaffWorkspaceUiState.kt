@@ -106,7 +106,11 @@ data class StaffWorkspaceUiState(
 
     // Presentation preferences
     val language: AppLanguage = AppLanguage.AR,
-    val isDarkTheme: Boolean = false
+    val isDarkTheme: Boolean = false,
+
+    // Active selection consumers
+    val selectedProduct: ProductCatalogItem? = null,
+    val selectedCustomer: CustomerDirectoryItem? = null
 ) {
     val isQueueProcessingReady: Boolean
         get() = outboxHealthResult?.isOperational == true

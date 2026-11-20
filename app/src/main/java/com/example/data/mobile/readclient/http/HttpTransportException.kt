@@ -27,5 +27,6 @@ class HttpTransportException(
         const val CATEGORY_PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"
         const val CATEGORY_MALFORMED_UTF8 = "MALFORMED_UTF8"
         const val CATEGORY_UNSUPPORTED_PROTOCOL = "UNSUPPORTED_PROTOCOL"
+        const val CATEGORY_SERVER_ERROR = "SERVER_ERROR"
     }
 }

@@ -1,5 +1,11 @@
 package com.example.ui.screens
 
+import java.math.BigDecimal
+import com.example.viewmodel.ReadStatus
+import com.example.model.TraderScreen
+import androidx.compose.material3.CircularProgressIndicator
+import com.example.data.mobile.merchantread.LiveStockMovementHistory
+import com.example.data.mobile.merchantread.StockMovementItem
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -80,7 +86,6 @@ import com.example.ui.components.StitchBidiUtils
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
-import java.math.BigDecimal
 import java.math.RoundingMode
 import kotlin.math.abs
 
@@ -104,9 +109,11 @@ fun ProductsCatalogScreen(
     onOpenPurchases: () -> Unit = {},
     launchLowStock: Boolean = false,
     onLowStockConsumed: () -> Unit = {},
-    onSaveProduct: ((productId: String?, nameAr: String, category: ProductCategory, unitAr: String, barcode: String, priceIls: Double, costIls: Double, minStockThreshold: Int, initialStock: Int, warehouseAr: String, lotBatchCode: String, expiryDate: String?, isWeightedDisplayOnly: Boolean) -> Unit)? = null
+    onSaveProduct: ((productId: String?, nameAr: String, category: ProductCategory, unitAr: String, barcode: String, priceIls: Double, costIls: Double, minStockThreshold: Int, initialStock: Int, warehouseAr: String, lotBatchCode: String, expiryDate: String?, isWeightedDisplayOnly: Boolean) -> Unit)? = null,
+    onRetryRefresh: (() -> Unit)? = null
 ) {
     val createDraft = rememberSaveableStateHolder()
+    val readStatus = state.readStatusFor(TraderScreen.PRODUCTS_CATALOG)
     val lang = state.language
     val canManageInventory = state.currentSession.canManageInventory()
     var stockFilter by rememberSaveable { mutableStateOf(CatalogStockFilter.ALL) }
@@ -492,26 +499,54 @@ fun ProductsCatalogScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = lang.tr(
-                            "لا توجد أصناف مطابقة للبحث أو التصنيف المحدد",
-                            "No products match the current search or filter"
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (state.searchQuery.isNotBlank() ||
-                        state.selectedCategory != ProductCategory.ALL ||
-                        stockFilter != CatalogStockFilter.ALL
-                    ) {
-                        TextButton(
-                            onClick = {
-                                onSearchChange("")
-                                onCategorySelect(ProductCategory.ALL)
-                                stockFilter = CatalogStockFilter.ALL
+                    if (readStatus == ReadStatus.LOADING) {
+                        CircularProgressIndicator()
+                    } else if (readStatus == ReadStatus.FAILED && state.products.isEmpty()) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Text(
+                            text = lang.tr("تعذر تحديث الأصناف من الخادم", "Could not refresh products from server"),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        if (onRetryRefresh != null) {
+                            TextButton(
+                                onClick = onRetryRefresh,
+                                modifier = Modifier.heightIn(min = 44.dp)
+                            ) {
+                                Text(
+                                    text = lang.tr("إعادة المحاولة", "Retry"),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
+                        }
+                    } else {
+                        Text(
+                            text = lang.tr(
+                                "لا توجد أصناف مطابقة للبحث أو التصنيف المحدد",
+                                "No products match the current search or filter"
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (state.searchQuery.isNotBlank() ||
+                            state.selectedCategory != ProductCategory.ALL ||
+                            stockFilter != CatalogStockFilter.ALL
                         ) {
-                            Text(lang.tr("إعادة ضبط الفلاتر وعرض الكل", "Reset Filters & Show All"))
+                            TextButton(
+                                onClick = {
+                                    onSearchChange("")
+                                    onCategorySelect(ProductCategory.ALL)
+                                    stockFilter = CatalogStockFilter.ALL
+                                }
+                            ) {
+                                Text(lang.tr("إعادة ضبط الفلاتر وعرض الكل", "Reset Filters & Show All"))
+                            }
                         }
                     }
                 }
@@ -710,11 +745,19 @@ fun ProductDetailScreen(
     onAdjustStock: (productId: String, delta: Int, reason: String) -> Unit,
     onAddToBasket: (Product) -> Unit = {},
     onDismissFeedback: (() -> Unit)? = null,
-    onSaveProduct: ((productId: String?, nameAr: String, category: ProductCategory, unitAr: String, barcode: String, priceIls: Double, costIls: Double, minStockThreshold: Int, initialStock: Int, warehouseAr: String, lotBatchCode: String, expiryDate: String?, isWeightedDisplayOnly: Boolean) -> Unit)? = null
+    onSaveProduct: ((productId: String?, nameAr: String, category: ProductCategory, unitAr: String, barcode: String, priceIls: Double, costIls: Double, minStockThreshold: Int, initialStock: Int, warehouseAr: String, lotBatchCode: String, expiryDate: String?, isWeightedDisplayOnly: Boolean) -> Unit)? = null,
+    onUpdatePriceWithResult: ((productId: String, newPrice: Double, onComplete: (Boolean) -> Unit) -> Unit)? = null,
+    onAdjustStockWithResult: ((productId: String, delta: Int, reason: String, onComplete: (Boolean) -> Unit) -> Unit)? = null
 ) {
     val lang = state.language
     val product = state.selectedProductForDetail ?: return
     val canManageInventory = state.currentSession.canManageInventory()
+    val isDemo = state.currentSession.isDemoSession
+    val liveHistory = if (!isDemo && state.selectedProductHistory?.productId == product.id) {
+        state.selectedProductHistory
+    } else null
+    val isHistoryLoading = !isDemo && liveHistory == null
+
     val movements = remember(state.stockMovements, product.id) {
         state.stockMovements.filter { it.productId == product.id }
     }
@@ -1162,7 +1205,7 @@ fun ProductDetailScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Text(
-                                        text = "${WesternFormatters.formatInt(product.minStockThreshold)} ${product.unit(lang)}",
+                                        text = "${product.minStockThreshold?.let { WesternFormatters.formatInt(it) } ?: "—"} ${product.unit(lang)}",
                                         style = MaterialTheme.typography.titleSmall.copy(
                                             fontFamily = MonoFontFamily,
                                             fontWeight = FontWeight.SemiBold
@@ -1287,7 +1330,7 @@ fun ProductDetailScreen(
                                 )
                                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                                     Text(
-                                        text = product.lotBatchCode.ifBlank { "—" },
+                                        text = (product.lotBatchCode ?: "").ifBlank { "—" },
                                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
@@ -1372,10 +1415,11 @@ fun ProductDetailScreen(
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                        val count = if (!isDemo && liveHistory != null) liveHistory.movements.size else movements.size
                         Text(
                             text = lang.tr(
-                                "${WesternFormatters.formatInt(movements.size)} حركة",
-                                "${WesternFormatters.formatInt(movements.size)} entries"
+                                "${WesternFormatters.formatInt(count)} حركة",
+                                "${WesternFormatters.formatInt(count)} entries"
                             ),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1383,28 +1427,86 @@ fun ProductDetailScreen(
                     }
                 }
 
-                if (movements.isEmpty()) {
+                if (!isDemo && isHistoryLoading) {
                     item {
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = MaterialTheme.colorScheme.surface,
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("product_stock_history_loading")
                         ) {
-                            Text(
-                                text = lang.tr(
-                                    "لا توجد حركات مخزنية مسجلة لهذا الصنف بعد.",
-                                    "No stock movements recorded for this item yet."
-                                ),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(14.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = lang.tr("جارٍ تحميل سجل الحركات...", "Loading stock movements..."),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                } else if (!isDemo && liveHistory != null) {
+                    if (liveHistory.movements.isEmpty()) {
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = lang.tr(
+                                        "لا توجد حركات مخزنية مسجلة لهذا الصنف بعد.",
+                                        "No stock movements recorded for this item yet."
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(14.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        items(liveHistory.movements, key = { it.id.value }) { smItem ->
+                            LiveStockMovementRow(item = smItem, lang = lang)
                         }
                     }
                 } else {
-                    items(movements, key = { it.id }) { sm ->
-                        StockMovementRow(sm = sm, lang = lang)
+                    if (movements.isEmpty()) {
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = lang.tr(
+                                        "لا توجد حركات مخزنية مسجلة لهذا الصنف بعد.",
+                                        "No stock movements recorded for this item yet."
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(14.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        items(movements, key = { it.id }) { sm ->
+                            StockMovementRow(sm = sm, lang = lang)
+                        }
                     }
                 }
             }
@@ -1526,11 +1628,17 @@ fun ProductDetailScreen(
                 Button(
                     onClick = {
                         if (parsedPrice > 0.0) {
-                            onUpdatePrice(product.id, parsedPrice)
-                            isEditPriceOpen = false
+                            if (onUpdatePriceWithResult != null) {
+                                onUpdatePriceWithResult(product.id, parsedPrice) { success ->
+                                    if (success) isEditPriceOpen = false
+                                }
+                            } else {
+                                onUpdatePrice(product.id, parsedPrice)
+                                isEditPriceOpen = false
+                            }
                         }
                     },
-                    enabled = parsedPrice > 0.0,
+                    enabled = parsedPrice > 0.0 && !state.isActionBusy,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.testTag("confirm_price_update_button")
                 ) {
@@ -1706,11 +1814,17 @@ fun ProductDetailScreen(
                 Button(
                     onClick = {
                         if (isResultValid) {
-                            onAdjustStock(product.id, signedDelta, stockReasonText.trim())
-                            isAdjustStockOpen = false
+                            if (onAdjustStockWithResult != null) {
+                                onAdjustStockWithResult(product.id, signedDelta, stockReasonText.trim()) { success ->
+                                    if (success) isAdjustStockOpen = false
+                                }
+                            } else {
+                                onAdjustStock(product.id, signedDelta, stockReasonText.trim())
+                                isAdjustStockOpen = false
+                            }
                         }
                     },
-                    enabled = isResultValid,
+                    enabled = isResultValid && !state.isActionBusy,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.testTag("confirm_stock_adjust_button")
                 ) {
@@ -2043,14 +2157,14 @@ private fun StockCountTransferPreviewDialog(
             ) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
-                    color = TraderTheme.financial.warningContainer.copy(alpha = 0.5f),
-                    border = BorderStroke(1.dp, TraderTheme.financial.warning.copy(alpha = 0.4f)),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = lang.tr(
-                            "معاينة نموذجية (Shallow Preview): التعديل الفردي لحركة الصنف يعمل فعلياً من شاشة الصنف، بينما جلسات الجرد الجماعي والتحويل بين المستودعات مرتبطة مستقبلاً بنواة Laravel /api/v1.",
-                            "Shallow Preview: Single-item stock adjustment is live in Product Detail, whereas bulk count sessions and inter-warehouse transfers connect to Laravel /api/v1 in backend integration."
+                            "التعديل المباشر لحركة ومخزون الصنف متاح من بطاقة تفاصيل الصنف.",
+                            "Direct stock adjustments and movements are managed from the Product Detail screen."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -2158,14 +2272,71 @@ private fun StockMovementRow(
             Spacer(modifier = Modifier.width(12.dp))
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = "${if (isPositive) "+" else ""}${WesternFormatters.formatInt(sm.delta)}",
+                    text = "${if (isPositive) "+" else ""}${WesternFormatters.formatQuantity(sm.delta)}",
                     style = MaterialTheme.typography.titleSmall.copy(
                         fontWeight = FontWeight.Bold
                     ),
                     color = if (isPositive) TraderTheme.financial.income else TraderTheme.financial.debit
                 )
                 Text(
-                    text = "${lang.tr("الرصيد:", "Stock:")} ${WesternFormatters.formatInt(sm.resultingStock)}",
+                    text = "${lang.tr("الرصيد:", "Stock:")} ${WesternFormatters.formatQuantity(sm.resultingStock)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveStockMovementRow(
+    item: StockMovementItem,
+    lang: AppLanguage
+) {
+    val isPositive = item.delta.compareTo(BigDecimal.ZERO) > 0
+    val deltaStr = WesternFormatters.formatExactOrPlain(item.delta)
+    val resultingStr = WesternFormatters.formatExactOrPlain(item.resultingStock)
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("stock_movement_${item.id.value}")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = item.reason,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = item.date,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFontFamily),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = if (isPositive) "+$deltaStr" else deltaStr,
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = if (isPositive) TraderTheme.financial.income else TraderTheme.financial.debit
+                )
+                Text(
+                    text = "${lang.tr("الرصيد:", "Stock:")} $resultingStr",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

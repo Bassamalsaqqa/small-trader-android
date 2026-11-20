@@ -888,9 +888,10 @@ fun CashPaymentScreen(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
-                                            if (selectedCustomer.phone.isNotBlank()) {
+                                            val phone = selectedCustomer.phone
+                                            if (!phone.isNullOrBlank()) {
                                                 Text(
-                                                    text = selectedCustomer.phone,
+                                                    text = phone,
                                                     style = MaterialTheme.typography.bodySmall.copy(
                                                         fontSize = 12.sp,
                                                         fontFamily = MonoFontFamily

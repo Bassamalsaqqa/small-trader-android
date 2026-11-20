@@ -44,7 +44,22 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+enum class ReadStatus { LOADING, FAILED, READY }
+
 data class TraderUiState(
+    // Mobile V1 Merchant Live Read Authoritative Projections
+    val liveHomeMetrics: com.example.data.mobile.merchantread.LiveHomeMetrics? = null,
+    val liveShiftSummary: com.example.data.mobile.merchantread.LiveShiftSummary? = null,
+    val liveTreasurySummary: com.example.data.mobile.merchantread.LiveTreasurySummary? = null,
+    val liveInvoicesHasMoreGap: Boolean = false,
+    val liveInvoicesHasMore: Boolean = false,
+    val liveInvoicesNextCursor: String? = null,
+    val isLiveInvoicesLoading: Boolean = false,
+    val selectedCustomerStatement: com.example.data.mobile.merchantread.LiveCustomerStatement? = null,
+    val selectedProductHistory: com.example.data.mobile.merchantread.LiveStockMovementHistory? = null,
+    val selectedInvoiceDetail: com.example.data.mobile.merchantread.LiveInvoiceRecord? = null,
+    val readStatus: Map<TraderScreen, ReadStatus> = emptyMap(),
+
     val language: AppLanguage = AppLanguage.AR,
     val isDarkTheme: Boolean = false,
     val currentScreen: TraderScreen = TraderScreen.HOME,
@@ -83,6 +98,14 @@ data class TraderUiState(
     val selectedCustomerId: String? = null,
     val cashInputText: String = "",
     val isSubmittingSale: Boolean = false,
+    val isActionBusy: Boolean = false,
+    val currentSaleClientEventId: String = java.util.UUID.randomUUID().toString(),
+    val draftExpenseOperationId: String = java.util.UUID.randomUUID().toString(),
+    val draftStockAdjustOperationId: String = java.util.UUID.randomUUID().toString(),
+    val draftPurchaseOperationId: String = java.util.UUID.randomUUID().toString(),
+    val draftSupplierPaymentOperationId: String = java.util.UUID.randomUUID().toString(),
+    val draftCustomerPaymentOperationId: String = java.util.UUID.randomUUID().toString(),
+    val draftGrnOperationId: String = java.util.UUID.randomUUID().toString(),
     val checkoutErrorAr: String? = null,
     val checkoutErrorEn: String? = null,
 
@@ -116,6 +139,7 @@ data class TraderUiState(
 
     // Expenses
     val expenses: List<ExpenseEntry> = emptyList(),
+    val serverExpenseCategories: List<com.example.model.ServerExpenseCategory> = emptyList(),
     val lastExpenseActionMessageAr: String? = null,
     val lastExpenseActionMessageEn: String? = null,
     val isExpenseActionError: Boolean = false,
@@ -146,6 +170,9 @@ data class TraderUiState(
     val printProgressFraction: Float = 0f,
     val receiptPaperWidthMm: Int = 58
 ) {
+    fun readStatusFor(screen: TraderScreen): ReadStatus =
+        readStatus[screen] ?: if (currentSession.isDemoSession) ReadStatus.READY else ReadStatus.LOADING
+
     private fun matchesSearchQuery(product: Product, normalizedQuery: String): Boolean {
         if (normalizedQuery.isEmpty()) return true
         return ProductSearch.computeScore(product, normalizedQuery) > 0
@@ -218,7 +245,10 @@ data class TraderUiState(
         }
 
     val basketItemCount: Int
-        get() = basket.sumOf { it.quantity }
+        get() = basket.fold(BigDecimal.ZERO) { acc, item -> acc + item.quantity }.toInt()
+
+    val basketItemCountExact: BigDecimal
+        get() = basket.fold(BigDecimal.ZERO) { acc, item -> acc + item.quantity }
 
     val basketSubtotalIls: Double
         get() = basket.fold(BigDecimal.ZERO) { acc, item ->
@@ -282,7 +312,10 @@ data class TraderUiState(
         get() = customers.firstOrNull { it.id == selectedCustomerId }
 
     val stockUnitsToDeduct: Int
-        get() = basket.filter { it.product.isStockTracked }.sumOf { it.quantity }
+        get() = basket.filter { it.product.isStockTracked }.fold(BigDecimal.ZERO) { acc, item -> acc + item.quantity }.toInt()
+
+    val stockUnitsToDeductExact: BigDecimal
+        get() = basket.filter { it.product.isStockTracked }.fold(BigDecimal.ZERO) { acc, item -> acc + item.quantity }
 
     val customLinesCount: Int
         get() = basket.count { !it.product.isStockTracked }
@@ -453,7 +486,10 @@ data class TraderUiState(
         get() = currentScreen in CHECKOUT_FLOW_DESTINATIONS
 
     fun quantityInBasket(productId: String): Int =
-        basket.firstOrNull { it.product.id == productId }?.quantity ?: 0
+        basket.firstOrNull { it.product.id == productId }?.quantity?.toInt() ?: 0
+
+    fun quantityInBasketExact(productId: String): BigDecimal =
+        basket.firstOrNull { it.product.id == productId }?.quantity ?: BigDecimal.ZERO
 
     fun supplierActionMessage(lang: AppLanguage): String =
         if (lang == AppLanguage.AR) lastSupplierActionMessageAr.orEmpty() else lastSupplierActionMessageEn.orEmpty()

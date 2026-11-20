@@ -17,7 +17,7 @@ data class OutboxHealthProbeEntity(
     @ColumnInfo(name = "device_id")
     val deviceId: String,
     @ColumnInfo(name = "device_lease_id")
-    val deviceLeaseId: String,
+    val deviceLeaseId: String? = null,
     @ColumnInfo(name = "captured_at")
     val capturedAt: String,
     @ColumnInfo(name = "payload_digest")
@@ -439,7 +439,7 @@ abstract class OutboxDao {
         deviceId: String,
         claimToken: String,
         invoiceUlid: String,
-        paymentUlid: String,
+        paymentUlid: String?,
         serverUlid: String,
         serverAcknowledgedAt: String,
         nowMillis: Long
@@ -468,7 +468,7 @@ abstract class OutboxDao {
         actorId: String,
         deviceId: String,
         invoiceUlid: String,
-        paymentUlid: String,
+        paymentUlid: String?,
         serverUlid: String,
         serverAcknowledgedAt: String,
         nowMillis: Long

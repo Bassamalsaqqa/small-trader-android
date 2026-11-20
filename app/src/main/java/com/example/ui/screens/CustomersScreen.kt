@@ -1,5 +1,13 @@
 package com.example.ui.screens
 
+import java.math.BigDecimal
+import androidx.compose.material.icons.filled.Warning
+import com.example.viewmodel.ReadStatus
+import com.example.model.TraderScreen
+import androidx.compose.material3.CircularProgressIndicator
+import com.example.data.mobile.merchantread.LiveCustomerStatement
+import com.example.data.mobile.merchantread.CustomerStatementCurrencySummary
+import com.example.data.mobile.merchantread.CustomerStatementEntry
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -86,7 +94,6 @@ import com.example.ui.components.StitchCard
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
-import java.math.BigDecimal
 import java.math.RoundingMode
 import kotlin.math.abs
 import kotlin.math.max
@@ -121,8 +128,10 @@ fun CustomersScreen(
     onOpenAddCustomerDialog: () -> Unit,
     onStartSaleForCustomer: (Customer) -> Unit,
     onQuickCollectPayment: ((Customer) -> Unit)? = null,
-    onDismissFeedback: (() -> Unit)? = null
+    onDismissFeedback: (() -> Unit)? = null,
+    onRetryRefresh: (() -> Unit)? = null
 ) {
+    val readStatus = state.readStatusFor(TraderScreen.CUSTOMERS)
     val lang = state.language
     val financial = TraderTheme.financial
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -146,10 +155,10 @@ fun CustomersScreen(
 
             TraderUiState.normalizeForSearch(c.nameAr).contains(q) ||
                 TraderUiState.normalizeForSearch(c.nameEn).contains(q) ||
-                TraderUiState.normalizeForSearch(c.addressAr).contains(q) ||
-                TraderUiState.normalizeForSearch(c.addressEn).contains(q) ||
-                c.phone.replace("-", "").contains(q.replace("-", "")) ||
-                c.phone.contains(q)
+                (c.addressAr?.let { TraderUiState.normalizeForSearch(it).contains(q) } ?: false) ||
+                (c.addressEn?.let { TraderUiState.normalizeForSearch(it).contains(q) } ?: false) ||
+                (c.phone?.replace("-", "")?.contains(q.replace("-", "")) ?: false) ||
+                (c.phone?.contains(q) ?: false)
         }
     }
 
@@ -477,34 +486,62 @@ fun CustomersScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = null,
-                        modifier = Modifier.size(42.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                    )
-                    Text(
-                        text = if (searchQuery.isNotBlank() || selectedFilter != CustomerBalanceFilter.ALL) {
-                            lang.tr("لا يوجد زبائن مطابقين للبحث أو التصفية", "No matching customers found")
-                        } else {
-                            lang.tr("لا يوجد زبائن مسجلين حالياً", "No registered customers yet")
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    if (searchQuery.isNotBlank() || selectedFilter != CustomerBalanceFilter.ALL) {
-                        TextButton(
-                            onClick = {
-                                searchQuery = ""
-                                selectedFilter = CustomerBalanceFilter.ALL
+                    if (readStatus == ReadStatus.LOADING) {
+                        CircularProgressIndicator()
+                    } else if (readStatus == ReadStatus.FAILED && state.customers.isEmpty()) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(42.dp)
+                        )
+                        Text(
+                            text = lang.tr("تعذر تحديث الزبائن من الخادم", "Could not refresh customers from server"),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        if (onRetryRefresh != null) {
+                            TextButton(
+                                onClick = onRetryRefresh,
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            ) {
+                                Text(
+                                    text = lang.tr("إعادة المحاولة", "Retry"),
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            modifier = Modifier.size(42.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        )
+                        Text(
+                            text = if (searchQuery.isNotBlank() || selectedFilter != CustomerBalanceFilter.ALL) {
+                                lang.tr("لا يوجد زبائن مطابقين للبحث أو التصفية", "No matching customers found")
+                            } else {
+                                lang.tr("لا يوجد زبائن مسجلين حالياً", "No registered customers yet")
                             },
-                            modifier = Modifier.heightIn(min = 48.dp)
-                        ) {
-                            Text(
-                                text = lang.tr("عرض كل الزبائن", "Show All Customers"),
-                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
-                            )
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (searchQuery.isNotBlank() || selectedFilter != CustomerBalanceFilter.ALL) {
+                            TextButton(
+                                onClick = {
+                                    searchQuery = ""
+                                    selectedFilter = CustomerBalanceFilter.ALL
+                                },
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            ) {
+                                Text(
+                                    text = lang.tr("عرض كل الزبائن", "Show All Customers"),
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
                         }
                     }
                 }
@@ -607,7 +644,7 @@ private fun CustomerDirectoryRow(
                 ) {
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                         Text(
-                            text = customer.phone,
+                            text = customer.phone ?: "",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontFamily = MonoFontFamily,
                                 fontWeight = FontWeight.SemiBold
@@ -714,6 +751,7 @@ fun CustomerDetailScreen(
     onOpenInvoice: ((InvoiceRecord) -> Unit)? = null,
     onDismissFeedback: (() -> Unit)? = null,
     onUpdateCustomer: ((customerId: String, name: String, phone: String, address: String, creditLimitIls: Double) -> Unit)? = null,
+    onUpdateCustomerWithResult: ((customerId: String, name: String, phone: String, address: String, creditLimitIls: Double, onComplete: (Boolean) -> Unit) -> Unit)? = null,
     onFormatStatementText: ((String) -> String)? = null
 ) {
     val lang = state.language
@@ -725,6 +763,12 @@ fun CustomerDetailScreen(
     }
     var isEditCustomerOpen by rememberSaveable(customer.id) { mutableStateOf(false) }
     var isStatementPreviewOpen by rememberSaveable(customer.id) { mutableStateOf(false) }
+
+    val isDemo = state.currentSession.isDemoSession
+    val liveStatement = if (!isDemo && state.selectedCustomerStatement?.customerId == customer.id) {
+        state.selectedCustomerStatement
+    } else null
+    val isStatementLoading = !isDemo && liveStatement == null
 
     val isDebtor = customer.balanceIls > 0.005
     val isAdvance = customer.balanceIls < -0.005
@@ -781,7 +825,7 @@ fun CustomerDetailScreen(
                     ) {
                         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                             Text(
-                                text = customer.phone,
+                                text = customer.phone ?: "",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.SemiBold
@@ -863,9 +907,115 @@ fun CustomerDetailScreen(
                 }
             }
 
-            // 1. Balance Status Card (ST-34 Outstanding Debt vs ST-36 Customer Advance)
+            // 1. Balance Status Card (ST-34 Outstanding Debt vs ST-36 Customer Advance vs Live Multi-Currency)
             item {
-                if (isAdvance) {
+                if (isStatementLoading) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("customer_statement_loading")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Text(
+                                text = lang.tr("جارٍ تحميل كشف الحساب من الخادم...", "Loading statement from server..."),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else if (liveStatement != null) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        liveStatement.currencies.forEach { (currCode, currSummary) ->
+                            val isDebtorLive = currSummary.closingBalance.compareTo(BigDecimal.ZERO) > 0
+                            val isAdvanceLive = currSummary.closingBalance.compareTo(BigDecimal.ZERO) < 0
+                            val formattedBalance = "${WesternFormatters.formatExactOrPlain(currSummary.closingBalance.abs())} $currCode"
+
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("customer_currency_statement_$currCode")
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = when {
+                                                isDebtorLive -> lang.tr("رصيد مستحق ($currCode)", "Outstanding Debt ($currCode)")
+                                                isAdvanceLive -> lang.tr("رصيد دائن / أمانة ($currCode)", "Credit Balance ($currCode)")
+                                                else -> lang.tr("رصيد الحساب ($currCode)", "Account Balance ($currCode)")
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        StitchBadge(
+                                            text = when {
+                                                isDebtorLive -> lang.tr("ذمة قائمة", "Debt")
+                                                isAdvanceLive -> lang.tr("رصيد دائن", "Credit")
+                                                else -> lang.tr("خالص", "Settled")
+                                            },
+                                            tone = when {
+                                                isDebtorLive -> StitchBadgeTone.DANGER
+                                                isAdvanceLive -> StitchBadgeTone.SUCCESS
+                                                else -> StitchBadgeTone.NEUTRAL
+                                            },
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                    }
+
+                                    Text(
+                                        text = formattedBalance,
+                                        style = MaterialTheme.typography.displayMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = MonoFontFamily
+                                        ),
+                                        color = when {
+                                            isDebtorLive -> financial.debit
+                                            isAdvanceLive -> financial.income
+                                            else -> MaterialTheme.colorScheme.onSurface
+                                        },
+                                        modifier = Modifier.testTag("customer_detail_balance_value")
+                                    )
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = "${lang.tr("إجمالي المدين:", "Total Debits:")} ${WesternFormatters.formatExactOrPlain(currSummary.totalDebits)} $currCode",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = "${lang.tr("إجمالي الدائن:", "Total Credits:")} ${WesternFormatters.formatExactOrPlain(currSummary.totalCredits)} $currCode",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = financial.income
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if (isAdvance) {
                     // ST-36: Customer Advance Credit (+50.00 ₪)
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -1127,8 +1277,11 @@ fun CustomerDetailScreen(
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                        val entryCount = if (!isDemo && liveStatement != null) {
+                            liveStatement.currencies.values.sumOf { it.entries.size }
+                        } else transactions.size
                         StitchBadge(
-                            text = "${WesternFormatters.formatInt(transactions.size)} ${lang.tr("حركة", "entries")}",
+                            text = "${WesternFormatters.formatInt(entryCount)} ${lang.tr("حركة", "entries")}",
                             tone = StitchBadgeTone.NEUTRAL,
                             shape = RoundedCornerShape(6.dp)
                         )
@@ -1136,7 +1289,94 @@ fun CustomerDetailScreen(
                 }
             }
 
-            if (transactions.isEmpty()) {
+            if (!isDemo && isStatementLoading) {
+                item {
+                    Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    }
+                }
+            } else if (!isDemo && liveStatement != null) {
+                val liveEntries = liveStatement.currencies.flatMap { (code, statement) -> statement.entries.map { code to it } }
+                if (liveEntries.isEmpty()) {
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = lang.tr(
+                                    "لا توجد حركات مسجلة لهذا الزبون في كشف الحساب.",
+                                    "No transactions recorded for this customer in statement."
+                                ),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(16.dp)
+                            )
+                        }
+                    }
+                } else {
+                    items(liveEntries) { (entryCurrency, entry) ->
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "${entry.type} • ${entry.date}",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    if (!entry.number.isNullOrBlank()) {
+                                        Text(
+                                            text = "${lang.tr("مستند:", "Doc:")} ${entry.number}",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFontFamily),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    if (entry.debit.compareTo(BigDecimal.ZERO) > 0) {
+                                        Text(
+                                            text = "+${WesternFormatters.formatExactOrPlain(entry.debit)} ${entryCurrency}",
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = MonoFontFamily
+                                            ),
+                                            color = financial.debit
+                                        )
+                                    }
+                                    if (entry.credit.compareTo(BigDecimal.ZERO) > 0) {
+                                        Text(
+                                            text = "-${WesternFormatters.formatExactOrPlain(entry.credit)} ${entryCurrency}",
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = MonoFontFamily
+                                            ),
+                                            color = financial.income
+                                        )
+                                    }
+                                    Text(
+                                        text = "${lang.tr("الرصيد:", "Bal:")} ${WesternFormatters.formatExactOrPlain(entry.balance)} ${entryCurrency}",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = MonoFontFamily),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (transactions.isEmpty()) {
                 item {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -1172,14 +1412,20 @@ fun CustomerDetailScreen(
         }
     }
 
-    if (isEditCustomerOpen && onUpdateCustomer != null) {
+    if (isEditCustomerOpen && (onUpdateCustomerWithResult != null || onUpdateCustomer != null)) {
         EditCustomerDialog(
             customer = customer,
             lang = lang,
             onDismiss = { isEditCustomerOpen = false },
             onConfirmUpdate = { name, phone, address, creditLimitIls ->
-                onUpdateCustomer(customer.id, name, phone, address, creditLimitIls)
-                isEditCustomerOpen = false
+                if (onUpdateCustomerWithResult != null) {
+                    onUpdateCustomerWithResult(customer.id, name, phone, address, creditLimitIls) { success ->
+                        if (success) isEditCustomerOpen = false
+                    }
+                } else {
+                    onUpdateCustomer?.invoke(customer.id, name, phone, address, creditLimitIls)
+                    isEditCustomerOpen = false
+                }
             }
         )
     }
@@ -1206,8 +1452,8 @@ private fun EditCustomerDialog(
     onConfirmUpdate: (name: String, phone: String, address: String, creditLimitIls: Double) -> Unit
 ) {
     var nameText by rememberSaveable(customer.id) { mutableStateOf(customer.nameAr) }
-    var phoneText by rememberSaveable(customer.id) { mutableStateOf(customer.phone) }
-    var addressText by rememberSaveable(customer.id) { mutableStateOf(customer.addressAr) }
+    var phoneText by rememberSaveable(customer.id) { mutableStateOf(customer.phone ?: "") }
+    var addressText by rememberSaveable(customer.id) { mutableStateOf(customer.addressAr ?: "") }
     var limitText by remember(customer.id) {
         mutableStateOf(WesternFormatters.formatNumber(customer.creditLimitIls).removeSuffix(".00"))
     }
@@ -1414,6 +1660,7 @@ private fun CustomerStatementRow(
 
     val runningBal = tx.runningBalanceIls
     val runningBalLabel = when {
+        runningBal == null -> "—"
         runningBal > 0.005 -> lang.tr(
             "الرصيد بعدها: عليه ${StitchBidiUtils.formatIls(runningBal)}",
             "Balance after: Owes ${StitchBidiUtils.formatIls(runningBal)}"
@@ -1863,14 +2110,16 @@ fun CustomerPaymentCollectionDialog(
 fun AddCustomerDialog(
     lang: AppLanguage,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, phone: String, address: String) -> Unit
+    onConfirm: (name: String, phone: String, address: String) -> Unit,
+    onConfirmWithResult: ((name: String, phone: String, address: String, onComplete: (Boolean) -> Unit) -> Unit)? = null
 ) {
     var newCustName by rememberSaveable { mutableStateOf("") }
     var newCustPhone by rememberSaveable { mutableStateOf("") }
     var newCustAddr by rememberSaveable { mutableStateOf("") }
+    var isSubmitting by rememberSaveable { mutableStateOf(false) }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
         shape = RoundedCornerShape(12.dp),
         title = {
             Text(
@@ -1927,8 +2176,25 @@ fun AddCustomerDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(newCustName.trim(), newCustPhone.trim(), newCustAddr.trim()) },
-                enabled = newCustName.isNotBlank(),
+                onClick = {
+                    if (!isSubmitting && newCustName.isNotBlank()) {
+                        val trimmedName = newCustName.trim()
+                        val trimmedPhone = newCustPhone.trim()
+                        val trimmedAddr = newCustAddr.trim()
+                        if (onConfirmWithResult != null) {
+                            isSubmitting = true
+                            onConfirmWithResult(trimmedName, trimmedPhone, trimmedAddr) { success ->
+                                isSubmitting = false
+                                if (success) {
+                                    onDismiss()
+                                }
+                            }
+                        } else {
+                            onConfirm(trimmedName, trimmedPhone, trimmedAddr)
+                        }
+                    }
+                },
+                enabled = !isSubmitting && newCustName.isNotBlank(),
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -1946,7 +2212,8 @@ fun AddCustomerDialog(
         },
         dismissButton = {
             TextButton(
-                onClick = onDismiss,
+                onClick = { if (!isSubmitting) onDismiss() },
+                enabled = !isSubmitting,
                 modifier = Modifier.heightIn(min = 48.dp)
             ) {
                 Text(lang.tr("إلغاء", "Cancel"))

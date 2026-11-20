@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import android.content.Intent
+import com.example.data.mobile.merchantread.LiveInvoiceRecord
+import java.math.BigDecimal
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -36,6 +39,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -49,7 +53,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -95,7 +101,6 @@ import com.example.ui.components.StitchCard
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
-import java.math.BigDecimal
 import java.math.RoundingMode
 
 private enum class InvoiceHistoryFilter {
@@ -179,6 +184,25 @@ fun ReceiptScreen(
 
     val linkedCustomer = remember(receipt.customerId, state.customers) {
         receipt.customerId?.let { cid -> state.customers.firstOrNull { it.id == cid } }
+    }
+    val liveDetail = if (state.selectedInvoiceDetail != null &&
+        (state.selectedInvoiceDetail.id == receipt.id ||
+         state.selectedInvoiceDetail.serverInvoiceUlid == receipt.serverInvoiceUlid ||
+         state.selectedInvoiceDetail.id == receipt.serverInvoiceUlid)) {
+        state.selectedInvoiceDetail
+    } else null
+    val detailLines = liveDetail?.thermalReceipt?.lines?.takeIf { it.isNotEmpty() } ?: liveDetail?.lines ?: emptyList()
+    val isPendingSync = receipt.outboxStatus != null || (receipt.serverInvoiceUlid == null && !state.currentSession.isDemoSession)
+    val displayCurrency = liveDetail?.currency ?: "₪"
+    val displayNetTotal = if (liveDetail != null) {
+        "${WesternFormatters.formatExactOrPlain(liveDetail.totalExact)} $displayCurrency"
+    } else {
+        WesternFormatters.formatIls(receipt.netTotalIls)
+    }
+    val displayRemainingDebit = if (liveDetail != null) {
+        "${WesternFormatters.formatExactOrPlain(liveDetail.remainingDebitExact)} $displayCurrency"
+    } else {
+        WesternFormatters.formatIls(receipt.remainingDebitIls)
     }
 
     Column(
@@ -313,6 +337,12 @@ fun ReceiptScreen(
                                         InvoicePaymentStatus.ON_CREDIT -> StitchBadgeTone.DANGER
                                     }
                                 )
+                                if (isPendingSync) {
+                                    StitchBadge(
+                                        text = lang.tr("قيد المزامنة", "Pending Sync"),
+                                        tone = StitchBadgeTone.WARNING
+                                    )
+                                }
                             }
                             Text(
                                 text = when (receipt.paymentStatus) {
@@ -415,28 +445,55 @@ fun ReceiptScreen(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        receipt.items.forEach { item ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "${item.product.name(lang)} (${WesternFormatters.formatInt(item.quantity)}×)",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.weight(1f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = WesternFormatters.formatIls(item.lineTotal),
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontFamily = MonoFontFamily
-                                    ),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
+                        if (receipt.items.isNotEmpty()) {
+                            receipt.items.forEach { item ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "${item.product.name(lang)} (${WesternFormatters.formatInt(item.quantity)}×)",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = WesternFormatters.formatIls(item.lineTotal),
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontFamily = MonoFontFamily
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        } else if (detailLines.isNotEmpty()) {
+                            detailLines.forEach { line ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "${line.productName} (${WesternFormatters.formatExactOrPlain(line.quantity)}×)",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${WesternFormatters.formatExactOrPlain(line.lineTotal)} $displayCurrency",
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontFamily = MonoFontFamily
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                             }
                         }
                     }
@@ -502,7 +559,7 @@ fun ReceiptScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = WesternFormatters.formatIls(receipt.netTotalIls),
+                                text = displayNetTotal,
                                 style = MaterialTheme.typography.headlineMedium.copy(
                                     fontSize = 24.sp,
                                     fontWeight = FontWeight.Bold,
@@ -610,25 +667,27 @@ fun ReceiptScreen(
                                     }
                                 }
                                 InvoicePaymentStatus.ON_CREDIT -> {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            text = lang.tr("المقبوض نقداً", "Cash Paid"),
-                                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Text(
-                                            text = "0.00 ₪",
-                                            style = MaterialTheme.typography.bodySmall.copy(
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontFamily = MonoFontFamily
-                                            ),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                    if (receipt.cashReceivedIls > 0.005) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = lang.tr("المقبوض نقداً", "Cash Paid"),
+                                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = WesternFormatters.formatIls(receipt.cashReceivedIls),
+                                                style = MaterialTheme.typography.bodySmall.copy(
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontFamily = MonoFontFamily
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                                     }
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -640,7 +699,7 @@ fun ReceiptScreen(
                                             color = TraderTheme.financial.debit
                                         )
                                         Text(
-                                            text = WesternFormatters.formatIls(receipt.remainingDebitIls),
+                                            text = displayRemainingDebit,
                                             style = MaterialTheme.typography.titleMedium.copy(
                                                 fontWeight = FontWeight.Bold,
                                                 fontFamily = MonoFontFamily
@@ -657,6 +716,7 @@ fun ReceiptScreen(
 
             // 3. Collapsible Detailed Thermal Paper Content (ST-13 Paper Preview)
             val maxDocWidth = if (state.receiptPaperWidthMm == 58) 380.dp else 480.dp
+            val totalLineCount = if (receipt.items.isNotEmpty()) receipt.items.size else detailLines.size
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -691,8 +751,8 @@ fun ReceiptScreen(
                                 )
                                 Text(
                                     text = lang.tr(
-                                        "${WesternFormatters.formatInt(receipt.items.size)} أصناف • عرض الورقة ${state.receiptPaperWidthMm} مم",
-                                        "${WesternFormatters.formatInt(receipt.items.size)} items • ${state.receiptPaperWidthMm}mm paper"
+                                        "${WesternFormatters.formatInt(totalLineCount)} أصناف • عرض الورقة ${state.receiptPaperWidthMm} مم",
+                                        "${WesternFormatters.formatInt(totalLineCount)} items • ${state.receiptPaperWidthMm}mm paper"
                                     ),
                                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -728,6 +788,7 @@ fun ReceiptScreen(
                                 business = state.businessInfo,
                                 lang = lang,
                                 paperWidthMm = state.receiptPaperWidthMm,
+                                liveDetail = liveDetail,
                                 modifier = Modifier
                                     .widthIn(max = maxDocWidth)
                                     .fillMaxWidth()
@@ -768,8 +829,8 @@ fun ReceiptScreen(
                             )
                             Text(
                                 text = lang.tr(
-                                    "طباعة تجريبية أو مشاركة نص الفاتورة عبر النظام",
-                                    "Simulated printing or native text sharing"
+                                    "طباعة الإيصال أو مشاركة نص الفاتورة عبر النظام",
+                                    "Print receipt or share invoice text"
                                 ),
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1175,11 +1236,51 @@ private fun InvoiceReceiptDocumentCard(
     business: BusinessInfo,
     lang: AppLanguage,
     paperWidthMm: Int,
+    liveDetail: LiveInvoiceRecord? = null,
     modifier: Modifier = Modifier
 ) {
     val paymentStatus = receipt.paymentStatus
-    val isPaidCash = paymentStatus == com.example.model.InvoicePaymentStatus.PAID_CASH
-    val isPartial = paymentStatus == com.example.model.InvoicePaymentStatus.PARTIAL
+    val isPaidCash = liveDetail?.isFullCashSale ?: (paymentStatus == com.example.model.InvoicePaymentStatus.PAID_CASH)
+    val isPartial = if (liveDetail != null) (!liveDetail.isPaidInFull && liveDetail.paidExact > BigDecimal.ZERO) else (paymentStatus == com.example.model.InvoicePaymentStatus.PARTIAL)
+    val detailLines = liveDetail?.thermalReceipt?.lines?.takeIf { it.isNotEmpty() } ?: liveDetail?.lines ?: emptyList()
+    val curr = liveDetail?.currency ?: "₪"
+    val totalLineCount = if (receipt.items.isNotEmpty()) receipt.items.size else detailLines.size
+    val totalUnitQty = if (receipt.items.isNotEmpty()) {
+        WesternFormatters.formatInt(receipt.totalQuantity)
+    } else {
+        WesternFormatters.formatExactOrPlain(detailLines.fold(BigDecimal.ZERO) { acc, l -> acc.add(l.quantity) })
+    }
+
+    val displayNetTotal = if (liveDetail != null) {
+        "${WesternFormatters.formatExactOrPlain(liveDetail.totalExact)} $curr"
+    } else {
+        WesternFormatters.formatIls(receipt.netTotalIls)
+    }
+    val displaySubtotal = if (liveDetail != null) {
+        "${WesternFormatters.formatExactOrPlain(liveDetail.subtotalExact)} $curr"
+    } else {
+        WesternFormatters.formatIls(receipt.subtotalIls)
+    }
+    val displayDiscount = if (liveDetail != null) {
+        "${WesternFormatters.formatExactOrPlain(liveDetail.discountExact)} $curr"
+    } else {
+        WesternFormatters.formatIls(receipt.discountIls)
+    }
+    val hasDiscount = if (liveDetail != null) {
+        liveDetail.discountExact.compareTo(BigDecimal.ZERO) > 0
+    } else {
+        receipt.discountIls > 0.005
+    }
+    val displayPaid = if (liveDetail != null) {
+        "${WesternFormatters.formatExactOrPlain(liveDetail.paidExact)} $curr"
+    } else {
+        WesternFormatters.formatIls(receipt.cashReceivedIls)
+    }
+    val displayRemaining = if (liveDetail != null) {
+        "${WesternFormatters.formatExactOrPlain(liveDetail.remainingDebitExact)} $curr"
+    } else {
+        WesternFormatters.formatIls(receipt.remainingDebitIls)
+    }
 
     Card(
         modifier = modifier.testTag("thermal_receipt_paper"),
@@ -1316,14 +1417,14 @@ private fun InvoiceReceiptDocumentCard(
             ) {
                 Text(
                     text = lang.tr(
-                        "الأصناف (${WesternFormatters.formatInt(receipt.items.size)} صنف • ${WesternFormatters.formatInt(receipt.totalQuantity)} وحدة)",
-                        "Items (${WesternFormatters.formatInt(receipt.items.size)} lines • ${WesternFormatters.formatInt(receipt.totalQuantity)} units)"
+                        "الأصناف (${WesternFormatters.formatInt(totalLineCount)} صنف • $totalUnitQty وحدة)",
+                        "Items (${WesternFormatters.formatInt(totalLineCount)} lines • $totalUnitQty units)"
                     ),
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = lang.tr("المبلغ (₪)", "Amount (₪)"),
+                    text = lang.tr("المبلغ ($curr)", "Amount ($curr)"),
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1331,38 +1432,75 @@ private fun InvoiceReceiptDocumentCard(
 
             // 5. Numbered Line Items
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                receipt.items.forEachIndexed { index, item ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.Top
+                if (receipt.items.isNotEmpty()) {
+                    receipt.items.forEachIndexed { index, item ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp)
                         ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Text(
+                                    text = "${index + 1}. ${item.product.name(lang)}",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = WesternFormatters.formatIls(item.lineTotal),
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                             Text(
-                                text = "${index + 1}. ${item.product.name(lang)}",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = WesternFormatters.formatIls(item.lineTotal),
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = FontWeight.SemiBold
-                                ),
-                                color = MaterialTheme.colorScheme.onSurface
+                                text = "${WesternFormatters.formatInt(item.quantity)} × ${WesternFormatters.formatIls(item.product.priceIls)} (${item.product.unit(lang)})",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 14.dp)
                             )
                         }
-                        Text(
-                            text = "${WesternFormatters.formatInt(item.quantity)} × ${WesternFormatters.formatIls(item.product.priceIls)} (${item.product.unit(lang)})",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 14.dp)
-                        )
+                    }
+                } else if (detailLines.isNotEmpty()) {
+                    detailLines.forEachIndexed { index, line ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Text(
+                                    text = "${index + 1}. ${line.productName}",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "${WesternFormatters.formatExactOrPlain(line.lineTotal)} $curr",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Text(
+                                text = "${WesternFormatters.formatExactOrPlain(line.quantity)} × ${WesternFormatters.formatExactOrPlain(line.unitPrice)} $curr (${line.unit})",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 14.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -1371,15 +1509,15 @@ private fun InvoiceReceiptDocumentCard(
 
             // 6. Totals & Settlement Breakdown
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (receipt.discountIls > 0.005) {
+                if (hasDiscount) {
                     DocumentMetaRow(
                         label = lang.tr("المجموع الفرعي:", "Subtotal:"),
-                        value = WesternFormatters.formatIls(receipt.subtotalIls),
+                        value = displaySubtotal,
                         useMono = false
                     )
                     DocumentMetaRow(
                         label = lang.tr("الخصم الممنوح:", "Discount:"),
-                        value = "- ${WesternFormatters.formatIls(receipt.discountIls)}",
+                        value = "- $displayDiscount",
                         useMono = false,
                         valueColor = TraderTheme.financial.income
                     )
@@ -1398,7 +1536,7 @@ private fun InvoiceReceiptDocumentCard(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = WesternFormatters.formatIls(receipt.netTotalIls),
+                        text = displayNetTotal,
                         style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.Bold
                         ),
@@ -1419,14 +1557,16 @@ private fun InvoiceReceiptDocumentCard(
                         )
                         DocumentMetaRow(
                             label = lang.tr("المبلغ المقبوض نقداً:", "Cash Received:"),
-                            value = WesternFormatters.formatIls(receipt.cashReceivedIls),
+                            value = displayPaid,
                             useMono = false
                         )
-                        DocumentMetaRow(
-                            label = lang.tr("الباقي المرجع للزبون:", "Change Returned:"),
-                            value = WesternFormatters.formatIls(receipt.changeReturnedIls),
-                            useMono = false
-                        )
+                        if (receipt.changeReturnedIls > 0.005) {
+                            DocumentMetaRow(
+                                label = lang.tr("الباقي المرجع للزبون:", "Change Returned:"),
+                                value = WesternFormatters.formatIls(receipt.changeReturnedIls),
+                                useMono = false
+                            )
+                        }
                     }
                     isPartial -> {
                         DocumentMetaRow(
@@ -1437,13 +1577,13 @@ private fun InvoiceReceiptDocumentCard(
                         )
                         DocumentMetaRow(
                             label = lang.tr("المدفوع نقداً:", "Cash Paid:"),
-                            value = WesternFormatters.formatIls(receipt.cashReceivedIls),
+                            value = displayPaid,
                             useMono = false,
                             valueColor = TraderTheme.financial.income
                         )
                         DocumentMetaRow(
                             label = lang.tr("المتبقي بالذمة على الحساب:", "Remaining Due on Account:"),
-                            value = WesternFormatters.formatIls(receipt.remainingDebitIls),
+                            value = displayRemaining,
                             useMono = false,
                             valueColor = TraderTheme.financial.debit
                         )
@@ -1455,14 +1595,16 @@ private fun InvoiceReceiptDocumentCard(
                             useMono = false,
                             valueColor = TraderTheme.financial.debit
                         )
-                        DocumentMetaRow(
-                            label = lang.tr("المدفوع نقداً عند الإصدار:", "Cash Paid at Issue:"),
-                            value = WesternFormatters.formatIls(receipt.cashReceivedIls),
-                            useMono = false
-                        )
+                        if (receipt.cashReceivedIls > 0.005) {
+                            DocumentMetaRow(
+                                label = lang.tr("المدفوع نقداً عند الإصدار:", "Cash Paid at Issue:"),
+                                value = displayPaid,
+                                useMono = false
+                            )
+                        }
                         DocumentMetaRow(
                             label = lang.tr("المبلغ المقيد بالذمة:", "Balance Due on Account:"),
-                            value = WesternFormatters.formatIls(receipt.remainingDebitIls),
+                            value = displayRemaining,
                             useMono = false,
                             valueColor = TraderTheme.financial.debit
                         )
@@ -1576,7 +1718,8 @@ fun calculateFilteredInvoicesPaidTotalIls(invoices: List<InvoiceRecord>): Double
 fun InvoicesHistoryScreen(
     state: TraderUiState,
     onOpenInvoice: (InvoiceRecord) -> Unit,
-    onStartNewSale: () -> Unit
+    onStartNewSale: () -> Unit,
+    onLoadMore: () -> Unit = {}
 ) {
     val lang = state.language
     var searchQuery by remember { mutableStateOf("") }
@@ -2053,6 +2196,39 @@ fun InvoicesHistoryScreen(
                         lang = lang,
                         onClick = { onOpenInvoice(invoice) }
                     )
+                }
+            }
+            if (state.liveInvoicesHasMore || state.liveInvoicesHasMoreGap) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        FilledTonalIconButton(
+                            onClick = onLoadMore,
+                            enabled = !state.isLiveInvoicesLoading,
+                            modifier = Modifier
+                                .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                                .testTag("invoice_history_load_more_button"),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            if (state.isLiveInvoicesLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.ExpandMore,
+                                    contentDescription = lang.tr("تحميل المزيد من الفواتير", "Load more invoices"),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

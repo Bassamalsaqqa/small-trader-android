@@ -62,18 +62,43 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            if (BuildConfig.STAFF_READ_WORKSPACE) {
-                val context = androidx.compose.ui.platform.LocalContext.current
-                val authDenialListener = androidx.compose.runtime.remember(context) {
-                    com.example.data.mobile.integration.OutboxAuthDenialBridge.create(context.applicationContext)
+            val launchTarget = com.example.ui.navigation.AppLaunchTargetResolver.resolve(
+                isDebug = BuildConfig.DEBUG,
+                staffReadWorkspace = BuildConfig.STAFF_READ_WORKSPACE,
+                configuredOrigin = BuildConfig.STAFF_WORKSPACE_ORIGIN,
+                demoModeOptIn = false,
+                allowHttpLoopback = BuildConfig.DEBUG && BuildConfig.STAFF_ALLOW_HTTP_LOOPBACK,
+                fullShell = true
+            )
+            when (launchTarget) {
+                com.example.ui.navigation.AppLaunchTarget.FULL_SHELL -> {
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val authDenialListener = androidx.compose.runtime.remember(context) {
+                        com.example.data.mobile.integration.OutboxAuthDenialBridge.create(context.applicationContext)
+                    }
+                    com.example.ui.AuthenticatedTraderApp(
+                        configuredOrigin = BuildConfig.STAFF_WORKSPACE_ORIGIN,
+                        allowHttpLoopback = BuildConfig.DEBUG && BuildConfig.STAFF_ALLOW_HTTP_LOOPBACK,
+                        authDenialListener = authDenialListener
+                    )
                 }
-                com.example.ui.staff.StaffWorkspaceApp(
-                    configuredOrigin = BuildConfig.STAFF_WORKSPACE_ORIGIN,
-                    allowHttpLoopback = BuildConfig.DEBUG && BuildConfig.STAFF_ALLOW_HTTP_LOOPBACK,
-                    authDenialListener = authDenialListener
-                )
-            } else {
-                SmallTraderApp()
+                com.example.ui.navigation.AppLaunchTarget.STAFF_WORKSPACE -> {
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val authDenialListener = androidx.compose.runtime.remember(context) {
+                        com.example.data.mobile.integration.OutboxAuthDenialBridge.create(context.applicationContext)
+                    }
+                    com.example.ui.staff.StaffWorkspaceApp(
+                        configuredOrigin = BuildConfig.STAFF_WORKSPACE_ORIGIN,
+                        allowHttpLoopback = BuildConfig.DEBUG && BuildConfig.STAFF_ALLOW_HTTP_LOOPBACK,
+                        authDenialListener = authDenialListener
+                    )
+                }
+                com.example.ui.navigation.AppLaunchTarget.DEMO_TRADER -> {
+                    SmallTraderApp()
+                }
+                com.example.ui.navigation.AppLaunchTarget.UNCONFIGURED -> {
+                    com.example.ui.staff.StaffUnconfiguredScreen(lang = com.example.model.AppLanguage.AR)
+                }
             }
         }
     }
@@ -144,10 +169,13 @@ fun SmallTraderApp(
                     (if (screen in com.example.viewmodel.TraderUiState.CHECKOUT_FLOW_DESTINATIONS) saleScreenStates else screenStates).SaveableStateProvider(screen.name) {
                     if (TraderNavigationPolicy.allows(state.currentSession, screen)) when (screen) {
                         TraderScreen.PEOPLE -> PeopleHubScreen(state,
-                            customers = { CustomersScreen(state, traderViewModel::selectCustomerForDetail,
+                            customers = {
+                                androidx.compose.runtime.LaunchedEffect(traderViewModel) { traderViewModel.loadScreen(TraderScreen.CUSTOMERS) }
+                                CustomersScreen(state, traderViewModel::selectCustomerForDetail,
                                 { traderViewModel.openAddCustomerDialog(true) },
                                 { customer -> traderViewModel.assignCustomerToSale(customer); traderViewModel.navigateTo(TraderScreen.NEW_SALE) },
-                                traderViewModel::openPaymentCollectionForCustomer, traderViewModel::dismissCustomerFeedback) },
+                                traderViewModel::openPaymentCollectionForCustomer, traderViewModel::dismissCustomerFeedback,
+                                onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.CUSTOMERS, retry = true) }) },
                             suppliers = { SuppliersScreen(state, traderViewModel::selectSupplierForDetail,
                                 { traderViewModel.openReceivePurchaseDialog(true) }, traderViewModel::dismissSupplierFeedback, traderViewModel::saveSupplier) })
                         TraderScreen.PURCHASES -> PurchasesScreen(
@@ -159,9 +187,13 @@ fun SmallTraderApp(
                             },
                             onConfirmPhysicalGoodsReceiptResult = { billId, productId, qty, note, operationId, lineId ->
                                 traderViewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, operationId, lineId)
+                            },
+                            onConfirmPhysicalGoodsReceiptWithResult = { billId, productId, qty, note, operationId, lineId, onComplete ->
+                                traderViewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, operationId, lineId, onComplete = onComplete)
                             }
                         )
                         TraderScreen.HOME -> {
+                            androidx.compose.runtime.LaunchedEffect(traderViewModel) { traderViewModel.loadScreen(TraderScreen.HOME) }
                             HomeScreen(
                                 state = state,
                                 onStartNewSale = { traderViewModel.navigateTo(TraderScreen.NEW_SALE) },
@@ -185,7 +217,8 @@ fun SmallTraderApp(
                                 onNavigateToExpenses = { traderViewModel.navigateTo(TraderScreen.EXPENSES) },
                                 onNavigateToReports = { traderViewModel.navigateTo(TraderScreen.FINANCIAL_REPORTS) },
                                 onNavigateToSettings = { traderViewModel.navigateTo(TraderScreen.BUSINESS_SETTINGS) },
-                                onOpenPurchase = { traderViewModel.openMerchantAction(MerchantAction.PURCHASE) }
+                                onOpenPurchase = { traderViewModel.openMerchantAction(MerchantAction.PURCHASE) },
+                                onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.HOME, retry = true) }
                             )
                         }
 
@@ -279,11 +312,13 @@ fun SmallTraderApp(
                                     } else {
                                         traderViewModel.startFreshSale()
                                     }
-                                }
+                                },
+                                onLoadMore = { traderViewModel.loadMoreInvoices() }
                             )
                         }
 
                         TraderScreen.PRODUCTS_CATALOG -> {
+                            androidx.compose.runtime.LaunchedEffect(traderViewModel) { traderViewModel.loadScreen(TraderScreen.PRODUCTS_CATALOG) }
                             ProductsCatalogScreen(
                                 state = state,
                                 onSearchChange = traderViewModel::updateSearchQuery,
@@ -299,6 +334,7 @@ fun SmallTraderApp(
                                 onOpenPurchases = { traderViewModel.navigateTo(TraderScreen.PURCHASES) },
                                 launchLowStock = state.inventoryLowStockRequested,
                                 onLowStockConsumed = traderViewModel::consumeLowStockRequest,
+                                onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.PRODUCTS_CATALOG, retry = true) },
                                 onSaveProduct = { pid, nameAr, cat, unitAr, barcode, price, cost, minThreshold, initialStock, warehouse, lot, expiry, isWeighted ->
                                     traderViewModel.saveProduct(
                                         productId = pid,
@@ -326,8 +362,14 @@ fun SmallTraderApp(
                                 onUpdatePrice = { productId, newPrice ->
                                     traderViewModel.updateProductPrice(productId, newPrice)
                                 },
+                                onUpdatePriceWithResult = { productId, newPrice, onComplete ->
+                                    traderViewModel.updateProductPrice(productId, newPrice, onComplete)
+                                },
                                 onAdjustStock = { productId, delta, reason ->
                                     traderViewModel.adjustProductStock(productId, delta, reason)
+                                },
+                                onAdjustStockWithResult = { productId, delta, reason, onComplete ->
+                                    traderViewModel.adjustProductStock(productId, delta, reason, onComplete = onComplete)
                                 },
                                 onAddToBasket = { prod ->
                                     traderViewModel.addProductToBasket(prod, 1)
@@ -355,6 +397,7 @@ fun SmallTraderApp(
                         }
 
                         TraderScreen.CUSTOMERS -> {
+                            androidx.compose.runtime.LaunchedEffect(traderViewModel) { traderViewModel.loadScreen(TraderScreen.CUSTOMERS) }
                             CustomersScreen(
                                 state = state,
                                 onCustomerClick = traderViewModel::selectCustomerForDetail,
@@ -366,7 +409,8 @@ fun SmallTraderApp(
                                 onQuickCollectPayment = { cust ->
                                     traderViewModel.openPaymentCollectionForCustomer(cust)
                                 },
-                                onDismissFeedback = traderViewModel::dismissCustomerFeedback
+                                onDismissFeedback = traderViewModel::dismissCustomerFeedback,
+                                onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.CUSTOMERS, retry = true) }
                             )
                         }
 
@@ -384,6 +428,9 @@ fun SmallTraderApp(
                                 onUpdateCustomer = { cid, name, phone, addr, limit ->
                                     traderViewModel.updateCustomer(cid, name, phone, addr, limit)
                                 },
+                                onUpdateCustomerWithResult = { cid, name, phone, addr, limit, onComplete ->
+                                    traderViewModel.updateCustomer(cid, name, phone, addr, limit, onComplete)
+                                },
                                 onFormatStatementText = { cid ->
                                     state.customers.firstOrNull { it.id == cid }?.let {
                                         traderViewModel.formatCustomerStatementText(it)
@@ -399,6 +446,9 @@ fun SmallTraderApp(
                                 onOpenReceivePurchaseDialog = { traderViewModel.openReceivePurchaseDialog(true) },
                                 onDismissFeedback = traderViewModel::dismissSupplierFeedback,
                                 onSaveSupplier = traderViewModel::saveSupplier,
+                                onSaveSupplierWithResult = { sid, name, comp, phone, onComplete ->
+                                    traderViewModel.saveSupplier(sid, name, comp, phone, onComplete)
+                                },
                                 launchCreate = state.pendingAction == MerchantAction.SUPPLIER,
                                 onLaunchConsumed = traderViewModel::consumeAction
                             )
@@ -410,11 +460,20 @@ fun SmallTraderApp(
                                 onBack = { traderViewModel.navigateBack() },
                                 onPaySupplier = { sup, amount -> traderViewModel.paySupplierAmount(sup.id, amount) },
                                 onPaySupplierResult = { sup, amount, paymentId -> traderViewModel.paySupplierAmountResult(sup.id, amount, paymentId = paymentId) },
+                                onPaySupplierWithResult = { sup, amount, paymentId, onComplete ->
+                                    traderViewModel.paySupplierAmountResult(sup.id, amount, paymentId = paymentId, onComplete = onComplete)
+                                },
                                 onOpenReceivePurchaseDialog = { traderViewModel.openReceivePurchaseDialog(true) },
                                 onDismissFeedback = traderViewModel::dismissSupplierFeedback,
                                 onSaveSupplier = traderViewModel::saveSupplier,
+                                onSaveSupplierWithResult = { sid, name, comp, phone, onComplete ->
+                                    traderViewModel.saveSupplier(sid, name, comp, phone, onComplete)
+                                },
                                 onConfirmGoodsReceipt = traderViewModel::confirmPhysicalGoodsReceipt,
                                 onConfirmGoodsReceiptResult = { billId, productId, qty, note, opId, lineId -> traderViewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, opId, lineId) },
+                                onConfirmGoodsReceiptWithResult = { billId, productId, qty, note, opId, lineId, onComplete ->
+                                    traderViewModel.confirmPhysicalGoodsReceiptResult(billId, productId, qty, note, opId, lineId, onComplete = onComplete)
+                                },
                                 launchPayment = state.pendingAction == MerchantAction.PAY,
                                 onLaunchConsumed = traderViewModel::consumeAction
                             )
@@ -604,6 +663,9 @@ fun SmallTraderApp(
                         onDismiss = { traderViewModel.openAddCustomerDialog(false) },
                         onConfirm = { name, phone, address ->
                             traderViewModel.createCustomer(name, phone, address)
+                        },
+                        onConfirmWithResult = { name, phone, address, onComplete ->
+                            traderViewModel.createCustomer(name, phone, address, onComplete)
                         }
                     )
                     }
@@ -615,8 +677,8 @@ fun SmallTraderApp(
                     AddExpenseDialog(
                         state = state,
                         onDismiss = { traderViewModel.openAddExpenseDialog(false) },
-                        onConfirmExpense = { title, category, amountIls ->
-                            traderViewModel.addExpense(title, category, amountIls)
+                        onConfirmExpense = { title, category, amountIls, categoryId ->
+                            traderViewModel.addExpense(title, category, amountIls, categoryId)
                         }
                     )
                     }
@@ -638,12 +700,32 @@ fun SmallTraderApp(
                                 expectedQuantity = expectedQty
                             )
                         },
+                        onConfirmBillWithResult = { supplierId, itemsSummary, totalIls, paidNowIls, expectedProductId, expectedQty, onComplete ->
+                            traderViewModel.recordPurchaseBill(
+                                supplierId = supplierId,
+                                itemsSummary = itemsSummary,
+                                totalIls = totalIls,
+                                paidNowIls = paidNowIls,
+                                expectedProductId = expectedProductId,
+                                expectedQuantity = expectedQty,
+                                onComplete = onComplete
+                            )
+                        },
                         onConfirmStructuredBill = { supplierId, lines, paidNowIls, note ->
                             traderViewModel.recordStructuredPurchaseBill(
                                 supplierId = supplierId,
                                 lines = lines,
                                 paidNowIls = paidNowIls,
                                 note = note
+                            )
+                        },
+                        onConfirmStructuredBillWithResult = { supplierId, lines, paidNowIls, note, onComplete ->
+                            traderViewModel.recordStructuredPurchaseBill(
+                                supplierId = supplierId,
+                                lines = lines,
+                                paidNowIls = paidNowIls,
+                                note = note,
+                                onComplete = onComplete
                             )
                         }
                     )

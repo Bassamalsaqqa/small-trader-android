@@ -71,9 +71,9 @@ class OkHttpTransportSecurityTest {
     fun testDisallowedMethodAndPathCombinationsRejectedBeforeNetwork() {
         val transport = OkHttpTransport(configuredOrigin = configuredOrigin)
 
-        // POST to products (only GET allowed)
+        // DELETE to products is not an authorized native endpoint.
         val postProducts = TransportRequest(
-            method = HttpMethod.POST,
+            method = HttpMethod.DELETE,
             path = validProductsPath,
             baseOrigin = configuredOrigin,
             headers = mapOf(

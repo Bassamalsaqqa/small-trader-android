@@ -184,7 +184,7 @@ class StaffSessionCoordinatorTest {
         assertEquals(StaffAuthState.LoggedOut, coordinator.authState)
 
         // 1. Request challenge
-        val challengeRes = coordinator.requestChallenge(appVersion)
+        val challengeRes = coordinator.requestChallenge(appVersion, rememberSession = true)
         assertTrue(challengeRes is CoordinatorResult.Success)
         val challenge = (challengeRes as CoordinatorResult.Success).value
         assertEquals(testChallengeId, challenge.challengeId)
@@ -208,11 +208,155 @@ class StaffSessionCoordinatorTest {
 
         // Proves encrypted session file was saved to disk
         assertTrue(sessionStore.hasSessionFile())
-        val readDisk = sessionStore.readSession(SessionReadScope(expectedDeviceUuid = coordinator.installationId))
+        val readDisk = sessionStore.readSession(SessionReadScope(expectedDeviceUuid = coordinator.installationId), nowEpochMs = testClock.nowEpochMs())
         assertTrue(readDisk is SessionReadResult.Success)
         val diskRecord = (readDisk as SessionReadResult.Success).session
         assertEquals(testActorUlid, diskRecord.actorUlid)
         assertEquals(testCompanyUlid, diskRecord.selectedCompanyId)
+    }
+
+    @Test
+    fun newOptInAttemptClearsPriorIdentityEvenWhenChallengeFails() {
+        coordinator.requestChallenge(appVersion, rememberSession = true)
+        assertTrue(coordinator.login("cashier@smalltrader.example", "CorrectHorseBatteryStaple123!", "Tablet-POS-01") is CoordinatorResult.Success)
+        assertTrue(sessionStore.hasSessionFile())
+        transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/challenge")] = {
+            assertFalse("Old token must be removed before network challenge", sessionStore.hasSessionFile())
+            TransportResponse(statusCode = 503, body = "{}")
+        }
+        val next = DefaultStaffSessionCoordinator(readClient, sessionStore, denialCapture, testClock)
+        assertFalse(next.requestChallenge(appVersion, rememberSession = true) is CoordinatorResult.Success)
+        val cold = DefaultStaffSessionCoordinator(readClient, sessionStore, denialCapture, testClock)
+        cold.restoreSession()
+        assertEquals(StaffAuthState.LoggedOut, cold.authState)
+        assertEquals(coordinator.installationId, cold.installationId)
+    }
+
+    @Test
+    fun optingOutAfterRememberedLoginRemovesOldTokenBeforeChallengeAndStaysSessionOnly() {
+        fun coldStart() = DefaultStaffSessionCoordinator(readClient, sessionStore, denialCapture, testClock)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
+        assertTrue(coordinator.login("cashier@smalltrader.example", "CorrectHorseBatteryStaple123!", "Tablet-POS-01") is CoordinatorResult.Success)
+        val remembered = coldStart()
+        remembered.restoreSession()
+        assertTrue(remembered.authState is StaffAuthState.ReadReady)
+
+        val nextLogin = coldStart()
+        assertTrue(nextLogin.requestChallenge(appVersion, rememberSession = false) is CoordinatorResult.Success)
+        assertFalse(sessionStore.hasSessionFile())
+        assertTrue(nextLogin.login("cashier@smalltrader.example", "CorrectHorseBatteryStaple123!", "Tablet-POS-01") is CoordinatorResult.Success)
+        assertTrue(nextLogin.authState is StaffAuthState.ReadReady)
+        assertFalse(sessionStore.hasSessionFile())
+        val restarted = coldStart()
+        restarted.restoreSession()
+        assertEquals(StaffAuthState.LoggedOut, restarted.authState)
+        assertEquals(nextLogin.installationId, restarted.installationId)
+    }
+
+    @Test
+    fun optingOutClearsPreviousSavedTokenEvenIfChallengeOrLoginFails() {
+        fun coldStart() = DefaultStaffSessionCoordinator(readClient, sessionStore, denialCapture, testClock)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
+        assertTrue(coordinator.login("cashier@smalltrader.example", "CorrectHorseBatteryStaple123!", "Tablet-POS-01") is CoordinatorResult.Success)
+        assertTrue(sessionStore.hasSessionFile())
+
+        // Next login attempts to opt out (rememberSession = false), but challenge fails over network
+        transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/challenge")] = {
+            TransportResponse(statusCode = 503, body = """{"error":{"code":"SERVICE_UNAVAILABLE","message":"Backend down"}}""")
+        }
+        val failingCoordinator = coldStart()
+        val challengeResult = failingCoordinator.requestChallenge(appVersion, rememberSession = false)
+        assertTrue("Challenge should fail due to 503", challengeResult is CoordinatorResult.Error)
+        // Prior saved token must ALREADY be purged BEFORE network challenge was dispatched
+        assertFalse("Prior session token must be cleared even if challenge fails", sessionStore.hasSessionFile())
+        val restarted = coldStart()
+        restarted.restoreSession()
+        assertEquals(StaffAuthState.LoggedOut, restarted.authState)
+        assertEquals(coordinator.installationId, restarted.installationId)
+    }
+
+    @Test
+    fun optingOutClearsPreviousSavedTokenEvenIfCredentialsFail() {
+        fun coldStart() = DefaultStaffSessionCoordinator(readClient, sessionStore, denialCapture, testClock)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
+        assertTrue(coordinator.login("cashier@smalltrader.example", "CorrectHorseBatteryStaple123!", "Tablet-POS-01") is CoordinatorResult.Success)
+        assertTrue(sessionStore.hasSessionFile())
+
+        // Next login attempts to opt out (rememberSession = false), challenge succeeds but credentials return 401
+        transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/login")] = {
+            TransportResponse(statusCode = 401, body = """{"error":{"code":"AUTH_FAILED","message":"Invalid credentials"}}""")
+        }
+        val optOutCoordinator = coldStart()
+        val challengeResult = optOutCoordinator.requestChallenge(appVersion, rememberSession = false)
+        assertTrue(challengeResult is CoordinatorResult.Success)
+        assertFalse("Prior session token must be cleared before login attempt", sessionStore.hasSessionFile())
+
+        val loginResult = optOutCoordinator.login("cashier@smalltrader.example", "WrongPassword", "Tablet-POS-01")
+        assertTrue(loginResult is CoordinatorResult.AuthDenied)
+        assertFalse(sessionStore.hasSessionFile())
+
+        val restarted = coldStart()
+        restarted.restoreSession()
+        assertEquals(StaffAuthState.LoggedOut, restarted.authState)
+        assertEquals(coordinator.installationId, restarted.installationId)
+    }
+
+    @Test
+    fun mfaRetryPreservesRememberedPreferenceAndPersistsAfterSuccess() {
+        transport.handlers[Pair(HttpMethod.POST, "/api/mobile/v1/auth/login")] = { req ->
+            val obj = StrictJsonParser.parse(req.body!!).asObject()
+            val mfa = obj["mfa_code"]
+            if (mfa is com.example.data.mobile.contract.StrictJsonNull || mfa == null) {
+                TransportResponse(statusCode = 200, body = """{"status":"MFA_REQUIRED","retry":"fresh_challenge"}""")
+            } else {
+                val loginJson = File(fixturesDir, "golden-auth-login.json").readText(Charsets.UTF_8)
+                val loginRes = StrictJsonParser.parse(loginJson).asObject().require("response")
+                TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(loginRes))
+            }
+        }
+
+        coordinator.requestChallenge(appVersion, rememberSession = true)
+        val initialLogin = coordinator.login(
+            email = "cashier@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!",
+            deviceName = "Tablet-POS-01"
+        )
+        assertTrue(initialLogin is CoordinatorResult.Success)
+        assertTrue(coordinator.authState is StaffAuthState.MfaRequired)
+        assertFalse("Session not persisted while MFA is pending", sessionStore.hasSessionFile())
+
+        val mfaRetry = coordinator.retryLoginWithMfa(
+            email = "cashier@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!",
+            deviceName = "Tablet-POS-01",
+            mfaCode = "123456"
+        )
+        assertTrue(mfaRetry is CoordinatorResult.Success)
+        assertTrue(coordinator.authState is StaffAuthState.ReadReady)
+        assertTrue("Session must be persisted after MFA success when rememberSession was true", sessionStore.hasSessionFile())
+    }
+
+    @Test
+    fun companySwitchPreservesSessionOnlyWhenNotRemembered() {
+        val secondBootstrapJson = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+            .replace(testCompanyUlid.value, testSecondCompanyUlid.value)
+        transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testSecondCompanyUlid/bootstrap")] = {
+            TransportResponse(statusCode = 200, body = secondBootstrapJson)
+        }
+
+        coordinator.requestChallenge(appVersion, rememberSession = false)
+        coordinator.login(
+            email = "cashier@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!",
+            deviceName = "Tablet-POS-01"
+        )
+        assertTrue(coordinator.authState is StaffAuthState.ReadReady)
+        assertFalse(sessionStore.hasSessionFile())
+
+        val switchRes = coordinator.switchCompany(testSecondCompanyUlid)
+        assertTrue(switchRes is CoordinatorResult.Success)
+        assertTrue(coordinator.authState is StaffAuthState.ReadReady)
+        assertFalse("Session-only login must remain session-only across company switch", sessionStore.hasSessionFile())
     }
 
     @Test
@@ -257,6 +401,7 @@ class StaffSessionCoordinatorTest {
             mfaCode = "123456"
         )
         assertTrue(mfaRetry is CoordinatorResult.Success)
+        assertFalse(sessionStore.hasSessionFile())
         assertTrue(coordinator.authState is StaffAuthState.ReadReady)
     }
 
@@ -324,7 +469,7 @@ class StaffSessionCoordinatorTest {
             TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(res))
         }
 
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
         val loginRes = coordinator.login(
             email = "cashier@smalltrader.example",
             password = "CorrectHorseBatteryStaple123!",
@@ -373,7 +518,7 @@ class StaffSessionCoordinatorTest {
             TransportResponse(statusCode = 200, body = mismatchedBootstrap)
         }
 
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
         val loginRes = coordinator.login(
             email = "cashier@smalltrader.example",
             password = "CorrectHorseBatteryStaple123!",
@@ -396,7 +541,7 @@ class StaffSessionCoordinatorTest {
             TransportResponse(statusCode = 200, body = mismatchedBootstrap)
         }
 
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
         val loginRes = coordinator.login(
             email = "cashier@smalltrader.example",
             password = "CorrectHorseBatteryStaple123!",
@@ -730,7 +875,7 @@ class StaffSessionCoordinatorTest {
 
     @Test
     fun testSwitchCompanyAdvancesGenerationAndSavesUpdatedSession() {
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
         coordinator.login(
             email = "cashier@smalltrader.example",
             password = "CorrectHorseBatteryStaple123!",
@@ -754,14 +899,14 @@ class StaffSessionCoordinatorTest {
         assertEquals(testSecondCompanyUlid, ready.session.selectedCompanyId)
 
         // Check disk record updated
-        val diskRead = sessionStore.readSession(SessionReadScope(expectedDeviceUuid = coordinator.installationId))
+        val diskRead = sessionStore.readSession(SessionReadScope(expectedDeviceUuid = coordinator.installationId), nowEpochMs = testClock.nowEpochMs())
         assertTrue(diskRead is SessionReadResult.Success)
         assertEquals(testSecondCompanyUlid, (diskRead as SessionReadResult.Success).session.selectedCompanyId)
     }
 
     @Test
     fun testLogoutImmediatelyDeniesLocalReadsRevokesRemoteTokenAndClearsCredentials() {
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
         coordinator.login(
             email = "cashier@smalltrader.example",
             password = "CorrectHorseBatteryStaple123!",
@@ -786,7 +931,7 @@ class StaffSessionCoordinatorTest {
 
     @Test
     fun testLogoutWithRemoteTimeoutReportsRemoteRevocationUnknownWithoutClaimingServerLogout() {
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
         coordinator.login(
             email = "cashier@smalltrader.example",
             password = "CorrectHorseBatteryStaple123!",
@@ -827,7 +972,7 @@ class StaffSessionCoordinatorTest {
 
     @Test
     fun testLogoutStorageClearFailureLeavesStateLockedAndNeverReportsSuccess() {
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
         coordinator.login(
             email = "cashier@smalltrader.example",
             password = "CorrectHorseBatteryStaple123!",
@@ -846,12 +991,8 @@ class StaffSessionCoordinatorTest {
             sessionStore = failingStore,
             clock = testClock
         )
-        faultCoordinator.requestChallenge(appVersion)
-        faultCoordinator.login(
-            email = "cashier@smalltrader.example",
-            password = "CorrectHorseBatteryStaple123!",
-            deviceName = "Samsung Galaxy Tab A8"
-        )
+        faultCoordinator.restoreSession()
+        assertTrue(faultCoordinator.authState is StaffAuthState.ReadReady)
 
         val logoutResult = faultCoordinator.logout()
         assertTrue(logoutResult is LogoutResult.StorageClearFailed)
@@ -894,7 +1035,7 @@ class StaffSessionCoordinatorTest {
             TransportResponse(statusCode = 200, body = CanonicalJsonSerializer.serialize(loginRes))
         }
 
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
 
         val loginThreadResult = AtomicReference<CoordinatorResult<StaffAuthState>>()
         val loginThread = Thread {
@@ -1162,7 +1303,7 @@ class StaffSessionCoordinatorTest {
             TransportResponse(statusCode = 200, body = bootstrapJson)
         }
 
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
 
         val loginResult = AtomicReference<CoordinatorResult<StaffAuthState>>()
         val loginThread = Thread {
@@ -1195,7 +1336,7 @@ class StaffSessionCoordinatorTest {
 
     @Test
     fun testDelayedRemoteLogoutDoesNotClobberNewLogin() {
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
         val initialLogin = coordinator.login(
             email = "cashier@smalltrader.example",
             password = "CorrectHorseBatteryStaple123!",
@@ -1224,7 +1365,7 @@ class StaffSessionCoordinatorTest {
         assertFalse(sessionStore.hasSessionFile())
 
         // User B logs in while User A's remote logout is in flight
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
         val userBLogin = coordinator.login(
             email = "cashier@smalltrader.example",
             password = "CorrectHorseBatteryStaple123!",
@@ -1241,13 +1382,13 @@ class StaffSessionCoordinatorTest {
         // User A's remote logout completion did NOT clobber User B's state or delete User B's credentials!
         assertTrue(coordinator.authState is StaffAuthState.ReadReady)
         assertTrue(sessionStore.hasSessionFile())
-        val diskRecord = sessionStore.readSession(SessionReadScope(expectedDeviceUuid = coordinator.installationId))
+        val diskRecord = sessionStore.readSession(SessionReadScope(expectedDeviceUuid = coordinator.installationId), nowEpochMs = testClock.nowEpochMs())
         assertTrue(diskRecord is SessionReadResult.Success)
     }
 
     @Test
     fun testCancellationOnRemoteLogoutLeavesLocalDiskAbsent() {
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
         coordinator.login(
             email = "cashier@smalltrader.example",
             password = "CorrectHorseBatteryStaple123!",
@@ -1273,7 +1414,7 @@ class StaffSessionCoordinatorTest {
 
     @Test
     fun testConcurrentRestoreSessionInvalidatedByNewGeneration() {
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
         coordinator.login(
             email = "cashier@smalltrader.example",
             password = "CorrectHorseBatteryStaple123!",
@@ -1465,7 +1606,7 @@ class StaffSessionCoordinatorTest {
             TransportResponse(statusCode = 200, body = bootstrapJson)
         }
 
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
         val loginRes = coordinator.login(
             email = "cashier@smalltrader.example",
             password = "CorrectHorseBatteryStaple123!",
@@ -1480,7 +1621,7 @@ class StaffSessionCoordinatorTest {
         transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = {
             TransportResponse(statusCode = 200, body = bootstrapJson)
         }
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
         coordinator.login(
             email = "cashier@smalltrader.example",
             password = "CorrectHorseBatteryStaple123!",
@@ -1557,7 +1698,7 @@ class StaffSessionCoordinatorTest {
         assertNotNull(createdCoordinator.installationId)
     }
     private fun loginReadyForDelta() {
-        coordinator.requestChallenge(appVersion)
+        coordinator.requestChallenge(appVersion, rememberSession = true)
         assertTrue(coordinator.login("cashier@smalltrader.example", "password", "Test device") is CoordinatorResult.Success)
     }
 

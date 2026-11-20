@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import java.math.BigDecimal
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -916,7 +917,7 @@ private fun ProductSaleCatalogRow(
                                     tone = StitchBadgeTone.DANGER
                                 )
                             }
-                            product.isStockTracked && product.stockCount in 1..4 -> {
+                            product.isStockTracked && product.stockCountInt in 1..4 -> {
                                 StitchBadge(
                                     text = lang.tr(
                                         "متبقي ${WesternFormatters.formatInt(product.stockCount)}",
@@ -1254,7 +1255,7 @@ private fun BasketStickyBottomSheet(
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         items(state.basket, key = { "basket_${it.product.id}" }) { item ->
-                            val atMaxStock = item.product.isStockTracked && item.quantity >= item.product.stockCount
+                            val atMaxStock = item.product.isStockTracked && item.quantity >= item.product.stockCountExact
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1782,7 +1783,7 @@ private fun WidePersistentCartPane(
                 items(state.basket, key = { it.product.id }) { item ->
                     val atMaxStock = item.product.isStockTracked &&
                         item.product.stockCount > 0 &&
-                        item.quantity >= item.product.stockCount
+                        item.quantity >= item.product.stockCountExact
 
                     Surface(
                         shape = RoundedCornerShape(10.dp),

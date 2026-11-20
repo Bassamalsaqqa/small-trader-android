@@ -8,6 +8,7 @@ import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.contract.v2.OfflineSaleEventV2
 import com.example.data.mobile.contract.v2.OfflineSaleIntakeRequestV2
+import com.example.data.mobile.contract.v2.OnlineSaleIntentProfile
 import com.example.data.mobile.contract.v2.PaymentDecimalConsistency
 import com.example.data.mobile.contract.ContractConstants
 import java.math.BigDecimal
@@ -104,6 +105,20 @@ interface OutboxRepository {
     ): CaptureResult
 
     /**
+     * Atomically captures a validated online sale intent profile.
+     * Durably persists immutable canonical profile UTF-8 bytes and digest alongside actor,
+     * company, device, and currencyMinorUnits metadata WITHOUT a fabricated offline lease (deviceLeaseId = null).
+     */
+    fun captureOnlineSaleIntent(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        currencyMinorUnits: Int,
+        profile: OnlineSaleIntentProfile,
+        rawCanonicalProfileUtf8: ByteArray? = null
+    ): CaptureResult
+
+    /**
      * Claims the next batch of eligible records using lease-bounded Compare-And-Set (CAS).
      * Guarded by transaction and persisted scope lock.
      * Prevents parallel drains across concurrent workers.
@@ -189,7 +204,7 @@ interface OutboxRepository {
         clientEventId: ClientUuid,
         payloadDigest: PayloadDigest,
         invoiceUlid: ServerUlid,
-        paymentUlid: ServerUlid,
+        paymentUlid: ServerUlid?,
         serverAcknowledgedAt: String,
         claimToken: String
     ): Boolean
@@ -205,7 +220,7 @@ interface OutboxRepository {
         clientEventId: ClientUuid,
         payloadDigest: PayloadDigest,
         invoiceUlid: ServerUlid,
-        paymentUlid: ServerUlid,
+        paymentUlid: ServerUlid?,
         serverAcknowledgedAt: String
     ): Boolean
 
@@ -414,11 +429,8 @@ class OutboxRepositoryImpl(
         }
 
         // 4. Strict parse direct root OfflineSaleEventV2:
-        // Strictly rejects intake envelope (e.g. "event", "payload_digest"), fixture wrapper (e.g. "request"),
-        // arbitrary root (e.g. {}), or unknown keys.
         val parsedJson = StrictJsonParser.parse(jsonString).asObject()
         val event = OfflineSaleEventV2.fromStrictJson(parsedJson)
-
         return captureSaleV2(
             companyId = companyId,
             actorId = actorId,
@@ -426,6 +438,64 @@ class OutboxRepositoryImpl(
             currencyMinorUnits = currencyMinorUnits,
             event = event,
             rawCanonicalEventUtf8 = clonedRaw
+        )
+    }
+
+    override fun captureOnlineSaleIntent(
+        companyId: ServerUlid,
+        actorId: ServerUlid,
+        deviceId: ClientUuid,
+        currencyMinorUnits: Int,
+        profile: OnlineSaleIntentProfile,
+        rawCanonicalProfileUtf8: ByteArray?
+    ): CaptureResult {
+        // Guard 1: Scope parameters MUST match profile identity BEFORE write
+        require(companyId == profile.companyId) {
+            "Explicit companyId ($companyId) does not match profile companyId (${profile.companyId})"
+        }
+        require(actorId == profile.actorId) {
+            "Explicit actorId ($actorId) does not match profile actorId (${profile.actorId})"
+        }
+        require(deviceId == profile.deviceId) {
+            "Explicit deviceId ($deviceId) does not match profile deviceId (${profile.deviceId})"
+        }
+        require(currencyMinorUnits == profile.currencyMinorUnits) {
+            "Explicit currencyMinorUnits ($currencyMinorUnits) does not match profile currencyMinorUnits (${profile.currencyMinorUnits})"
+        }
+
+        // Canonical bytes validation & defensive copy
+        val canonicalBytes = if (rawCanonicalProfileUtf8 != null) {
+            val clonedRaw = rawCanonicalProfileUtf8.clone()
+            require(clonedRaw.size <= ContractConstants.MAX_PAYLOAD_BYTES) {
+                "rawCanonicalProfileUtf8 size ${clonedRaw.size} exceeds maximum allowed 1 MiB (${ContractConstants.MAX_PAYLOAD_BYTES} bytes)"
+            }
+            val expectedBytes = CanonicalJsonSerializer.serialize(profile).toByteArray(StandardCharsets.UTF_8)
+            require(clonedRaw.contentEquals(expectedBytes)) {
+                "Provided rawCanonicalProfileUtf8 is not canonical for event ${profile.clientEventId}"
+            }
+            clonedRaw
+        } else {
+            CanonicalJsonSerializer.serialize(profile).toByteArray(StandardCharsets.UTF_8)
+        }
+
+        val computedDigest = profile.computePayloadDigest()
+        val byteDigest = PayloadDigest.fromBytes(canonicalBytes)
+        require(computedDigest == byteDigest) {
+            "Canonical bytes digest ($byteDigest) does not match profile digest ($computedDigest) for event ${profile.clientEventId}"
+        }
+
+        return executeCaptureTransaction(
+            companyIdStr = profile.companyId.value,
+            actorIdStr = profile.actorId.value,
+            deviceIdStr = profile.deviceId.value,
+            deviceLeaseIdStr = null, // No fabricated offline lease!
+            clientEventIdStr = profile.clientEventId.value,
+            capturedAtStr = java.text.SimpleDateFormat("yyyy-MM-dd\'T\'HH:mm:ss.SSS\'Z\'", java.util.Locale.ROOT).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date(clock())),
+            eventVersion = 2,
+            payloadDigestStr = computedDigest.value,
+            canonicalBytes = canonicalBytes
         )
     }
 
@@ -604,7 +674,7 @@ class OutboxRepositoryImpl(
         companyIdStr: String,
         actorIdStr: String,
         deviceIdStr: String,
-        deviceLeaseIdStr: String,
+        deviceLeaseIdStr: String?,
         clientEventIdStr: String,
         capturedAtStr: String,
         eventVersion: Int,
@@ -882,13 +952,16 @@ class OutboxRepositoryImpl(
         clientEventId: ClientUuid,
         payloadDigest: PayloadDigest,
         invoiceUlid: ServerUlid,
-        paymentUlid: ServerUlid,
+        paymentUlid: ServerUlid?,
         serverAcknowledgedAt: String,
         claimToken: String
     ): Boolean {
         require(claimToken.isNotBlank()) { "claimToken must not be blank for worker delivery confirmation" }
         require(ServerUlid.isValid(invoiceUlid.value)) { "Invalid invoice ULID: '${invoiceUlid.value}'" }
-        require(ServerUlid.isValid(paymentUlid.value)) { "Invalid payment ULID: '${paymentUlid.value}'" }
+        if (paymentUlid != null) {
+            require(ServerUlid.isValid(paymentUlid.value)) { "Invalid payment ULID: '${paymentUlid.value}'" }
+            require(paymentUlid != invoiceUlid) { "Payment ULID must not match invoice ULID" }
+        }
         com.example.data.mobile.contract.Rfc3339Validator.requireValid(serverAcknowledgedAt, "serverAcknowledgedAt")
 
         val now = clock()
@@ -910,6 +983,31 @@ class OutboxRepositoryImpl(
                 )
             }
 
+            val profile = try {
+                if (event.eventVersion == 2) {
+                    val root = StrictJsonParser.parseObject(String(event.payloadBytes, StandardCharsets.UTF_8))
+                    if ("lines" in root.properties && "payment" in root.properties) {
+                        OnlineSaleIntentProfile.fromStrictJson(root)
+                    } else null
+                } else null
+            } catch (_: Exception) {
+                null
+            }
+
+            if (paymentUlid == null) {
+                if (profile == null || profile.payment.settlementMode != "unpaid") {
+                    throw InvalidAcknowledgementException(
+                        "Explicit null payment accepted ONLY for original admitted unpaid profile; rejected for ${profile?.payment?.settlementMode ?: "offline/legacy"}"
+                    )
+                }
+            } else {
+                if (profile != null && profile.payment.settlementMode == "unpaid") {
+                    throw InvalidAcknowledgementException(
+                        "Non-null payment ULID ${paymentUlid.value} rejected for original admitted unpaid profile"
+                    )
+                }
+            }
+
             val state = database.outboxDao().getDeliveryState(companyId.value, clientEventId.value)
                 ?: throw InvalidAcknowledgementException("No delivery state found for clientEventId: $clientEventId")
 
@@ -927,14 +1025,14 @@ class OutboxRepositoryImpl(
                 val currentInvoice = state.invoiceUlid
                 val currentPayment = state.paymentUlid
                 val matches = currentInvoice == invoiceUlid.value &&
-                        currentPayment == paymentUlid.value
+                        currentPayment == paymentUlid?.value
                 if (matches) {
                     // Exact mapping replay: return true without mutating existing record
                     return@runInTransaction true
                 } else {
                     // Conflicting mapping rejected; preserve original
                     throw InvalidAcknowledgementException(
-                        "Conflicting server mapping for already-confirmed record (existing invoice: $currentInvoice, payment: $currentPayment; incoming invoice: ${invoiceUlid.value}, payment: ${paymentUlid.value}); original preserved"
+                        "Conflicting server mapping for already-confirmed record (existing invoice: $currentInvoice, payment: $currentPayment; incoming invoice: ${invoiceUlid.value}, payment: ${paymentUlid?.value}); original preserved"
                     )
                 }
             }
@@ -969,7 +1067,7 @@ class OutboxRepositoryImpl(
                 deviceId = deviceId.value,
                 claimToken = claimToken,
                 invoiceUlid = invoiceUlid.value,
-                paymentUlid = paymentUlid.value,
+                paymentUlid = paymentUlid?.value,
                 serverUlid = invoiceUlid.value,
                 serverAcknowledgedAt = serverAcknowledgedAt,
                 nowMillis = now
@@ -985,11 +1083,14 @@ class OutboxRepositoryImpl(
         clientEventId: ClientUuid,
         payloadDigest: PayloadDigest,
         invoiceUlid: ServerUlid,
-        paymentUlid: ServerUlid,
+        paymentUlid: ServerUlid?,
         serverAcknowledgedAt: String
     ): Boolean {
         require(ServerUlid.isValid(invoiceUlid.value)) { "Invalid invoice ULID: '${invoiceUlid.value}'" }
-        require(ServerUlid.isValid(paymentUlid.value)) { "Invalid payment ULID: '${paymentUlid.value}'" }
+        if (paymentUlid != null) {
+            require(ServerUlid.isValid(paymentUlid.value)) { "Invalid payment ULID: '${paymentUlid.value}'" }
+            require(paymentUlid != invoiceUlid) { "Payment ULID must not match invoice ULID" }
+        }
         com.example.data.mobile.contract.Rfc3339Validator.requireValid(serverAcknowledgedAt, "serverAcknowledgedAt")
 
         val now = clock()
@@ -1007,6 +1108,31 @@ class OutboxRepositoryImpl(
                 throw InvalidAcknowledgementException("Payload digest mismatch on reconciliation")
             }
 
+            val profile = try {
+                if (event.eventVersion == 2) {
+                    val root = StrictJsonParser.parseObject(String(event.payloadBytes, StandardCharsets.UTF_8))
+                    if ("lines" in root.properties && "payment" in root.properties) {
+                        OnlineSaleIntentProfile.fromStrictJson(root)
+                    } else null
+                } else null
+            } catch (_: Exception) {
+                null
+            }
+
+            if (paymentUlid == null) {
+                if (profile == null || profile.payment.settlementMode != "unpaid") {
+                    throw InvalidAcknowledgementException(
+                        "Explicit null payment accepted ONLY for original admitted unpaid profile; rejected for ${profile?.payment?.settlementMode ?: "offline/legacy"}"
+                    )
+                }
+            } else {
+                if (profile != null && profile.payment.settlementMode == "unpaid") {
+                    throw InvalidAcknowledgementException(
+                        "Non-null payment ULID ${paymentUlid.value} rejected for original admitted unpaid profile"
+                    )
+                }
+            }
+
             val state = database.outboxDao().getDeliveryState(companyId.value, clientEventId.value)
                 ?: throw InvalidAcknowledgementException("No delivery state found for clientEventId: $clientEventId")
 
@@ -1022,7 +1148,7 @@ class OutboxRepositoryImpl(
                 val currentInvoice = state.invoiceUlid
                 val currentPayment = state.paymentUlid
                 val matches = currentInvoice == invoiceUlid.value &&
-                        currentPayment == paymentUlid.value
+                        currentPayment == paymentUlid?.value
                 if (matches) {
                     return@runInTransaction true
                 } else {
@@ -1042,7 +1168,7 @@ class OutboxRepositoryImpl(
                 actorId = actorId.value,
                 deviceId = deviceId.value,
                 invoiceUlid = invoiceUlid.value,
-                paymentUlid = paymentUlid.value,
+                paymentUlid = paymentUlid?.value,
                 serverUlid = invoiceUlid.value,
                 serverAcknowledgedAt = serverAcknowledgedAt,
                 nowMillis = now

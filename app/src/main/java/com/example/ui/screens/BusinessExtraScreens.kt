@@ -111,6 +111,10 @@ import com.example.ui.components.StitchTonalButton
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
+import java.math.BigDecimal
+import com.example.data.mobile.merchantread.LiveShiftSummary
+import com.example.data.mobile.merchantread.LiveTreasurySummary
+import com.example.data.mobile.merchantread.TreasuryAccountItem
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -726,12 +730,15 @@ fun ExpensesScreen(
 fun AddExpenseDialog(
     state: TraderUiState,
     onDismiss: () -> Unit,
-    onConfirmExpense: (String, ExpenseCategory, Double) -> Unit
+    onConfirmExpense: (String, ExpenseCategory, Double, String?) -> Unit
 ) {
     val lang = state.language
     val financial = TraderTheme.financial
     var titleText by rememberSaveable { mutableStateOf("") }
     var selectedCategory by rememberSaveable { mutableStateOf(ExpenseCategory.TRANSPORT) }
+    var selectedServerCategoryId by rememberSaveable {
+        mutableStateOf(state.serverExpenseCategories.firstOrNull()?.id ?: "")
+    }
     var amountText by rememberSaveable { mutableStateOf("") }
     var localError by remember { mutableStateOf<String?>(null) }
 
@@ -864,20 +871,37 @@ fun AddExpenseDialog(
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        ExpenseCategory.entries.forEach { cat ->
-                            FilterChip(
-                                selected = selectedCategory == cat,
-                                onClick = { selectedCategory = cat },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = expenseCategoryIcon(cat),
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                },
-                                label = { Text(cat.label(lang)) },
-                                modifier = Modifier.heightIn(min = 48.dp)
-                            )
+                        if (state.serverExpenseCategories.isNotEmpty()) {
+                            state.serverExpenseCategories.forEach { serverCat ->
+                                FilterChip(
+                                    selected = selectedServerCategoryId == serverCat.id,
+                                    onClick = {
+                                        selectedServerCategoryId = serverCat.id
+                                        val enumMatch = ExpenseCategory.entries.firstOrNull {
+                                            serverCat.name(lang).contains(it.name, ignoreCase = true)
+                                        }
+                                        if (enumMatch != null) selectedCategory = enumMatch
+                                    },
+                                    label = { Text(serverCat.name(lang)) },
+                                    modifier = Modifier.heightIn(min = 48.dp)
+                                )
+                            }
+                        } else {
+                            ExpenseCategory.entries.forEach { cat ->
+                                FilterChip(
+                                    selected = selectedCategory == cat,
+                                    onClick = { selectedCategory = cat },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = expenseCategoryIcon(cat),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    },
+                                    label = { Text(cat.label(lang)) },
+                                    modifier = Modifier.heightIn(min = 48.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -968,7 +992,7 @@ fun AddExpenseDialog(
                             localError = lang.tr("يرجى إدخال مبلغ صحيح أكبر من صفر", "Please enter a valid amount greater than zero")
                         }
                         else -> {
-                            onConfirmExpense(titleText.trim(), selectedCategory, parsedAmount)
+                            onConfirmExpense(titleText.trim(), selectedCategory, parsedAmount, selectedServerCategoryId.ifBlank { null })
                         }
                     }
                 },
@@ -988,9 +1012,9 @@ fun AddExpenseDialog(
                             "Confirm ${StitchBidiUtils.formatIls(parsedAmount)}"
                         )
                     } else {
-                        lang.tr("تأكيد الصرف من الصندوق", "Confirm Drawer Expense")
+                        lang.tr("تأكيد الصرف", "Confirm Disbursement")
                     },
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                 )
             }
         },
@@ -999,12 +1023,22 @@ fun AddExpenseDialog(
                 onClick = onDismiss,
                 modifier = Modifier.heightIn(min = 48.dp)
             ) {
-                Text(
-                    text = lang.tr("إلغاء والعودة", "Cancel"),
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                Text(lang.tr("إلغاء", "Cancel"))
             }
         }
+    )
+}
+
+@Composable
+fun AddExpenseDialog(
+    state: TraderUiState,
+    onDismiss: () -> Unit,
+    onConfirmExpense: (String, ExpenseCategory, Double) -> Unit
+) {
+    AddExpenseDialog(
+        state = state,
+        onDismiss = onDismiss,
+        onConfirmExpense = { title, cat, amt, _ -> onConfirmExpense(title, cat, amt) }
     )
 }
 
@@ -1022,6 +1056,10 @@ fun FinancialReportsScreen(
     val lang = state.language
     val session = state.currentSession
     val financial = TraderTheme.financial
+    val isDemo = session.isDemoSession
+    val liveShift = if (!isDemo) state.liveShiftSummary else null
+    val liveTreasury = if (!isDemo) state.liveTreasurySummary else null
+    val liveHome = if (!isDemo) state.liveHomeMetrics else null
 
     // Cashier Role Access Guard
     if (!session.canViewReports()) {
@@ -1169,16 +1207,29 @@ fun FinancialReportsScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                val salesDisplay = when {
+                                    !isDemo -> liveHome?.salesTodayTotal?.toPlainString()
+                                        ?: liveShift?.let { "${WesternFormatters.formatNumber(it.cashSales)} ${it.currency}" }
+                                        ?: "—"
+                                    else -> StitchBidiUtils.formatIls(state.todaySalesTotalIls)
+                                }
                                 Text(
-                                    text = StitchBidiUtils.formatIls(state.todaySalesTotalIls),
+                                    text = salesDisplay,
                                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.testTag("reports_today_sales_total")
                                 )
-                                Text(
-                                    text = lang.tr(
+                                val countDisplay = when {
+                                    !isDemo -> liveHome?.salesTodayCount?.let { "$it ${lang.tr("فواتير", "invoices")}" }
+                                        ?: liveShift?.let { "${it.salesCount} ${lang.tr("فواتير", "invoices")}" }
+                                        ?: "—"
+                                    else -> lang.tr(
                                         "${state.todayInvoiceCount} فواتير",
                                         "${state.todayInvoiceCount} invoices"
-                                    ),
+                                    )
+                                }
+                                Text(
+                                    text = countDisplay,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -1197,13 +1248,20 @@ fun FinancialReportsScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                val cashDrawerDisplay = when {
+                                    !isDemo -> liveShift?.expectedCash?.let { "${WesternFormatters.formatNumber(it)} ${liveShift.currency}" }
+                                        ?: liveHome?.cashInDrawer?.toPlainString()
+                                        ?: "—"
+                                    else -> StitchBidiUtils.formatIls(state.expectedBookCashIls)
+                                }
                                 Text(
-                                    text = StitchBidiUtils.formatIls(state.expectedBookCashIls),
+                                    text = cashDrawerDisplay,
                                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = financial.income
+                                    color = financial.income,
+                                    modifier = Modifier.testTag("reports_cash_in_drawer")
                                 )
                                 Text(
-                                    text = if (state.shiftCashVarianceIls != null && abs(state.shiftCashVarianceIls!!) < 0.005) {
+                                    text = if (isDemo && state.shiftCashVarianceIls != null && abs(state.shiftCashVarianceIls!!) < 0.005) {
                                         lang.tr("مطابق للجرد الفعلي", "Matches Count")
                                     } else {
                                         lang.tr("رصيد دفتري مسجل", "Recorded Book Cash")
@@ -1226,10 +1284,15 @@ fun FinancialReportsScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            val receivablesDisplay = when {
+                                !isDemo -> liveHome?.totalReceivables?.toPlainString() ?: "—"
+                                else -> StitchBidiUtils.formatIls(state.totalCustomerDebtsIls)
+                            }
                             Text(
-                                text = StitchBidiUtils.formatIls(state.totalCustomerDebtsIls),
+                                text = receivablesDisplay,
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.testTag("reports_customer_receivables")
                             )
                         }
                         Column(modifier = Modifier.weight(1f)) {
@@ -1238,23 +1301,44 @@ fun FinancialReportsScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            val payablesDisplay = when {
+                                !isDemo -> liveHome?.totalPayables?.toPlainString() ?: "—"
+                                else -> StitchBidiUtils.formatIls(state.totalSupplierPayablesIls)
+                            }
                             Text(
-                                text = StitchBidiUtils.formatIls(state.totalSupplierPayablesIls),
+                                text = payablesDisplay,
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = financial.warning
+                                color = financial.warning,
+                                modifier = Modifier.testTag("reports_supplier_payables")
                             )
                         }
                         Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                            val netReceivable = state.totalCustomerDebtsIls - state.totalSupplierPayablesIls
                             Text(
                                 text = lang.tr("صافي الذمم", "Net Position"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            val (netText, netColor) = when {
+                                !isDemo -> {
+                                    if (liveHome?.totalReceivables != null && liveHome.totalPayables != null) {
+                                        val net = liveHome.totalReceivables - liveHome.totalPayables
+                                        val sign = if (net >= BigDecimal.ZERO) "+ " else ""
+                                        Pair("$sign${WesternFormatters.formatNumber(net)} ${liveHome.businessInfo.defaultCurrency}", if (net >= BigDecimal.ZERO) financial.income else financial.debit)
+                                    } else {
+                                        Pair("—", MaterialTheme.colorScheme.onSurface)
+                                    }
+                                }
+                                else -> {
+                                    val netReceivable = state.totalCustomerDebtsIls - state.totalSupplierPayablesIls
+                                    val sign = if (netReceivable >= 0) "+ " else ""
+                                    Pair(sign + StitchBidiUtils.formatIls(netReceivable), if (netReceivable >= 0) financial.income else financial.debit)
+                                }
+                            }
                             Text(
-                                text = (if (netReceivable >= 0) "+ " else "") + StitchBidiUtils.formatIls(netReceivable),
+                                text = netText,
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = if (netReceivable >= 0) financial.income else financial.debit
+                                color = netColor,
+                                modifier = Modifier.testTag("reports_net_position")
                             )
                         }
                     }
@@ -1286,56 +1370,84 @@ fun FinancialReportsScreen(
                                 text = lang.tr("الصندوق والوردية الحالية", "Cash Drawer & Shift Ledger"),
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                             )
+                            val shiftDateText = if (!isDemo && liveShift != null) liveShift.shiftDate else state.todayDate
                             Text(
                                 text = lang.tr(
-                                    "تاريخ الوردية: ${state.todayDate} • رصيد دفتري من واقع القيود",
-                                    "Shift: ${state.todayDate} • Book balance from ledger"
+                                    "تاريخ الوردية: $shiftDateText • رصيد دفتري من واقع القيود",
+                                    "Shift: $shiftDateText • Book balance from ledger"
                                 ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        StitchBadge(
-                            text = if (state.isShiftClosedPreview) {
-                                lang.tr("معاينة إغلاق", "Preview Closed")
-                            } else {
-                                lang.tr("مفتوحة الآن", "Open Now")
-                            },
-                            tone = if (state.isShiftClosedPreview) StitchBadgeTone.WARNING else StitchBadgeTone.SUCCESS
-                        )
+                        if (!isDemo) {
+                            StitchBadge(
+                                text = lang.tr("وردية النظام", "System Shift"),
+                                tone = StitchBadgeTone.NEUTRAL
+                            )
+                        } else {
+                            StitchBadge(
+                                text = if (state.isShiftClosedPreview) {
+                                    lang.tr("معاينة إغلاق", "Preview Closed")
+                                } else {
+                                    lang.tr("مفتوحة الآن", "Open Now")
+                                },
+                                tone = if (state.isShiftClosedPreview) StitchBadgeTone.WARNING else StitchBadgeTone.SUCCESS
+                            )
+                        }
                     }
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
                     // Inflows & Outflows Ledger
+                    val openingFloatDisplay = when {
+                        !isDemo -> liveShift?.openingFloat?.let { "${WesternFormatters.formatNumber(it)} ${liveShift.currency}" } ?: "—"
+                        else -> StitchBidiUtils.formatIls(state.startingDrawerCashIls)
+                    }
                     ReportMetricRow(
                         label = lang.tr("رصيد بداية الوردية (العهدة الافتتاحية)", "Opening Drawer Cash (Float)"),
-                        value = StitchBidiUtils.formatIls(state.startingDrawerCashIls),
+                        value = openingFloatDisplay,
                         valueColor = MaterialTheme.colorScheme.onSurface
                     )
 
+                    val cashSalesDisplay = when {
+                        !isDemo -> liveShift?.let { "+ ${WesternFormatters.formatNumber(it.cashSales)} ${it.currency}" } ?: "—"
+                        else -> "+ " + StitchBidiUtils.formatIls(state.shiftCashSalesIls)
+                    }
                     ReportMetricRow(
                         label = lang.tr("مبيعات نقدية مقبوضة بالدرج (كاش)", "Cash Sales Received in Drawer"),
-                        value = "+ " + StitchBidiUtils.formatIls(state.shiftCashSalesIls),
+                        value = cashSalesDisplay,
                         valueColor = financial.income
                     )
 
+                    val customerCollectionsDisplay = when {
+                        !isDemo -> liveShift?.let { "+ ${WesternFormatters.formatNumber(it.cashCollections)} ${it.currency}" } ?: "—"
+                        else -> "+ " + StitchBidiUtils.formatIls(state.shiftCustomerCollectionsIls)
+                    }
                     ReportMetricRow(
                         label = lang.tr("سداد ديون زبائن مقبوض نقداً اليوم", "Customer Debt Collected (Cash)"),
-                        value = "+ " + StitchBidiUtils.formatIls(state.shiftCustomerCollectionsIls),
-                        valueColor = if (state.shiftCustomerCollectionsIls > 0.0) financial.income else MaterialTheme.colorScheme.onSurfaceVariant
+                        value = customerCollectionsDisplay,
+                        valueColor = if (!isDemo || state.shiftCustomerCollectionsIls > 0.0) financial.income else MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
+                    val supplierDisbursementsDisplay = when {
+                        !isDemo -> liveShift?.let { "- ${WesternFormatters.formatNumber(it.cashDisbursements)} ${it.currency}" } ?: "—"
+                        else -> "- " + StitchBidiUtils.formatIls(state.shiftSupplierDisbursementsIls)
+                    }
                     ReportMetricRow(
                         label = lang.tr("دفعات نقدية للموردين من الدرج", "Supplier Payments from Drawer"),
-                        value = "- " + StitchBidiUtils.formatIls(state.shiftSupplierDisbursementsIls),
-                        valueColor = if (state.shiftSupplierDisbursementsIls > 0.0) financial.debit else MaterialTheme.colorScheme.onSurfaceVariant
+                        value = supplierDisbursementsDisplay,
+                        valueColor = if (!isDemo || state.shiftSupplierDisbursementsIls > 0.0) financial.debit else MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
+                    val shiftExpensesDisplay = when {
+                        !isDemo -> liveShift?.let { "- ${WesternFormatters.formatNumber(it.operatingExpenses)} ${it.currency}" } ?: "—"
+                        else -> "- " + StitchBidiUtils.formatIls(state.shiftExpensesIls)
+                    }
                     ReportMetricRow(
                         label = lang.tr("مصاريف ونثريات مدفوعة نقداً", "Shift Cash Expenses Paid"),
-                        value = "- " + StitchBidiUtils.formatIls(state.shiftExpensesIls),
-                        valueColor = if (state.shiftExpensesIls > 0.0) financial.debit else MaterialTheme.colorScheme.onSurfaceVariant
+                        value = shiftExpensesDisplay,
+                        valueColor = if (!isDemo || state.shiftExpensesIls > 0.0) financial.debit else MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -1363,8 +1475,12 @@ fun FinancialReportsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                        val expectedTotalDisplay = when {
+                            !isDemo -> liveShift?.expectedCash?.let { "${WesternFormatters.formatNumber(it)} ${liveShift.currency}" } ?: "—"
+                            else -> StitchBidiUtils.formatIls(state.expectedBookCashIls)
+                        }
                         Text(
-                            text = StitchBidiUtils.formatIls(state.expectedBookCashIls),
+                            text = expectedTotalDisplay,
                             style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.testTag("expected_drawer_cash_value")
@@ -1374,236 +1490,337 @@ fun FinancialReportsScreen(
             }
         }
 
-        // ST-43: Physical Count, Variance & Shift Closing Card
-        item {
-            val variance = state.shiftCashVarianceIls
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("shift_physical_count_variance_card")
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text(
-                        text = lang.tr(
-                            "جرد الصندوق الفعلي ومطابقة الوردية",
-                            "Physical Cash Count & Shift Reconciliation"
-                        ),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                    )
-                    Text(
-                        text = lang.tr(
-                            "أدخل النقد الموجود فعلياً بالدرج للتحقق من تطابق الرصيد الدفتري مع الأوراق النقدية قبل تسليم الوردية.",
-                            "Enter the actual physically counted cash in the drawer to verify against book cash before shift handover."
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                    // Opening Float Preset Chips (ST-42)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = lang.tr("عهدة افتتاح الوردية:", "Opening Float:"),
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(250.0, 350.0, 500.0).forEach { floatAmt ->
-                                val isSel = abs(state.startingDrawerCashIls - floatAmt) < 0.01
-                                FilterChip(
-                                    selected = isSel,
-                                    onClick = { onUpdateOpeningCash(floatAmt) },
-                                    label = { Text("${floatAmt.toInt()} ₪") },
-                                    modifier = Modifier
-                                        .heightIn(min = 48.dp)
-                                        .testTag("shift_opening_preset_${floatAmt.toInt()}")
-                                )
-                            }
-                        }
-                    }
-
-                    // Physical Cash Count Input Field (ST-43)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = state.countedPhysicalCashText,
-                            onValueChange = onUpdateCountedCashText,
-                            label = {
-                                Text(
-                                    lang.tr(
-                                        "الجرد الفعلي النقدي بالدرج (₪)",
-                                        "Actual Counted Cash in Drawer (₪)"
-                                    )
-                                )
-                            },
-                            placeholder = { Text(WesternFormatters.formatNumber(state.expectedBookCashIls)) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            singleLine = true,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("shift_counted_cash_input")
-                        )
-                        OutlinedButton(
-                            onClick = {
-                                onUpdateCountedCashText(
-                                    WesternFormatters.formatNumber(state.expectedBookCashIls).removeSuffix(".00")
-                                )
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("match_expected_cash_button")
-                        ) {
-                            Text(
-                                text = lang.tr("مطابق للدفتري", "Match Book"),
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
-                            )
-                        }
-                    }
-
-                    // Quick Cash Addition Chips (ST-43)
-                    Row(
+        // ST-43: Treasury & Shift Status Card
+        if (!isDemo) {
+            // Live Mode: Real GET Treasury Accounts (if available) & Read-Only Notice
+            if (liveTreasury != null) {
+                item {
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            .testTag("treasury_accounts_card")
                     ) {
-                        listOf(20, 50, 100, 200).forEach { bill ->
-                            FilterChip(
-                                selected = false,
-                                onClick = {
-                                    val current = state.countedPhysicalCashIls ?: 0.0
-                                    val next = current + bill
-                                    onUpdateCountedCashText(WesternFormatters.formatNumber(next).removeSuffix(".00"))
-                                },
-                                label = { Text("+$bill ₪") },
-                                modifier = Modifier.heightIn(min = 48.dp)
-                            )
-                        }
-                    }
-
-                    // Variance Banner (ST-43 v02: مطابق تماماً / عجز / فائض)
-                    if (variance != null) {
-                        val isExact = abs(variance) < 0.005
-                        val isSurplus = variance > 0.005
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = when {
-                                isExact -> financial.incomeContainer
-                                isSurplus -> financial.warningContainer
-                                else -> financial.debitContainer
-                            },
-                            border = BorderStroke(
-                                1.dp,
-                                when {
-                                    isExact -> financial.income.copy(alpha = 0.35f)
-                                    isSurplus -> financial.warning.copy(alpha = 0.35f)
-                                    else -> financial.debit.copy(alpha = 0.35f)
-                                }
-                            ),
-                            modifier = Modifier.fillMaxWidth()
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                Text(
+                                    text = lang.tr("أرصدة الخزينة والحسابات", "Treasury & Account Balances"),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                                StitchBadge(
+                                    text = lang.tr("بيانات حقيقية", "Live GET Data"),
+                                    tone = StitchBadgeTone.PRIMARY
+                                )
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                            if (liveTreasury.cashAccounts.isNotEmpty()) {
+                                Text(
+                                    text = lang.tr("حسابات النقدية والدرج", "Cash & Drawer Accounts"),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                liveTreasury.cashAccounts.forEach { acc ->
+                                    ReportMetricRow(
+                                        label = acc.name,
+                                        value = "${WesternFormatters.formatNumber(acc.balanceBase)} ${acc.baseCurrencyCode}",
+                                        valueColor = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+
+                            if (liveTreasury.bankAccounts.isNotEmpty()) {
+                                Text(
+                                    text = lang.tr("الحسابات البنكية", "Bank Accounts"),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                liveTreasury.bankAccounts.forEach { acc ->
+                                    val label = if (!acc.bankName.isNullOrBlank()) "${acc.name} (${acc.bankName})" else acc.name
+                                    ReportMetricRow(
+                                        label = label,
+                                        value = "${WesternFormatters.formatNumber(acc.balanceBase)} ${acc.baseCurrencyCode}",
+                                        valueColor = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("shift_read_only_notice")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = lang.tr(
+                                "بيانات الوردية والخزينة معروضة للقراءة ومستقاة من الخادم المركزي مباشرة.",
+                                "Shift and treasury metrics are read-only and sourced directly from the server."
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        } else {
+            // Demo Mode: Interactive Physical Count, Variance & Shift Closing Card
+            item {
+                val variance = state.shiftCashVarianceIls
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("shift_physical_count_variance_card")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = lang.tr(
+                                "جرد الصندوق الفعلي ومطابقة الوردية",
+                                "Physical Cash Count & Shift Reconciliation"
+                            ),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = lang.tr(
+                                "أدخل النقد الموجود فعلياً بالدرج للتحقق من تطابق الرصيد الدفتري مع الأوراق النقدية قبل تسليم الوردية.",
+                                "Enter the actual physically counted cash in the drawer to verify against book cash before shift handover."
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                        // Opening Float Preset Chips (ST-42)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = lang.tr("عهدة افتتاح الوردية:", "Opening Float:"),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf(250.0, 350.0, 500.0).forEach { floatAmt ->
+                                    val isSel = abs(state.startingDrawerCashIls - floatAmt) < 0.01
+                                    FilterChip(
+                                        selected = isSel,
+                                        onClick = { onUpdateOpeningCash(floatAmt) },
+                                        label = { Text("${floatAmt.toInt()} ₪") },
+                                        modifier = Modifier
+                                            .heightIn(min = 48.dp)
+                                            .testTag("shift_opening_preset_${floatAmt.toInt()}")
+                                    )
+                                }
+                            }
+                        }
+
+                        // Physical Cash Count Input Field (ST-43)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = state.countedPhysicalCashText,
+                                onValueChange = onUpdateCountedCashText,
+                                label = {
+                                    Text(
+                                        lang.tr(
+                                            "الجرد الفعلي النقدي بالدرج (₪)",
+                                            "Actual Counted Cash in Drawer (₪)"
+                                        )
+                                    )
+                                },
+                                placeholder = { Text(WesternFormatters.formatNumber(state.expectedBookCashIls)) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                singleLine = true,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("shift_counted_cash_input")
+                            )
+                            OutlinedButton(
+                                onClick = {
+                                    onUpdateCountedCashText(
+                                        WesternFormatters.formatNumber(state.expectedBookCashIls).removeSuffix(".00")
+                                    )
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("match_expected_cash_button")
+                            ) {
+                                Text(
+                                    text = lang.tr("مطابق للدفتري", "Match Book"),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+
+                        // Quick Cash Addition Chips (ST-43)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(20, 50, 100, 200).forEach { bill ->
+                                FilterChip(
+                                    selected = false,
+                                    onClick = {
+                                        val current = state.countedPhysicalCashIls ?: 0.0
+                                        val next = current + bill
+                                        onUpdateCountedCashText(WesternFormatters.formatNumber(next).removeSuffix(".00"))
+                                    },
+                                    label = { Text("+$bill ₪") },
+                                    modifier = Modifier.heightIn(min = 48.dp)
+                                )
+                            }
+                        }
+
+                        // Variance Banner (ST-43 v02: مطابق تماماً / عجز / فائض)
+                        if (variance != null) {
+                            val isExact = abs(variance) < 0.005
+                            val isSurplus = variance > 0.005
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = when {
+                                    isExact -> financial.incomeContainer
+                                    isSurplus -> financial.warningContainer
+                                    else -> financial.debitContainer
+                                },
+                                border = BorderStroke(
+                                    1.dp,
+                                    when {
+                                        isExact -> financial.income.copy(alpha = 0.35f)
+                                        isSurplus -> financial.warning.copy(alpha = 0.35f)
+                                        else -> financial.debit.copy(alpha = 0.35f)
+                                    }
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = if (isExact) Icons.Default.CheckCircle else Icons.Default.WarningAmber,
-                                        contentDescription = null,
-                                        tint = when {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isExact) Icons.Default.CheckCircle else Icons.Default.WarningAmber,
+                                            contentDescription = null,
+                                            tint = when {
+                                                isExact -> financial.income
+                                                isSurplus -> financial.warning
+                                                else -> financial.debit
+                                            },
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = lang.tr(
+                                                "الفارق (الفعلي - الدفتري):",
+                                                "Variance (Counted - Book):"
+                                            ),
+                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                                        )
+                                    }
+                                    Text(
+                                        text = when {
+                                            isExact -> lang.tr("مطابق تماماً (0.00 ₪)", "Exact Match (0.00 ₪)")
+                                            isSurplus -> "+ " + StitchBidiUtils.formatIls(variance)
+                                            else -> StitchBidiUtils.formatIls(variance)
+                                        },
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = when {
                                             isExact -> financial.income
                                             isSurplus -> financial.warning
                                             else -> financial.debit
                                         },
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = lang.tr(
-                                            "الفارق (الفعلي - الدفتري):",
-                                            "Variance (Counted - Book):"
-                                        ),
-                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                                        modifier = Modifier.testTag("shift_cash_variance_text")
                                     )
                                 }
-                                Text(
-                                    text = when {
-                                        isExact -> lang.tr("مطابق تماماً (0.00 ₪)", "Exact Match (0.00 ₪)")
-                                        isSurplus -> "+ " + StitchBidiUtils.formatIls(variance)
-                                        else -> StitchBidiUtils.formatIls(variance)
-                                    },
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = when {
-                                        isExact -> financial.income
-                                        isSurplus -> financial.warning
-                                        else -> financial.debit
-                                    },
-                                    modifier = Modifier.testTag("shift_cash_variance_text")
-                                )
                             }
                         }
-                    }
 
-                    // Shift Closing Action
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (state.isShiftClosedPreview) {
-                                    lang.tr(
-                                        "حالة الوردية: مغلقة مؤقتاً (${state.shiftClosedTimestamp ?: ""})",
-                                        "Shift Status: Closed (${state.shiftClosedTimestamp ?: ""})"
-                                    )
-                                } else {
-                                    lang.tr(
-                                        "حالة الوردية: مفتوحة وتستقبل العمليات",
-                                        "Shift Status: Open and active"
-                                    )
-                                },
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = if (state.isShiftClosedPreview) financial.warning else financial.income,
-                                modifier = Modifier.testTag("shift_close_status_text")
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        OutlinedButton(
-                            onClick = { onToggleShiftClose(!state.isShiftClosedPreview) },
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("toggle_shift_close_button")
+                        // Shift Closing Action
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = if (state.isShiftClosedPreview) {
-                                    lang.tr("إعادة فتح المعاينة", "Reopen Shift")
-                                } else {
-                                    lang.tr("معاينة إغلاق الوردية", "Preview Shift Close")
-                                },
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (state.isShiftClosedPreview) {
+                                        lang.tr(
+                                            "حالة الوردية: مغلقة مؤقتاً (${state.shiftClosedTimestamp ?: ""})",
+                                            "Shift Status: Closed (${state.shiftClosedTimestamp ?: ""})"
+                                        )
+                                    } else {
+                                        lang.tr(
+                                            "حالة الوردية: مفتوحة وتستقبل العمليات",
+                                            "Shift Status: Open and active"
+                                        )
+                                    },
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = if (state.isShiftClosedPreview) financial.warning else financial.income,
+                                    modifier = Modifier.testTag("shift_close_status_text")
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            OutlinedButton(
+                                onClick = { onToggleShiftClose(!state.isShiftClosedPreview) },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("toggle_shift_close_button")
+                            ) {
+                                Text(
+                                    text = if (state.isShiftClosedPreview) {
+                                        lang.tr("إعادة فتح المعاينة", "Reopen Shift")
+                                    } else {
+                                        lang.tr("معاينة إغلاق الوردية", "Preview Shift Close")
+                                    },
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
                         }
                     }
                 }
@@ -2085,7 +2302,7 @@ fun UserProfileScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
-                                text = lang.tr("تفاصيل الصلاحيات وأداة التبديل التجريبية", "Permission Details & Demo Role Switcher"),
+                                text = lang.tr("تفاصيل الصلاحيات وأداة التبديل", "Permission Details & Role Switcher"),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -2112,14 +2329,14 @@ fun UserProfileScreen(
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = lang.tr("أداة تبديل الدور التجريبية:", "Demo Role Switcher:"),
+                                text = lang.tr("تبديل الدور النشط:", "Active Role Switcher:"),
                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
                                 text = lang.tr(
-                                    "معاينة الفروق الميدانية بين صلاحيات المالك والكاشير داخل هذا النموذج التجريبي المحلي.",
-                                    "Inspect field differences between Owner and Cashier permissions in this local prototype."
+                                    "معاينة الفروق الميدانية بين صلاحيات المالك والكاشير داخل النظام.",
+                                    "Inspect field differences between Owner and Cashier permissions in the system."
                                 ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -2600,7 +2817,7 @@ fun BusinessSettingsScreen(
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(
-                                    text = lang.tr("التاجر الصغير — نموذج تجريبي محلي يعمل في ذاكرة الجهاز • الإصدار 1.0", "Small Trader — Local in-memory demo • v1.0"),
+                                    text = lang.tr("التاجر الصغير — الإصدار 1.1", "Small Trader — v1.1"),
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
@@ -2626,7 +2843,7 @@ fun BusinessSettingsScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = lang.tr("إعادة تصفير الذاكرة التجريبية", "Reset In-Memory Demo Data"),
+                                    text = lang.tr("إعادة ضبط البيانات المحلية", "Reset Local Session Data"),
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                                 )
                             }
@@ -2644,15 +2861,15 @@ fun BusinessSettingsScreen(
             shape = RoundedCornerShape(16.dp),
             title = {
                 Text(
-                    text = lang.tr("تأكيد إعادة ضبط البيانات التجريبية", "Confirm In-Memory Reset"),
+                    text = lang.tr("تأكيد إعادة ضبط البيانات المحلية", "Confirm Local Session Reset"),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             },
             text = {
                 Text(
                     text = lang.tr(
-                        "سيؤدي هذا الإجراء إلى حذف العمليات المسجلة في الذاكرة للجلسة الحالية واستعادة البيانات الافتراضية للنموذج.",
-                        "This action will reset current session's in-memory transactions and restore default sample data."
+                        "سيؤدي هذا الإجراء إلى مسح العمليات المخزنة محلياً للجلسة الحالية وإعادة تهيئة السجلات.",
+                        "This action will clear locally stored transactions for the current session and reinitialize records."
                     ),
                     style = MaterialTheme.typography.bodySmall
                 )

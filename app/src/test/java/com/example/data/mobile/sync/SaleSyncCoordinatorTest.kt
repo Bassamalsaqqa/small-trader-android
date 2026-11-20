@@ -13,6 +13,12 @@ import com.example.data.mobile.outbox.OutboxRepositoryImpl
 import com.example.data.mobile.outbox.OutboxEventEntity
 import com.example.data.mobile.outbox.OutboxDeliveryStateEntity
 import com.example.data.mobile.outbox.OutboxStatus
+import com.example.data.mobile.contract.MoneyAmount
+import com.example.data.mobile.contract.PositiveDecimalQuantity
+import com.example.data.mobile.contract.TaxPercentage
+import com.example.data.mobile.contract.v2.OnlineSaleIntentProfile
+import com.example.data.mobile.contract.v2.OnlineSaleIntentLine
+import com.example.data.mobile.contract.v2.OnlineSaleIntentPayment
 import com.example.data.mobile.outbox.OutboxTestFixtures
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -112,7 +118,8 @@ class SaleSyncCoordinatorTest {
             actorId: ServerUlid,
             deviceId: ClientUuid,
             clientEventId: ClientUuid,
-            payloadDigest: PayloadDigest
+            payloadDigest: PayloadDigest,
+            expectedIntent: com.example.data.mobile.contract.v2.OnlineSaleIntentProfile?
         ): SyncStatusOutcome {
             checkStatusCallCount.incrementAndGet()
             return statusOutcomeProvider(clientEventId)
@@ -818,9 +825,10 @@ class SaleSyncCoordinatorTest {
                 actorId: ServerUlid,
                 deviceId: ClientUuid,
                 clientEventId: ClientUuid,
-                payloadDigest: PayloadDigest
+                payloadDigest: PayloadDigest,
+                expectedIntent: com.example.data.mobile.contract.v2.OnlineSaleIntentProfile?
             ): SyncStatusOutcome {
-                val res = gateway.checkStatus(companyId, actorId, deviceId, clientEventId, payloadDigest)
+                val res = gateway.checkStatus(companyId, actorId, deviceId, clientEventId, payloadDigest, expectedIntent)
                 // Interleave: advance clock past Coordinator 1's lease duration (10s)
                 clockTime += 20_000L
                 // Coordinator 2 claims and successfully submits + confirms
@@ -1382,5 +1390,498 @@ class SaleSyncCoordinatorTest {
             assertTrue("Interrupted status must be restored", Thread.interrupted())
             db.close()
         }
+    }
+
+    // =========================================================================
+    // V2 Cash / Partial / Unpaid Settlement Mode Confirmation Tests
+    // =========================================================================
+
+    private fun createOnlineProfile(
+        companyId: ServerUlid = ServerUlid.parse("01J9Z5K3MN0000000000000001"),
+        actorId: ServerUlid = ServerUlid.parse("01J9Z5K3MN0000000000000002"),
+        deviceId: ClientUuid = ClientUuid.parse("a0000000-0000-0000-0000-000000000001"),
+        clientEventId: ClientUuid = ClientUuid.random(),
+        settlementMode: String = "full",
+        amount: String = "50.000000"
+    ): OnlineSaleIntentProfile {
+        val line = OnlineSaleIntentLine(
+            productId = ServerUlid.parse("01J9Z5K3MN0000000000000010"),
+            productUnitId = ServerUlid.parse("01J9Z5K3MN0000000000000020"),
+            conversionToBase = PositiveDecimalQuantity.fromPositiveString("1.000000"),
+            quantity = PositiveDecimalQuantity.fromPositiveString("2.000000"),
+            unitPrice = MoneyAmount.fromNonnegativeString("25.000000"),
+            taxRateId = ServerUlid.parse("01J9Z5K3MN0000000000000030"),
+            taxRate = TaxPercentage.fromString("0.000000"),
+            taxInclusive = true
+        )
+        val payment = OnlineSaleIntentPayment(
+            settlementMode = settlementMode,
+            paymentMethod = if (settlementMode == "unpaid") null else "cash",
+            cashAccountId = if (settlementMode == "unpaid") null else ServerUlid.parse("01J9Z5K3MN0000000000000005"),
+            amount = MoneyAmount.fromNonnegativeString(amount)
+        )
+        return OnlineSaleIntentProfile(
+            actorId = actorId,
+            clientEventId = clientEventId,
+            companyId = companyId,
+            currency = "ILS",
+            currencyMinorUnits = 2,
+            customerId = ServerUlid.parse("01J9Z5K3MN0000000000000003"),
+            deviceId = deviceId,
+            lines = listOf(line),
+            payment = payment,
+            warehouseId = ServerUlid.parse("01J9Z5K3MN0000000000000004")
+        )
+    }
+
+    @Test
+    fun testFullSettlementSyncConfirmsWithDistinctInvoiceAndPaymentUlids() {
+        val profile = createOnlineProfile(settlementMode = "full", amount = "50.000000")
+        val captureResult = repository.captureOnlineSaleIntent(
+            companyId = profile.companyId,
+            actorId = profile.actorId,
+            deviceId = profile.deviceId,
+            currencyMinorUnits = 2,
+            profile = profile
+        )
+        assertTrue(captureResult is CaptureResult.Created)
+
+        val digest = profile.computePayloadDigest()
+        val invoiceUlid = ServerUlid.parse("01JCV8X9ME7890123456789ABC")
+        val paymentUlid = ServerUlid.parse("01JCV8X9MFGHJKMNPQRSTVWXYZ")
+
+        val gateway = FakeSaleSyncGateway().apply {
+            statusOutcomeProvider = {
+                SyncStatusOutcome.Posted(
+                    ServerSaleAck(
+                        companyId = profile.companyId,
+                        clientEventId = profile.clientEventId,
+                        payloadDigest = digest,
+                        invoiceUlid = invoiceUlid,
+                        paymentUlid = paymentUlid,
+                        invoiceNumber = "INV-2026-00101",
+                        paymentReceiptNumber = "RCT-2026-00101",
+                        serverAcknowledgedAt = "2026-11-19T10:00:00Z"
+                    )
+                )
+            }
+        }
+
+        val coordinator = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
+        val result = coordinator.synchronizeScope(profile.companyId, profile.actorId, profile.deviceId)
+
+        assertEquals(1, result.recordsClaimed)
+        assertEquals(1, result.confirmedCount)
+
+        val record = repository.getRecord(profile.companyId, profile.actorId, profile.deviceId, profile.clientEventId)
+        assertNotNull(record)
+        assertEquals(OutboxStatus.CONFIRMED, record!!.status)
+        assertEquals(invoiceUlid.value, record.deliveryState.invoiceUlid)
+        assertEquals(paymentUlid.value, record.deliveryState.paymentUlid)
+    }
+
+    @Test
+    fun testPartialSettlementSyncConfirmsWithDistinctInvoiceAndPaymentUlids() {
+        val profile = createOnlineProfile(settlementMode = "partial", amount = "20.000000")
+        val captureResult = repository.captureOnlineSaleIntent(
+            companyId = profile.companyId,
+            actorId = profile.actorId,
+            deviceId = profile.deviceId,
+            currencyMinorUnits = 2,
+            profile = profile
+        )
+        assertTrue(captureResult is CaptureResult.Created)
+
+        val digest = profile.computePayloadDigest()
+        val invoiceUlid = ServerUlid.parse("01JCV8X9ME7890123456789ABC")
+        val paymentUlid = ServerUlid.parse("01JCV8X9MFGHJKMNPQRSTVWXYZ")
+
+        val gateway = FakeSaleSyncGateway().apply {
+            statusOutcomeProvider = {
+                SyncStatusOutcome.Posted(
+                    ServerSaleAck(
+                        companyId = profile.companyId,
+                        clientEventId = profile.clientEventId,
+                        payloadDigest = digest,
+                        invoiceUlid = invoiceUlid,
+                        paymentUlid = paymentUlid,
+                        invoiceNumber = "INV-2026-00102",
+                        paymentReceiptNumber = "RCT-2026-00102",
+                        serverAcknowledgedAt = "2026-11-19T10:00:00Z"
+                    )
+                )
+            }
+        }
+
+        val coordinator = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
+        val result = coordinator.synchronizeScope(profile.companyId, profile.actorId, profile.deviceId)
+
+        assertEquals(1, result.recordsClaimed)
+        assertEquals(1, result.confirmedCount)
+
+        val record = repository.getRecord(profile.companyId, profile.actorId, profile.deviceId, profile.clientEventId)
+        assertNotNull(record)
+        assertEquals(OutboxStatus.CONFIRMED, record!!.status)
+        assertEquals(invoiceUlid.value, record.deliveryState.invoiceUlid)
+        assertEquals(paymentUlid.value, record.deliveryState.paymentUlid)
+    }
+
+    @Test
+    fun testUnpaidSettlementSyncConfirmsWithCanonicalInvoiceUlidAndExplicitNullPaymentUlid() {
+        val profile = createOnlineProfile(settlementMode = "unpaid", amount = "0.000000")
+        val captureResult = repository.captureOnlineSaleIntent(
+            companyId = profile.companyId,
+            actorId = profile.actorId,
+            deviceId = profile.deviceId,
+            currencyMinorUnits = 2,
+            profile = profile
+        )
+        assertTrue(captureResult is CaptureResult.Created)
+
+        val digest = profile.computePayloadDigest()
+        val invoiceUlid = ServerUlid.parse("01JCV8X9ME7890123456789ABC")
+
+        val gateway = FakeSaleSyncGateway().apply {
+            statusOutcomeProvider = {
+                SyncStatusOutcome.Posted(
+                    ServerSaleAck(
+                        companyId = profile.companyId,
+                        clientEventId = profile.clientEventId,
+                        payloadDigest = digest,
+                        invoiceUlid = invoiceUlid,
+                        paymentUlid = null,
+                        invoiceNumber = "INV-2026-00103",
+                        paymentReceiptNumber = null,
+                        serverAcknowledgedAt = "2026-11-19T10:00:00Z"
+                    )
+                )
+            }
+        }
+
+        val coordinator = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
+        val result = coordinator.synchronizeScope(profile.companyId, profile.actorId, profile.deviceId)
+
+        assertEquals(1, result.recordsClaimed)
+        assertEquals(1, result.confirmedCount)
+
+        val record = repository.getRecord(profile.companyId, profile.actorId, profile.deviceId, profile.clientEventId)
+        assertNotNull(record)
+        assertEquals(OutboxStatus.CONFIRMED, record!!.status)
+        assertEquals(invoiceUlid.value, record.deliveryState.invoiceUlid)
+        assertNull(record.deliveryState.paymentUlid)
+    }
+
+    @Test
+    fun testForgedNullPaymentRejectedForFullSettlementIntent() {
+        val profile = createOnlineProfile(settlementMode = "full", amount = "50.000000")
+        repository.captureOnlineSaleIntent(
+            companyId = profile.companyId,
+            actorId = profile.actorId,
+            deviceId = profile.deviceId,
+            currencyMinorUnits = 2,
+            profile = profile
+        )
+
+        val digest = profile.computePayloadDigest()
+        val invoiceUlid = ServerUlid.parse("01JCV8X9ME7890123456789ABC")
+
+        // Server illegally returns null paymentUlid for full settlement intent
+        val gateway = FakeSaleSyncGateway().apply {
+            statusOutcomeProvider = {
+                SyncStatusOutcome.Posted(
+                    ServerSaleAck(
+                        companyId = profile.companyId,
+                        clientEventId = profile.clientEventId,
+                        payloadDigest = digest,
+                        invoiceUlid = invoiceUlid,
+                        paymentUlid = null,
+                        serverAcknowledgedAt = "2026-11-19T10:00:00Z"
+                    )
+                )
+            }
+        }
+
+        val coordinator = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
+        val result = coordinator.synchronizeScope(profile.companyId, profile.actorId, profile.deviceId)
+
+        assertEquals(0, result.confirmedCount)
+        val record = repository.getRecord(profile.companyId, profile.actorId, profile.deviceId, profile.clientEventId)
+        assertNotNull(record)
+        assertNotEquals(OutboxStatus.CONFIRMED, record!!.status)
+    }
+
+    @Test
+    fun testForgedNullPaymentRejectedForPartialSettlementIntent() {
+        val profile = createOnlineProfile(settlementMode = "partial", amount = "20.000000")
+        repository.captureOnlineSaleIntent(
+            companyId = profile.companyId,
+            actorId = profile.actorId,
+            deviceId = profile.deviceId,
+            currencyMinorUnits = 2,
+            profile = profile
+        )
+
+        val digest = profile.computePayloadDigest()
+        val invoiceUlid = ServerUlid.parse("01JCV8X9ME7890123456789ABC")
+
+        // Server illegally returns null paymentUlid for partial settlement intent
+        val gateway = FakeSaleSyncGateway().apply {
+            statusOutcomeProvider = {
+                SyncStatusOutcome.Posted(
+                    ServerSaleAck(
+                        companyId = profile.companyId,
+                        clientEventId = profile.clientEventId,
+                        payloadDigest = digest,
+                        invoiceUlid = invoiceUlid,
+                        paymentUlid = null,
+                        serverAcknowledgedAt = "2026-11-19T10:00:00Z"
+                    )
+                )
+            }
+        }
+
+        val coordinator = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
+        val result = coordinator.synchronizeScope(profile.companyId, profile.actorId, profile.deviceId)
+
+        assertEquals(0, result.confirmedCount)
+        val record = repository.getRecord(profile.companyId, profile.actorId, profile.deviceId, profile.clientEventId)
+        assertNotNull(record)
+        assertNotEquals(OutboxStatus.CONFIRMED, record!!.status)
+    }
+
+    @Test
+    fun testPaymentUlidMatchingInvoiceUlidRejected() {
+        val profile = createOnlineProfile(settlementMode = "full", amount = "50.000000")
+        repository.captureOnlineSaleIntent(
+            companyId = profile.companyId,
+            actorId = profile.actorId,
+            deviceId = profile.deviceId,
+            currencyMinorUnits = 2,
+            profile = profile
+        )
+
+        val digest = profile.computePayloadDigest()
+        val sharedUlid = ServerUlid.parse("01JCV8X9ME7890123456789ABC")
+
+        val gateway = FakeSaleSyncGateway().apply {
+            statusOutcomeProvider = {
+                SyncStatusOutcome.Posted(
+                    ServerSaleAck(
+                        companyId = profile.companyId,
+                        clientEventId = profile.clientEventId,
+                        payloadDigest = digest,
+                        invoiceUlid = sharedUlid,
+                        paymentUlid = sharedUlid, // Payment ULID illegally equals invoice ULID
+                        serverAcknowledgedAt = "2026-11-19T10:00:00Z"
+                    )
+                )
+            }
+        }
+
+        val coordinator = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
+        val result = coordinator.synchronizeScope(profile.companyId, profile.actorId, profile.deviceId)
+
+        assertEquals(0, result.confirmedCount)
+        val record = repository.getRecord(profile.companyId, profile.actorId, profile.deviceId, profile.clientEventId)
+        assertNotNull(record)
+        assertNotEquals(OutboxStatus.CONFIRMED, record!!.status)
+    }
+
+    @Test
+    fun testScopeMismatchRejection() {
+        val profile = createOnlineProfile(settlementMode = "full", amount = "50.000000")
+        repository.captureOnlineSaleIntent(
+            companyId = profile.companyId,
+            actorId = profile.actorId,
+            deviceId = profile.deviceId,
+            currencyMinorUnits = 2,
+            profile = profile
+        )
+
+        val digest = profile.computePayloadDigest()
+        val invoiceUlid = ServerUlid.parse("01JCV8X9ME7890123456789ABC")
+        val paymentUlid = ServerUlid.parse("01JCV8X9MFGHJKMNPQRSTVWXYZ")
+        val wrongCompany = ServerUlid.parse("01JCV8X9MBV4W5X6Y7Z8999999")
+
+        val gateway = FakeSaleSyncGateway().apply {
+            statusOutcomeProvider = {
+                SyncStatusOutcome.Posted(
+                    ServerSaleAck(
+                        companyId = wrongCompany, // Scope mismatch!
+                        clientEventId = profile.clientEventId,
+                        payloadDigest = digest,
+                        invoiceUlid = invoiceUlid,
+                        paymentUlid = paymentUlid,
+                        serverAcknowledgedAt = "2026-11-19T10:00:00Z"
+                    )
+                )
+            }
+        }
+
+        val coordinator = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
+        val result = coordinator.synchronizeScope(profile.companyId, profile.actorId, profile.deviceId)
+
+        assertEquals(0, result.confirmedCount)
+        val record = repository.getRecord(profile.companyId, profile.actorId, profile.deviceId, profile.clientEventId)
+        assertNotNull(record)
+        assertNotEquals(OutboxStatus.CONFIRMED, record!!.status)
+    }
+
+    @Test
+    fun testUnknownAckRecoveryWithCurrentRetainedScopeGetMatchingServerDigest() {
+        val profile = createOnlineProfile(settlementMode = "unpaid", amount = "0.000000")
+        repository.captureOnlineSaleIntent(
+            companyId = profile.companyId,
+            actorId = profile.actorId,
+            deviceId = profile.deviceId,
+            currencyMinorUnits = 2,
+            profile = profile
+        )
+
+        val digest = profile.computePayloadDigest()
+        val invoiceUlid = ServerUlid.parse("01JCV8X9ME7890123456789ABC")
+
+        val gateway = FakeSaleSyncGateway()
+        // Pass 1: status NotFound, submit times out
+        gateway.statusOutcomeProvider = { SyncStatusOutcome.NotFound }
+        gateway.submitOutcomeProvider = { _, _ ->
+            SyncSubmitOutcome.TransientUnknown("Network timeout", isTimeout = true)
+        }
+
+        val coordinator1 = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
+        val result1 = coordinator1.synchronizeScope(profile.companyId, profile.actorId, profile.deviceId)
+
+        assertEquals(1, result1.recordsClaimed)
+        assertEquals(0, result1.confirmedCount)
+        assertEquals(1, result1.timeoutCount)
+
+        val record1 = repository.getRecord(profile.companyId, profile.actorId, profile.deviceId, profile.clientEventId)
+        assertNotNull(record1)
+        assertEquals(OutboxStatus.UNKNOWN_ACK, record1!!.status)
+
+        // Pass 2: gateway status lookup reflects that the server has recorded the sale
+        gateway.statusOutcomeProvider = {
+            SyncStatusOutcome.Posted(
+                ServerSaleAck(
+                    companyId = profile.companyId,
+                    clientEventId = profile.clientEventId,
+                    payloadDigest = digest,
+                    invoiceUlid = invoiceUlid,
+                    paymentUlid = null,
+                    serverAcknowledgedAt = "2026-11-19T10:30:00Z"
+                )
+            )
+        }
+
+        val coordinator2 = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
+        val result2 = coordinator2.synchronizeScope(profile.companyId, profile.actorId, profile.deviceId)
+
+        assertEquals(1, result2.recordsClaimed)
+        assertEquals(1, result2.confirmedCount)
+        assertEquals(0, result2.timeoutCount)
+
+        val record2 = repository.getRecord(profile.companyId, profile.actorId, profile.deviceId, profile.clientEventId)
+        assertNotNull(record2)
+        assertEquals(OutboxStatus.CONFIRMED, record2!!.status)
+        assertEquals(invoiceUlid.value, record2.deliveryState.invoiceUlid)
+        assertNull(record2.deliveryState.paymentUlid)
+    }
+
+    @Test
+    fun testRestartPersistedModeRetainsSettlementIntentAcrossReopen() {
+        val diskDb1 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val diskRepo1 = testOutboxRepository(diskDb1, clock = { testClockMillis })
+
+        val profile = createOnlineProfile(settlementMode = "unpaid", amount = "0.000000")
+        diskRepo1.captureOnlineSaleIntent(
+            companyId = profile.companyId,
+            actorId = profile.actorId,
+            deviceId = profile.deviceId,
+            currencyMinorUnits = 2,
+            profile = profile
+        )
+
+        // Close database to simulate app termination
+        diskDb1.close()
+
+        // Reopen database from disk file
+        val diskDb2 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val diskRepo2 = testOutboxRepository(diskDb2, clock = { testClockMillis })
+
+        val digest = profile.computePayloadDigest()
+        val invoiceUlid = ServerUlid.parse("01JCV8X9ME7890123456789ABC")
+
+        val gateway = FakeSaleSyncGateway().apply {
+            statusOutcomeProvider = {
+                SyncStatusOutcome.Posted(
+                    ServerSaleAck(
+                        companyId = profile.companyId,
+                        clientEventId = profile.clientEventId,
+                        payloadDigest = digest,
+                        invoiceUlid = invoiceUlid,
+                        paymentUlid = null,
+                        serverAcknowledgedAt = "2026-11-19T11:00:00Z"
+                    )
+                )
+            }
+        }
+
+        val coordinator = SaleSyncCoordinatorImpl(diskRepo2, gateway, clock = { testClockMillis })
+        val result = coordinator.synchronizeScope(profile.companyId, profile.actorId, profile.deviceId)
+
+        assertEquals(1, result.recordsClaimed)
+        assertEquals(1, result.confirmedCount)
+
+        val record = diskRepo2.getRecord(profile.companyId, profile.actorId, profile.deviceId, profile.clientEventId)
+        assertNotNull(record)
+        assertEquals(OutboxStatus.CONFIRMED, record!!.status)
+        assertEquals(invoiceUlid.value, record.deliveryState.invoiceUlid)
+        assertNull(record.deliveryState.paymentUlid)
+
+        diskDb2.close()
+    }
+
+    @Test
+    fun testDistinctRealPaymentWhenPaidNeverFallbacksToInvoiceUlid() {
+        val profile = createOnlineProfile(settlementMode = "partial", amount = "20.000000")
+        repository.captureOnlineSaleIntent(
+            companyId = profile.companyId,
+            actorId = profile.actorId,
+            deviceId = profile.deviceId,
+            currencyMinorUnits = 2,
+            profile = profile
+        )
+
+        val digest = profile.computePayloadDigest()
+        val invoiceUlid = ServerUlid.parse("01JCV8X9ME7890123456789ABC")
+        val paymentUlid = ServerUlid.parse("01JCV8X9MFGHJKMNPQRSTVWXYZ")
+
+        val gateway = FakeSaleSyncGateway().apply {
+            statusOutcomeProvider = {
+                SyncStatusOutcome.Posted(
+                    ServerSaleAck(
+                        companyId = profile.companyId,
+                        clientEventId = profile.clientEventId,
+                        payloadDigest = digest,
+                        invoiceUlid = invoiceUlid,
+                        paymentUlid = paymentUlid,
+                        serverAcknowledgedAt = "2026-11-19T10:00:00Z"
+                    )
+                )
+            }
+        }
+
+        val coordinator = SaleSyncCoordinatorImpl(repository, gateway, clock = { testClockMillis })
+        val result = coordinator.synchronizeScope(profile.companyId, profile.actorId, profile.deviceId)
+
+        assertEquals(1, result.recordsClaimed)
+        assertEquals(1, result.confirmedCount)
+
+        val record = repository.getRecord(profile.companyId, profile.actorId, profile.deviceId, profile.clientEventId)
+        assertNotNull(record)
+        assertEquals(OutboxStatus.CONFIRMED, record!!.status)
+        assertNotNull(record.deliveryState.paymentUlid)
+        assertNotEquals(record.deliveryState.invoiceUlid, record.deliveryState.paymentUlid)
+        assertEquals(paymentUlid.value, record.deliveryState.paymentUlid)
     }
 }

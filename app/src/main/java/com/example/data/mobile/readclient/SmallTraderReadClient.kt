@@ -68,7 +68,7 @@ data class PaginationQuery(
  * - Does not wire network engine, UI, ViewModel, Keystore, Room, or sales endpoints.
  */
 class SmallTraderReadClient(
-    private val transport: ReadClientTransport,
+    val transport: ReadClientTransport,
     baseOrigin: String,
     allowHttpLoopback: Boolean = false
 ) {

@@ -5,9 +5,12 @@ import com.example.data.mobile.contract.ContractConstants
 import com.example.data.mobile.contract.PayloadDigest
 import com.example.data.mobile.contract.Rfc3339Validator
 import com.example.data.mobile.contract.ServerUlid
+import com.example.data.mobile.contract.StrictJsonParser
+import com.example.data.mobile.contract.v2.OnlineSaleIntentProfile
 import com.example.data.mobile.outbox.OutboxRepository
 import com.example.data.mobile.outbox.OutboxStatus
 import com.example.data.mobile.outbox.QueueLockedException
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.CancellationException
 
 /**
@@ -251,6 +254,18 @@ class SaleSyncCoordinatorImpl(
                 break
             }
 
+            // Extract original retained canonical intent profile from persisted payload bytes if available
+            val expectedIntent: OnlineSaleIntentProfile? = try {
+                if (event.eventVersion == 2) {
+                    val root = StrictJsonParser.parseObject(String(event.payloadBytes, StandardCharsets.UTF_8))
+                    if ("lines" in root.properties && "payment" in root.properties) {
+                        OnlineSaleIntentProfile.fromStrictJson(root)
+                    } else null
+                } else null
+            } catch (_: Exception) {
+                null
+            }
+
             // Invariant: Reconcile gateway status BEFORE any submit (including UNKNOWN_ACK)
             val statusOutcome = try {
                 gateway.checkStatus(
@@ -258,7 +273,8 @@ class SaleSyncCoordinatorImpl(
                     actorId = actorId,
                     deviceId = deviceId,
                     clientEventId = clientEventId,
-                    payloadDigest = payloadDigest
+                    payloadDigest = payloadDigest,
+                    expectedIntent = expectedIntent
                 )
             } catch (e: CancellationException) {
                 try {
@@ -309,7 +325,7 @@ class SaleSyncCoordinatorImpl(
                 is SyncStatusOutcome.Posted -> {
                     // Event was already posted on server: validate exact acknowledgement fields
                     val ack = statusOutcome.ack
-                    if (isValidAck(ack, companyId, clientEventId, payloadDigest)) {
+                    if (isValidAck(ack, companyId, clientEventId, payloadDigest, expectedIntent)) {
                         val confirmed = try {
                             outboxRepository.confirmDelivery(
                                 companyId = companyId,
@@ -409,7 +425,7 @@ class SaleSyncCoordinatorImpl(
                     when (submitOutcome) {
                         is SyncSubmitOutcome.Posted -> {
                             val ack = submitOutcome.ack
-                            if (isValidAck(ack, companyId, clientEventId, payloadDigest)) {
+                            if (isValidAck(ack, companyId, clientEventId, payloadDigest, expectedIntent)) {
                                 val confirmed = try {
                                     outboxRepository.confirmDelivery(
                                         companyId = companyId,
@@ -620,14 +636,26 @@ class SaleSyncCoordinatorImpl(
         ack: ServerSaleAck,
         expectedCompanyId: ServerUlid,
         expectedClientEventId: ClientUuid,
-        expectedDigest: PayloadDigest
+        expectedDigest: PayloadDigest,
+        expectedIntent: OnlineSaleIntentProfile? = null
     ): Boolean {
         if (ack.companyId != expectedCompanyId) return false
         if (ack.clientEventId != expectedClientEventId) return false
         if (ack.payloadDigest != expectedDigest) return false
         if (!ServerUlid.isValid(ack.invoiceUlid.value)) return false
-        if (!ServerUlid.isValid(ack.paymentUlid.value)) return false
         if (!Rfc3339Validator.isValid(ack.serverAcknowledgedAt)) return false
+
+        val mode = expectedIntent?.payment?.settlementMode
+        if (mode == "unpaid") {
+            // unpaid explicit null payment accepted ONLY for original admitted unpaid profile
+            if (ack.paymentUlid != null) return false
+            if (ack.paymentReceiptNumber != null) return false
+        } else {
+            // full / partial (or non-intent offline sales where payment is mandatory)
+            val payUlid = ack.paymentUlid ?: return false
+            if (!ServerUlid.isValid(payUlid.value)) return false
+            if (payUlid == ack.invoiceUlid) return false // never fallback invoice ID
+        }
         return true
     }
 }

@@ -1,9 +1,14 @@
 package com.example.ui.staff
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -37,6 +42,7 @@ class StaffWorkspaceComposeTest {
 
     @Test
     fun signInScreen_rendersInputs_andSubmitsCredentials() {
+        var remembered = false
         var submittedEmail = ""
         var submittedPassword = ""
         val uiState = StaffWorkspaceUiState(
@@ -48,7 +54,8 @@ class StaffWorkspaceComposeTest {
             SmallTraderTheme(darkTheme = false, isRtl = true) {
                 StaffSignInScreen(
                     uiState = uiState,
-                    onSignIn = { email, pwd ->
+                    onSignIn = { email, pwd, choice ->
+                        remembered = choice
                         submittedEmail = email
                         submittedPassword = pwd
                     },
@@ -62,10 +69,12 @@ class StaffWorkspaceComposeTest {
         composeTestRule.onNodeWithTag("staff_signin_email_input").performTextInput("staff@al-zaytouna.ps")
         composeTestRule.onNodeWithTag("staff_signin_password_input").performTextInput("Pass1234!")
 
+        composeTestRule.onNodeWithTag("staff_signin_remember").performClick()
         // Click submit button
         composeTestRule.onNodeWithTag("staff_signin_submit_button").performClick()
         composeTestRule.waitForIdle()
 
+        assertEquals(true, remembered)
         assertEquals("staff@al-zaytouna.ps", submittedEmail)
         assertEquals("Pass1234!", submittedPassword)
     }
@@ -251,7 +260,10 @@ class StaffWorkspaceComposeTest {
         }
 
         composeTestRule.onNodeWithText("شركة النور التجارية").assertIsDisplayed()
-        composeTestRule.onNodeWithText("الكود: C-500").assertIsDisplayed()
+        val displayedCode = "الكود: \u2066${customer.code}\u2069 • \u2066ID: ${customer.id.value.take(8)}\u2069"
+        composeTestRule.onNodeWithTag("staff_customer_list").performScrollToNode(hasText(displayedCode))
+        composeTestRule.onNodeWithText(displayedCode).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("staff_customer_list").performScrollToNode(hasText("الهاتف: 0599112233"))
         composeTestRule.onNodeWithText("الهاتف: 0599112233").assertIsDisplayed()
     }
 
@@ -360,5 +372,112 @@ class StaffWorkspaceComposeTest {
         }
 
         composeTestRule.onNodeWithText("إلغاء").assertIsDisplayed()
+    }
+
+    @Test
+    fun signInScreen_fitsConstrainedHeightWithInlineError() {
+        var submittedEmail = ""
+        var submittedPassword = ""
+        val uiState = StaffWorkspaceUiState(
+            phase = StaffWorkspacePhase.SIGN_IN,
+            language = AppLanguage.AR,
+            errorMessage = "بيانات الاعتماد غير صحيحة"
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffSignInScreen(
+                    uiState = uiState,
+                    modifier = Modifier.height(320.dp),
+                    onSignIn = { email, pwd, _ ->
+                        submittedEmail = email
+                        submittedPassword = pwd
+                    },
+                    onToggleLanguage = {},
+                    onToggleTheme = {}
+                )
+            }
+        }
+
+        // Error banner is visible
+        composeTestRule.onNodeWithTag("staff_signin_error_banner").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("بيانات الاعتماد غير صحيحة").performScrollTo().assertIsDisplayed()
+
+        // Inputs exist, accessible, and functional
+        composeTestRule.onNodeWithTag("staff_signin_email_input").performTextInput("merchant@test.ps")
+        composeTestRule.onNodeWithTag("staff_signin_password_input").performTextInput("Secure123")
+
+        composeTestRule.onNodeWithTag("staff_signin_submit_button").performScrollTo().assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals("merchant@test.ps", submittedEmail)
+        assertEquals("Secure123", submittedPassword)
+    }
+
+    @Test
+    fun mfaScreen_fitsConstrainedHeightWithInlineError() {
+        var submittedCode = ""
+        var submittedIsRecovery = false
+        val uiState = StaffWorkspaceUiState(
+            phase = StaffWorkspacePhase.MFA_REQUIRED,
+            mfaMode = MfaMode.TOTP,
+            language = AppLanguage.AR,
+            errorMessage = "رمز التحقق غير صحيح"
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                StaffMfaScreen(
+                    uiState = uiState,
+                    modifier = Modifier.height(320.dp),
+                    onRetryWithMfa = { code, isRec ->
+                        submittedCode = code
+                        submittedIsRecovery = isRec
+                    },
+                    onSetMfaMode = {},
+                    onBackToSignIn = {}
+                )
+            }
+        }
+
+        // Error banner is visible
+        composeTestRule.onNodeWithTag("staff_mfa_error_banner").performScrollTo().assertIsDisplayed()
+
+        // Submit button and code input
+        composeTestRule.onNodeWithTag("staff_mfa_code_input").performTextInput("123456")
+        composeTestRule.onNodeWithTag("staff_mfa_submit_button").performScrollTo().assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals("123456", submittedCode)
+        assertFalse(submittedIsRecovery)
+    }
+
+    @Test
+    fun traderRepositoryLoadFailedScreen_rendersLocalizedMessage_andActions() {
+        var retryCount = 0
+        var signOutCount = 0
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                TraderRepositoryLoadFailedScreen(
+                    error = java.net.ConnectException("Failed to connect to 127.0.0.1:8000"),
+                    lang = AppLanguage.AR,
+                    onRetry = { retryCount++ },
+                    onSignOut = { signOutCount++ }
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("trader_load_failed_screen").assertIsDisplayed()
+        composeTestRule.onNodeWithText("تعذر تحميل مساحة التاجر").assertIsDisplayed()
+        // No raw stack trace leaked
+        composeTestRule.onNodeWithText("تعذر الاتصال بالخادم. يرجى التحقق من الشبكة والمحاولة مجدداً.").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("trader_load_retry_button").assertIsDisplayed().performClick()
+        composeTestRule.onNodeWithTag("trader_load_signout_button").assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(1, retryCount)
+        assertEquals(1, signOutCount)
     }
 }
