@@ -173,6 +173,9 @@ object EndpointSecurity {
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/reports/shift-close$"""),
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/reports/treasury$"""),
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/settings/business$"""),
+        // Receipts & Command Status
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/receipts/status$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/receipts/[a-zA-Z0-9_.-]{1,128}/status$"""),
         // Companies V2
         Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/online-cash$"""),
         Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/offline-events/[0-9a-fA-F-]{36}/status$""")
@@ -235,76 +238,132 @@ object EndpointSecurity {
     private fun isLoopbackHost(host: String): Boolean =
         host.lowercase(Locale.ROOT) in setOf("localhost", "127.0.0.1", "10.0.2.2", "::1", "[::1]")
 
+    fun validateSearchQuery(search: String?) {
+        if (search == null) return
+        val trimmed = search.trim()
+        require(trimmed.length <= 100) { "Search query exceeds maximum allowed length of 100 characters" }
+        require(trimmed.none { it == '\r' || it == '\n' || it.code < 32 || it.code == 127 }) {
+            "Search query contains prohibited control characters"
+        }
+    }
+
+    fun validateLimit(limit: Int?) {
+        if (limit == null) return
+        require(limit in 1..100) { "Limit must be between 1 and 100, got: $limit" }
+    }
+
+    fun validateIdempotencyKey(key: String?) {
+        if (key == null) return
+        require(key.length in 1..128) { "Idempotency key length must be between 1 and 128 characters, got ${key.length}" }
+        require(Regex("""^[a-zA-Z0-9_.-]+$""").matches(key)) {
+            "Idempotency key contains invalid characters: '$key'"
+        }
+    }
+
+    fun validateRawQueryString(basePath: String, queryString: String) {
+        require(queryString.length <= 512) { "Query string exceeds maximum length bound" }
+        require(queryString.none { it == '\r' || it == '\n' || it.code < 32 || it.code == 127 }) {
+            "Query string contains prohibited control characters"
+        }
+        val pairs = queryString.split('&')
+        for (pair in pairs) {
+            if (pair.isBlank()) continue
+            val parts = pair.split('=', limit = 2)
+            val key = try { java.net.URLDecoder.decode(parts[0], "UTF-8") } catch (_: Exception) { parts[0] }
+            val value = if (parts.size > 1) {
+                try { java.net.URLDecoder.decode(parts[1], "UTF-8") } catch (_: Exception) { parts[1] }
+            } else ""
+            when (key) {
+                "search" -> validateSearchQuery(value)
+                "limit" -> validateLimit(value.toIntOrNull() ?: throw IllegalArgumentException("Invalid limit"))
+                "cursor" -> validateCursor(value)
+                "idempotency_key" -> validateIdempotencyKey(value)
+                "from_date", "to_date" -> {
+                    require(value.length <= 32) { "Date query parameter exceeds length bound" }
+                }
+                else -> {
+                    throw IllegalArgumentException("Unauthorized query parameter '$key' for endpoint '$basePath'")
+                }
+            }
+        }
+    }
+
     fun validatePath(path: String) {
-        val matchesAny = ALLOWED_PATH_PATTERNS.any { it.matches(path) }
+        val basePath = if (path.contains('?')) path.substringBefore('?') else path
+        val matchesAny = ALLOWED_PATH_PATTERNS.any { it.matches(basePath) }
         require(matchesAny) {
             "Unauthorized API path: '$path'. Must match an allowlisted Mobile V1 read endpoint."
+        }
+        if (path.contains('?')) {
+            val queryString = path.substringAfter('?')
+            validateRawQueryString(basePath, queryString)
         }
     }
 
     fun validateMethodAndPath(method: HttpMethod, path: String) {
         validatePath(path)
+        val basePath = if (path.contains('?')) path.substringBefore('?') else path
         when (method) {
             HttpMethod.POST -> {
-                val isChallenge = path == "/api/mobile/v1/auth/challenge"
-                val isLogin = path == "/api/mobile/v1/auth/login"
-                val isLogout = path == "/api/mobile/v1/auth/logout"
+                val isChallenge = basePath == "/api/mobile/v1/auth/challenge"
+                val isLogin = basePath == "/api/mobile/v1/auth/login"
+                val isLogout = basePath == "/api/mobile/v1/auth/logout"
                 val isPostEndpoint = isChallenge || isLogin || isLogout ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/products$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/inventory/adjustments$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/inventory/transfers/preview$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers/[0-7][0-9A-HJKMNP-TV-Z]{25}/payments$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers/[0-7][0-9A-HJKMNP-TV-Z]{25}/payments$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/draft$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/preview$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/[0-7][0-9A-HJKMNP-TV-Z]{25}/execute$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/returns/preview$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/returns$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases/[0-7][0-9A-HJKMNP-TV-Z]{25}/grn$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases/returns/preview$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases/returns$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/expenses$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/reports/shift-close$""").matches(path) ||
-                    Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/online-cash$""").matches(path)
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/products$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/inventory/adjustments$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/inventory/transfers/preview$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers/[0-7][0-9A-HJKMNP-TV-Z]{25}/payments$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers/[0-7][0-9A-HJKMNP-TV-Z]{25}/payments$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/draft$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/preview$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/[0-7][0-9A-HJKMNP-TV-Z]{25}/execute$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/returns/preview$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/returns$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases/[0-7][0-9A-HJKMNP-TV-Z]{25}/grn$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases/returns/preview$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases/returns$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/expenses$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/reports/shift-close$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/online-cash$""").matches(basePath)
                 require(isPostEndpoint) {
                     "Unauthorized POST endpoint: '$path'."
                 }
             }
             HttpMethod.GET -> {
-                val isNotAllowedGet = path == "/api/mobile/v1/auth/login" ||
-                    path == "/api/mobile/v1/auth/challenge" ||
-                    path == "/api/mobile/v1/auth/logout" ||
-                    path.endsWith("/sales/online-cash") ||
-                    path.endsWith("/inventory/adjustments") ||
-                    path.endsWith("/shift-close") ||
-                    path.endsWith("/payments") ||
-                    path.endsWith("/execute") ||
-                    path.endsWith("/grn") ||
-                    path.endsWith("/sales/invoices/preview") ||
-                    path.endsWith("/sales/invoices/draft") ||
-                    path.endsWith("/sales/returns") ||
-                    path.endsWith("/sales/returns/preview") ||
-                    path.endsWith("/purchases/returns") ||
-                    path.endsWith("/purchases/returns/preview")
+                val isNotAllowedGet = basePath == "/api/mobile/v1/auth/login" ||
+                    basePath == "/api/mobile/v1/auth/challenge" ||
+                    basePath == "/api/mobile/v1/auth/logout" ||
+                    basePath.endsWith("/sales/online-cash") ||
+                    basePath.endsWith("/inventory/adjustments") ||
+                    basePath.endsWith("/shift-close") ||
+                    basePath.endsWith("/payments") ||
+                    basePath.endsWith("/execute") ||
+                    basePath.endsWith("/grn") ||
+                    basePath.endsWith("/sales/invoices/preview") ||
+                    basePath.endsWith("/sales/invoices/draft") ||
+                    basePath.endsWith("/sales/returns") ||
+                    basePath.endsWith("/sales/returns/preview") ||
+                    basePath.endsWith("/purchases/returns") ||
+                    basePath.endsWith("/purchases/returns/preview")
                 require(!isNotAllowedGet) {
                     "Unauthorized GET endpoint: '$path'."
                 }
             }
             HttpMethod.PUT -> {
                 val isPutEndpoint =
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/products/[0-7][0-9A-HJKMNP-TV-Z]{25}$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers/[0-7][0-9A-HJKMNP-TV-Z]{25}$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers/[0-7][0-9A-HJKMNP-TV-Z]{25}$""").matches(path) ||
-                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/[0-7][0-9A-HJKMNP-TV-Z]{25}$""").matches(path)
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/products/[0-7][0-9A-HJKMNP-TV-Z]{25}$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers/[0-7][0-9A-HJKMNP-TV-Z]{25}$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers/[0-7][0-9A-HJKMNP-TV-Z]{25}$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/[0-7][0-9A-HJKMNP-TV-Z]{25}$""").matches(basePath)
                 require(isPutEndpoint) {
                     "Unauthorized PUT endpoint: '$path'."
                 }
             }
             HttpMethod.DELETE -> {
-                val isDeleteEndpoint = Regex("""^/api/mobile/v1/sessions/[0-9a-fA-F-]{36}$""").matches(path)
+                val isDeleteEndpoint = Regex("""^/api/mobile/v1/sessions/[0-9a-fA-F-]{36}$""").matches(basePath)
                 require(isDeleteEndpoint) {
                     "Unauthorized DELETE endpoint: '$path'."
                 }

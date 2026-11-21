@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import androidx.compose.runtime.LaunchedEffect
+import com.example.data.mobile.contract.toNullableString
+
 import java.math.BigDecimal
 import androidx.compose.material.icons.filled.Warning
 import com.example.viewmodel.ReadStatus
@@ -1139,7 +1142,7 @@ fun CustomerDetailScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        text = "${lang.tr("سقف الائتمان:", "Credit Limit:")} ${StitchBidiUtils.formatIls(customer.creditLimitIls)}",
+                                        text = "${lang.tr("سقف الائتمان:", "Credit Limit:")} ${if (customer.creditLimitExact != null) StitchBidiUtils.formatIls(customer.creditLimitExact) else lang.tr("غير محدد", "Not set")}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -1484,6 +1487,13 @@ private fun EditCustomerDialog(
     var addressModified by rememberSaveable(customer.id) { mutableStateOf(false) }
     var limitModified by rememberSaveable(customer.id) { mutableStateOf(false) }
 
+    LaunchedEffect(customer) {
+        if (!nameModified) nameText = customer.nameAr
+        if (!phoneModified) phoneText = customer.phone ?: ""
+        if (!addressModified) addressText = customer.addressAr ?: ""
+        if (!limitModified) limitText = customer.creditLimitExact?.toPlainString() ?: ""
+    }
+
     val isLimitValid = remember(limitText) {
         val trimmed = limitText.trim()
         if (trimmed.isEmpty()) true
@@ -1520,6 +1530,7 @@ private fun EditCustomerDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+
                 OutlinedTextField(
                     value = nameText,
                     onValueChange = {
@@ -2189,11 +2200,19 @@ fun AddCustomerDialog(
     lang: AppLanguage,
     onDismiss: () -> Unit,
     onConfirm: (name: String, phone: String, address: String) -> Unit,
-    onConfirmWithResult: ((name: String, phone: String, address: String, onComplete: (Boolean) -> Unit) -> Unit)? = null
+    onConfirmWithResult: ((name: String, phone: String, address: String, onComplete: (Boolean) -> Unit) -> Unit)? = null,
+    initialDraft: com.example.data.mobile.contract.StrictJsonObject? = null,
+    isRecovering: Boolean = false
 ) {
-    var newCustName by rememberSaveable { mutableStateOf("") }
-    var newCustPhone by rememberSaveable { mutableStateOf("") }
-    var newCustAddr by rememberSaveable { mutableStateOf("") }
+    var newCustName by rememberSaveable {
+        mutableStateOf(initialDraft?.properties?.get("name_ar").toNullableString() ?: "")
+    }
+    var newCustPhone by rememberSaveable {
+        mutableStateOf(initialDraft?.properties?.get("phone").toNullableString() ?: "")
+    }
+    var newCustAddr by rememberSaveable {
+        mutableStateOf(initialDraft?.properties?.get("address_ar").toNullableString() ?: "")
+    }
     var isSubmitting by rememberSaveable { mutableStateOf(false) }
 
     AlertDialog(
@@ -2210,9 +2229,24 @@ fun AddCustomerDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                if (isRecovering) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = lang.tr("جاري استعادة العملية السابقة والتحقق من حالتها...", "Recovering in-flight operation from local store..."),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = newCustName,
                     onValueChange = { newCustName = it },
+                    enabled = !isSubmitting && !isRecovering,
                     label = { Text(lang.tr("اسم الزبون أو المنشأة *", "Customer Name *")) },
                     placeholder = { Text(lang.tr("مثال: خليل شاهين", "e.g. Khalil Shaheen")) },
                     singleLine = true,
@@ -2225,6 +2259,7 @@ fun AddCustomerDialog(
                 OutlinedTextField(
                     value = newCustPhone,
                     onValueChange = { newCustPhone = WesternFormatters.sanitizeWesternDigits(it) },
+                    enabled = !isSubmitting && !isRecovering,
                     label = { Text(lang.tr("رقم الجوال (05X...) *", "Phone Number (05X...) *")) },
                     placeholder = { Text("059X-XXXXXX") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
@@ -2241,6 +2276,7 @@ fun AddCustomerDialog(
                 OutlinedTextField(
                     value = newCustAddr,
                     onValueChange = { newCustAddr = it },
+                    enabled = !isSubmitting && !isRecovering,
                     label = { Text(lang.tr("العنوان أو الحي (اختياري)", "Address / Area (Optional)")) },
                     placeholder = { Text(lang.tr("نابلس — رفيديا", "Nablus - Rafidia")) },
                     singleLine = true,
@@ -2254,8 +2290,9 @@ fun AddCustomerDialog(
         },
         confirmButton = {
             Button(
+                enabled = !isSubmitting && !isRecovering && newCustName.isNotBlank(),
                 onClick = {
-                    if (!isSubmitting && newCustName.isNotBlank()) {
+                    if (!isSubmitting && !isRecovering && newCustName.isNotBlank()) {
                         val trimmedName = newCustName.trim()
                         val trimmedPhone = newCustPhone.trim()
                         val trimmedAddr = newCustAddr.trim()
@@ -2272,7 +2309,6 @@ fun AddCustomerDialog(
                         }
                     }
                 },
-                enabled = !isSubmitting && newCustName.isNotBlank(),
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,

@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import com.example.data.mobile.contract.toNullableString
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -769,7 +771,8 @@ fun ReceivePurchaseBillDialog(
     onConfirmBill: ((supplierId: String, itemsSummary: String, totalIls: Double, paidNowIls: Double, expectedProductId: String?, expectedQuantity: Int) -> Boolean)? = null,
     onConfirmStructuredBill: ((supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, note: String) -> Result<PurchaseBill>)? = null,
     onConfirmBillWithResult: ((supplierId: String, itemsSummary: String, totalIls: Double, paidNowIls: Double, expectedProductId: String?, expectedQuantity: Int, onComplete: (Boolean) -> Unit) -> Unit)? = null,
-    onConfirmStructuredBillWithResult: ((supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, note: String, onComplete: (Result<PurchaseBill>) -> Unit) -> Unit)? = null
+    onConfirmStructuredBillWithResult: ((supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, note: String, onComplete: (Result<PurchaseBill>) -> Unit) -> Unit)? = null,
+    onSearchSuppliers: ((String) -> Unit)? = null
 ) {
     val lang = state.language
     val suppliers = state.suppliers
@@ -900,33 +903,96 @@ fun ReceivePurchaseBillDialog(
                     )
                 }
 
-                // Supplier Picker
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = lang.tr("المورد:", "Supplier:"),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    LazyRow(
-                        modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                // Supplier Picker with Search
+                var supplierPickerSearch by rememberSaveable { mutableStateOf("") }
+                val displayedSuppliers = remember(suppliers, state.supplierSearchResults, supplierPickerSearch) {
+                    if (supplierPickerSearch.isNotBlank()) {
+                        if (state.supplierSearchResults != null && state.supplierSearchResults.isNotEmpty()) {
+                            state.supplierSearchResults
+                        } else {
+                            val q = supplierPickerSearch.trim().lowercase()
+                            suppliers.filter {
+                                it.name(lang).lowercase().contains(q) ||
+                                    it.company(lang).lowercase().contains(q) ||
+                                    (it.phone ?: "").contains(q)
+                            }
+                        }
+                    } else suppliers
+                }
+
+                if (onSearchSuppliers != null) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        items(suppliers, key = { it.id }) { s ->
-                            FilterChip(
-                                selected = s.id == selectedSupplierId,
-                                enabled = !isSubmitting,
-                                onClick = { selectedSupplierId = s.id },
-                                label = { Text(s.name(lang), style = MaterialTheme.typography.labelSmall) },
-                                shape = RoundedCornerShape(8.dp),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                        Text(
+                            text = lang.tr("المورد:", "Supplier:"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        OutlinedTextField(
+                            value = supplierPickerSearch,
+                            onValueChange = {
+                                supplierPickerSearch = it
+                                onSearchSuppliers.invoke(it)
+                            },
+                            placeholder = { Text(lang.tr("بحث في الموردين...", "Search suppliers..."), style = MaterialTheme.typography.labelSmall) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(8.dp),
+                            textStyle = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("purchase_supplier_search_input")
+                        )
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(displayedSuppliers, key = { it.id }) { s ->
+                                FilterChip(
+                                    selected = s.id == selectedSupplierId,
+                                    enabled = !isSubmitting,
+                                    onClick = { selectedSupplierId = s.id },
+                                    label = { Text(s.name(lang), style = MaterialTheme.typography.labelSmall) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
+                                    modifier = Modifier.testTag("purchase_supplier_chip_${s.id}")
                                 )
-                            )
+                            }
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = lang.tr("المورد:", "Supplier:"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        LazyRow(
+                            modifier = Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(displayedSuppliers, key = { it.id }) { s ->
+                                FilterChip(
+                                    selected = s.id == selectedSupplierId,
+                                    enabled = !isSubmitting,
+                                    onClick = { selectedSupplierId = s.id },
+                                    label = { Text(s.name(lang), style = MaterialTheme.typography.labelSmall) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
+                                    modifier = Modifier.testTag("purchase_supplier_chip_${s.id}")
+                                )
+                            }
                         }
                     }
                 }
@@ -1399,11 +1465,19 @@ fun SupplierEditorDialog(
     lang: AppLanguage,
     onDismiss: () -> Unit,
     onSave: (name: String, company: String, phone: String) -> Unit,
-    onSaveWithResult: ((name: String, company: String, phone: String, onComplete: (Boolean) -> Unit) -> Unit)? = null
+    onSaveWithResult: ((name: String, company: String, phone: String, onComplete: (Boolean) -> Unit) -> Unit)? = null,
+    initialDraft: com.example.data.mobile.contract.StrictJsonObject? = null,
+    isRecovering: Boolean = false
 ) {
-    var name by rememberSaveable(initialSupplier?.id) { mutableStateOf(initialSupplier?.nameAr ?: "") }
-    var company by rememberSaveable(initialSupplier?.id) { mutableStateOf(initialSupplier?.companyAr ?: "") }
-    var phone by rememberSaveable(initialSupplier?.id) { mutableStateOf(initialSupplier?.phone ?: "") }
+    var name by rememberSaveable(initialSupplier?.id) {
+        mutableStateOf(initialSupplier?.nameAr ?: initialDraft?.properties?.get("name_ar").toNullableString() ?: "")
+    }
+    var company by rememberSaveable(initialSupplier?.id) {
+        mutableStateOf(initialSupplier?.companyAr ?: initialDraft?.properties?.get("company_name").toNullableString() ?: "")
+    }
+    var phone by rememberSaveable(initialSupplier?.id) {
+        mutableStateOf(initialSupplier?.phone ?: initialDraft?.properties?.get("phone").toNullableString() ?: "")
+    }
     val isValid = name.isNotBlank()
 
     AlertDialog(
@@ -1417,9 +1491,24 @@ fun SupplierEditorDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (isRecovering) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = lang.tr("جاري استعادة العملية السابقة والتحقق من حالتها...", "Recovering in-flight operation from local store..."),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
+                    enabled = !isRecovering,
                     label = { Text(lang.tr("اسم المورد *", "Supplier Name *")) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
@@ -1428,7 +1517,7 @@ fun SupplierEditorDialog(
                         .testTag("supplier_name_input")
                 )
                 OutlinedTextField(
-                    enabled = companyEditable,
+                    enabled = companyEditable && !isRecovering,
                     supportingText = { if (!companyEditable) Text(lang.tr("غير متاح (لا يُحفظ على الخادم)", "Unavailable (not saved on server)")) },
                     value = company,
                     onValueChange = { company = it },
@@ -1442,6 +1531,7 @@ fun SupplierEditorDialog(
                 OutlinedTextField(
                     value = phone,
                     onValueChange = { phone = WesternFormatters.sanitizeWesternDigits(it) },
+                    enabled = !isRecovering,
                     label = { Text(lang.tr("رقم الهاتف", "Phone Number")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     singleLine = true,

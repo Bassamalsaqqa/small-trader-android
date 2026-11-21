@@ -289,9 +289,10 @@ class MobileMerchantApiClient(
             }
             if (updateAddress) {
                 if (address.isNullOrBlank()) {
-                    append(",\"address_ar\":null")
+                    append(",\"address_ar\":null,\"address_en\":null,\"address\":null")
                 } else {
                     append(",\"address_ar\":\"").append(escapeJson(address)).append("\"")
+                    append(",\"address\":\"").append(escapeJson(address)).append("\"")
                 }
             }
             if (updateCreditLimit) {
@@ -347,16 +348,18 @@ class MobileMerchantApiClient(
     // -------------------------------------------------------------------------
 
     fun getSuppliers(companyId: ServerUlid, search: String? = null, limit: Int = 30): Result<StrictJsonObject> {
-        val qParams = mutableListOf<String>()
+        val qParams = mutableMapOf<String, String>()
         if (!search.isNullOrBlank()) {
-            qParams.add("search=" + java.net.URLEncoder.encode(search.trim(), "UTF-8"))
+            val trimmed = search.trim()
+            com.example.data.mobile.readclient.EndpointSecurity.validateSearchQuery(trimmed)
+            qParams["search"] = trimmed
         }
         if (limit != 30) {
-            qParams.add("limit=$limit")
+            com.example.data.mobile.readclient.EndpointSecurity.validateLimit(limit)
+            qParams["limit"] = limit.toString()
         }
-        val queryStr = if (qParams.isNotEmpty()) "?" + qParams.joinToString("&") else ""
-        val path = "/api/mobile/v1/companies/${companyId.value}/suppliers$queryStr"
-        return execute(HttpMethod.GET, path)
+        val path = "/api/mobile/v1/companies/${companyId.value}/suppliers"
+        return execute(HttpMethod.GET, path, queryParams = qParams)
     }
 
     fun getSupplier(companyId: ServerUlid, supplierId: ServerUlid): Result<StrictJsonObject> {
@@ -527,11 +530,13 @@ class MobileMerchantApiClient(
         companyId: ServerUlid,
         idempotencyKey: String
     ): ReceiptStatusResult {
-        val path = "/api/mobile/v1/companies/${companyId.value}/receipts/$idempotencyKey/status"
+        com.example.data.mobile.readclient.EndpointSecurity.validateIdempotencyKey(idempotencyKey)
+        val path = "/api/mobile/v1/companies/${companyId.value}/receipts/status"
         val request = TransportRequest(
             method = HttpMethod.GET,
             path = path,
             baseOrigin = baseOrigin,
+            queryParams = mapOf("idempotency_key" to idempotencyKey),
             headers = authHeaders()
         )
         return try {

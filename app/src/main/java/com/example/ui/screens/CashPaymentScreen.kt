@@ -1348,11 +1348,16 @@ fun CashPaymentScreen(
                 } else {
                     // Consequence line for credit sale
                     val overLimit = state.wouldCreditExceedCustomerLimit
+                    val isDetailLoading = selectedCustomer != null && !selectedCustomer.isDetailLoaded
                     Text(
                         text = when {
                             selectedCustomer == null -> lang.tr(
                                 "يلزم اختيار زبون مسجل للبيع الآجل",
                                 "Select a customer for credit sale"
+                            )
+                            isDetailLoading -> lang.tr(
+                                "جاري تحميل بيانات وسقف ائتمان الزبون...",
+                                "Loading customer credit details..."
                             )
                             overLimit -> lang.tr(
                                 "يتجاوز سقف الدين بمقدار ${WesternFormatters.formatIls(state.creditCeilingExcessIls)}",
@@ -1368,7 +1373,7 @@ fun CashPaymentScreen(
                             )
                         },
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
-                        color = if (selectedCustomer != null && !overLimit) {
+                        color = if (selectedCustomer != null && !overLimit && !isDetailLoading) {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         } else {
                             financial.debit
@@ -1380,11 +1385,11 @@ fun CashPaymentScreen(
                     // Primary confirmation button (ST-11)
                     Button(
                         onClick = onCompleteCreditSale,
-                        enabled = selectedCustomer != null && !overLimit && state.basket.isNotEmpty() && !state.isSubmittingSale,
+                        enabled = selectedCustomer != null && !isDetailLoading && !overLimit && state.basket.isNotEmpty() && !state.isSubmittingSale,
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (selectedCustomer != null && !overLimit) financial.debit else MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = if (selectedCustomer != null && !overLimit) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            containerColor = if (selectedCustomer != null && !isDetailLoading && !overLimit) financial.debit else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (selectedCustomer != null && !isDetailLoading && !overLimit) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1402,6 +1407,10 @@ fun CashPaymentScreen(
                                 selectedCustomer == null -> lang.tr(
                                     "البيع الآجل غير متاح بدون زبون",
                                     "Credit Disabled: No Customer"
+                                )
+                                isDetailLoading -> lang.tr(
+                                    "جاري تحميل بيانات الزبون...",
+                                    "Loading Customer Details..."
                                 )
                                 overLimit -> lang.tr(
                                     "متوقف لتجاوز سقف الدين",

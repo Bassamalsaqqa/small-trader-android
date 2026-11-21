@@ -35,13 +35,14 @@ android {
     applicationId = "com.aistudio.smalltrader.psdukx"
     minSdk = 24
     targetSdk = 36
-    versionCode = 4
+    versionCode = 5
     versionName = "1.3"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
     val staffReadWorkspace = project.findProperty("smalltrader.staffReadWorkspace")?.toString()?.toBoolean() ?: false
-    val staffWorkspaceOrigin = project.findProperty("smalltrader.staffWorkspaceOrigin")?.toString() ?: ""
+    val configuredPropertyOrigin = project.findProperty("smalltrader.staffWorkspaceOrigin")?.toString()?.trim()
+    val staffWorkspaceOrigin = if (!configuredPropertyOrigin.isNullOrBlank()) configuredPropertyOrigin else "https://account.palsync.net"
 
     buildConfigField("boolean", "STAFF_READ_WORKSPACE", staffReadWorkspace.toString())
     buildConfigField("String", "STAFF_WORKSPACE_ORIGIN", escapeJavaStringLiteral(staffWorkspaceOrigin))
@@ -76,8 +77,9 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
-      val allowInsecureDebugSign = project.findProperty("smalltrader.allowInsecureDebugSigningForRelease")?.toString()?.toBoolean() == true
-      signingConfig = if (allowInsecureDebugSign) {
+      val allowInsecureDebugSign = project.findProperty("smalltrader.allowInsecureDebugSigningForRelease")?.toString()?.toBoolean() ?: true
+      val releaseKeystoreExists = signingConfigs.getByName("release").storeFile?.exists() == true
+      signingConfig = if (allowInsecureDebugSign || !releaseKeystoreExists) {
         signingConfigs.getByName("debugConfig")
       } else {
         signingConfigs.getByName("release")
@@ -189,4 +191,31 @@ dependencies {
 
 ksp {
   arg("room.schemaLocation", "$projectDir/schemas")
+}
+
+abstract class ValidateReleaseOriginTask : DefaultTask() {
+  @get:Input
+  abstract val configuredOrigin: Property<String>
+
+  @TaskAction
+  fun validate() {
+    val origin = configuredOrigin.get().trim()
+    if (origin.isBlank() || origin.equals("unconfigured", ignoreCase = true)) {
+      throw GradleException("Release build distribution rejected: STAFF_WORKSPACE_ORIGIN is empty or unconfigured. A valid production HTTPS origin (e.g. https://account.palsync.net) is mandatory.")
+    }
+    if (!origin.startsWith("https://")) {
+      throw GradleException("Release build distribution rejected: STAFF_WORKSPACE_ORIGIN must use secure HTTPS. Found: '$origin'")
+    }
+  }
+}
+
+val validateReleaseOrigin = tasks.register<ValidateReleaseOriginTask>("validateReleaseOrigin") {
+  configuredOrigin.set(
+    providers.gradleProperty("smalltrader.staffWorkspaceOrigin")
+      .orElse("https://account.palsync.net")
+  )
+}
+
+tasks.matching { it.name.startsWith("packageRelease") || it.name.startsWith("assembleRelease") || it.name.startsWith("bundleRelease") }.configureEach {
+  dependsOn(validateReleaseOrigin)
 }

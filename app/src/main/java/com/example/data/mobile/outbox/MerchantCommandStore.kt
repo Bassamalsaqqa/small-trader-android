@@ -136,6 +136,20 @@ interface MerchantCommandStore {
         formType: String
     )
 
+    fun getActiveDraftRecord(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        formType: String
+    ): MerchantCommandRecord?
+
+    fun getActiveDraftPayload(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        formType: String
+    ): com.example.data.mobile.contract.StrictJsonObject?
+
     fun decryptPayload(record: MerchantCommandRecord): ByteArray
     fun decryptSnapshot(record: MerchantCommandRecord): ByteArray?
 }
@@ -725,6 +739,57 @@ class RoomMerchantCommandStore internal constructor(
         rotateDraftOperationId(companyId, actorId, deviceId, formType)
     }
 
+    override fun getActiveDraftRecord(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        formType: String
+    ): MerchantCommandRecord? {
+        val db = dbProvider()
+        val c = db.query(
+            "SELECT company_id, command_id, actor_id, device_id, command_type, idempotency_key, " +
+                "payload_digest, payload_bytes, status, response_snapshot, error_message, created_at, updated_at " +
+                "FROM merchant_commands WHERE company_id = ? AND actor_id = ? AND device_id = ? AND command_type = ? " +
+                "AND status IN ('PENDING', 'SUBMITTED', 'UNKNOWN_ACK') ORDER BY updated_at DESC LIMIT 1",
+            arrayOf(companyId, actorId, deviceId, formType)
+        )
+        return c.use {
+            if (it.moveToFirst()) {
+                MerchantCommandRecord(
+                    companyId = it.getString(0),
+                    commandId = it.getString(1),
+                    actorId = it.getString(2),
+                    deviceId = it.getString(3),
+                    commandType = it.getString(4),
+                    idempotencyKey = it.getString(5),
+                    payloadDigest = it.getString(6),
+                    payloadBytes = it.getBlob(7),
+                    status = CommandStatus.valueOf(it.getString(8)),
+                    responseSnapshot = if (it.isNull(9)) null else it.getBlob(9),
+                    errorMessage = if (it.isNull(10)) null else it.getString(10),
+                    createdAt = it.getLong(11),
+                    updatedAt = it.getLong(12)
+                )
+            } else null
+        }
+    }
+
+    override fun getActiveDraftPayload(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        formType: String
+    ): com.example.data.mobile.contract.StrictJsonObject? {
+        val record = getActiveDraftRecord(companyId, actorId, deviceId, formType) ?: return null
+        return try {
+            val decrypted = decryptPayload(record)
+            val jsonStr = String(decrypted, StandardCharsets.UTF_8)
+            com.example.data.mobile.contract.StrictJsonParser.parse(jsonStr).asObject()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     override fun decryptPayload(record: MerchantCommandRecord): ByteArray {
         return cipher.decryptPayload(
             companyId = record.companyId,
@@ -959,6 +1024,35 @@ class InMemoryMerchantCommandStore : MerchantCommandStore {
     ) = synchronized(lock) {
         rotateDraftOperationId(companyId, actorId, deviceId, formType)
         Unit
+    }
+
+    override fun getActiveDraftRecord(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        formType: String
+    ): MerchantCommandRecord? = synchronized(lock) {
+        return records.values.firstOrNull {
+            it.companyId == companyId && it.actorId == actorId && it.deviceId == deviceId &&
+                it.commandType == formType &&
+                (it.status == CommandStatus.PENDING || it.status == CommandStatus.SUBMITTED || it.status == CommandStatus.UNKNOWN_ACK)
+        }
+    }
+
+    override fun getActiveDraftPayload(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        formType: String
+    ): com.example.data.mobile.contract.StrictJsonObject? = synchronized(lock) {
+        val record = getActiveDraftRecord(companyId, actorId, deviceId, formType) ?: return null
+        return try {
+            val decrypted = decryptPayload(record)
+            val jsonStr = String(decrypted, StandardCharsets.UTF_8)
+            com.example.data.mobile.contract.StrictJsonParser.parse(jsonStr).asObject()
+        } catch (_: Exception) {
+            null
+        }
     }
 
     override fun decryptPayload(record: MerchantCommandRecord): ByteArray = record.payloadBytes

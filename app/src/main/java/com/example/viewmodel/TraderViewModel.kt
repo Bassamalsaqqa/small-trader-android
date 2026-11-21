@@ -1086,6 +1086,13 @@ class TraderViewModel(
                 checkoutErrorEn = null
             )
         }
+        if (customer != null && !customer.isDetailLoaded && repository !is OfflineDemoTraderRepository) {
+            viewModelScope.launch {
+                try {
+                    repository.loadCustomerDetail(customer.id)
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     fun dismissCheckoutError() {
@@ -1649,7 +1656,36 @@ class TraderViewModel(
     }
 
     fun openAddCustomerDialog(open: Boolean) {
-        _uiState.update { it.copy(isAddCustomerDialogOpen = open) }
+        if (open) {
+            val payload = repository.getActiveDraftPayload("customer_create")
+            val isRecovering = repository.isDraftRecovering("customer_create")
+            _uiState.update {
+                it.copy(
+                    isAddCustomerDialogOpen = true,
+                    activeCustomerCreateDraft = payload,
+                    isCustomerCreateRecovering = isRecovering
+                )
+            }
+        } else {
+            _uiState.update {
+                it.copy(
+                    isAddCustomerDialogOpen = false,
+                    activeCustomerCreateDraft = null,
+                    isCustomerCreateRecovering = false
+                )
+            }
+        }
+    }
+
+    fun prepareSupplierCreateDraft() {
+        val payload = repository.getActiveDraftPayload("supplier_create")
+        val isRecovering = repository.isDraftRecovering("supplier_create")
+        _uiState.update {
+            it.copy(
+                activeSupplierCreateDraft = payload,
+                isSupplierCreateRecovering = isRecovering
+            )
+        }
     }
 
     // Suppliers & Purchasing Operations
@@ -2945,15 +2981,66 @@ class TraderViewModel(
     }
 
     private var supplierSearchJob: Job? = null
+    private var supplierSearchGeneration = 0L
 
     fun searchSuppliers(query: String) {
         supplierSearchJob?.cancel()
         val trimmed = query.trim()
+        val generation = ++supplierSearchGeneration
+        _uiState.update {
+            it.copy(
+                supplierSearchQuery = query,
+                isSearchingSuppliers = trimmed.isNotBlank(),
+                supplierSearchError = null
+            )
+        }
+        if (trimmed.isBlank()) {
+            _uiState.update {
+                it.copy(
+                    supplierSearchResults = null,
+                    isSearchingSuppliers = false,
+                    supplierSearchError = null
+                )
+            }
+            return
+        }
         supplierSearchJob = viewModelScope.launch {
-            delay(300)
+            delay(250)
             try {
-                repository.searchSuppliers(trimmed)
-            } catch (_: Exception) {}
+                val res = repository.searchSuppliers(trimmed)
+                if (generation == supplierSearchGeneration) {
+                    if (res.isSuccess) {
+                        _uiState.update {
+                            it.copy(
+                                supplierSearchResults = res.getOrThrow(),
+                                isSearchingSuppliers = false,
+                                supplierSearchError = null
+                            )
+                        }
+                    } else {
+                        val errMsg = res.exceptionOrNull()?.message ?: "Supplier search failed"
+                        _uiState.update {
+                            it.copy(
+                                supplierSearchResults = emptyList(),
+                                isSearchingSuppliers = false,
+                                supplierSearchError = errMsg
+                            )
+                        }
+                    }
+                }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                if (generation == supplierSearchGeneration) {
+                    _uiState.update {
+                        it.copy(
+                            supplierSearchResults = emptyList(),
+                            isSearchingSuppliers = false,
+                            supplierSearchError = e.message
+                        )
+                    }
+                }
+            }
         }
     }
 

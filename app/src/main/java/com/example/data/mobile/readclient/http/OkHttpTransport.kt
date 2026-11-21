@@ -246,7 +246,7 @@ class OkHttpTransport(
             }
         }
 
-        // 4. Cursor validation & UTF-8 Query Parameter Percent-Encoding
+        // 4. Query Parameter Validation & Bounding
         val cursor = request.queryParams["cursor"]
         if (cursor != null) {
             try {
@@ -257,6 +257,49 @@ class OkHttpTransport(
                 throw HttpTransportException(
                     HttpTransportException.CATEGORY_SECURITY_VIOLATION,
                     "Invalid pagination cursor query parameter"
+                )
+            }
+        }
+
+        val search = request.queryParams["search"]
+        if (search != null) {
+            try {
+                EndpointSecurity.validateSearchQuery(search)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                if (e is VirtualMachineError) throw e
+                throw HttpTransportException(
+                    HttpTransportException.CATEGORY_SECURITY_VIOLATION,
+                    "Invalid search query parameter"
+                )
+            }
+        }
+
+        val limitStr = request.queryParams["limit"]
+        if (limitStr != null) {
+            try {
+                val limit = limitStr.toIntOrNull() ?: throw IllegalArgumentException("Invalid limit integer")
+                EndpointSecurity.validateLimit(limit)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                if (e is VirtualMachineError) throw e
+                throw HttpTransportException(
+                    HttpTransportException.CATEGORY_SECURITY_VIOLATION,
+                    "Invalid limit query parameter"
+                )
+            }
+        }
+
+        val idempotencyKey = request.queryParams["idempotency_key"]
+        if (idempotencyKey != null) {
+            try {
+                EndpointSecurity.validateIdempotencyKey(idempotencyKey)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                if (e is VirtualMachineError) throw e
+                throw HttpTransportException(
+                    HttpTransportException.CATEGORY_SECURITY_VIOLATION,
+                    "Invalid idempotency_key query parameter"
                 )
             }
         }

@@ -400,7 +400,8 @@ data class Customer(
     val creditLimitExact: BigDecimal? = null,
     val totalPurchasesExact: BigDecimal? = null,
     val isWalkIn: Boolean = false,
-    val code: String? = null
+    val code: String? = null,
+    val isDetailLoaded: Boolean = false
 ) {
     constructor(
         id: String,
@@ -421,7 +422,8 @@ data class Customer(
         addressEn = addressEn.ifBlank { null },
         balanceExact = BigDecimal(balanceIls.toString()).setScale(2, RoundingMode.HALF_UP),
         creditLimitExact = BigDecimal(creditLimitIls.toString()).setScale(2, RoundingMode.HALF_UP),
-        totalPurchasesExact = BigDecimal(totalPurchasesIls.toString()).setScale(2, RoundingMode.HALF_UP)
+        totalPurchasesExact = BigDecimal(totalPurchasesIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        isDetailLoaded = true
     )
 
     // Legacy presentation bridge: NaN means unavailable, never an economic zero. Use balanceExact for arithmetic.

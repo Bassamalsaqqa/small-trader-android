@@ -176,9 +176,17 @@ fun SmallTraderApp(
                                 { customer -> traderViewModel.assignCustomerToSale(customer); traderViewModel.navigateTo(TraderScreen.NEW_SALE) },
                                 traderViewModel::openPaymentCollectionForCustomer, traderViewModel::dismissCustomerFeedback,
                                 onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.CUSTOMERS, retry = true) }) },
-                            suppliers = { SuppliersScreen(state, traderViewModel::selectSupplierForDetail,
-                                { traderViewModel.openReceivePurchaseDialog(true) }, traderViewModel::dismissSupplierFeedback, traderViewModel::saveSupplier,
-                                onSearchSuppliers = traderViewModel::searchSuppliers) })
+                            suppliers = { SuppliersScreen(
+                                state = state,
+                                onSupplierClick = traderViewModel::selectSupplierForDetail,
+                                onOpenReceivePurchaseDialog = { traderViewModel.openReceivePurchaseDialog(true) },
+                                onDismissFeedback = traderViewModel::dismissSupplierFeedback,
+                                onSaveSupplier = traderViewModel::saveSupplier,
+                                onSaveSupplierWithResult = { sid, name, comp, phone, onComplete ->
+                                    traderViewModel.saveSupplier(sid, name, comp, phone, onComplete)
+                                },
+                                onSearchSuppliers = traderViewModel::searchSuppliers
+                            ) })
                         TraderScreen.PURCHASES -> PurchasesScreen(
                             state = state,
                             onNewPurchase = { traderViewModel.openReceivePurchaseDialog(true) },
@@ -695,6 +703,7 @@ fun SmallTraderApp(
                     ReceivePurchaseBillDialog(
                         state = state,
                         onDismiss = { traderViewModel.openReceivePurchaseDialog(false) },
+                        onSearchSuppliers = traderViewModel::searchSuppliers,
                         onConfirmBill = { supplierId, itemsSummary, totalIls, paidNowIls, expectedProductId, expectedQty ->
                             traderViewModel.recordPurchaseBill(
                                 supplierId = supplierId,

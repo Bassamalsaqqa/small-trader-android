@@ -7,6 +7,8 @@ import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.StrictJsonObject
 import com.example.data.mobile.contract.StrictJsonParser
+import com.example.data.mobile.contract.toNullableString
+import com.example.data.mobile.outbox.InMemoryMerchantCommandStore
 import com.example.data.mobile.merchantread.MerchantReadClient
 import com.example.data.mobile.merchantread.MerchantReadTokenProvider
 import com.example.data.mobile.readclient.HttpMethod
@@ -794,32 +796,94 @@ class CustomerSupplierDirectoryWireTest {
 
     @Test
     fun testCustomerCreation_RequiresAuthoritativeULID_FailsOnMissingOrInvalidId() = runBlocking {
-        val transport = RecordingTransport()
-        val repo = createRepository(transport)
-
-        // 1. Missing "id" in response
-        transport.responseQueue.add(
+        // 1. Missing "id" in response (independent store context)
+        val transportMissingId = RecordingTransport()
+        val repoMissingId = createRepository(transportMissingId)
+        transportMissingId.responseQueue.add(
             TransportResponse(
                 statusCode = 201,
                 headers = mapOf("Content-Type" to "application/json"),
                 body = """{"name":"عميل بدون معرف"}"""
             )
         )
-        val resMissingId = repo.createCustomer("عميل بدون معرف", "0599-111111", "نابلس", 0.0)
+        val resMissingId = repoMissingId.createCustomer("عميل بدون معرف", "0599-111111", "نابلس", 0.0)
         assertTrue("Must fail when server omits ID", resMissingId.isFailure)
         assertTrue("Error must mention missing customer ID", resMissingId.exceptionOrNull()?.message?.contains("missing customer ID") == true)
 
-        // 2. Non-ULID (e.g. UUID) in response
-        transport.responseQueue.add(
+        // 2. Non-ULID (e.g. UUID) in response (independent store context)
+        val transportInvalidId = RecordingTransport()
+        val repoInvalidId = createRepository(transportInvalidId)
+        transportInvalidId.responseQueue.add(
             TransportResponse(
                 statusCode = 201,
                 headers = mapOf("Content-Type" to "application/json"),
                 body = """{"id":"550e8400-e29b-41d4-a716-446655440000","name":"عميل بمعرف غير صالح"}"""
             )
         )
-        val resInvalidId = repo.createCustomer("عميل بمعرف غير صالح", "0599-111111", "نابلس", 0.0)
+        val resInvalidId = repoInvalidId.createCustomer("عميل بمعرف غير صالح", "0599-111111", "نابلس", 0.0)
         assertTrue("Must fail when server returns non-ULID", resInvalidId.isFailure)
         assertTrue("Error must mention invalid ULID", resInvalidId.exceptionOrNull()?.message?.contains("invalid customer ULID") == true)
+    }
+
+    @Test
+    fun testCustomerCreation_SamePayloadRetryAndProcessDeath_RestoresOriginalIdentity() = runBlocking {
+        val transport = RecordingTransport()
+        val commandStore = InMemoryMerchantCommandStore()
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = MobileMerchantApiClient(transport, "https://api.example.com") { validToken },
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = commandStore
+        )
+
+        // 1. Initial attempt fails with UNKNOWN_ACK due to malformed authoritative ID
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 201,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """{"id":"MALFORMED_ULID","name":"عميل تجربة"}"""
+            )
+        )
+        val originalDraftId = repo.getDraftOperationId("customer_create")
+        val resFail = repo.createCustomer("عميل تجربة", "0599-111111", "نابلس", 0.0)
+        assertTrue("First attempt must fail due to malformed ULID", resFail.isFailure)
+
+        // 2. Draft operation ID is retained (never cancelled or rotated away)
+        val retainedDraftId = repo.getDraftOperationId("customer_create")
+        assertEquals("Unresolved server event must retain original draft operation ID", originalDraftId, retainedDraftId)
+        assertTrue("Draft must be marked as recovering", repo.isDraftRecovering("customer_create"))
+
+        // 3. Process death simulation: restore with new repo instance over same command store
+        val restoredRepo = ProductionTraderRepository.forTesting(
+            apiClient = MobileMerchantApiClient(transport, "https://api.example.com") { validToken },
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = commandStore
+        )
+        assertEquals("Restored repo must retain exact draft operation ID across process death", originalDraftId, restoredRepo.getDraftOperationId("customer_create"))
+        val restoredPayload = restoredRepo.getActiveDraftPayload("customer_create")
+        assertNotNull("Restored draft payload must be available", restoredPayload)
+        assertEquals("عميل تجربة", restoredPayload?.properties?.get("name_ar").toNullableString())
+
+        // 4. Same payload retry succeeds with valid ULID
+        val validUlid = "01JCV8X9M2NQW3TYZ4R5S6789Z"
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 201,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """{"id":"$validUlid","name":"عميل تجربة"}"""
+            )
+        )
+        val resSuccess = restoredRepo.createCustomer("عميل تجربة", "0599-111111", "نابلس", 0.0)
+        assertTrue("Retry with same payload must succeed", resSuccess.isSuccess)
+        assertEquals(validUlid, resSuccess.getOrNull()?.id)
+
+        // 5. After authoritative completion, draft is rotated
+        val rotatedDraftId = restoredRepo.getDraftOperationId("customer_create")
+        assertNotEquals("Draft ID must rotate only after authoritative completion", originalDraftId, rotatedDraftId)
+        assertFalse("Draft must no longer be recovering", restoredRepo.isDraftRecovering("customer_create"))
     }
 
     @Test

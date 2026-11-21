@@ -129,10 +129,18 @@ data class TraderUiState(
     val selectedCustomerForDetail: Customer? = null,
     val lastCustomerPaymentMessageAr: String? = null,
     val lastCustomerPaymentMessageEn: String? = null,
+    val activeCustomerCreateDraft: com.example.data.mobile.contract.StrictJsonObject? = null,
+    val isCustomerCreateRecovering: Boolean = false,
 
     // Suppliers & Purchasing
     val suppliers: List<Supplier> = emptyList(),
     val suppliersHasMore: Boolean = false,
+    val supplierSearchQuery: String = "",
+    val supplierSearchResults: List<Supplier>? = null,
+    val isSearchingSuppliers: Boolean = false,
+    val supplierSearchError: String? = null,
+    val activeSupplierCreateDraft: com.example.data.mobile.contract.StrictJsonObject? = null,
+    val isSupplierCreateRecovering: Boolean = false,
     val purchaseBills: List<PurchaseBill> = emptyList(),
     val supplierPayments: List<SupplierPayment> = emptyList(),
     val selectedSupplierForDetail: Supplier? = null,

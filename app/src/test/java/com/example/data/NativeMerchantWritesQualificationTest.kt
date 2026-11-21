@@ -21,6 +21,9 @@ import com.example.data.mobile.outbox.MerchantCommandRecord
 import com.example.data.mobile.outbox.MerchantCommandStore
 import com.example.data.mobile.outbox.OutboxDatabase
 import com.example.data.mobile.outbox.RoomMerchantCommandStore
+import com.example.data.mobile.contract.toNullableString
+import com.example.data.mobile.readclient.EndpointSecurity
+import org.junit.Assert.assertNotEquals
 import com.example.data.mobile.readclient.HttpMethod
 import com.example.data.mobile.readclient.ReadClientTransport
 import com.example.data.mobile.readclient.TransportRequest
@@ -1806,5 +1809,366 @@ class NativeMerchantWritesQualificationTest {
         // StitchBidiUtils formatBillCode preserves string
         val stitchFormatted = StitchBidiUtils.formatBillCode(bill.billNumber)
         assertTrue(stitchFormatted.contains("فاتورة-2026-X889"))
+    }
+
+    // -------------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // 26. Real transport allowlist validates receipts status and supplier search
+    // -------------------------------------------------------------------------
+    @Test
+    fun test26_realTransportAllowlistValidatesReceiptsStatusAndSupplierSearch() {
+        val validReceiptQueryPath = "/api/mobile/v1/companies/${companyId.value}/receipts/status?idempotency_key=custcreate-test-key-123"
+        val validReceiptPathFormat = "/api/mobile/v1/companies/${companyId.value}/receipts/custcreate-test-key-123/status"
+        val validSupplierSearchPath = "/api/mobile/v1/companies/${companyId.value}/suppliers?search=Supplier31"
+
+        // Real EndpointSecurity allowlist must accept scoped GET paths
+        EndpointSecurity.validateMethodAndPath(HttpMethod.GET, validReceiptQueryPath)
+        EndpointSecurity.validateMethodAndPath(HttpMethod.GET, validReceiptPathFormat)
+        EndpointSecurity.validateMethodAndPath(HttpMethod.GET, validSupplierSearchPath)
+
+        // Bounded validations
+        EndpointSecurity.validateSearchQuery("Supplier31")
+        EndpointSecurity.validateIdempotencyKey("custcreate-test-key-123")
+
+        // Invalid paths or malicious characters rejected
+        var rejectedIllegalKey = false
+        try {
+            EndpointSecurity.validateIdempotencyKey("bad key with spaces	")
+        } catch (_: IllegalArgumentException) {
+            rejectedIllegalKey = true
+        }
+        assertTrue("Illegal idempotency key with control characters must be rejected", rejectedIllegalKey)
+
+        var rejectedPathTraversal = false
+        try {
+            EndpointSecurity.validatePath("/api/mobile/v1/companies/${companyId.value}/receipts/../../etc/passwd/status")
+        } catch (_: IllegalArgumentException) {
+            rejectedPathTraversal = true
+        }
+        assertTrue("Path traversal in receipt status path must be rejected", rejectedPathTraversal)
+    }
+
+    // -------------------------------------------------------------------------
+    // 27. Malformed authoritative response leaves command in UNKNOWN_ACK and does NOT rotate key
+    // -------------------------------------------------------------------------
+    @Test
+    fun test27_malformedAuthoritativeResponseDoesNotMarkCompletedOrRotateKey(): Unit = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = OutboxDatabase.buildInMemory(context, allowMainThreadQueries = true)
+        val commandStore = RoomMerchantCommandStore(db, JvmAesGcmCryptoEngine())
+
+        var postCount = 0
+        val transport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                // Return 200 with invalid entity ULID
+                if (request.method == HttpMethod.POST && request.path.contains("/customers")) {
+                    postCount++
+                    return TransportResponse(
+                        statusCode = 200,
+                        headers = emptyMap(),
+                        body = """{"id":"NOT_A_VALID_ULID","name_ar":"خالد","code":"CUST-001"}"""
+                    )
+                }
+                return TransportResponse(200, emptyMap(), "{}")
+            }
+        }
+
+        val apiClient = MobileMerchantApiClient(transport, "https://api.test.example") { "tok" }
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            warehouseId = warehouseId,
+            commandStore = commandStore
+        )
+
+        val draftOpIdBefore = repo.getDraftOperationId("customer_create")
+        val createRes = repo.createCustomer("خالد", "0599123456", "نابلس", 500.0, draftOpIdBefore)
+
+        assertTrue("Creation must fail due to invalid ULID", createRes.isFailure)
+        assertEquals(1, postCount)
+
+        // Draft operation ID must NOT have been rotated
+        val draftOpIdAfter = repo.getDraftOperationId("customer_create")
+        assertEquals("Draft op ID must remain unchanged when authoritative validation fails", draftOpIdBefore, draftOpIdAfter)
+
+        // In Room database, command record must be UNKNOWN_ACK, NEVER COMPLETED
+        val record = commandStore.getActiveDraftRecord(companyId.value, actorId.value, deviceId.value, "customer_create")
+        assertNotNull("Record must exist in Room store", record)
+        assertEquals("Status must be UNKNOWN_ACK", CommandStatus.UNKNOWN_ACK, record?.status)
+    }
+
+    // -------------------------------------------------------------------------
+    // 28. Room persists immutable draft payload across process death, preventing substitute intent
+    // -------------------------------------------------------------------------
+    @Test
+    fun test28_formsRestoreImmutablePersistedRoomDraftAfterProcessDeath(): Unit = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = OutboxDatabase.buildInMemory(context, allowMainThreadQueries = true)
+        val crypto = JvmAesGcmCryptoEngine()
+        val commandStore1 = RoomMerchantCommandStore(db, crypto)
+
+        val transport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST && request.path.contains("/customers")) {
+                    // Simulate network timeout or dropped connection leaving command in flight / UNKNOWN_ACK
+                    throw java.io.IOException("Network dropped before ACK")
+                }
+                return TransportResponse(200, emptyMap(), "{}")
+            }
+        }
+
+        val apiClient = MobileMerchantApiClient(transport, "https://api.test.example") { "tok" }
+        val repo1 = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            warehouseId = warehouseId,
+            commandStore = commandStore1
+        )
+
+        val opId = repo1.getDraftOperationId("customer_create")
+        val res = repo1.createCustomer("سمير التميمي", "0599000111", "رام الله", 1000.0, opId)
+        assertTrue(res.isFailure)
+
+        // Process death: simulate by tearing down repo1 and opening repo2 with fresh command store connected to same Room DB
+        val commandStore2 = RoomMerchantCommandStore(db, crypto)
+        val repo2 = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            warehouseId = warehouseId,
+            commandStore = commandStore2
+        )
+
+        // Restores immutable persisted Room draft
+        assertTrue("Draft must be recognized as recovering", repo2.isDraftRecovering("customer_create"))
+        val restoredPayload = repo2.getActiveDraftPayload("customer_create")
+        assertNotNull("Restored payload must be present", restoredPayload)
+        assertEquals("سمير التميمي", restoredPayload?.properties?.get("name_ar")?.toNullableString())
+        assertEquals("0599000111", restoredPayload?.properties?.get("phone")?.toNullableString())
+
+        // An edited draft substituting different payload bytes with same opId is rejected by Room
+        var collisionRejected = false
+        try {
+            val editedBytes = """{"name_ar":"بديل خبيث"}""".toByteArray(java.nio.charset.StandardCharsets.UTF_8)
+            val digest = digestBytes(editedBytes)
+            commandStore2.recordPendingCommand(
+                companyId = companyId.value,
+                commandId = opId,
+                actorId = actorId.value,
+                deviceId = deviceId.value,
+                commandType = "customer_create",
+                idempotencyKey = "custcreate-$opId",
+                payloadDigest = digest.value,
+                canonicalPayloadBytes = editedBytes
+            )
+        } catch (_: IllegalStateException) {
+            collisionRejected = true
+        }
+        assertTrue("Substituted draft payload under same operationId must be rejected", collisionRejected)
+    }
+
+    // -------------------------------------------------------------------------
+    // 29. Supplier search isolation from base directory without clobbering pagination
+    // -------------------------------------------------------------------------
+    @Test
+    fun test29_supplierSearchIsolationFromBaseDirectory(): Unit = runBlocking {
+        val baseSuppliersJson = """{"has_more":true,"suppliers":[
+            {"id":"01JCV8X9M2NQW3TYZ4R5S00001","name_ar":"مورد 1","balance_owed":"100.00"},
+            {"id":"01JCV8X9M2NQW3TYZ4R5S00002","name_ar":"مورد 2","balance_owed":"200.00"}
+        ]}"""
+
+        val searchSupplier31Json = """{"has_more":false,"suppliers":[
+            {"id":"01JCV8X9M2NQW3TYZ4R5S00031","name_ar":"Supplier31","company_name":"شركة 31","phone":"0599313131","balance_owed":"310.00","advances":"50.00"}
+        ]}"""
+
+        val transport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                EndpointSecurity.validateMethodAndPath(request.method, request.path)
+                if (request.queryParams.containsKey("search")) {
+                    val q = request.queryParams["search"]
+                    if (q == "Supplier31") {
+                        return TransportResponse(200, emptyMap(), searchSupplier31Json)
+                    }
+                }
+                return TransportResponse(200, emptyMap(), baseSuppliersJson)
+            }
+        }
+
+        val apiClient = MobileMerchantApiClient(transport, "https://api.test.example") { "tok" }
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            warehouseId = warehouseId
+        )
+
+        // 1. Refresh base directory
+        val baseRefreshRes = repo.refreshSuppliers()
+        assertTrue(baseRefreshRes.isSuccess)
+        assertEquals(2, repo.getSuppliers().size)
+        assertTrue("Base directory pagination hasMore must be true", repo.suppliersHasMoreFlow.value)
+
+        // 2. Perform dedicated server search for Supplier31
+        val searchRes = repo.searchSuppliers("Supplier31")
+        assertTrue(searchRes.isSuccess)
+        val searchList = searchRes.getOrThrow()
+        assertEquals(1, searchList.size)
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S00031", searchList[0].id)
+        assertEquals("Supplier31", searchList[0].nameAr)
+        assertEquals(BigDecimal("310.00"), searchList[0].balanceOwedExact)
+        assertEquals(BigDecimal("50.00"), searchList[0].advancesExact)
+
+        // 3. Base directory must NOT be mutated or appended by the search!
+        assertEquals("Base directory list size must remain 2", 2, repo.getSuppliers().size)
+        assertTrue("Base directory pagination hasMore must remain true", repo.suppliersHasMoreFlow.value)
+    }
+
+    // -------------------------------------------------------------------------
+    // 30. Pre-payment detail request does not republish stale balance
+    // -------------------------------------------------------------------------
+    @Test
+    fun test30_prePaymentDetailRequestDoesNotRepublishStaleBalance(): Unit = runBlocking {
+        val custId = "01JCV8X9M2NQW3TYZ4R5S00099"
+        var currentBalance = "500.00"
+        var getShouldWait = false
+        val getStartedLatch = java.util.concurrent.CountDownLatch(1)
+        val paymentDoneLatch = java.util.concurrent.CountDownLatch(1)
+
+        val transport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST && request.path.contains("/customers/$custId/payments")) {
+                    return TransportResponse(201, emptyMap(), """{"id":"01PAY000000000000000000001","amount":"200.00","posted_at":"2026-11-21","balance":"300.00"}""")
+                }
+                if (request.method == HttpMethod.GET && request.path.contains("/customers/$custId")) {
+                    if (getShouldWait) {
+                        getShouldWait = false
+                        getStartedLatch.countDown()
+                        paymentDoneLatch.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                        // Return stale pre-payment balance of 500.00
+                        return TransportResponse(200, emptyMap(), """{"id":"$custId","name_ar":"زبون رصيد","balance":"500.00","credit_limit":"1000.00"}""")
+                    }
+                    return TransportResponse(200, emptyMap(), """{"id":"$custId","name_ar":"زبون رصيد","balance":"$currentBalance","credit_limit":"1000.00"}""")
+                }
+                if (request.method == HttpMethod.GET && request.path.contains("/receipts/status")) {
+                    return TransportResponse(200, emptyMap(), """{"status":"FOUND","response_snapshot":{"id":"01PAY000000000000000000001","amount":"200.00","posted_at":"2026-11-21","balance":"300.00"}}""")
+                }
+                return TransportResponse(200, emptyMap(), "{}")
+            }
+        }
+
+        val apiClient = MobileMerchantApiClient(transport, "https://api.test.example") { "tok" }
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            warehouseId = warehouseId
+        )
+
+        // 1. Initial detail fetch: balance = 500.00
+        val initDetail = repo.getCustomerDetail(custId)
+        assertTrue(initDetail.isSuccess)
+        assertEquals(BigDecimal("500.00"), repo.getCustomers().first { it.id == custId }.balanceExact)
+        assertTrue(repo.getCustomers().first { it.id == custId }.isDetailLoaded)
+
+        // 2. Start a pre-payment detail fetch in the background that hangs until payment commits
+        currentBalance = "300.00"
+        getShouldWait = true
+        val delayedThread = kotlin.concurrent.thread {
+            runBlocking {
+                repo.getCustomerDetail(custId)
+            }
+        }
+        getStartedLatch.await(5, java.util.concurrent.TimeUnit.SECONDS)
+
+        // 3. Payment occurs in the meantime: balance becomes 300.00
+        val payRes = repo.recordCustomerPayment(custId, 200.0, "سداد", "pay-1")
+        assertTrue(payRes.isSuccess)
+        assertEquals(BigDecimal("300.00"), repo.getCustomers().first { it.id == custId }.balanceExact)
+
+        // 4. Now allow delayed pre-payment detail response (returning stale 500.00) to complete
+        paymentDoneLatch.countDown()
+        delayedThread.join(5000)
+
+        // 5. CAS revision guard prevents stale 500.00 from overwriting post-payment 300.00
+        val finalBal = repo.getCustomers().first { it.id == custId }.balanceExact
+        assertEquals("Post-payment balance must NOT be overwritten by stale pre-payment detail", BigDecimal("300.00"), finalBal)
+    }
+
+    // -------------------------------------------------------------------------
+    // 31. Customer update explicit null clears limit and untouched preserves exact 6
+    // -------------------------------------------------------------------------
+    @Test
+    fun test31_customerUpdateExplicitNullClearsLimitAndUntouchedPreservesExact6(): Unit = runBlocking {
+        val custId = "01JCV8X9M2NQW3TYZ4R5S00077"
+        var lastPutBody: String? = null
+
+        val transport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST && request.path.contains("/customers")) {
+                    return TransportResponse(201, emptyMap(), """{"id":"$custId","name_ar":"شركة الأمل","phone":"0599112233","address_ar":"طولكرم","credit_limit":"1234.567890"}""")
+                }
+                if (request.method == HttpMethod.PUT && request.path.contains("/customers/$custId")) {
+                    lastPutBody = request.body
+                    val returnLimit = if (request.body?.contains(""""credit_limit":null""") == true) "null" else """"1234.56""""
+                    return TransportResponse(200, emptyMap(), """{"id":"$custId","name_ar":"شركة الأمل","phone":"0599112233","address_ar":"طولكرم","credit_limit":$returnLimit}""")
+                }
+                return TransportResponse(200, emptyMap(), "{}")
+            }
+        }
+
+        val apiClient = MobileMerchantApiClient(transport, "https://api.test.example") { "tok" }
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            warehouseId = warehouseId
+        )
+
+        // Create initial customer
+        val initRes = repo.createCustomer("شركة الأمل", "0599112233", "طولكرم", 1234.56789)
+        assertTrue(initRes.isSuccess)
+        val exact6Limit = BigDecimal("1234.567890")
+
+        // 1. Update customer with updateCreditLimit = false: untouched limit preserves exact 6 decimals
+        val res1 = repo.updateCustomer(
+            customerId = custId,
+            name = "شركة الأمل الجديدة",
+            phone = null,
+            address = null,
+            creditLimit = null,
+            updatePhone = false,
+            updateAddress = false,
+            updateCreditLimit = false
+        )
+        assertTrue(res1.isSuccess)
+        assertEquals("Untouched limit must preserve exact 6 decimals", exact6Limit, res1.getOrThrow().creditLimitExact)
+
+        // 2. Update customer with updateCreditLimit = true and creditLimit = null (clear limit)
+        val res2 = repo.updateCustomer(
+            customerId = custId,
+            name = "شركة الأمل",
+            phone = null,
+            address = "",
+            creditLimit = null,
+            updatePhone = false,
+            updateAddress = true,
+            updateCreditLimit = true
+        )
+        assertTrue(res2.isSuccess)
+        assertNull("Explicit null update response must clear credit limit", res2.getOrThrow().creditLimitExact)
+
+        // 3. Verify address clear in PUT body sent all 3 locales
+        assertNotNull(lastPutBody)
+        assertTrue("Address clear must send address_ar null", lastPutBody!!.contains(""""address_ar":null"""))
+        assertTrue("Address clear must send address null", lastPutBody!!.contains(""""address":null"""))
+        assertTrue("Address clear must send address_en null", lastPutBody!!.contains(""""address_en":null"""))
     }
 }
