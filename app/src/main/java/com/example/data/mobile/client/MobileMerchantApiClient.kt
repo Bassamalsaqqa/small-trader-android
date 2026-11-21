@@ -259,6 +259,38 @@ class MobileMerchantApiClient(
         return execute(HttpMethod.POST, path, body = payload, idempotencyKey = UUID.randomUUID().toString())
     }
 
+    fun updateCustomer(companyId: ServerUlid, customerId: ServerUlid, name: String, phone: String, address: String, creditLimit: BigDecimal?): Result<StrictJsonObject> {
+        val payload = buildString {
+            append("{")
+            append("\"name_ar\":\"").append(escapeJson(name)).append("\"")
+            run {
+                append(",\"phone\":\"").append(escapeJson(phone.orEmpty())).append("\"")
+            }
+            run {
+                append(",\"address_ar\":\"").append(escapeJson(address)).append("\"")
+            }
+            if (creditLimit != null) {
+                append(",\"credit_limit\":\"").append(creditLimit.toPlainString()).append("\"")
+            } else {
+                append(",\"credit_limit\":null")
+            }
+            append("}")
+        }
+        return execute(HttpMethod.PUT, "/api/mobile/v1/companies/${companyId.value}/customers/${customerId.value}", body = payload, idempotencyKey = UUID.randomUUID().toString())
+    }
+
+    fun updateSupplier(companyId: ServerUlid, supplierId: ServerUlid, name: String, phone: String?): Result<StrictJsonObject> {
+        val payload = buildString {
+            append("{")
+            append("\"name_ar\":\"").append(escapeJson(name)).append("\"")
+            run {
+                append(",\"phone\":\"").append(escapeJson(phone.orEmpty())).append("\"")
+            }
+            append("}")
+        }
+        return execute(HttpMethod.PUT, "/api/mobile/v1/companies/${companyId.value}/suppliers/${supplierId.value}", body = payload, idempotencyKey = UUID.randomUUID().toString())
+    }
+
     fun recordCustomerPayment(
         companyId: ServerUlid,
         customerId: ServerUlid,

@@ -424,7 +424,8 @@ data class Customer(
         totalPurchasesExact = BigDecimal(totalPurchasesIls.toString()).setScale(2, RoundingMode.HALF_UP)
     )
 
-    val balanceIls: Double get() = balanceExact?.toDouble() ?: 0.0
+    // Legacy presentation bridge: NaN means unavailable, never an economic zero. Use balanceExact for arithmetic.
+    val balanceIls: Double get() = balanceExact?.toDouble() ?: Double.NaN
     val creditLimitIls: Double get() = creditLimitExact?.toDouble() ?: 0.0
     val totalPurchasesIls: Double get() = totalPurchasesExact?.toDouble() ?: 0.0
 
@@ -502,7 +503,8 @@ data class Supplier(
         balanceOwedExact = BigDecimal(balanceOwedIls.toString()).setScale(2, RoundingMode.HALF_UP)
     )
 
-    val balanceOwedIls: Double get() = balanceOwedExact?.toDouble() ?: 0.0
+    // Legacy presentation bridge; calculations must use nullable balanceOwedExact.
+    val balanceOwedIls: Double get() = balanceOwedExact?.toDouble() ?: Double.NaN
 
     fun name(lang: AppLanguage): String = lang.tr(nameAr, nameEn)
     fun company(lang: AppLanguage): String = lang.tr(companyAr ?: "", companyEn ?: "")
@@ -864,6 +866,7 @@ object WesternFormatters {
     }
 
     fun formatIls(amount: Double): String {
+        if (!amount.isFinite()) return "-- ₪"
         val safe = if (kotlin.math.abs(amount) < 0.005) 0.0 else amount
         return "${moneyFormat.format(safe)} ₪"
     }
@@ -875,6 +878,7 @@ object WesternFormatters {
     }
 
     fun formatCompactIls(amount: Double): String {
+        if (!amount.isFinite()) return "-- ₪"
         val safe = if (kotlin.math.abs(amount) < 0.005) 0.0 else amount
         return "${compactMoneyFormat.format(safe)} ₪"
     }

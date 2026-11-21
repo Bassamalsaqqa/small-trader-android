@@ -137,18 +137,18 @@ fun CustomersScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(CustomerBalanceFilter.ALL) }
 
-    val debtorsCount = remember(state.customers) { state.customers.count { it.balanceIls > 0.005 } }
-    val advanceCount = remember(state.customers) { state.customers.count { it.balanceIls < -0.005 } }
-    val settledCount = remember(state.customers) { state.customers.count { abs(it.balanceIls) <= 0.005 } }
+    val debtorsCount = remember(state.customers) { state.customers.count { it.balanceExact != null && it.balanceExact > BigDecimal.ZERO } }
+    val advanceCount = remember(state.customers) { state.customers.count { it.balanceExact != null && it.balanceExact < BigDecimal.ZERO } }
+    val settledCount = remember(state.customers) { state.customers.count { it.balanceExact != null && it.balanceExact.compareTo(BigDecimal.ZERO) == 0 } }
 
     val filteredCustomers = remember(state.customers, searchQuery, selectedFilter) {
         val q = TraderUiState.normalizeForSearch(WesternFormatters.sanitizeWesternDigits(searchQuery.trim()))
         state.customers.filter { c ->
             val matchesFilter = when (selectedFilter) {
                 CustomerBalanceFilter.ALL -> true
-                CustomerBalanceFilter.DEBTORS -> c.balanceIls > 0.005
-                CustomerBalanceFilter.ADVANCE -> c.balanceIls < -0.005
-                CustomerBalanceFilter.SETTLED -> abs(c.balanceIls) <= 0.005
+                CustomerBalanceFilter.DEBTORS -> c.balanceExact != null && c.balanceExact > BigDecimal.ZERO
+                CustomerBalanceFilter.ADVANCE -> c.balanceExact != null && c.balanceExact < BigDecimal.ZERO
+                CustomerBalanceFilter.SETTLED -> c.balanceExact != null && c.balanceExact.compareTo(BigDecimal.ZERO) == 0
             }
             if (!matchesFilter) return@filter false
             if (q.isEmpty()) return@filter true
@@ -205,7 +205,7 @@ fun CustomersScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = StitchBidiUtils.formatIls(state.totalCustomerDebtsIls),
+                                    text = if (state.totalCustomerDebtsIls.isNaN()) lang.tr("غير متاح", "Unavailable") else StitchBidiUtils.formatIls(state.totalCustomerDebtsIls),
                                     style = MaterialTheme.typography.titleLarge.copy(
                                         fontWeight = FontWeight.Bold
                                     ),
@@ -221,11 +221,11 @@ fun CustomersScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = StitchBidiUtils.formatIls(state.totalCustomerAdvancesIls),
+                                    text = if (state.totalCustomerAdvancesIls.isNaN()) lang.tr("غير متاح", "Unavailable") else StitchBidiUtils.formatIls(state.totalCustomerAdvancesIls),
                                     style = MaterialTheme.typography.titleLarge.copy(
                                         fontWeight = FontWeight.Bold
                                     ),
-                                    color = if (state.totalCustomerAdvancesIls > 0.005) {
+                                    color = if (!state.totalCustomerAdvancesIls.isNaN() && state.totalCustomerAdvancesIls > 0.005) {
                                         financial.income
                                     } else {
                                         MaterialTheme.colorScheme.onSurfaceVariant
@@ -598,12 +598,14 @@ private fun CustomerDirectoryRow(
     }
 
     val statusLabel = when {
+        customer.balanceExact == null -> lang.tr("الرصيد غير متاح", "Balance unavailable")
         isDebtor -> lang.tr("عليه دين", "Owes Store")
         isAdvance -> lang.tr("له رصيد مقدم", "In Credit")
         else -> lang.tr("خالص", "Settled")
     }
 
     val displayedAmount = when {
+        customer.balanceExact == null -> lang.tr("غير متاح", "Unavailable")
         isDebtor -> StitchBidiUtils.formatIls(customer.balanceIls)
         isAdvance -> StitchBidiUtils.formatIls(-customer.balanceIls)
         else -> StitchBidiUtils.formatIls(0.0)
@@ -773,7 +775,7 @@ fun CustomerDetailScreen(
     val isDebtor = customer.balanceIls > 0.005
     val isAdvance = customer.balanceIls < -0.005
     val availableCreditIls = max(0.0, customer.creditLimitIls - max(0.0, customer.balanceIls))
-    val creditUsagePercent = if (customer.creditLimitIls > 0.0) {
+    val creditUsagePercent = if (customer.balanceExact != null && customer.creditLimitIls > 0.0) {
         (max(0.0, customer.balanceIls) / customer.creditLimitIls).coerceIn(0.0, 1.0).toFloat()
     } else 0f
 
@@ -1108,19 +1110,19 @@ fun CustomerDetailScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 StitchBadge(
-                                    text = if (isDebtor) lang.tr("ذمة قائمة", "Outstanding Debt") else lang.tr("حساب خالص", "Settled"),
-                                    tone = if (isDebtor) StitchBadgeTone.DANGER else StitchBadgeTone.SUCCESS,
+                                    text = if (customer.balanceExact == null) lang.tr("غير متاح", "Unavailable") else if (isDebtor) lang.tr("ذمة قائمة", "Outstanding Debt") else lang.tr("حساب خالص", "Settled"),
+                                    tone = if (customer.balanceExact == null) StitchBadgeTone.NEUTRAL else if (isDebtor) StitchBadgeTone.DANGER else StitchBadgeTone.SUCCESS,
                                     shape = RoundedCornerShape(8.dp)
                                 )
                             }
 
                             // Big Outstanding Debt Amount
                             Text(
-                                text = StitchBidiUtils.formatIls(customer.balanceIls),
+                                text = if (customer.balanceExact == null) lang.tr("غير متاح", "Unavailable") else StitchBidiUtils.formatIls(customer.balanceIls),
                                 style = MaterialTheme.typography.displayLarge.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
-                                color = if (isDebtor) financial.debit else MaterialTheme.colorScheme.onSurface,
+                                color = if (customer.balanceExact == null) MaterialTheme.colorScheme.onSurfaceVariant else if (isDebtor) financial.debit else MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.testTag("customer_detail_balance_value")
                             )
 
@@ -1454,7 +1456,7 @@ private fun EditCustomerDialog(
     var nameText by rememberSaveable(customer.id) { mutableStateOf(customer.nameAr) }
     var phoneText by rememberSaveable(customer.id) { mutableStateOf(customer.phone ?: "") }
     var addressText by rememberSaveable(customer.id) { mutableStateOf(customer.addressAr ?: "") }
-    var limitText by remember(customer.id) {
+    var limitText by rememberSaveable(customer.id) {
         mutableStateOf(WesternFormatters.formatNumber(customer.creditLimitIls).removeSuffix(".00"))
     }
 
@@ -1852,10 +1854,8 @@ fun CustomerPaymentCollectionDialog(
 
     val enteredAmount = payAmountText.toDoubleOrNull() ?: 0.0
     val projectedBalance = remember(customer.balanceIls, enteredAmount) {
-        BigDecimal(customer.balanceIls.toString())
-            .subtract(BigDecimal(enteredAmount.toString()))
-            .setScale(2, RoundingMode.HALF_UP)
-            .toDouble()
+        customer.balanceExact?.subtract(BigDecimal(enteredAmount.toString()))
+            ?.setScale(2, RoundingMode.HALF_UP)?.toDouble() ?: Double.NaN
     }
 
     AlertDialog(
@@ -1863,7 +1863,9 @@ fun CustomerPaymentCollectionDialog(
         shape = RoundedCornerShape(12.dp),
         title = {
             Text(
-                text = if (customer.balanceIls > 0.005) {
+                text = if (customer.balanceExact == null) {
+                    lang.tr("دفعة من الزبون", "Customer payment")
+                } else if (customer.balanceIls > 0.005) {
                     lang.tr("قبض دفعة نقدية من الزبون", "Collect Cash Payment")
                 } else {
                     lang.tr("إيداع دفعة مقدمة للزبون", "Record Customer Advance")
@@ -1893,6 +1895,7 @@ fun CustomerPaymentCollectionDialog(
                         )
                         Text(
                             text = when {
+                                customer.balanceExact == null -> lang.tr("الرصيد غير متاح", "Balance unavailable")
                                 customer.balanceIls > 0.005 -> lang.tr(
                                     "الدين الحالي عليه (ذمة قائمة): ${StitchBidiUtils.formatIls(customer.balanceIls)}",
                                     "Current outstanding debt: ${StitchBidiUtils.formatIls(customer.balanceIls)}"
@@ -2006,6 +2009,7 @@ fun CustomerPaymentCollectionDialog(
                         ) {
                             Text(
                                 text = when {
+                                    customer.balanceExact == null -> lang.tr("الرصيد غير متاح", "Balance unavailable")
                                     projectedBalance > 0.005 -> lang.tr(
                                         "الرصيد المتبقي بعد القبض: ${StitchBidiUtils.formatIls(projectedBalance)} (دين متبقي)",
                                         "Remaining debt after payment: ${StitchBidiUtils.formatIls(projectedBalance)}"

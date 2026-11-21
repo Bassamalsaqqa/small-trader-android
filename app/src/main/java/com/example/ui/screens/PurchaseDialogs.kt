@@ -107,10 +107,8 @@ fun PaySupplierDialog(
     var payInlineError by rememberSaveable(supplier.id) { mutableStateOf<String?>(null) }
 
     val projectedOwed = remember(supplier.balanceOwedIls, enteredAmount) {
-        BigDecimal(supplier.balanceOwedIls.toString())
-            .subtract(BigDecimal(enteredAmount.toString()))
-            .setScale(2, RoundingMode.HALF_UP)
-            .toDouble()
+        supplier.balanceOwedExact?.subtract(BigDecimal(enteredAmount.toString()))
+            ?.setScale(2, RoundingMode.HALF_UP)?.toDouble() ?: Double.NaN
     }
 
     AlertDialog(
@@ -217,6 +215,7 @@ fun PaySupplierDialog(
                         ) {
                             Text(
                                 text = when {
+                                    supplier.balanceOwedExact == null -> lang.tr("الرصيد غير متاح", "Balance unavailable")
                                     projectedOwed > 0.005 -> lang.tr(
                                         "المتبقي للمورد: ${StitchBidiUtils.formatIls(projectedOwed)}",
                                         "Remaining due: ${StitchBidiUtils.formatIls(projectedOwed)}"
@@ -1396,14 +1395,15 @@ fun ReceivePurchaseBillDialog(
 @Composable
 fun SupplierEditorDialog(
     initialSupplier: Supplier?,
+    companyEditable: Boolean = true,
     lang: AppLanguage,
     onDismiss: () -> Unit,
     onSave: (name: String, company: String, phone: String) -> Unit,
     onSaveWithResult: ((name: String, company: String, phone: String, onComplete: (Boolean) -> Unit) -> Unit)? = null
 ) {
-    var name by rememberSaveable { mutableStateOf(initialSupplier?.nameAr ?: "") }
-    var company by rememberSaveable { mutableStateOf(initialSupplier?.companyAr ?: "") }
-    var phone by rememberSaveable { mutableStateOf(initialSupplier?.phone ?: "") }
+    var name by rememberSaveable(initialSupplier?.id) { mutableStateOf(initialSupplier?.nameAr ?: "") }
+    var company by rememberSaveable(initialSupplier?.id) { mutableStateOf(initialSupplier?.companyAr ?: "") }
+    var phone by rememberSaveable(initialSupplier?.id) { mutableStateOf(initialSupplier?.phone ?: "") }
     val isValid = name.isNotBlank()
 
     AlertDialog(
@@ -1428,6 +1428,8 @@ fun SupplierEditorDialog(
                         .testTag("supplier_name_input")
                 )
                 OutlinedTextField(
+                    enabled = companyEditable,
+                    supportingText = { if (!companyEditable) Text(lang.tr("غير متاح (لا يُحفظ على الخادم)", "Unavailable (not saved on server)")) },
                     value = company,
                     onValueChange = { company = it },
                     label = { Text(lang.tr("اسم الشركة / التجارة", "Company / Business Name")) },
@@ -1455,7 +1457,7 @@ fun SupplierEditorDialog(
                 onClick = {
                     if (isValid) {
                         val trimmedName = name.trim()
-                        val trimmedCompany = company.trim()
+                        val trimmedCompany = if (companyEditable) company.trim() else ""
                         val trimmedPhone = phone.trim()
                         if (onSaveWithResult != null) {
                             onSaveWithResult(trimmedName, trimmedCompany, trimmedPhone) { success ->

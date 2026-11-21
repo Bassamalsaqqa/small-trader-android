@@ -322,10 +322,9 @@ data class TraderUiState(
 
     val projectedCustomerBalanceIfCreditIls: Double?
         get() = selectedCustomer?.let { customer ->
-            BigDecimal(customer.balanceIls.toString())
-                .add(BigDecimal(basketNetTotalIls.toString()))
-                .setScale(2, RoundingMode.HALF_UP)
-                .toDouble()
+            customer.balanceExact?.add(BigDecimal(basketNetTotalIls.toString()))
+                ?.setScale(2, RoundingMode.HALF_UP)
+                ?.toDouble()
         }
 
     val wouldCreditExceedCustomerLimit: Boolean
@@ -448,27 +447,16 @@ data class TraderUiState(
     val totalCustomerCollectionsIls: Double get() = shiftCustomerCollectionsIls
     val totalSupplierDisbursementsIls: Double get() = shiftSupplierDisbursementsIls
 
-    // Separate customer debts (accounts receivable) from customer deposits/advances (store liabilities)
-    val totalCustomerDebtsIls: Double
-        get() = customers.filter { it.balanceIls > 0.0 }
-            .fold(BigDecimal.ZERO) { acc, c -> acc.add(BigDecimal(c.balanceIls.toString())) }
-            .setScale(2, RoundingMode.HALF_UP).toDouble()
-
-    val totalCustomerAdvancesIls: Double
-        get() = customers.filter { it.balanceIls < 0.0 }
-            .fold(BigDecimal.ZERO) { acc, c -> acc.add(BigDecimal((-c.balanceIls).toString())) }
-            .setScale(2, RoundingMode.HALF_UP).toDouble()
-
-    // Separate supplier payables (accounts payable) from supplier advances/prepayments (store assets)
-    val totalSupplierPayablesIls: Double
-        get() = suppliers.filter { it.balanceOwedIls > 0.0 }
-            .fold(BigDecimal.ZERO) { acc, s -> acc.add(BigDecimal(s.balanceOwedIls.toString())) }
-            .setScale(2, RoundingMode.HALF_UP).toDouble()
-
-    val totalSupplierAdvancesIls: Double
-        get() = suppliers.filter { it.balanceOwedIls < 0.0 }
-            .fold(BigDecimal.ZERO) { acc, s -> acc.add(BigDecimal((-s.balanceOwedIls).toString())) }
-            .setScale(2, RoundingMode.HALF_UP).toDouble()
+    // A directory without authorized balances cannot establish an aggregate.
+    private fun directoryTotal(values: List<BigDecimal?>, sign: Int): Double {
+        if (values.any { it == null }) return Double.NaN // Legacy display-only unknown sentinel.
+        return values.filterNotNull().filter { it.signum() == sign }
+            .fold(BigDecimal.ZERO) { sum, value -> sum.add(value.abs()) }.toDouble()
+    }
+    val totalCustomerDebtsIls: Double get() = directoryTotal(customers.map { it.balanceExact }, 1)
+    val totalCustomerAdvancesIls: Double get() = directoryTotal(customers.map { it.balanceExact }, -1)
+    val totalSupplierPayablesIls: Double get() = directoryTotal(suppliers.map { it.balanceOwedExact }, 1)
+    val totalSupplierAdvancesIls: Double get() = directoryTotal(suppliers.map { it.balanceOwedExact }, -1)
 
     val lowStockProducts: List<Product>
         get() = products.filter { it.isLowStock }.sortedBy { it.stockCount }

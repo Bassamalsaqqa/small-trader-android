@@ -1541,16 +1541,38 @@ class ProductionTraderRepository(
         }
         val existing = _customersFlow.value.firstOrNull { it.id == customerId }
             ?: return@withContext Result.failure(IllegalArgumentException("Customer not found: $customerId"))
-        val updated = existing.copy(
-            nameAr = name,
-            nameEn = name,
-            phone = phone.ifBlank { null },
-            addressAr = address.ifBlank { null },
-            addressEn = address.ifBlank { null },
-            creditLimitExact = if (creditLimitIls > 0.0) BigDecimal(creditLimitIls.toString()).setScale(currencyMinorUnits, RoundingMode.HALF_UP) else null
-        )
-        _customersFlow.update { list -> list.map { if (it.id == customerId) updated else it } }
-        Result.success(updated)
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Customer name is required | اسم الزبون مطلوب"))
+        }
+        try {
+            val before = requireActiveScope()
+            val creditLimitExact = if (creditLimitIls > 0.0) BigDecimal(creditLimitIls.toString()).setScale(currencyMinorUnits) else null
+            val response = apiClient.updateCustomer(
+                companyId = companyId,
+                customerId = ServerUlid.parse(customerId),
+                name = cleanName,
+                phone = phone,
+                address = address,
+                creditLimit = creditLimitExact
+            ).getOrThrow()
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            check(requireActiveScope() == before) { "Session changed" }
+            val id = response.properties["id"]?.asString() ?: error("Missing customer ID")
+            require(ServerUlid.parse(id).value == customerId) { "Customer ID mismatch" }
+            val serverName = response.properties["name"]?.asString() ?: error("Missing customer name")
+            val updated = existing.copy(
+                nameAr = serverName,
+                nameEn = serverName,
+                phone = response.properties["phone"]?.asString() ?: phone.ifBlank { null },
+                addressAr = address.ifBlank { null },
+                addressEn = address.ifBlank { null },
+                creditLimitExact = response.properties["credit_limit"]?.asString()?.let { BigDecimal(it) } ?: creditLimitExact
+            )
+            _customersFlow.update { list -> list.map { if (it.id == id) updated else it } }
+            Result.success(updated)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
+        } catch (error: Exception) { Result.failure(error) }
     }
 
     override suspend fun getCustomerStatement(
@@ -1608,28 +1630,52 @@ class ProductionTraderRepository(
         if (authScopeProvider != null && (currentScope == null || currentScope.companyId != companyId || currentScope.actorId != actorId || currentScope.deviceId != deviceId)) {
             return@withContext Result.failure(SecurityException("Scope validation failed: current session is superseded or revoked."))
         }
-        val res = apiClient.createSupplier(
-            companyId = companyId,
-            nameAr = name,
-            company = company.ifBlank { null },
-            phone = phone.ifBlank { null }
-        )
-        if (res.isSuccess) {
-            val id = supplierId ?: res.getOrNull()?.properties?.get("id")?.asString() ?: UUID.randomUUID().toString()
-            val supplier = Supplier(
-                id = id,
-                nameAr = name,
-                nameEn = name,
-                companyAr = company.ifBlank { null },
-                companyEn = company.ifBlank { null },
-                phone = phone.ifBlank { null },
-                balanceOwedExact = BigDecimal.ZERO
-            )
-            _suppliersFlow.update { listOf(supplier) + it.filter { it.id != id } }
-            Result.success(supplier)
-        } else {
-            Result.failure(res.exceptionOrNull() ?: RuntimeException("Supplier save failed"))
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Supplier name is required | اسم المورد مطلوب"))
         }
+        if (company.isNotBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Supplier company name is not persisted on server | اسم الشركة للمورد غير مدعوم على الخادم"))
+        }
+        try {
+            val before = requireActiveScope()
+            val response = if (supplierId == null) {
+                apiClient.createSupplier(companyId, cleanName, null, phone.ifBlank { null }).getOrThrow()
+            } else {
+                apiClient.updateSupplier(companyId, ServerUlid.parse(supplierId), cleanName, phone.ifBlank { null }).getOrThrow()
+            }
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            check(requireActiveScope() == before) { "Session changed" }
+            val id = response.properties["id"]?.asString() ?: error("Missing supplier ID")
+            ServerUlid.parse(id)
+            require(supplierId == null || supplierId == id) { "Supplier ID mismatch" }
+            val serverName = response.properties["name"]?.asString() ?: error("Missing supplier name")
+            val existing = _suppliersFlow.value.firstOrNull { it.id == id }
+            val supplier = existing?.copy(
+                nameAr = serverName,
+                nameEn = serverName,
+                companyAr = null,
+                companyEn = null,
+                phone = response.properties["phone"]?.asString() ?: phone.ifBlank { null }
+            ) ?: Supplier(
+                id = id,
+                nameAr = serverName,
+                nameEn = serverName,
+                companyAr = null,
+                companyEn = null,
+                phone = response.properties["phone"]?.asString() ?: phone.ifBlank { null },
+                balanceOwedExact = null
+            )
+            _suppliersFlow.update { list ->
+                if (list.any { it.id == id }) {
+                    list.map { if (it.id == id) supplier else it }
+                } else {
+                    listOf(supplier) + list
+                }
+            }
+            Result.success(supplier)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
+        } catch (error: Exception) { Result.failure(error) }
     }
 
     override suspend fun recordPurchaseBill(
