@@ -949,23 +949,29 @@ fun CashPaymentScreen(
                                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                    val isCustBalKnown = state.isCustomerBalanceKnown && selectedCustomer.balanceExact != null && !selectedCustomer.balanceIls.isNaN()
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
                                         Text(
-                                            text = WesternFormatters.formatIls(selectedCustomer.balanceIls),
+                                            text = if (isCustBalKnown) WesternFormatters.formatIls(selectedCustomer.balanceIls) else "-- ₪",
                                             style = MaterialTheme.typography.titleMedium.copy(
                                                 fontWeight = FontWeight.Bold,
                                                 fontFamily = MonoFontFamily
                                             ),
-                                            color = if (selectedCustomer.balanceIls > 0.0) financial.debit else MaterialTheme.colorScheme.onSurface
+                                            color = if (!isCustBalKnown) MaterialTheme.colorScheme.onSurfaceVariant else if (selectedCustomer.balanceIls > 0.0) financial.debit else MaterialTheme.colorScheme.onSurface
                                         )
-                                        if (selectedCustomer.balanceIls > 0.0) {
+                                        if (isCustBalKnown && selectedCustomer.balanceIls > 0.0) {
                                             StitchBadge(
                                                 text = lang.tr("ذمة سابقة", "Owed"),
                                                 tone = StitchBadgeTone.WARNING
+                                            )
+                                        } else if (!isCustBalKnown) {
+                                            StitchBadge(
+                                                text = lang.tr("الرصيد غير متاح", "Balance unavailable"),
+                                                tone = StitchBadgeTone.NEUTRAL
                                             )
                                         }
                                     }
@@ -993,58 +999,71 @@ fun CashPaymentScreen(
                             }
 
                             // Credit Limit Meter & Projection
-                            val projectedBalance = state.projectedCustomerBalanceIfCreditIls ?: (selectedCustomer.balanceIls + state.basketNetTotalIls)
+                            val isCustBalKnown = state.isCustomerBalanceKnown && selectedCustomer.balanceExact != null && !selectedCustomer.balanceIls.isNaN()
+                            val projectedBalance = state.projectedCustomerBalanceIfCreditIls ?: (if (isCustBalKnown) selectedCustomer.balanceIls + state.basketNetTotalIls else null)
                             val overLimit = state.wouldCreditExceedCustomerLimit
-                            val consumptionRatio = if (selectedCustomer.creditLimitIls > 0.0) {
-                                (projectedBalance / selectedCustomer.creditLimitIls).toFloat().coerceIn(0f, 1f)
-                            } else 1f
 
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Row(
+                            if (isCustBalKnown && projectedBalance != null) {
+                                val consumptionRatio = if (selectedCustomer.creditLimitIls > 0.0) {
+                                    (projectedBalance / selectedCustomer.creditLimitIls).toFloat().coerceIn(0f, 1f)
+                                } else 1f
+
+                                Column(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Text(
-                                        text = lang.tr("نسبة استهلاك السقف بعد الفاتورة", "Limit Usage After Sale"),
-                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Text(
-                                        text = "${(consumptionRatio * 100).toInt()}%",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = MonoFontFamily
-                                        ),
-                                        color = if (overLimit) financial.debit else MaterialTheme.colorScheme.primary
-                                    )
-                                }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = lang.tr("نسبة استهلاك السقف بعد الفاتورة", "Limit Usage After Sale"),
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = "${(consumptionRatio * 100).toInt()}%",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = MonoFontFamily
+                                            ),
+                                            color = if (overLimit) financial.debit else MaterialTheme.colorScheme.primary
+                                        )
+                                    }
 
-                                LinearProgressIndicator(
-                                    progress = { consumptionRatio },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(8.dp)
-                                        .clip(RoundedCornerShape(4.dp)),
-                                    color = if (overLimit) financial.debit else MaterialTheme.colorScheme.primary,
-                                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                    LinearProgressIndicator(
+                                        progress = { consumptionRatio },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(8.dp)
+                                            .clip(RoundedCornerShape(4.dp)),
+                                        color = if (overLimit) financial.debit else MaterialTheme.colorScheme.primary,
+                                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                    )
+
+                                    if (!overLimit) {
+                                        val safeRemaining = (selectedCustomer.creditLimitIls - projectedBalance).coerceAtLeast(0.0)
+                                        Text(
+                                            text = lang.tr(
+                                                "ضمن الحد الائتماني الآمن (متبقي ${WesternFormatters.formatIls(safeRemaining)} متاح)",
+                                                "Within safe credit ceiling (${WesternFormatters.formatIls(safeRemaining)} available)"
+                                            ),
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                                            color = financial.income
+                                        )
+                                    }
+                                }
+                            } else {
+                                Text(
+                                    text = lang.tr(
+                                        "الرصيد الحالي غير متاح — لا يمكن احتساب نسبة استهلاك السقف التقديرية",
+                                        "Current balance unavailable — cannot calculate projected limit usage"
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-
-                                if (!overLimit) {
-                                    val safeRemaining = (selectedCustomer.creditLimitIls - projectedBalance).coerceAtLeast(0.0)
-                                    Text(
-                                        text = lang.tr(
-                                            "ضمن الحد الائتماني الآمن (متبقي ${WesternFormatters.formatIls(safeRemaining)} متاح)",
-                                            "Within safe credit ceiling (${WesternFormatters.formatIls(safeRemaining)} available)"
-                                        ),
-                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-                                        color = financial.income
-                                    )
-                                }
                             }
 
                             // Projected Post-Transaction Balance Summary Box (ST-11)
@@ -1068,7 +1087,8 @@ fun CashPaymentScreen(
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
-                                            text = "${WesternFormatters.formatIls(selectedCustomer.balanceIls)} + ${WesternFormatters.formatIls(state.basketNetTotalIls)}",
+                                            text = if (isCustBalKnown) "${WesternFormatters.formatIls(selectedCustomer.balanceIls)} + ${WesternFormatters.formatIls(state.basketNetTotalIls)}"
+                                                   else "-- ₪ + ${WesternFormatters.formatIls(state.basketNetTotalIls)}",
                                             style = MaterialTheme.typography.bodySmall.copy(
                                                 fontSize = 12.sp,
                                                 fontFamily = MonoFontFamily
@@ -1078,7 +1098,7 @@ fun CashPaymentScreen(
                                     }
 
                                     Text(
-                                        text = WesternFormatters.formatIls(projectedBalance),
+                                        text = if (isCustBalKnown && projectedBalance != null) WesternFormatters.formatIls(projectedBalance) else "-- ₪",
                                         style = MaterialTheme.typography.titleMedium.copy(
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = MonoFontFamily

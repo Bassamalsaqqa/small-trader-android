@@ -72,6 +72,7 @@ import com.example.model.SupplierPayment
 import com.example.model.UserRole
 import com.example.model.UserSession
 import com.example.model.WesternFormatters
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -445,6 +446,9 @@ class ProductionTraderRepository(
     private val _isInvoicesLoadingFlow = MutableStateFlow<Boolean>(false)
     override val isInvoicesLoadingFlow: StateFlow<Boolean> = _isInvoicesLoadingFlow.asStateFlow()
 
+    private val _suppliersHasMoreFlow = MutableStateFlow<Boolean>(false)
+    override val suppliersHasMoreFlow: StateFlow<Boolean> = _suppliersHasMoreFlow.asStateFlow()
+
     private val _invoicesHasMoreGapFlow = MutableStateFlow<Boolean>(false)
     override val invoicesHasMoreGapFlow: StateFlow<Boolean> = _invoicesHasMoreGapFlow.asStateFlow()
 
@@ -565,12 +569,15 @@ class ProductionTraderRepository(
         }
     }
 
-    private suspend fun refreshSuppliers() {
+    override suspend fun refreshSuppliers(): Result<Unit> = withContext(ioDispatcher) {
         try {
             val res = apiClient.getSuppliers(companyId)
             if (res.isSuccess) {
                 val root = res.getOrThrow()
-                val dataElem = root.properties["suppliers"] ?: root.properties["data"]
+                val hasMore = (root.properties["has_more"] as? StrictJsonBoolean)?.value
+                    ?: (root.properties["has_more"]?.asString()?.toBooleanStrictOrNull() ?: false)
+                _suppliersHasMoreFlow.value = hasMore
+                val dataElem = root.properties["suppliers"] ?: root.properties["data"] ?: root.properties["items"]
                 if (dataElem is com.example.data.mobile.contract.StrictJsonArray) {
                     val list = (0 until dataElem.size).mapNotNull { i ->
                         val obj = dataElem[i] as? com.example.data.mobile.contract.StrictJsonObject ?: return@mapNotNull null
@@ -583,6 +590,8 @@ class ProductionTraderRepository(
                         val phone = obj.properties["phone"]?.asString()
                         val balanceStr = obj.properties["balance_owed"]?.asString() ?: obj.properties["balance"]?.asString()
                         val balanceExact = balanceStr?.let { try { BigDecimal(it) } catch (_: Exception) { null } }
+                        val advancesStr = obj.properties["advances"]?.asString()
+                        val advancesExact = advancesStr?.let { try { BigDecimal(it) } catch (_: Exception) { null } }
                         Supplier(
                             id = id,
                             nameAr = name,
@@ -590,16 +599,22 @@ class ProductionTraderRepository(
                             companyAr = company,
                             companyEn = company,
                             phone = phone,
-                            balanceOwedExact = balanceExact
+                            balanceOwedExact = balanceExact,
+                            advancesExact = advancesExact
                         )
                     }
                     _suppliersFlow.value = list
                 }
+                Result.success(Unit)
             } else {
                 _lastRefreshError.value = res.exceptionOrNull()?.message
+                Result.failure(res.exceptionOrNull() ?: RuntimeException("Failed to refresh suppliers"))
             }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             _lastRefreshError.value = e.message
+            Result.failure(e)
         }
     }
 
@@ -1507,30 +1522,71 @@ class ProductionTraderRepository(
         if (authScopeProvider != null && (currentScope == null || currentScope.companyId != companyId || currentScope.actorId != actorId || currentScope.deviceId != deviceId)) {
             return@withContext Result.failure(SecurityException("Scope validation failed: current session is superseded or revoked."))
         }
-        val creditLimitExact = if (creditLimitIls > 0.0) BigDecimal(creditLimitIls.toString()).setScale(currencyMinorUnits, RoundingMode.HALF_UP) else null
-        val res = apiClient.createCustomer(
-            companyId = companyId,
-            nameAr = name,
-            phone = phone.ifBlank { null },
-            creditLimit = creditLimitExact
-        )
-        if (res.isSuccess) {
-            val id = res.getOrNull()?.properties?.get("id")?.asString() ?: UUID.randomUUID().toString()
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Customer name is required | اسم الزبون مطلوب"))
+        }
+        val cleanPhone = phone.trim().ifBlank { null }
+        val cleanAddress = address.trim().ifBlank { null }
+        val creditLimitExact = if (creditLimitIls >= 0.0) {
+            BigDecimal(creditLimitIls.toString()).setScale(currencyMinorUnits, RoundingMode.HALF_UP)
+        } else null
+
+        try {
+            val before = requireActiveScope()
+            val res = apiClient.createCustomer(
+                companyId = companyId,
+                nameAr = cleanName,
+                phone = cleanPhone,
+                creditLimit = creditLimitExact,
+                address = cleanAddress
+            )
+            if (res.isFailure) {
+                return@withContext Result.failure(res.exceptionOrNull() ?: RuntimeException("Customer creation failed"))
+            }
+
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            check(requireActiveScope() == before) { "Session changed during customer creation" }
+
+            val responseObj = res.getOrThrow()
+            val rawId = responseObj.properties["id"]?.asString()
+                ?: return@withContext Result.failure(IllegalStateException("Server response missing customer ID"))
+            if (!ServerUlid.isValid(rawId)) {
+                return@withContext Result.failure(IllegalStateException("Server returned invalid customer ULID: '$rawId'"))
+            }
+
+            val authName = responseObj.properties["name"]?.asString()
+                ?: responseObj.properties["name_ar"]?.asString()
+                ?: cleanName
+            val authCode = responseObj.properties["code"]?.asString()
+            val authPhone = responseObj.properties["phone"]?.asString()
+            val authAddress = responseObj.properties["address"]?.asString()
+                ?: responseObj.properties["address_ar"]?.asString()
+            val authCreditLimit = responseObj.properties["credit_limit"]?.asString()?.let {
+                try { BigDecimal(it).setScale(currencyMinorUnits, RoundingMode.HALF_UP) } catch (_: Exception) { null }
+            } ?: creditLimitExact
+            val authBalance = responseObj.properties["balance"]?.asString()?.let {
+                try { BigDecimal(it).setScale(currencyMinorUnits, RoundingMode.HALF_UP) } catch (_: Exception) { null }
+            }
+
             val created = Customer(
-                id = id,
-                nameAr = name,
-                nameEn = name,
-                phone = phone.ifBlank { null },
-                addressAr = address.ifBlank { null },
-                addressEn = address.ifBlank { null },
-                balanceExact = BigDecimal.ZERO,
-                creditLimitExact = creditLimitExact,
-                totalPurchasesExact = BigDecimal.ZERO
+                id = rawId,
+                code = authCode,
+                nameAr = authName,
+                nameEn = authName,
+                phone = authPhone,
+                addressAr = authAddress,
+                addressEn = authAddress,
+                balanceExact = authBalance,
+                creditLimitExact = authCreditLimit,
+                totalPurchasesExact = null
             )
             _customersFlow.update { listOf(created) + it }
             Result.success(created)
-        } else {
-            Result.failure(res.exceptionOrNull() ?: RuntimeException("Customer creation failed"))
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Result.failure(error)
         }
     }
 
@@ -1545,34 +1601,137 @@ class ProductionTraderRepository(
         if (cleanName.isBlank()) {
             return@withContext Result.failure(IllegalArgumentException("Customer name is required | اسم الزبون مطلوب"))
         }
+
+        // Determine PATCH-like omission vs explicit clear semantics
+        val isAddressUnloaded = existing.addressAr == null && existing.addressEn == null
+        val shouldUpdateAddress = if (isAddressUnloaded) {
+            address.trim().isNotBlank() // Only update if user explicitly provided non-blank address
+        } else {
+            true // Was loaded, so blank means user explicitly cleared it
+        }
+
+        val isCreditLimitUnloaded = existing.creditLimitExact == null
+        val shouldUpdateCreditLimit = if (isCreditLimitUnloaded) {
+            creditLimitIls > 0.0 // Only update if user explicitly provided a positive credit limit
+        } else {
+            true // Was loaded, so 0.0 means explicit zero
+        }
+
+        val creditLimitExact = if (shouldUpdateCreditLimit) {
+            if (creditLimitIls >= 0.0) BigDecimal(creditLimitIls.toString()).setScale(currencyMinorUnits, RoundingMode.HALF_UP)
+            else null
+        } else null
+
         try {
             val before = requireActiveScope()
-            val creditLimitExact = if (creditLimitIls > 0.0) BigDecimal(creditLimitIls.toString()).setScale(currencyMinorUnits) else null
             val response = apiClient.updateCustomer(
                 companyId = companyId,
                 customerId = ServerUlid.parse(customerId),
                 name = cleanName,
-                phone = phone,
-                address = address,
-                creditLimit = creditLimitExact
+                phone = phone.trim(),
+                address = if (shouldUpdateAddress) address.trim() else null,
+                creditLimit = creditLimitExact,
+                updatePhone = true,
+                updateAddress = shouldUpdateAddress,
+                updateCreditLimit = shouldUpdateCreditLimit
             ).getOrThrow()
+
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
             check(requireActiveScope() == before) { "Session changed" }
+
             val id = response.properties["id"]?.asString() ?: error("Missing customer ID")
             require(ServerUlid.parse(id).value == customerId) { "Customer ID mismatch" }
-            val serverName = response.properties["name"]?.asString() ?: error("Missing customer name")
+            val serverName = response.properties["name"]?.asString() ?: response.properties["name_ar"]?.asString() ?: error("Missing customer name")
+
+            val authoritativePhone = if (response.properties.containsKey("phone")) {
+                val p = response.properties["phone"]
+                if (p == null || p is com.example.data.mobile.contract.StrictJsonNull || p.asString().isNullOrBlank()) null
+                else p.asString()
+            } else {
+                existing.phone
+            }
+
+            val authoritativeAddressAr = if (response.properties.containsKey("address") || response.properties.containsKey("address_ar")) {
+                val a = response.properties["address"] ?: response.properties["address_ar"]
+                if (a == null || a is com.example.data.mobile.contract.StrictJsonNull || a.asString().isNullOrBlank()) null
+                else a.asString()
+            } else {
+                existing.addressAr
+            }
+
+            val authoritativeCreditLimit = if (response.properties.containsKey("credit_limit")) {
+                val cl = response.properties["credit_limit"]
+                if (cl == null || cl is com.example.data.mobile.contract.StrictJsonNull || cl.asString().isNullOrBlank()) null
+                else try { BigDecimal(cl.asString()).setScale(currencyMinorUnits, RoundingMode.HALF_UP) } catch (_: Exception) { creditLimitExact }
+            } else {
+                existing.creditLimitExact
+            }
+
             val updated = existing.copy(
                 nameAr = serverName,
                 nameEn = serverName,
-                phone = response.properties["phone"]?.asString() ?: phone.ifBlank { null },
-                addressAr = address.ifBlank { null },
-                addressEn = address.ifBlank { null },
-                creditLimitExact = response.properties["credit_limit"]?.asString()?.let { BigDecimal(it) } ?: creditLimitExact
+                phone = authoritativePhone,
+                addressAr = authoritativeAddressAr,
+                addressEn = authoritativeAddressAr,
+                creditLimitExact = authoritativeCreditLimit
             )
             _customersFlow.update { list -> list.map { if (it.id == id) updated else it } }
             Result.success(updated)
-        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
-        } catch (error: Exception) { Result.failure(error) }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Result.failure(error)
+        }
+    }
+
+    override suspend fun getCustomerDetail(customerId: String): Result<Customer> = withContext(ioDispatcher) {
+        val currentScope = authScopeProvider?.invoke()
+        if (authScopeProvider != null && (currentScope == null || currentScope.companyId != companyId || currentScope.actorId != actorId || currentScope.deviceId != deviceId)) {
+            return@withContext Result.failure(SecurityException("Scope validation failed: current session is superseded or revoked."))
+        }
+        val before = requireActiveScope()
+        val ulid = try {
+            ServerUlid.parse(customerId)
+        } catch (e: Exception) {
+            return@withContext Result.failure(IllegalArgumentException("Invalid customerId ULID: '$customerId'", e))
+        }
+        val res = apiClient.getCustomer(companyId, ulid)
+        if (res.isFailure) {
+            return@withContext Result.failure(res.exceptionOrNull() ?: RuntimeException("Failed to get customer detail"))
+        }
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        check(requireActiveScope() == before) { "Session changed" }
+        val obj = res.getOrThrow()
+        val id = obj.properties["id"]?.asString() ?: return@withContext Result.failure(IllegalStateException("Missing customer ID"))
+        require(id == customerId)
+        val name = obj.properties["name"]?.asString() ?: obj.properties["name_ar"]?.asString() ?: ""
+        val nameAr = obj.properties["name_ar"]?.asString() ?: name
+        val nameEn = obj.properties["name_en"]?.asString() ?: name
+        val phone = obj.properties["phone"]?.asString()
+        val code = obj.properties["code"]?.asString()
+        val address = obj.properties["address"]?.asString() ?: obj.properties["address_ar"]?.asString()
+        val creditLimit = obj.properties["credit_limit"]?.asString()?.let {
+            try { BigDecimal(it).setScale(currencyMinorUnits, RoundingMode.HALF_UP) } catch (_: Exception) { null }
+        }
+        val balance = obj.properties["balance"]?.asString()?.let {
+            try { BigDecimal(it).setScale(currencyMinorUnits, RoundingMode.HALF_UP) } catch (_: Exception) { null }
+        }
+
+        val existing = _customersFlow.value.firstOrNull { it.id == customerId }
+        val detail = Customer(
+            id = id,
+            nameAr = nameAr,
+            nameEn = nameEn,
+            phone = phone,
+            code = code,
+            addressAr = address ?: existing?.addressAr,
+            addressEn = address ?: existing?.addressEn,
+            creditLimitExact = creditLimit ?: existing?.creditLimitExact,
+            balanceExact = balance ?: existing?.balanceExact,
+            isWalkIn = existing?.isWalkIn ?: false
+        )
+        _customersFlow.update { list -> list.map { if (it.id == id) detail else it } }
+        Result.success(detail)
     }
 
     override suspend fun getCustomerStatement(

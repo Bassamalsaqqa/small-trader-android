@@ -1435,7 +1435,12 @@ fun CustomerDetailScreen(
     if (isStatementPreviewOpen) {
         val statementText = onFormatStatementText?.invoke(customer.id) ?: buildString {
             appendLine("${lang.tr("كشف حساب الزبون:", "Customer Statement:")} ${customer.name(lang)}")
-            appendLine("${lang.tr("الرصيد الحالي:", "Current Balance:")} ${StitchBidiUtils.formatIls(customer.balanceIls)}")
+            val balStr = if (customer.balanceExact != null && !customer.balanceIls.isNaN()) {
+                StitchBidiUtils.formatIls(customer.balanceIls)
+            } else {
+                lang.tr("غير متاح (يرجى تحديث الكشف)", "Unavailable (refresh statement)")
+            }
+            appendLine("${lang.tr("الرصيد الحالي:", "Current Balance:")} $balStr")
         }
         CustomerStatementShareDialog(
             customer = customer,
@@ -1457,11 +1462,29 @@ private fun EditCustomerDialog(
     var phoneText by rememberSaveable(customer.id) { mutableStateOf(customer.phone ?: "") }
     var addressText by rememberSaveable(customer.id) { mutableStateOf(customer.addressAr ?: "") }
     var limitText by rememberSaveable(customer.id) {
-        mutableStateOf(WesternFormatters.formatNumber(customer.creditLimitIls).removeSuffix(".00"))
+        mutableStateOf(
+            if (customer.creditLimitExact != null) {
+                WesternFormatters.formatNumber(customer.creditLimitIls).removeSuffix(".00")
+            } else ""
+        )
     }
 
-    val parsedLimit = limitText.toDoubleOrNull() ?: customer.creditLimitIls
-    val canSave = nameText.trim().length >= 2 && parsedLimit >= 0.0
+    val isLimitValid = remember(limitText) {
+        val trimmed = limitText.trim()
+        if (trimmed.isEmpty()) true
+        else {
+            val parts = trimmed.split(".")
+            if (parts.size > 2) false
+            else if (parts.size == 2 && parts[1].length > 2) false
+            else trimmed.toDoubleOrNull()?.let { it >= 0.0 } ?: false
+        }
+    }
+    val limitErrorMsg = if (!isLimitValid) {
+        lang.tr("يرجى إدخال مبلغ صحيح (بحد أقصى خانتان عشريتان)", "Enter a valid amount (up to 2 decimal places)")
+    } else null
+
+    val parsedLimit = limitText.trim().toDoubleOrNull() ?: if (limitText.isBlank()) 0.0 else customer.creditLimitIls
+    val canSave = nameText.trim().length >= 2 && isLimitValid
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1506,6 +1529,11 @@ private fun EditCustomerDialog(
                     value = addressText,
                     onValueChange = { addressText = it },
                     label = { Text(lang.tr("العنوان / المنطقة", "Neighborhood / Address")) },
+                    placeholder = {
+                        if (customer.addressAr == null) {
+                            Text(lang.tr("غير محمل — اتركه فارغاً لعدم التعديل", "Unloaded — leave blank to keep unchanged"))
+                        }
+                    },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
@@ -1519,6 +1547,13 @@ private fun EditCustomerDialog(
                             .filter { ch -> ch.isDigit() || ch == '.' }
                     },
                     label = { Text(lang.tr("سقف الدين المسموح (₪)", "Credit Limit (₪)")) },
+                    placeholder = {
+                        if (customer.creditLimitExact == null) {
+                            Text(lang.tr("غير محدد — اتركه فارغاً للإبقاء عليه", "Not set — leave blank to keep unchanged"))
+                        }
+                    },
+                    isError = !isLimitValid,
+                    supportingText = limitErrorMsg?.let { msg -> { Text(msg, color = MaterialTheme.colorScheme.error) } },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),

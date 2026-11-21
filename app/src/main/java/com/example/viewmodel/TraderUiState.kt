@@ -130,6 +130,7 @@ data class TraderUiState(
 
     // Suppliers & Purchasing
     val suppliers: List<Supplier> = emptyList(),
+    val suppliersHasMore: Boolean = false,
     val purchaseBills: List<PurchaseBill> = emptyList(),
     val supplierPayments: List<SupplierPayment> = emptyList(),
     val selectedSupplierForDetail: Supplier? = null,
@@ -320,8 +321,11 @@ data class TraderUiState(
     val customLinesCount: Int
         get() = basket.count { !it.product.isStockTracked }
 
+    val isCustomerBalanceKnown: Boolean
+        get() = selectedCustomer?.let { it.balanceExact != null && !it.balanceIls.isNaN() } ?: false
+
     val projectedCustomerBalanceIfCreditIls: Double?
-        get() = selectedCustomer?.let { customer ->
+        get() = if (!isCustomerBalanceKnown) null else selectedCustomer?.let { customer ->
             customer.balanceExact?.add(BigDecimal(basketNetTotalIls.toString()))
                 ?.setScale(2, RoundingMode.HALF_UP)
                 ?.toDouble()
@@ -329,6 +333,7 @@ data class TraderUiState(
 
     val wouldCreditExceedCustomerLimit: Boolean
         get() {
+            if (!isCustomerBalanceKnown) return false
             val customer = selectedCustomer ?: return false
             val projected = projectedCustomerBalanceIfCreditIls ?: return false
             return projected > customer.creditLimitIls + 0.001
@@ -336,6 +341,7 @@ data class TraderUiState(
 
     val creditCeilingExcessIls: Double
         get() {
+            if (!isCustomerBalanceKnown) return 0.0
             val customer = selectedCustomer ?: return 0.0
             val projected = projectedCustomerBalanceIfCreditIls ?: return 0.0
             val projBd = BigDecimal(projected.toString()).setScale(2, RoundingMode.HALF_UP)
@@ -455,8 +461,24 @@ data class TraderUiState(
     }
     val totalCustomerDebtsIls: Double get() = directoryTotal(customers.map { it.balanceExact }, 1)
     val totalCustomerAdvancesIls: Double get() = directoryTotal(customers.map { it.balanceExact }, -1)
-    val totalSupplierPayablesIls: Double get() = directoryTotal(suppliers.map { it.balanceOwedExact }, 1)
-    val totalSupplierAdvancesIls: Double get() = directoryTotal(suppliers.map { it.balanceOwedExact }, -1)
+    val totalSupplierPayablesIls: Double
+        get() {
+            if (suppliersHasMore) return Double.NaN
+            return directoryTotal(suppliers.map { it.balanceOwedExact }, 1)
+        }
+    val totalSupplierAdvancesIls: Double
+        get() {
+            if (suppliersHasMore) return Double.NaN
+            val effectiveAdvances = suppliers.map { s ->
+                when {
+                    s.advancesExact != null -> s.advancesExact
+                    s.balanceOwedExact != null && s.balanceOwedExact < BigDecimal.ZERO -> s.balanceOwedExact.abs()
+                    s.balanceOwedExact != null -> BigDecimal.ZERO
+                    else -> null
+                }
+            }
+            return directoryTotal(effectiveAdvances, 1)
+        }
 
     val lowStockProducts: List<Product>
         get() = products.filter { it.isLowStock }.sortedBy { it.stockCount }

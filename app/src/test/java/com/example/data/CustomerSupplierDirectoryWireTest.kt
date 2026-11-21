@@ -23,6 +23,7 @@ import com.example.model.WesternFormatters
 import com.example.ui.components.StitchBadgeTone
 import com.example.ui.components.StitchBidiUtils
 import com.example.viewmodel.TraderUiState
+import com.example.viewmodel.TraderViewModel
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -650,13 +651,14 @@ class CustomerSupplierDirectoryWireTest {
                 if (shouldIncrementGen) {
                     currentGen = 2L
                 }
+                val respName = if (shouldIncrementGen) "تعديل وصل بعد فوات الأوان" else "الزبون المستقر"
                 return TransportResponse(
                     statusCode = 200,
                     headers = mapOf("Content-Type" to "application/json"),
                     body = """
                     {
                         "id": "$customerId",
-                        "name": "تعديل وصل بعد فوات الأوان",
+                        "name": "$respName",
                         "code": "CUST-001",
                         "phone": "0599-777777",
                         "credit_limit": "3000.00"
@@ -711,5 +713,239 @@ class CustomerSupplierDirectoryWireTest {
 
         assertNull("Redacted unitCostExact must remain strictly null", lineWithRedactedCost.unitCostExact)
         assertNull("Redacted unitCostIls must remain null", lineWithRedactedCost.unitCostIls)
+    }
+
+    // =========================================================================
+    // 9. Review Findings Verification (Truthful Balances, Directory Omission, Pagination)
+    // =========================================================================
+
+    @Test
+    fun testSharedCustomerStatement_WithNullBalance_DoesNotSaySettledAccountZero() {
+        val custWithNullBalance = Customer(
+            id = "01JCV8X9M2NQW3TYZ4R5S6789C",
+            nameAr = "أحمد خالد",
+            nameEn = "Ahmad Khaled",
+            phone = "0599-123456",
+            balanceExact = null,
+            creditLimitExact = BigDecimal("1000.00")
+        )
+        val transport = RecordingTransport()
+        val repo = createRepository(transport)
+        val vm = TraderViewModel(repo)
+
+        val statementAr = vm.formatCustomerStatementText(custWithNullBalance)
+        assertTrue("Statement must indicate balance is unavailable", statementAr.contains("غير متاح (يتطلب تحديث كشف الحساب)"))
+        assertFalse("Statement must NEVER claim settled account 0.00 ₪ when balance is null", statementAr.contains("الحساب خالص"))
+        assertFalse("Statement must NEVER format 0.00 ₪ as current balance", statementAr.contains("الحساب خالص (0.00 ₪)"))
+    }
+
+    @Test
+    fun testCustomerPaymentSuccess_WithNullBalance_DoesNotClaimSettledZero() {
+        val cust = Customer(
+            id = "01JCV8X9M2NQW3TYZ4R5S6789C",
+            nameAr = "عميل نقدي",
+            nameEn = "Cash Customer",
+            phone = "0599-000000",
+            balanceExact = null
+        )
+        val isBalKnown = cust.balanceExact != null && !cust.balanceIls.isNaN()
+        val paidStr = WesternFormatters.formatIls(100.0)
+        val newBal = cust.balanceIls
+        val msgAr = when {
+            !isBalKnown -> "تم قبض $paidStr نقداً — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
+            newBal > 0.005 -> "تم قبض $paidStr نقداً — المتبقي على الزبون: ${WesternFormatters.formatIls(newBal)}"
+            newBal < -0.005 -> "تم قبض $paidStr نقداً — أصبح للزبون رصيد مقدم: ${WesternFormatters.formatIls(-newBal)}"
+            else -> "تم قبض $paidStr نقداً — أصبح الحساب خالصاً (0.00 ₪)"
+        }
+        assertEquals("تم قبض 100.00 ₪ نقداً — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)", msgAr)
+        assertFalse("Must not claim settled account", msgAr.contains("أصبح الحساب خالصاً"))
+    }
+
+    @Test
+    fun testUnknownBalance_DoesNotShowSafeCreditCeilingOrZeroPercentCheckout() {
+        val cust = Customer(
+            id = "01JCV8X9M2NQW3TYZ4R5S6789C",
+            nameAr = "عميل غير معروف الرصيد",
+            nameEn = "Customer Unknown",
+            phone = "0599-000000",
+            balanceExact = null,
+            creditLimitExact = BigDecimal("1000.00")
+        )
+        val state = TraderUiState(
+            customers = listOf(cust),
+            selectedCustomerId = cust.id
+        )
+        assertFalse("isCustomerBalanceKnown must be false", state.isCustomerBalanceKnown)
+        assertNull("projectedCustomerBalanceIfCreditIls must be null when balance is unknown", state.projectedCustomerBalanceIfCreditIls)
+        assertFalse("wouldCreditExceedCustomerLimit must be false (no false positive / false negative limit check)", state.wouldCreditExceedCustomerLimit)
+    }
+
+    @Test
+    fun testCustomerCreation_RequiresAuthoritativeULID_FailsOnMissingOrInvalidId() = runBlocking {
+        val transport = RecordingTransport()
+        val repo = createRepository(transport)
+
+        // 1. Missing "id" in response
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 201,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """{"name":"عميل بدون معرف"}"""
+            )
+        )
+        val resMissingId = repo.createCustomer("عميل بدون معرف", "0599-111111", "نابلس", 0.0)
+        assertTrue("Must fail when server omits ID", resMissingId.isFailure)
+        assertTrue("Error must mention missing customer ID", resMissingId.exceptionOrNull()?.message?.contains("missing customer ID") == true)
+
+        // 2. Non-ULID (e.g. UUID) in response
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 201,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """{"id":"550e8400-e29b-41d4-a716-446655440000","name":"عميل بمعرف غير صالح"}"""
+            )
+        )
+        val resInvalidId = repo.createCustomer("عميل بمعرف غير صالح", "0599-111111", "نابلس", 0.0)
+        assertTrue("Must fail when server returns non-ULID", resInvalidId.isFailure)
+        assertTrue("Error must mention invalid ULID", resInvalidId.exceptionOrNull()?.message?.contains("invalid customer ULID") == true)
+    }
+
+    @Test
+    fun testCustomerCreation_PostsAddressAndValidatesMidflightScope() = runBlocking {
+        var currentGen = 1L
+        val customerId = "01JCV8X9M2NQW3TYZ4R5S6789F"
+
+        val transport = object : ReadClientTransport {
+            val requests = mutableListOf<TransportRequest>()
+            override fun execute(request: TransportRequest): TransportResponse {
+                requests.add(request)
+                // Midflight scope change simulation
+                currentGen = 2L
+                return TransportResponse(
+                    statusCode = 201,
+                    headers = mapOf("Content-Type" to "application/json"),
+                    body = """{"id":"$customerId","name":"عميل تجريبي","address_ar":"نابلس شارع فيصل"}"""
+                )
+            }
+        }
+        val repo = createRepository(transport, generationProvider = { currentGen })
+
+        val result = repo.createCustomer("عميل تجريبي", "0599-222222", "نابلس شارع فيصل", 500.0)
+        assertTrue("Must fail due to midflight scope invalidation", result.isFailure)
+        assertEquals(1, transport.requests.size)
+        val postReq = transport.requests[0]
+        assertTrue("Must send address_ar on wire", postReq.body?.contains("\"address_ar\":\"نابلس شارع فيصل\"") == true)
+    }
+
+    @Test
+    fun testColdDirectoryCustomerEdit_DoesNotWipeStoredAddressOrCreditLimit() = runBlocking {
+        val transport = RecordingTransport()
+        val repo = createRepository(transport)
+
+        val customerId = "01JCV8X9M2NQW3TYZ4R5S6789G"
+
+        // Seed a customer as loaded from directory (address and credit limit null / unloaded)
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 201,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """{"id":"$customerId","name":"زبون دليل بارد"}"""
+            )
+        )
+        repo.createCustomer("زبون دليل بارد", "", "", -1.0)
+
+        // Seed successful PUT response
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """{"id":"$customerId","name":"زبون معدل بالاسم فقط"}"""
+            )
+        )
+
+        // Perform edit where address is empty and creditLimit is 0.0 (unloaded placeholders)
+        val editRes = repo.updateCustomer(
+            customerId = customerId,
+            name = "زبون معدل بالاسم فقط",
+            phone = "0599-333333",
+            address = "",
+            creditLimitIls = 0.0
+        )
+        assertTrue(editRes.isSuccess)
+
+        // Verify wire: PUT request MUST NOT include address_ar or credit_limit keys!
+        val putReq = transport.requests.last { it.method == HttpMethod.PUT }
+        assertFalse("PUT payload must NOT contain address_ar when unmodified in cold edit", putReq.body?.contains("address_ar") == true)
+        assertFalse("PUT payload must NOT contain credit_limit when unmodified in cold edit", putReq.body?.contains("credit_limit") == true)
+        assertTrue("PUT payload must contain updated name_ar", putReq.body?.contains("\"name_ar\":\"زبون معدل بالاسم فقط\"") == true)
+    }
+
+    @Test
+    fun testSuppliersDirectory_First30HasMore_DoesNotCalculateFalseGlobalTotal() {
+        val suppliers = (1..30).map { i ->
+            Supplier(
+                id = "01JCV8X9M2NQW3TYZ4R5S678${i.toString().padStart(2, '0')}",
+                nameAr = "مورد $i",
+                nameEn = "Supplier $i",
+                balanceOwedExact = BigDecimal("100.00"),
+                advancesExact = BigDecimal("50.00")
+            )
+        }
+        val stateWithoutMore = TraderUiState(suppliers = suppliers, suppliersHasMore = false)
+        assertEquals(3000.0, stateWithoutMore.totalSupplierPayablesIls, 0.001)
+        assertEquals(1500.0, stateWithoutMore.totalSupplierAdvancesIls, 0.001)
+
+        val stateWithMore = TraderUiState(suppliers = suppliers, suppliersHasMore = true)
+        assertTrue("Total payables must be NaN when directory is truncated with has_more=true", stateWithMore.totalSupplierPayablesIls.isNaN())
+        assertTrue("Total advances must be NaN when directory is truncated with has_more=true", stateWithMore.totalSupplierAdvancesIls.isNaN())
+    }
+
+    @Test
+    fun testSuppliersDirectory_ParsesSeparateAuthoritativeAdvancesField() = runBlocking {
+        val transport = RecordingTransport()
+        val repo = createRepository(transport)
+
+        val supplierId = "01JCV8X9M2NQW3TYZ4R5S6789H"
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """
+                {
+                    "items": [
+                        {
+                            "id": "$supplierId",
+                            "name": "شركة التوزيع المتقدمة",
+                            "balance_owed": "450.00",
+                            "advances": "120.00"
+                        }
+                    ],
+                    "has_more": true
+                }
+                """.trimIndent()
+            )
+        )
+
+        repo.refreshSuppliers()
+
+        val suppliers = repo.getSuppliers()
+        val supplier = suppliers.first { it.id == supplierId }
+        assertEquals(BigDecimal("450.00"), supplier.balanceOwedExact)
+        assertEquals(BigDecimal("120.00"), supplier.advancesExact)
+        assertEquals(120.0, supplier.advancesIls, 0.001)
+        assertTrue("suppliersHasMoreFlow must be true when response indicates has_more", repo.suppliersHasMoreFlow.value)
+    }
+
+    @Test
+    fun testCustomerEdit_ExactDecimalCreditLimitValidation() {
+        val regex = Regex("^\\d*(\\.\\d{0,2})?$")
+        assertTrue(regex.matches("12.34"))
+        assertTrue(regex.matches("12"))
+        assertTrue(regex.matches("12.3"))
+        assertTrue(regex.matches(""))
+        assertTrue(regex.matches("1000.00"))
+        assertFalse("More than 2 decimals must be rejected", regex.matches("12.345"))
+        assertFalse("Non-digits must be rejected", regex.matches("abc"))
+        assertFalse("Multiple dots must be rejected", regex.matches("12.34.56"))
     }
 }

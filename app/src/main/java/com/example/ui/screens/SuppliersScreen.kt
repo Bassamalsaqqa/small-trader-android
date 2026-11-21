@@ -135,8 +135,8 @@ fun SuppliersScreen(
     if (!canManageSuppliers) return
 
     val payablesCount = remember(state.suppliers) { state.suppliers.count { it.balanceOwedExact != null && it.balanceOwedExact > BigDecimal.ZERO } }
-    val advancesCount = remember(state.suppliers) { state.suppliers.count { it.balanceOwedExact != null && it.balanceOwedExact < BigDecimal.ZERO } }
-    val settledCount = remember(state.suppliers) { state.suppliers.count { it.balanceOwedExact != null && it.balanceOwedExact.compareTo(BigDecimal.ZERO) == 0 } }
+    val advancesCount = remember(state.suppliers) { state.suppliers.count { (it.advancesExact != null && it.advancesExact > BigDecimal.ZERO) || (it.balanceOwedExact != null && it.balanceOwedExact < BigDecimal.ZERO) } }
+    val settledCount = remember(state.suppliers) { state.suppliers.count { (it.balanceOwedExact != null && it.balanceOwedExact.compareTo(BigDecimal.ZERO) == 0) && (it.advancesExact == null || it.advancesExact.compareTo(BigDecimal.ZERO) == 0) } }
 
     val filteredSuppliers = remember(state.suppliers, searchQuery, selectedFilter) {
         val q = TraderUiState.normalizeForSearch(WesternFormatters.sanitizeWesternDigits(searchQuery.trim()))
@@ -144,8 +144,8 @@ fun SuppliersScreen(
             val matchesFilter = when (selectedFilter) {
                 SupplierBalanceFilter.ALL -> true
                 SupplierBalanceFilter.PAYABLES -> s.balanceOwedExact != null && s.balanceOwedExact > BigDecimal.ZERO
-                SupplierBalanceFilter.ADVANCES -> s.balanceOwedExact != null && s.balanceOwedExact < BigDecimal.ZERO
-                SupplierBalanceFilter.SETTLED -> s.balanceOwedExact != null && s.balanceOwedExact.compareTo(BigDecimal.ZERO) == 0
+                SupplierBalanceFilter.ADVANCES -> (s.advancesExact != null && s.advancesExact > BigDecimal.ZERO) || (s.balanceOwedExact != null && s.balanceOwedExact < BigDecimal.ZERO)
+                SupplierBalanceFilter.SETTLED -> s.balanceOwedExact != null && s.balanceOwedExact.compareTo(BigDecimal.ZERO) == 0 && (s.advancesExact == null || s.advancesExact.compareTo(BigDecimal.ZERO) == 0)
             }
             if (!matchesFilter) return@filter false
             if (q.isEmpty()) return@filter true
@@ -201,7 +201,7 @@ fun SuppliersScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = if (state.totalSupplierPayablesIls.isNaN()) lang.tr("غير متاح", "Unavailable") else StitchBidiUtils.formatIls(state.totalSupplierPayablesIls),
+                                text = if (state.suppliersHasMore) lang.tr("غير متاح (دليل جزئي)", "Unavailable (partial)") else if (state.totalSupplierPayablesIls.isNaN()) lang.tr("غير متاح", "Unavailable") else StitchBidiUtils.formatIls(state.totalSupplierPayablesIls),
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
@@ -217,7 +217,7 @@ fun SuppliersScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = if (state.totalSupplierAdvancesIls.isNaN()) lang.tr("غير متاح", "Unavailable") else StitchBidiUtils.formatIls(state.totalSupplierAdvancesIls),
+                                text = if (state.suppliersHasMore) lang.tr("غير متاح (دليل جزئي)", "Unavailable (partial)") else if (state.totalSupplierAdvancesIls.isNaN()) lang.tr("غير متاح", "Unavailable") else StitchBidiUtils.formatIls(state.totalSupplierAdvancesIls),
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
@@ -392,10 +392,11 @@ fun SuppliersScreen(
                                 selected = selectedFilter == SupplierBalanceFilter.ALL,
                                 onClick = { selectedFilter = SupplierBalanceFilter.ALL },
                                 label = {
+                                    val countSuffix = if (state.suppliersHasMore) "+" else ""
                                     Text(
                                         text = lang.tr(
-                                            "الكل (${WesternFormatters.formatInt(state.suppliers.size)})",
-                                            "All (${WesternFormatters.formatInt(state.suppliers.size)})"
+                                            "الكل (${WesternFormatters.formatInt(state.suppliers.size)}$countSuffix)",
+                                            "All (${WesternFormatters.formatInt(state.suppliers.size)}$countSuffix)"
                                         ),
                                         style = MaterialTheme.typography.labelMedium.copy(
                                             fontWeight = if (selectedFilter == SupplierBalanceFilter.ALL) FontWeight.Bold else FontWeight.Medium
@@ -590,20 +591,26 @@ private fun SupplierDirectoryRow(
     lang: AppLanguage,
     onClick: () -> Unit
 ) {
-    val isPayableOwed = supplier.balanceOwedIls > 0.005
-    val isStoreAdvance = supplier.balanceOwedIls < -0.005
+    val isPayableOwed = supplier.balanceOwedExact != null && supplier.balanceOwedExact > BigDecimal.ZERO
+    val hasAdvance = (supplier.advancesExact != null && supplier.advancesExact > BigDecimal.ZERO) || (supplier.balanceOwedExact != null && supplier.balanceOwedExact < BigDecimal.ZERO)
 
     val statusBadgeTone = when {
         supplier.balanceOwedExact == null -> StitchBadgeTone.NEUTRAL
         isPayableOwed -> StitchBadgeTone.WARNING
-        isStoreAdvance -> StitchBadgeTone.SUCCESS
+        hasAdvance -> StitchBadgeTone.SUCCESS
         else -> StitchBadgeTone.NEUTRAL
     }
+
+    val advanceAmountIls = if (supplier.advancesExact != null && supplier.advancesExact > BigDecimal.ZERO) {
+        supplier.advancesIls
+    } else if (supplier.balanceOwedIls < -0.005) {
+        -supplier.balanceOwedIls
+    } else 0.0
 
     val statusLabel = when {
         supplier.balanceOwedExact == null -> lang.tr("الرصيد غير متاح", "Balance unavailable")
         isPayableOwed -> "${lang.tr("مستحق للمورد", "Owed to Supplier")} ${StitchBidiUtils.formatIls(supplier.balanceOwedIls)}"
-        isStoreAdvance -> "${lang.tr("لنا رصيد مقدم", "Store Advance")} ${StitchBidiUtils.formatIls(-supplier.balanceOwedIls)}"
+        hasAdvance -> "${lang.tr("لنا رصيد مقدم", "Store Advance")} ${StitchBidiUtils.formatIls(advanceAmountIls)}"
         else -> lang.tr("خالص", "Settled")
     }
 

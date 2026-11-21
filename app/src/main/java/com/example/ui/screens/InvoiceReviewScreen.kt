@@ -447,7 +447,12 @@ private fun CustomerAndAccountImpactCard(
                             text = if (selectedCustomer == null) {
                                 lang.tr("بيع نقدي مباشر", "Direct cash sale")
                             } else {
-                                "${WesternFormatters.formatIls(selectedCustomer.balanceIls)} • ${selectedCustomer.phone}"
+                                val balanceText = if (selectedCustomer.balanceExact == null || selectedCustomer.balanceIls.isNaN()) {
+                                    "-- ₪"
+                                } else {
+                                    WesternFormatters.formatIls(selectedCustomer.balanceIls)
+                                }
+                                "$balanceText • ${selectedCustomer.phone}"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = if (selectedCustomer != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
@@ -528,10 +533,11 @@ private fun CustomerAndAccountImpactCard(
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                    val isBalKnown = selectedCustomer.balanceExact != null && !selectedCustomer.balanceIls.isNaN()
                                     Text(
-                                        text = WesternFormatters.formatIls(selectedCustomer.balanceIls),
+                                        text = if (isBalKnown) WesternFormatters.formatIls(selectedCustomer.balanceIls) else "-- ₪",
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = if (selectedCustomer.balanceIls > 0) financial.debit else financial.income
+                                        color = if (!isBalKnown) MaterialTheme.colorScheme.onSurfaceVariant else if (selectedCustomer.balanceIls > 0) financial.debit else financial.income
                                     )
                                 }
 
@@ -1770,8 +1776,9 @@ internal fun CustomerPickerModalSheet(
             ) {
                 items(filteredCustomers, key = { it.id }) { cust ->
                     val isCustSelected = cust.id == selectedCustomerId
-                    val projected = cust.balanceIls + basketNetTotalIls
-                    val wouldExceed = projected > cust.creditLimitIls
+                    val isCustBalKnown = cust.balanceExact != null && !cust.balanceIls.isNaN()
+                    val projected = if (isCustBalKnown) cust.balanceIls + basketNetTotalIls else null
+                    val wouldExceed = if (projected != null && cust.creditLimitIls > 0.005) projected > cust.creditLimitIls else false
 
                     Surface(
                         onClick = { onSelectCustomer(cust) },
@@ -1812,10 +1819,10 @@ internal fun CustomerPickerModalSheet(
 
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
-                                    text = WesternFormatters.formatIls(cust.balanceIls),
+                                    text = if (isCustBalKnown) WesternFormatters.formatIls(cust.balanceIls) else "-- ₪",
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (cust.balanceIls > 0) financial.debit else financial.income
+                                    color = if (!isCustBalKnown) MaterialTheme.colorScheme.onSurfaceVariant else if (cust.balanceIls > 0) financial.debit else financial.income
                                 )
                                 if (wouldExceed) {
                                     Text(

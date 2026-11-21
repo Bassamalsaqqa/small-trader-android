@@ -1396,7 +1396,22 @@ class TraderViewModel(
 
     // Customer Ledger & Debt Collections
     fun selectCustomerForDetail(customer: Customer) {
-        if (repository !is OfflineDemoTraderRepository) loadCustomerStatement(customer.id)
+        if (repository !is OfflineDemoTraderRepository) {
+            loadCustomerStatement(customer.id)
+            viewModelScope.launch {
+                val detailRes = repository.getCustomerDetail(customer.id)
+                if (detailRes.isSuccess) {
+                    val detail = detailRes.getOrNull()
+                    if (detail != null) {
+                        _uiState.update { current ->
+                            if (current.selectedCustomerForDetail?.id == customer.id) {
+                                current.copy(selectedCustomerForDetail = detail)
+                            } else current
+                        }
+                    }
+                }
+            }
+        }
         _uiState.update { state ->
             val freshCustomer = state.customers.firstOrNull { it.id == customer.id } ?: customer
             state.copy(
@@ -1469,13 +1484,16 @@ class TraderViewModel(
                     _uiState.update { state ->
                         val updatedCust = state.customers.firstOrNull { it.id == customerId }
                         val paidStr = WesternFormatters.formatIls(paymentAmountIls)
-                        val newBal = updatedCust?.balanceIls ?: 0.0
+                        val isBalKnown = updatedCust?.balanceExact != null && updatedCust?.balanceIls?.isNaN() == false
+                        val newBal = updatedCust?.balanceIls ?: Double.NaN
                         val msgAr = when {
+                            !isBalKnown -> "تم قبض $paidStr نقداً — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
                             newBal > 0.005 -> "تم قبض $paidStr نقداً — المتبقي على الزبون: ${WesternFormatters.formatIls(newBal)}"
                             newBal < -0.005 -> "تم قبض $paidStr نقداً — أصبح للزبون رصيد مقدم: ${WesternFormatters.formatIls(-newBal)}"
                             else -> "تم قبض $paidStr نقداً — أصبح الحساب خالصاً (0.00 ₪)"
                         }
                         val msgEn = when {
+                            !isBalKnown -> "Collected $paidStr in cash — Current balance unavailable (statement refresh required)"
                             newBal > 0.005 -> "Collected $paidStr in cash — Remaining debt: ${WesternFormatters.formatIls(newBal)}"
                             newBal < -0.005 -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatIls(-newBal)}"
                             else -> "Collected $paidStr in cash — Account is now settled (0.00 ₪)"
@@ -1511,13 +1529,16 @@ class TraderViewModel(
                     _uiState.update { state ->
                         val updatedCust = state.customers.firstOrNull { it.id == customerId }
                         val paidStr = WesternFormatters.formatIls(paymentAmountIls)
-                        val newBal = updatedCust?.balanceIls ?: 0.0
+                        val isBalKnown = updatedCust?.balanceExact != null && updatedCust?.balanceIls?.isNaN() == false
+                        val newBal = updatedCust?.balanceIls ?: Double.NaN
                         val msgAr = when {
+                            !isBalKnown -> "تم قبض $paidStr نقداً — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
                             newBal > 0.005 -> "تم قبض $paidStr نقداً — المتبقي على الزبون: ${WesternFormatters.formatIls(newBal)}"
                             newBal < -0.005 -> "تم قبض $paidStr نقداً — أصبح للزبون رصيد مقدم: ${WesternFormatters.formatIls(-newBal)}"
                             else -> "تم قبض $paidStr نقداً — أصبح الحساب خالصاً (0.00 ₪)"
                         }
                         val msgEn = when {
+                            !isBalKnown -> "Collected $paidStr in cash — Current balance unavailable (statement refresh required)"
                             newBal > 0.005 -> "Collected $paidStr in cash — Remaining debt: ${WesternFormatters.formatIls(newBal)}"
                             newBal < -0.005 -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatIls(-newBal)}"
                             else -> "Collected $paidStr in cash — Account is now settled (0.00 ₪)"
@@ -1929,13 +1950,16 @@ class TraderViewModel(
                     val updatedPayments = repository.getSupplierPayments()
                     val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
                     val paidStr = WesternFormatters.formatIls(amountIls)
-                    val newOwed = updatedSup?.balanceOwedIls ?: 0.0
+                    val isOwedKnown = updatedSup?.balanceOwedExact != null && updatedSup?.balanceOwedIls?.isNaN() == false
+                    val newOwed = updatedSup?.balanceOwedIls ?: Double.NaN
                     val msgAr = when {
+                        !isOwedKnown -> "تم صرف $paidStr للمورد — الرصيد الحالي غير متاح (يتطلب تحديث البيانات)"
                         newOwed > 0.005 -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatIls(newOwed)}"
                         newOwed < -0.005 -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatIls(-newOwed)}"
                         else -> "تم صرف $paidStr للمورد — أصبح حساب المورد خالصاً (0.00 ₪)"
                     }
                     val msgEn = when {
+                        !isOwedKnown -> "Paid $paidStr to supplier — Current balance unavailable"
                         newOwed > 0.005 -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatIls(newOwed)}"
                         newOwed < -0.005 -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatIls(-newOwed)}"
                         else -> "Paid $paidStr to supplier — Supplier account settled (0.00 ₪)"
@@ -1984,13 +2008,16 @@ class TraderViewModel(
                     val updatedPayments = repository.getSupplierPayments()
                     val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
                     val paidStr = WesternFormatters.formatIls(amountIls)
-                    val newOwed = updatedSup?.balanceOwedIls ?: 0.0
+                    val isOwedKnown = updatedSup?.balanceOwedExact != null && updatedSup?.balanceOwedIls?.isNaN() == false
+                    val newOwed = updatedSup?.balanceOwedIls ?: Double.NaN
                     val msgAr = when {
+                        !isOwedKnown -> "تم صرف $paidStr للمورد — الرصيد الحالي غير متاح (يتطلب تحديث البيانات)"
                         newOwed > 0.005 -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatIls(newOwed)}"
                         newOwed < -0.005 -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatIls(-newOwed)}"
                         else -> "تم صرف $paidStr للمورد — أصبح حساب المورد خالصاً (0.00 ₪)"
                     }
                     val msgEn = when {
+                        !isOwedKnown -> "Paid $paidStr to supplier — Current balance unavailable"
                         newOwed > 0.005 -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatIls(newOwed)}"
                         newOwed < -0.005 -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatIls(-newOwed)}"
                         else -> "Paid $paidStr to supplier — Supplier account settled (0.00 ₪)"
@@ -2706,7 +2733,9 @@ class TraderViewModel(
         sb.appendLine(lang.tr("كشف حساب زبون تفصيلي", "Customer Account Statement"))
         sb.appendLine("${lang.tr("الزبون", "Customer")}: ${customer.name(lang)} (${customer.phone})")
         sb.appendLine("${lang.tr("تاريخ الكشف", "Statement Date")}: ${WesternFormatters.currentTimestamp()}")
+        val isBalKnown = customer.balanceExact != null && !customer.balanceIls.isNaN()
         val balStr = when {
+            !isBalKnown -> lang.tr("غير متاح (يتطلب تحديث كشف الحساب)", "Unavailable (statement refresh required)")
             customer.balanceIls > 0.005 -> lang.tr("ذمة مستحقة للمتجر: ${WesternFormatters.formatIls(customer.balanceIls)}", "Balance Due to Store: ${WesternFormatters.formatIls(customer.balanceIls)}")
             customer.balanceIls < -0.005 -> lang.tr("رصيد مقدم للزبون: ${WesternFormatters.formatIls(-customer.balanceIls)}", "Customer Advance Credit: ${WesternFormatters.formatIls(-customer.balanceIls)}")
             else -> lang.tr("الحساب خالص (0.00 ₪)", "Settled Account (0.00 ₪)")

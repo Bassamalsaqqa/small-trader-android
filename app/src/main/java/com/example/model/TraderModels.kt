@@ -483,7 +483,8 @@ data class Supplier(
     val companyAr: String? = null,
     val companyEn: String? = null,
     val phone: String? = null,
-    val balanceOwedExact: BigDecimal? = null
+    val balanceOwedExact: BigDecimal? = null,
+    val advancesExact: BigDecimal? = null
 ) {
     constructor(
         id: String,
@@ -500,11 +501,17 @@ data class Supplier(
         companyAr = companyAr.ifBlank { null },
         companyEn = companyEn.ifBlank { null },
         phone = phone.ifBlank { null },
-        balanceOwedExact = BigDecimal(balanceOwedIls.toString()).setScale(2, RoundingMode.HALF_UP)
+        balanceOwedExact = BigDecimal(balanceOwedIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        advancesExact = null
     )
 
-    // Legacy presentation bridge; calculations must use nullable balanceOwedExact.
+    // Legacy presentation bridge; calculations must use nullable balanceOwedExact / advancesExact.
     val balanceOwedIls: Double get() = balanceOwedExact?.toDouble() ?: Double.NaN
+    val advancesIls: Double
+        get() = advancesExact?.toDouble()
+            ?: if (!balanceOwedIls.isNaN() && balanceOwedIls < -0.005) -balanceOwedIls
+            else if (!balanceOwedIls.isNaN()) 0.0
+            else Double.NaN
 
     fun name(lang: AppLanguage): String = lang.tr(nameAr, nameEn)
     fun company(lang: AppLanguage): String = lang.tr(companyAr ?: "", companyEn ?: "")

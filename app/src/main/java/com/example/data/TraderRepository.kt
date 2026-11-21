@@ -55,6 +55,7 @@ interface TraderRepository {
     val purchasesFlow: StateFlow<List<PurchaseBill>>
     val expensesFlow: StateFlow<List<ExpenseEntry>>
     val invoicesFlow: StateFlow<List<InvoiceRecord>>
+    val suppliersHasMoreFlow: StateFlow<Boolean>
     val stockMovementsFlow: StateFlow<List<StockMovement>>
     val customerTransactionsFlow: StateFlow<List<CustomerTransaction>>
     val supplierPaymentsFlow: StateFlow<List<SupplierPayment>>
@@ -98,8 +99,12 @@ interface TraderRepository {
     suspend fun recordCustomerPayment(customerId: String, amountIls: Double, note: String, paymentId: String = ""): Result<CustomerTransaction>
     suspend fun createCustomer(name: String, phone: String, address: String, creditLimitIls: Double = 1000.0): Result<Customer>
     suspend fun updateCustomer(customerId: String, name: String, phone: String, address: String, creditLimitIls: Double): Result<Customer>
+    suspend fun getCustomerDetail(customerId: String): Result<Customer> =
+        getCustomers().firstOrNull { it.id == customerId }?.let { Result.success(it) }
+            ?: Result.failure(NoSuchElementException("Customer not found: "))
 
     // Suppliers & Disbursements
+    suspend fun refreshSuppliers(): Result<Unit> = Result.success(Unit)
     fun getSuppliers(): List<Supplier>
     fun getPurchaseBills(): List<PurchaseBill>
     fun getSupplierPayments(): List<SupplierPayment>
@@ -706,6 +711,12 @@ class OfflineDemoTraderRepository(
         _customersFlow.value = customers.toList()
         return Result.success(newCust)
     }
+
+    override suspend fun refreshSuppliers(): Result<Unit> = Result.success(Unit)
+
+    override suspend fun getCustomerDetail(customerId: String): Result<Customer> =
+        getCustomers().firstOrNull { it.id == customerId }?.let { Result.success(it) }
+            ?: Result.failure(NoSuchElementException("Customer not found: "))
 
     override suspend fun updateCustomer(
         customerId: String,
