@@ -76,6 +76,8 @@ class TraderViewModel(
             draftPurchaseOperationId = repository.getDraftOperationId("purchase"),
             draftSupplierPaymentOperationId = repository.getDraftOperationId("supplier_payment"),
             draftCustomerPaymentOperationId = repository.getDraftOperationId("customer_payment"),
+            draftCustomerCreateOperationId = repository.getDraftOperationId("customer_create"),
+            draftSupplierCreateOperationId = repository.getDraftOperationId("supplier_create"),
             draftGrnOperationId = repository.getDraftOperationId("goods_receipt_note")
         )
     )
@@ -116,6 +118,11 @@ class TraderViewModel(
                         }
                     )
                 }
+            }
+        }
+        viewModelScope.launch {
+            repository.suppliersHasMoreFlow.collect { hasMore ->
+                _uiState.update { current -> current.copy(suppliersHasMore = hasMore) }
             }
         }
         viewModelScope.launch {
@@ -1399,17 +1406,19 @@ class TraderViewModel(
         if (repository !is OfflineDemoTraderRepository) {
             loadCustomerStatement(customer.id)
             viewModelScope.launch {
-                val detailRes = repository.getCustomerDetail(customer.id)
-                if (detailRes.isSuccess) {
-                    val detail = detailRes.getOrNull()
-                    if (detail != null) {
-                        _uiState.update { current ->
-                            if (current.selectedCustomerForDetail?.id == customer.id) {
-                                current.copy(selectedCustomerForDetail = detail)
-                            } else current
+                try {
+                    val detailRes = repository.getCustomerDetail(customer.id)
+                    if (detailRes.isSuccess) {
+                        val detail = detailRes.getOrNull()
+                        if (detail != null) {
+                            _uiState.update { current ->
+                                if (current.selectedCustomerForDetail?.id == customer.id) {
+                                    current.copy(selectedCustomerForDetail = detail)
+                                } else current
+                            }
                         }
                     }
-                }
+                } catch (_: Exception) {}
             }
         }
         _uiState.update { state ->
@@ -1575,14 +1584,18 @@ class TraderViewModel(
             return
         }
 
+        val opId = _uiState.value.draftCustomerCreateOperationId
+
         if (repository is OfflineDemoTraderRepository) {
             try {
-                val result = kotlinx.coroutines.runBlocking { repository.createCustomer(name, phone, address) }
+                val result = kotlinx.coroutines.runBlocking { repository.createCustomer(name, phone, address, opId) }
                 val success = if (result.isSuccess) {
                     val created = result.getOrNull()
                     syncCustomers()
+                    val nextOpId = repository.rotateDraftOperationId("customer_create")
                     _uiState.update {
                         it.copy(
+                            draftCustomerCreateOperationId = nextOpId,
                             isAddCustomerDialogOpen = false,
                             lastCustomerPaymentMessageAr = if (created != null) "تمت إضافة الزبون «${created.nameAr}» إلى دفتر الحسابات" else null,
                             lastCustomerPaymentMessageEn = if (created != null) "Added customer \"${created.nameEn}\" to ledger" else null
@@ -1604,13 +1617,15 @@ class TraderViewModel(
         viewModelScope.launch {
             try {
                 val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                    repository.createCustomer(name, phone, address)
+                    repository.createCustomer(name, phone, address, opId)
                 }
                 val success = if (result.isSuccess) {
                     val created = result.getOrNull()
                     syncCustomers()
+                    val nextOpId = repository.rotateDraftOperationId("customer_create")
                     _uiState.update {
                         it.copy(
+                            draftCustomerCreateOperationId = nextOpId,
                             isAddCustomerDialogOpen = false,
                             lastCustomerPaymentMessageAr = if (created != null) "تمت إضافة الزبون «${created.nameAr}» إلى دفتر الحسابات" else null,
                             lastCustomerPaymentMessageEn = if (created != null) "Added customer \"${created.nameEn}\" to ledger" else null
@@ -1990,6 +2005,7 @@ class TraderViewModel(
                     }
                     showBanner(errAr, errEn, isError = true)
                 }
+                releaseActionLock()
                 onComplete(result)
                 return result
             } finally {
@@ -1998,6 +2014,7 @@ class TraderViewModel(
         }
 
         viewModelScope.launch {
+            var completionResult: Result<SupplierPayment>? = null
             try {
                 val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
                     repository.recordSupplierPayment(supplierId, amountIls, note, session, pid)
@@ -2048,15 +2065,16 @@ class TraderViewModel(
                     }
                     showBanner(errAr, errEn, isError = true)
                 }
-                onComplete(result)
+                completionResult = result
             } catch (e: Exception) {
                 val err = Result.failure<SupplierPayment>(e)
                 val msg = e.message ?: "Supplier payment rejected"
                 showBanner(msg, msg, isError = true)
-                onComplete(err)
+                completionResult = err
             } finally {
                 releaseActionLock()
             }
+            completionResult?.let { onComplete(it) }
         }
         return Result.failure(IllegalStateException("Action in progress"))
     }
@@ -2655,6 +2673,30 @@ class TraderViewModel(
         creditLimitIls: Double = 1000.0,
         onComplete: (Boolean) -> Unit = {}
     ): Boolean {
+        return updateCustomer(
+            customerId = customerId,
+            name = name,
+            phone = phone,
+            address = address,
+            updatePhone = true,
+            updateAddress = true,
+            updateCreditLimit = true,
+            creditLimit = BigDecimal.valueOf(creditLimitIls),
+            onComplete = onComplete
+        )
+    }
+
+    fun updateCustomer(
+        customerId: String,
+        name: String,
+        phone: String,
+        address: String,
+        updatePhone: Boolean,
+        updateAddress: Boolean,
+        updateCreditLimit: Boolean,
+        creditLimit: BigDecimal?,
+        onComplete: (Boolean) -> Unit = {}
+    ): Boolean {
         if (!acquireActionLock()) {
             onComplete(false)
             return false
@@ -2663,16 +2705,28 @@ class TraderViewModel(
         if (repository is OfflineDemoTraderRepository) {
             try {
                 val result = kotlinx.coroutines.runBlocking {
-                    repository.updateCustomer(customerId, name, phone, address, creditLimitIls)
+                    repository.updateCustomer(
+                        customerId = customerId,
+                        name = name,
+                        phone = phone,
+                        address = address,
+                        updatePhone = updatePhone,
+                        updateAddress = updateAddress,
+                        updateCreditLimit = updateCreditLimit,
+                        creditLimit = creditLimit
+                    )
                 }
                 val success = if (result.isSuccess) {
                     val updated = result.getOrNull()
                     syncFromRepository()
                     _uiState.update { state ->
+                        val limitDesc = if (updateCreditLimit) {
+                            creditLimit?.let { " (${WesternFormatters.formatIls(it.toDouble())})" } ?: " (غير محدد)"
+                        } else ""
                         state.copy(
                             selectedCustomerForDetail = updated ?: state.selectedCustomerForDetail,
-                            lastCustomerPaymentMessageAr = "تم تحديث بيانات الزبون «${updated?.nameAr}» وسقف الائتمان (${WesternFormatters.formatIls(creditLimitIls)})",
-                            lastCustomerPaymentMessageEn = "Updated customer ${updated?.nameEn} and credit limit (${WesternFormatters.formatIls(creditLimitIls)})"
+                            lastCustomerPaymentMessageAr = "تم تحديث بيانات الزبون «${updated?.nameAr}»$limitDesc",
+                            lastCustomerPaymentMessageEn = "Updated customer ${updated?.nameEn}$limitDesc"
                         )
                     }
                     true
@@ -2691,16 +2745,28 @@ class TraderViewModel(
         viewModelScope.launch {
             try {
                 val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                    repository.updateCustomer(customerId, name, phone, address, creditLimitIls)
+                    repository.updateCustomer(
+                        customerId = customerId,
+                        name = name,
+                        phone = phone,
+                        address = address,
+                        updatePhone = updatePhone,
+                        updateAddress = updateAddress,
+                        updateCreditLimit = updateCreditLimit,
+                        creditLimit = creditLimit
+                    )
                 }
                 val success = if (result.isSuccess) {
                     val updated = result.getOrNull()
                     syncFromRepository()
                     _uiState.update { state ->
+                        val limitDesc = if (updateCreditLimit) {
+                            creditLimit?.let { " (${WesternFormatters.formatIls(it.toDouble())})" } ?: " (غير محدد)"
+                        } else ""
                         state.copy(
                             selectedCustomerForDetail = updated ?: state.selectedCustomerForDetail,
-                            lastCustomerPaymentMessageAr = "تم تحديث بيانات الزبون «${updated?.nameAr}» وسقف الائتمان (${WesternFormatters.formatIls(creditLimitIls)})",
-                            lastCustomerPaymentMessageEn = "Updated customer ${updated?.nameEn} and credit limit (${WesternFormatters.formatIls(creditLimitIls)})"
+                            lastCustomerPaymentMessageAr = "تم تحديث بيانات الزبون «${updated?.nameAr}»$limitDesc",
+                            lastCustomerPaymentMessageEn = "Updated customer ${updated?.nameEn}$limitDesc"
                         )
                     }
                     true
@@ -2774,19 +2840,22 @@ class TraderViewModel(
             return false
         }
 
+        val opId = if (supplierId == null) _uiState.value.draftSupplierCreateOperationId else ""
         if (repository is OfflineDemoTraderRepository) {
             try {
                 val session = _uiState.value.currentSession
                 val result = kotlinx.coroutines.runBlocking {
-                    repository.saveSupplier(supplierId, name, company, phone, session)
+                    repository.saveSupplier(supplierId, name, company, phone, session, opId)
                 }
                 val success = if (result.isSuccess) {
                     val saved = result.getOrNull()
                     syncFromRepository()
+                    val nextOpId = if (supplierId == null) repository.rotateDraftOperationId("supplier_create") else _uiState.value.draftSupplierCreateOperationId
                     _uiState.update { state ->
                         val msgAr = if (supplierId == null) "تمت إضافة المورد «${saved?.nameAr}»" else "تم تحديث بيانات المورد «${saved?.nameAr}»"
                         val msgEn = if (supplierId == null) "Added supplier ${saved?.nameEn}" else "Updated supplier ${saved?.nameEn}"
                         state.copy(
+                            draftSupplierCreateOperationId = nextOpId,
                             selectedSupplierForDetail = saved ?: state.selectedSupplierForDetail,
                             lastSupplierActionMessageAr = msgAr,
                             lastSupplierActionMessageEn = msgEn,
@@ -2820,15 +2889,17 @@ class TraderViewModel(
             try {
                 val session = _uiState.value.currentSession
                 val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                    repository.saveSupplier(supplierId, name, company, phone, session)
+                    repository.saveSupplier(supplierId, name, company, phone, session, opId)
                 }
                 val success = if (result.isSuccess) {
                     val saved = result.getOrNull()
                     syncFromRepository()
+                    val nextOpId = if (supplierId == null) repository.rotateDraftOperationId("supplier_create") else _uiState.value.draftSupplierCreateOperationId
                     _uiState.update { state ->
                         val msgAr = if (supplierId == null) "تمت إضافة المورد «${saved?.nameAr}»" else "تم تحديث بيانات المورد «${saved?.nameAr}»"
                         val msgEn = if (supplierId == null) "Added supplier ${saved?.nameEn}" else "Updated supplier ${saved?.nameEn}"
                         state.copy(
+                            draftSupplierCreateOperationId = nextOpId,
                             selectedSupplierForDetail = saved ?: state.selectedSupplierForDetail,
                             lastSupplierActionMessageAr = msgAr,
                             lastSupplierActionMessageEn = msgEn,
@@ -2853,14 +2924,37 @@ class TraderViewModel(
                 }
                 onComplete(success)
             } catch (e: Exception) {
-                val err = e.message ?: "Supplier save failed"
-                showBanner(err, err, isError = true)
+                val rawErr = e.message ?: "Supplier save failed"
+                val parts = rawErr.split(" | ", limit = 2)
+                val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                _uiState.update {
+                    it.copy(
+                        lastSupplierActionMessageAr = errAr,
+                        lastSupplierActionMessageEn = errEn,
+                        isSupplierActionError = true
+                    )
+                }
+                showBanner(errAr, errEn, isError = true)
                 onComplete(false)
             } finally {
                 releaseActionLock()
             }
         }
         return false
+    }
+
+    private var supplierSearchJob: Job? = null
+
+    fun searchSuppliers(query: String) {
+        supplierSearchJob?.cancel()
+        val trimmed = query.trim()
+        supplierSearchJob = viewModelScope.launch {
+            delay(300)
+            try {
+                repository.searchSuppliers(trimmed)
+            } catch (_: Exception) {}
+        }
     }
 
     fun confirmPhysicalGoodsReceiptResult(

@@ -116,6 +116,7 @@ fun SuppliersScreen(
     onDismissFeedback: (() -> Unit)? = null,
     onSaveSupplier: ((supplierId: String?, name: String, company: String, phone: String) -> Unit)? = null,
     onSaveSupplierWithResult: ((supplierId: String?, name: String, company: String, phone: String, onComplete: (Boolean) -> Unit) -> Unit)? = null,
+    onSearchSuppliers: ((String) -> Unit)? = null,
     launchCreate: Boolean = false,
     onLaunchConsumed: () -> Unit = {}
 ) {
@@ -334,7 +335,10 @@ fun SuppliersScreen(
                 // Instant Search by Supplier Name, Representative or Phone
                 OutlinedTextField(
                     value = searchQuery,
-                    onValueChange = { searchQuery = it },
+                    onValueChange = {
+                        searchQuery = it
+                        onSearchSuppliers?.invoke(it)
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp)
@@ -595,9 +599,9 @@ private fun SupplierDirectoryRow(
     val hasAdvance = (supplier.advancesExact != null && supplier.advancesExact > BigDecimal.ZERO) || (supplier.balanceOwedExact != null && supplier.balanceOwedExact < BigDecimal.ZERO)
 
     val statusBadgeTone = when {
-        supplier.balanceOwedExact == null -> StitchBadgeTone.NEUTRAL
-        isPayableOwed -> StitchBadgeTone.WARNING
         hasAdvance -> StitchBadgeTone.SUCCESS
+        isPayableOwed -> StitchBadgeTone.WARNING
+        supplier.balanceOwedExact == null -> StitchBadgeTone.NEUTRAL
         else -> StitchBadgeTone.NEUTRAL
     }
 
@@ -608,9 +612,9 @@ private fun SupplierDirectoryRow(
     } else 0.0
 
     val statusLabel = when {
-        supplier.balanceOwedExact == null -> lang.tr("الرصيد غير متاح", "Balance unavailable")
-        isPayableOwed -> "${lang.tr("مستحق للمورد", "Owed to Supplier")} ${StitchBidiUtils.formatIls(supplier.balanceOwedIls)}"
         hasAdvance -> "${lang.tr("لنا رصيد مقدم", "Store Advance")} ${StitchBidiUtils.formatIls(advanceAmountIls)}"
+        isPayableOwed -> "${lang.tr("مستحق للمورد", "Owed to Supplier")} ${StitchBidiUtils.formatIls(supplier.balanceOwedIls)}"
+        supplier.balanceOwedExact == null -> lang.tr("الرصيد غير متاح", "Balance unavailable")
         else -> lang.tr("خالص", "Settled")
     }
 

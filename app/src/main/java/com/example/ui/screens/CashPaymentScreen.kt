@@ -982,13 +982,21 @@ fun CashPaymentScreen(
                                     horizontalAlignment = Alignment.End
                                 ) {
                                     Text(
-                                        text = lang.tr("سقف الائتمان المعتمد", "Approved Credit Limit"),
+                                        text = if (selectedCustomer.creditLimitExact != null) {
+                                            lang.tr("سقف الائتمان المعتمد", "Approved Credit Limit")
+                                        } else {
+                                            lang.tr("سقف الائتمان", "Credit Limit")
+                                        },
                                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = WesternFormatters.formatIls(selectedCustomer.creditLimitIls),
+                                        text = if (selectedCustomer.creditLimitExact != null) {
+                                            WesternFormatters.formatIls(selectedCustomer.creditLimitIls)
+                                        } else {
+                                            lang.tr("غير محدد", "Not set")
+                                        },
                                         style = MaterialTheme.typography.titleMedium.copy(
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = MonoFontFamily
@@ -1004,55 +1012,66 @@ fun CashPaymentScreen(
                             val overLimit = state.wouldCreditExceedCustomerLimit
 
                             if (isCustBalKnown && projectedBalance != null) {
-                                val consumptionRatio = if (selectedCustomer.creditLimitIls > 0.0) {
-                                    (projectedBalance / selectedCustomer.creditLimitIls).toFloat().coerceIn(0f, 1f)
-                                } else 1f
-
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = lang.tr("نسبة استهلاك السقف بعد الفاتورة", "Limit Usage After Sale"),
-                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Text(
-                                            text = "${(consumptionRatio * 100).toInt()}%",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                fontFamily = MonoFontFamily
-                                            ),
-                                            color = if (overLimit) financial.debit else MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-
-                                    LinearProgressIndicator(
-                                        progress = { consumptionRatio },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(8.dp)
-                                            .clip(RoundedCornerShape(4.dp)),
-                                        color = if (overLimit) financial.debit else MaterialTheme.colorScheme.primary,
-                                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                if (selectedCustomer.creditLimitExact == null) {
+                                    Text(
+                                        text = lang.tr(
+                                            "سقف الائتمان غير محدد لهذا الزبون (إرشادي) — الرصيد المتوقع بعد العملية: ${WesternFormatters.formatIls(projectedBalance)}",
+                                            "No credit limit set for customer (advisory) — Projected balance after sale: ${WesternFormatters.formatIls(projectedBalance)}"
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                } else {
+                                    val consumptionRatio = if (selectedCustomer.creditLimitIls > 0.0) {
+                                        (projectedBalance / selectedCustomer.creditLimitIls).toFloat().coerceIn(0f, 1f)
+                                    } else 1f
 
-                                    if (!overLimit) {
-                                        val safeRemaining = (selectedCustomer.creditLimitIls - projectedBalance).coerceAtLeast(0.0)
-                                        Text(
-                                            text = lang.tr(
-                                                "ضمن الحد الائتماني الآمن (متبقي ${WesternFormatters.formatIls(safeRemaining)} متاح)",
-                                                "Within safe credit ceiling (${WesternFormatters.formatIls(safeRemaining)} available)"
-                                            ),
-                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-                                            color = financial.income
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = lang.tr("نسبة استهلاك السقف بعد الفاتورة", "Limit Usage After Sale"),
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = "${(consumptionRatio * 100).toInt()}%",
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = MonoFontFamily
+                                                ),
+                                                color = if (overLimit) financial.debit else MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+
+                                        LinearProgressIndicator(
+                                            progress = { consumptionRatio },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(8.dp)
+                                                .clip(RoundedCornerShape(4.dp)),
+                                            color = if (overLimit) financial.debit else MaterialTheme.colorScheme.primary,
+                                            trackColor = MaterialTheme.colorScheme.surfaceVariant
                                         )
+
+                                        if (!overLimit) {
+                                            val safeRemaining = (selectedCustomer.creditLimitIls - projectedBalance).coerceAtLeast(0.0)
+                                            Text(
+                                                text = lang.tr(
+                                                    "ضمن الحد الائتماني الآمن (متبقي ${WesternFormatters.formatIls(safeRemaining)} متاح)",
+                                                    "Within safe credit ceiling (${WesternFormatters.formatIls(safeRemaining)} available)"
+                                                ),
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                                                color = financial.income
+                                            )
+                                        }
                                     }
                                 }
                             } else {
@@ -1338,6 +1357,10 @@ fun CashPaymentScreen(
                             overLimit -> lang.tr(
                                 "يتجاوز سقف الدين بمقدار ${WesternFormatters.formatIls(state.creditCeilingExcessIls)}",
                                 "Exceeds credit limit by ${WesternFormatters.formatIls(state.creditCeilingExcessIls)}"
+                            )
+                            selectedCustomer.creditLimitExact == null -> lang.tr(
+                                "سقف الائتمان غير محدد (إرشادي) • قيد على الحساب: ${WesternFormatters.formatIls(state.basketNetTotalIls)}",
+                                "Credit limit unset (advisory) • Debit: ${WesternFormatters.formatIls(state.basketNetTotalIls)}"
                             )
                             else -> lang.tr(
                                 "قيد على الحساب: ${WesternFormatters.formatIls(state.basketNetTotalIls)} • الصندوق: 0.00 ₪",

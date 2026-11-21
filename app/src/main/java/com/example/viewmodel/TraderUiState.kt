@@ -106,6 +106,8 @@ data class TraderUiState(
     val draftSupplierPaymentOperationId: String = java.util.UUID.randomUUID().toString(),
     val draftCustomerPaymentOperationId: String = java.util.UUID.randomUUID().toString(),
     val draftGrnOperationId: String = java.util.UUID.randomUUID().toString(),
+    val draftCustomerCreateOperationId: String = "",
+    val draftSupplierCreateOperationId: String = "",
     val checkoutErrorAr: String? = null,
     val checkoutErrorEn: String? = null,
 
@@ -335,17 +337,19 @@ data class TraderUiState(
         get() {
             if (!isCustomerBalanceKnown) return false
             val customer = selectedCustomer ?: return false
+            val limitExact = customer.creditLimitExact ?: return false
             val projected = projectedCustomerBalanceIfCreditIls ?: return false
-            return projected > customer.creditLimitIls + 0.001
+            return projected > limitExact.toDouble() + 0.001
         }
 
     val creditCeilingExcessIls: Double
         get() {
             if (!isCustomerBalanceKnown) return 0.0
             val customer = selectedCustomer ?: return 0.0
+            val limitExact = customer.creditLimitExact ?: return 0.0
             val projected = projectedCustomerBalanceIfCreditIls ?: return 0.0
             val projBd = BigDecimal(projected.toString()).setScale(2, RoundingMode.HALF_UP)
-            val limitBd = BigDecimal(customer.creditLimitIls.toString()).setScale(2, RoundingMode.HALF_UP)
+            val limitBd = limitExact.setScale(2, RoundingMode.HALF_UP)
             return projBd.subtract(limitBd).setScale(2, RoundingMode.HALF_UP).toDouble().coerceAtLeast(0.0)
         }
 

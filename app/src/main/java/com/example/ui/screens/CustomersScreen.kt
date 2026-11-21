@@ -754,6 +754,7 @@ fun CustomerDetailScreen(
     onDismissFeedback: (() -> Unit)? = null,
     onUpdateCustomer: ((customerId: String, name: String, phone: String, address: String, creditLimitIls: Double) -> Unit)? = null,
     onUpdateCustomerWithResult: ((customerId: String, name: String, phone: String, address: String, creditLimitIls: Double, onComplete: (Boolean) -> Unit) -> Unit)? = null,
+    onUpdateCustomerWithDetails: ((customerId: String, name: String, phone: String, address: String, updatePhone: Boolean, updateAddress: Boolean, updateCreditLimit: Boolean, creditLimit: BigDecimal?, onComplete: (Boolean) -> Unit) -> Unit)? = null,
     onFormatStatementText: ((String) -> String)? = null
 ) {
     val lang = state.language
@@ -1224,7 +1225,7 @@ fun CustomerDetailScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (onUpdateCustomer != null) {
+                    if (onUpdateCustomerWithDetails != null || onUpdateCustomerWithResult != null || onUpdateCustomer != null) {
                         OutlinedButton(
                             onClick = { isEditCustomerOpen = true },
                             shape = RoundedCornerShape(10.dp),
@@ -1414,18 +1415,22 @@ fun CustomerDetailScreen(
         }
     }
 
-    if (isEditCustomerOpen && (onUpdateCustomerWithResult != null || onUpdateCustomer != null)) {
+    if (isEditCustomerOpen && (onUpdateCustomerWithDetails != null || onUpdateCustomerWithResult != null || onUpdateCustomer != null)) {
         EditCustomerDialog(
             customer = customer,
             lang = lang,
             onDismiss = { isEditCustomerOpen = false },
-            onConfirmUpdate = { name, phone, address, creditLimitIls ->
-                if (onUpdateCustomerWithResult != null) {
-                    onUpdateCustomerWithResult(customer.id, name, phone, address, creditLimitIls) { success ->
+            onConfirmUpdate = { name, phone, address, upPhone, upAddr, upLimit, limitExact, limitIls ->
+                if (onUpdateCustomerWithDetails != null) {
+                    onUpdateCustomerWithDetails(customer.id, name, phone, address, upPhone, upAddr, upLimit, limitExact) { success ->
+                        if (success) isEditCustomerOpen = false
+                    }
+                } else if (onUpdateCustomerWithResult != null) {
+                    onUpdateCustomerWithResult(customer.id, name, phone, address, limitIls) { success ->
                         if (success) isEditCustomerOpen = false
                     }
                 } else {
-                    onUpdateCustomer?.invoke(customer.id, name, phone, address, creditLimitIls)
+                    onUpdateCustomer?.invoke(customer.id, name, phone, address, limitIls)
                     isEditCustomerOpen = false
                 }
             }
@@ -1456,34 +1461,49 @@ private fun EditCustomerDialog(
     customer: Customer,
     lang: AppLanguage,
     onDismiss: () -> Unit,
-    onConfirmUpdate: (name: String, phone: String, address: String, creditLimitIls: Double) -> Unit
+    onConfirmUpdate: (
+        name: String,
+        phone: String,
+        address: String,
+        updatePhone: Boolean,
+        updateAddress: Boolean,
+        updateCreditLimit: Boolean,
+        creditLimit: BigDecimal?,
+        creditLimitIls: Double
+    ) -> Unit
 ) {
     var nameText by rememberSaveable(customer.id) { mutableStateOf(customer.nameAr) }
     var phoneText by rememberSaveable(customer.id) { mutableStateOf(customer.phone ?: "") }
     var addressText by rememberSaveable(customer.id) { mutableStateOf(customer.addressAr ?: "") }
     var limitText by rememberSaveable(customer.id) {
-        mutableStateOf(
-            if (customer.creditLimitExact != null) {
-                WesternFormatters.formatNumber(customer.creditLimitIls).removeSuffix(".00")
-            } else ""
-        )
+        mutableStateOf(customer.creditLimitExact?.toPlainString() ?: "")
     }
+
+    var nameModified by rememberSaveable(customer.id) { mutableStateOf(false) }
+    var phoneModified by rememberSaveable(customer.id) { mutableStateOf(false) }
+    var addressModified by rememberSaveable(customer.id) { mutableStateOf(false) }
+    var limitModified by rememberSaveable(customer.id) { mutableStateOf(false) }
 
     val isLimitValid = remember(limitText) {
         val trimmed = limitText.trim()
         if (trimmed.isEmpty()) true
         else {
-            val parts = trimmed.split(".")
-            if (parts.size > 2) false
-            else if (parts.size == 2 && parts[1].length > 2) false
-            else trimmed.toDoubleOrNull()?.let { it >= 0.0 } ?: false
+            try {
+                val bd = BigDecimal(trimmed)
+                val parts = trimmed.split(".")
+                val decPlaces = if (parts.size > 1) parts[1].length else 0
+                bd >= BigDecimal.ZERO && decPlaces <= 6
+            } catch (_: Exception) {
+                false
+            }
         }
     }
     val limitErrorMsg = if (!isLimitValid) {
-        lang.tr("يرجى إدخال مبلغ صحيح (بحد أقصى خانتان عشريتان)", "Enter a valid amount (up to 2 decimal places)")
+        lang.tr("يرجى إدخال مبلغ صحيح (بحد أقصى 6 خانات عشرية)", "Enter a valid amount (up to 6 decimal places)")
     } else null
 
-    val parsedLimit = limitText.trim().toDoubleOrNull() ?: if (limitText.isBlank()) 0.0 else customer.creditLimitIls
+    val parsedLimitExact = if (limitText.isBlank()) null else try { BigDecimal(limitText.trim()) } catch (_: Exception) { null }
+    val parsedLimitDouble = parsedLimitExact?.toDouble() ?: if (limitText.isBlank()) 0.0 else customer.creditLimitIls
     val canSave = nameText.trim().length >= 2 && isLimitValid
 
     AlertDialog(
@@ -1502,7 +1522,10 @@ private fun EditCustomerDialog(
             ) {
                 OutlinedTextField(
                     value = nameText,
-                    onValueChange = { nameText = it },
+                    onValueChange = {
+                        nameText = it
+                        nameModified = true
+                    },
                     label = { Text(lang.tr("اسم الزبون أو المنشأة *", "Customer Name *")) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
@@ -1512,7 +1535,10 @@ private fun EditCustomerDialog(
                 )
                 OutlinedTextField(
                     value = phoneText,
-                    onValueChange = { phoneText = WesternFormatters.sanitizeWesternDigits(it) },
+                    onValueChange = {
+                        phoneText = WesternFormatters.sanitizeWesternDigits(it)
+                        phoneModified = true
+                    },
                     label = { Text(lang.tr("رقم الجوال", "Phone Number")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     singleLine = true,
@@ -1527,7 +1553,10 @@ private fun EditCustomerDialog(
                 )
                 OutlinedTextField(
                     value = addressText,
-                    onValueChange = { addressText = it },
+                    onValueChange = {
+                        addressText = it
+                        addressModified = true
+                    },
                     label = { Text(lang.tr("العنوان / المنطقة", "Neighborhood / Address")) },
                     placeholder = {
                         if (customer.addressAr == null) {
@@ -1545,6 +1574,7 @@ private fun EditCustomerDialog(
                     onValueChange = {
                         limitText = WesternFormatters.sanitizeWesternDigits(it)
                             .filter { ch -> ch.isDigit() || ch == '.' }
+                        limitModified = true
                     },
                     label = { Text(lang.tr("سقف الدين المسموح (₪)", "Credit Limit (₪)")) },
                     placeholder = {
@@ -1567,7 +1597,16 @@ private fun EditCustomerDialog(
             Button(
                 onClick = {
                     if (canSave) {
-                        onConfirmUpdate(nameText.trim(), phoneText.trim(), addressText.trim(), parsedLimit)
+                        onConfirmUpdate(
+                            nameText.trim(),
+                            phoneText.trim(),
+                            addressText.trim(),
+                            phoneModified,
+                            addressModified,
+                            limitModified,
+                            parsedLimitExact,
+                            parsedLimitDouble
+                        )
                     }
                 },
                 enabled = canSave,

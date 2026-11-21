@@ -14,6 +14,8 @@ sealed interface StrictJsonElement {
     fun asString(): String =
         (this as? StrictJsonString)?.value ?: throw CanonicalSerializationException("Expected JSON string, got ${this::class.simpleName}")
 
+    fun asStringOrNull(): String? = toNullableString()
+
     fun asInt(): Int {
         val num = this as? StrictJsonNumber ?: throw CanonicalSerializationException("Expected JSON number, got ${this::class.simpleName}")
         if (!num.isInt) {
@@ -56,6 +58,21 @@ data class StrictJsonBoolean(val value: Boolean) : StrictJsonElement
 
 object StrictJsonNull : StrictJsonElement {
     override fun toString(): String = "null"
+}
+
+fun StrictJsonElement?.toNullableString(): String? {
+    if (this == null || this is StrictJsonNull) return null
+    return (this as? StrictJsonString)?.value
+}
+
+fun StrictJsonElement?.toNullableBigDecimal(scale: Int? = null): java.math.BigDecimal? {
+    val str = this.toNullableString() ?: return null
+    return try {
+        val bd = java.math.BigDecimal(str)
+        if (scale != null) bd.setScale(scale, java.math.RoundingMode.HALF_UP) else bd
+    } catch (_: Exception) {
+        null
+    }
 }
 
 /**

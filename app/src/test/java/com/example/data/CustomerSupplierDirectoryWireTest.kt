@@ -63,7 +63,19 @@ class CustomerSupplierDirectoryWireTest {
 
         override fun execute(request: TransportRequest): TransportResponse {
             requests.add(request)
-            return if (responseQueue.isNotEmpty()) responseQueue.removeAt(0) else defaultResponse
+            if (request.path.contains("/receipts/") && request.path.endsWith("/status")) {
+                val receiptIdx = responseQueue.indexOfFirst {
+                    it.body?.contains("response_snapshot") == true || it.body?.contains("\"outcome\":") == true
+                }
+                if (receiptIdx >= 0) {
+                    return responseQueue.removeAt(receiptIdx)
+                }
+                return TransportResponse(404, emptyMap(), """{"message":"Receipt not found"}""")
+            }
+            if (responseQueue.isNotEmpty()) {
+                return responseQueue.removeAt(0)
+            }
+            return defaultResponse
         }
     }
 
@@ -938,14 +950,389 @@ class CustomerSupplierDirectoryWireTest {
 
     @Test
     fun testCustomerEdit_ExactDecimalCreditLimitValidation() {
-        val regex = Regex("^\\d*(\\.\\d{0,2})?$")
+        val regex = Regex("^\\d*(\\.\\d{0,6})?$")
         assertTrue(regex.matches("12.34"))
         assertTrue(regex.matches("12"))
         assertTrue(regex.matches("12.3"))
         assertTrue(regex.matches(""))
         assertTrue(regex.matches("1000.00"))
-        assertFalse("More than 2 decimals must be rejected", regex.matches("12.345"))
+        assertTrue("6 decimals must be accepted for historical limits", regex.matches("123.456789"))
+        assertFalse("More than 6 decimals must be rejected", regex.matches("12.3456789"))
         assertFalse("Non-digits must be rejected", regex.matches("abc"))
         assertFalse("Multiple dots must be rejected", regex.matches("12.34.56"))
+    }
+
+    // =========================================================================
+    // 9. Exact 598c Nullable Payload Fixtures & Stable Durable Keys
+    // =========================================================================
+
+    @Test
+    fun testCustomerCreate_ExplicitJsonNullBalanceAndLimit_ParsesWithoutCrash() = runBlocking {
+        val transport = RecordingTransport()
+        val repo = createRepository(transport)
+
+        val customerId = "01JCV8X9M2NQW3TYZ4R5S6789K"
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """
+                {
+                    "id": "$customerId",
+                    "name": "أبو كمال الزبون",
+                    "phone": "0599-123456",
+                    "address": null,
+                    "balance": null,
+                    "credit_limit": null
+                }
+                """.trimIndent()
+            )
+        )
+
+        val createRes = repo.createCustomer("أبو كمال الزبون", "0599-123456", "", "test-op-create-1")
+        assertTrue("Customer creation with null balance must succeed", createRes.isSuccess)
+
+        val customer = createRes.getOrNull()
+        assertNotNull(customer)
+        assertEquals(customerId, customer!!.id)
+        assertEquals("أبو كمال الزبون", customer.nameAr)
+        assertNull("balanceExact must be strictly null when backend sends null", customer.balanceExact)
+        assertTrue("balanceIls must be NaN when balanceExact is null", customer.balanceIls.isNaN())
+        assertNull("creditLimitExact must be null when backend sends null", customer.creditLimitExact)
+    }
+
+    @Test
+    fun testCustomerDetail_ExplicitJsonNullBalance_ParsesWithoutCrash() = runBlocking {
+        val transport = RecordingTransport()
+        val repo = createRepository(transport)
+
+        val customerId = "01JCV8X9M2NQW3TYZ4R5S6789A"
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """
+                {
+                    "id": "$customerId",
+                    "name": "أبو كمال الزبون",
+                    "balance": null,
+                    "credit_limit": null
+                }
+                """.trimIndent()
+            )
+        )
+
+        val detailRes = repo.getCustomerDetail(customerId)
+        assertTrue("Customer detail with null balance must succeed without crash", detailRes.isSuccess)
+        val detail = detailRes.getOrNull()
+        assertNotNull(detail)
+        assertNull("Detail balanceExact must be null", detail!!.balanceExact)
+        assertTrue("Detail balanceIls must be NaN", detail.balanceIls.isNaN())
+    }
+
+    @Test
+    fun testSupplierDirectory_NullableBalanceAndAdvancesCombinations() = runBlocking {
+        val transport = RecordingTransport()
+        val repo = createRepository(transport)
+
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """
+                {
+                    "items": [
+                        {
+                            "id": "01JCV8X9M2NQW3TYZ4R5S67891",
+                            "name": "مورد سلفة فقط",
+                            "balance_owed": null,
+                            "advances": "120.00"
+                        },
+                        {
+                            "id": "01JCV8X9M2NQW3TYZ4R5S67892",
+                            "name": "مورد ذمة فقط",
+                            "balance_owed": "450.00",
+                            "advances": null
+                        },
+                        {
+                            "id": "01JCV8X9M2NQW3TYZ4R5S67893",
+                            "name": "مورد أرصدة مجهولة",
+                            "balance_owed": null,
+                            "advances": null
+                        }
+                    ],
+                    "has_more": false
+                }
+                """.trimIndent()
+            )
+        )
+
+        val refreshRes = repo.refreshSuppliers()
+        assertTrue("Supplier refresh with nullable balances must succeed", refreshRes.isSuccess)
+
+        val suppliers = repo.getSuppliers()
+        assertEquals(3, suppliers.size)
+
+        val s1 = suppliers.first { it.id == "01JCV8X9M2NQW3TYZ4R5S67891" }
+        assertNull("s1 balanceOwedExact must be null", s1.balanceOwedExact)
+        assertEquals(BigDecimal("120.00"), s1.advancesExact)
+
+        val s2 = suppliers.first { it.id == "01JCV8X9M2NQW3TYZ4R5S67892" }
+        assertEquals(BigDecimal("450.00"), s2.balanceOwedExact)
+        assertNull("s2 advancesExact must be null", s2.advancesExact)
+
+        val s3 = suppliers.first { it.id == "01JCV8X9M2NQW3TYZ4R5S67893" }
+        assertNull("s3 balanceOwedExact must be null", s3.balanceOwedExact)
+        assertNull("s3 advancesExact must be null", s3.advancesExact)
+    }
+
+    @Test
+    fun testCustomerCreate_StableDurableCommandKeyAcrossFailureAndRetry() = runBlocking {
+        val transport = RecordingTransport()
+        val repo = createRepository(transport)
+
+        val stableOpId = "stable-cust-op-42"
+
+        // First attempt fails with 500 Internal Server Error
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 500,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """{"message":"Internal Server Error"}"""
+            )
+        )
+        val res1 = repo.createCustomer("زبون تجربة مفتاح", "0599-000111", "", stableOpId)
+        assertFalse("First attempt must fail", res1.isSuccess)
+
+        // Second attempt succeeds
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """{"id":"01JCV8X9M2NQW3TYZ4R5S6789M","name":"زبون تجربة مفتاح"}"""
+            )
+        )
+        val res2 = repo.createCustomer("زبون تجربة مفتاح", "0599-000111", "", stableOpId)
+        assertTrue("Second attempt must succeed", res2.isSuccess)
+
+        // Verify that BOTH attempts used the exact same Idempotency-Key
+        val postRequests = transport.requests.filter { it.method == HttpMethod.POST }
+        assertEquals(2, postRequests.size)
+        val key1 = postRequests[0].headers["Idempotency-Key"]
+        val key2 = postRequests[1].headers["Idempotency-Key"]
+        assertNotNull(key1)
+        assertEquals("custcreate-$stableOpId", key1)
+        assertEquals("Retry must preserve exact same Idempotency-Key", key1, key2)
+    }
+
+    @Test
+    fun testSupplierCreate_StableDurableCommandKeyAcrossFailureAndRetry() = runBlocking {
+        val transport = RecordingTransport()
+        val repo = createRepository(transport)
+
+        val stableOpId = "stable-supp-op-99"
+
+        // First attempt fails with 503 Service Unavailable
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 503,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """{"message":"Service Unavailable"}"""
+            )
+        )
+        val res1 = repo.createSupplier("مورد تجربة مفتاح", "0599-222333", "", stableOpId)
+        assertFalse("First attempt must fail", res1.isSuccess)
+
+        // Second attempt succeeds
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """{"id":"01JCV8X9M2NQW3TYZ4R5S6789N","name":"مورد تجربة مفتاح"}"""
+            )
+        )
+        val res2 = repo.createSupplier("مورد تجربة مفتاح", "0599-222333", "", stableOpId)
+        assertTrue("Second attempt must succeed", res2.isSuccess)
+
+        // Verify that BOTH attempts used the exact same Idempotency-Key
+        val postRequests = transport.requests.filter { it.method == HttpMethod.POST }
+        assertEquals(2, postRequests.size)
+        val key1 = postRequests[0].headers["Idempotency-Key"]
+        val key2 = postRequests[1].headers["Idempotency-Key"]
+        assertNotNull(key1)
+        assertEquals("suppcreate-$stableOpId", key1)
+        assertEquals("Supplier retry must preserve exact same Idempotency-Key", key1, key2)
+    }
+
+    @Test
+    fun testCustomerUpdate_NameOnlyEditOmitsUntouchedFields_Preserves6DecimalLimit() = runBlocking {
+        val transport = RecordingTransport()
+        val repo = createRepository(transport)
+
+        val customerId = "01JCV8X9M2NQW3TYZ4R5S6789P"
+        // Seed customer with historical 6-decimal limit
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """
+                {
+                    "id": "$customerId",
+                    "name": "الزبون الأصلي",
+                    "phone": "0599-111222",
+                    "address": "نابلس - شارع فيصل",
+                    "credit_limit": "123.456789"
+                }
+                """.trimIndent()
+            )
+        )
+        val initRes = repo.createCustomer("الزبون الأصلي", "0599-111222", "نابلس - شارع فيصل")
+        assertTrue(initRes.isSuccess)
+        assertEquals(BigDecimal("123.456789"), repo.getCustomers().first().creditLimitExact)
+
+        // Server responds to name-only PUT
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """
+                {
+                    "id": "$customerId",
+                    "name": "الاسم الجديد المعدل فقط"
+                }
+                """.trimIndent()
+            )
+        )
+
+        // Update name ONLY with untouched flags
+        val updateRes = repo.updateCustomer(
+            customerId = customerId,
+            name = "الاسم الجديد المعدل فقط",
+            phone = "0599-111222",
+            address = "نابلس - شارع فيصل",
+            updatePhone = false,
+            updateAddress = false,
+            updateCreditLimit = false,
+            creditLimit = null
+        )
+        assertTrue("Name-only update must succeed", updateRes.isSuccess)
+
+        // Verify PUT payload on wire
+        val putReq = transport.requests.last { it.method == HttpMethod.PUT }
+        val putBody = putReq.body ?: ""
+        assertTrue("PUT body must contain updated name", putBody.contains("\"name_ar\":\"الاسم الجديد المعدل فقط\""))
+        assertFalse("PUT body must NOT contain phone when updatePhone=false", putBody.contains("phone"))
+        assertFalse("PUT body must NOT contain address when updateAddress=false", putBody.contains("address"))
+        assertFalse("PUT body must NOT contain credit_limit when updateCreditLimit=false", putBody.contains("credit_limit"))
+
+        // Verify local repository preserves untouched 6-decimal limit!
+        val updatedCustomer = repo.getCustomers().first { it.id == customerId }
+        assertEquals("الاسم الجديد المعدل فقط", updatedCustomer.nameAr)
+        assertEquals(BigDecimal("123.456789"), updatedCustomer.creditLimitExact)
+        assertEquals("0599-111222", updatedCustomer.phone)
+    }
+
+    @Test
+    fun testCustomerPayment_RefreshFails_InvalidatesPrepaymentBalance() = runBlocking {
+        val transport = RecordingTransport()
+        val repo = createRepository(transport)
+
+        val customerId = "01JCV8X9M2NQW3TYZ4R5S6789Q"
+        // Seed customer with known balance
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """
+                {
+                    "id": "$customerId",
+                    "name": "زبون ذمة سابقة",
+                    "balance": "300.00"
+                }
+                """.trimIndent()
+            )
+        )
+        repo.createCustomer("زبون ذمة سابقة", "", "")
+
+        // 1. Payment POST succeeds
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 200,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """{"id":"pay_123","amount":"100.00"}"""
+            )
+        )
+        // 2. Subsequent GET customer detail fails with 500 error
+        transport.responseQueue.add(
+            TransportResponse(
+                statusCode = 500,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = """{"message":"Internal Server Error"}"""
+            )
+        )
+
+        val payRes = repo.recordCustomerPayment(customerId, 100.0, "دفعة نقدية", "op-pay-1")
+        assertTrue("Payment recording itself succeeded on wire", payRes.isSuccess)
+
+        // Verify that customer balanceExact was invalidated (null), NOT claiming stale 300.00 or false 0.00
+        val custAfterPay = repo.getCustomers().first { it.id == customerId }
+        assertNull("Customer balanceExact must be invalidated to null when refresh fails", custAfterPay.balanceExact)
+        assertTrue("Customer balanceIls must be NaN when balance is invalidated", custAfterPay.balanceIls.isNaN())
+    }
+
+    @Test
+    fun testSupplierDirectory_KnownAdvanceWinsOverUnavailableBranch() {
+        val supplierWithAdvanceAndNullBalance = Supplier(
+            id = "01JCV8X9M2NQW3TYZ4R5S6789R",
+            nameAr = "مورد سلفة مؤكدة",
+            nameEn = "Advance Supplier",
+            balanceOwedExact = null,
+            advancesExact = BigDecimal("150.00")
+        )
+
+        val isPayableOwed = supplierWithAdvanceAndNullBalance.balanceOwedExact != null && supplierWithAdvanceAndNullBalance.balanceOwedExact > BigDecimal.ZERO
+        val hasAdvance = (supplierWithAdvanceAndNullBalance.advancesExact != null && supplierWithAdvanceAndNullBalance.advancesExact > BigDecimal.ZERO) ||
+            (supplierWithAdvanceAndNullBalance.balanceOwedExact != null && supplierWithAdvanceAndNullBalance.balanceOwedExact < BigDecimal.ZERO)
+
+        val statusBadgeTone = when {
+            hasAdvance -> StitchBadgeTone.SUCCESS
+            isPayableOwed -> StitchBadgeTone.WARNING
+            supplierWithAdvanceAndNullBalance.balanceOwedExact == null -> StitchBadgeTone.NEUTRAL
+            else -> StitchBadgeTone.NEUTRAL
+        }
+
+        val advanceAmountIls = if (supplierWithAdvanceAndNullBalance.advancesExact != null && supplierWithAdvanceAndNullBalance.advancesExact > BigDecimal.ZERO) {
+            supplierWithAdvanceAndNullBalance.advancesIls
+        } else 0.0
+
+        val statusLabel = when {
+            hasAdvance -> "${AppLanguage.AR.tr("لنا رصيد مقدم", "Store Advance")} ${StitchBidiUtils.formatIls(advanceAmountIls)}"
+            isPayableOwed -> "${AppLanguage.AR.tr("مستحق للمورد", "Owed to Supplier")} ${StitchBidiUtils.formatIls(supplierWithAdvanceAndNullBalance.balanceOwedIls)}"
+            supplierWithAdvanceAndNullBalance.balanceOwedExact == null -> AppLanguage.AR.tr("الرصيد غير متاح", "Balance unavailable")
+            else -> AppLanguage.AR.tr("خالص", "Settled")
+        }
+
+        assertEquals(StitchBadgeTone.SUCCESS, statusBadgeTone)
+        assertTrue("Status label must indicate store advance", statusLabel.contains("لنا رصيد مقدم"))
+        assertFalse("Status label must NOT say balance unavailable", statusLabel.contains("الرصيد غير متاح"))
+    }
+
+    @Test
+    fun testTraderUiState_UnloadedCreditLimitIsNotApprovedZero() {
+        val customerWithNullLimit = Customer(
+            id = "01JCV8X9M2NQW3TYZ4R5S6789S",
+            nameAr = "زبون بدون سقف",
+            nameEn = "Customer No Limit",
+            creditLimitExact = null,
+            balanceExact = BigDecimal("100.00")
+        )
+
+        val state = TraderUiState(
+            customers = listOf(customerWithNullLimit),
+            selectedCustomerId = customerWithNullLimit.id
+        )
+
+        assertFalse("Unloaded credit limit must NOT cause wouldCreditExceedCustomerLimit to be true", state.wouldCreditExceedCustomerLimit)
+        assertEquals(0.0, state.creditCeilingExcessIls, 0.001)
     }
 }

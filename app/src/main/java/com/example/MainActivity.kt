@@ -177,7 +177,8 @@ fun SmallTraderApp(
                                 traderViewModel::openPaymentCollectionForCustomer, traderViewModel::dismissCustomerFeedback,
                                 onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.CUSTOMERS, retry = true) }) },
                             suppliers = { SuppliersScreen(state, traderViewModel::selectSupplierForDetail,
-                                { traderViewModel.openReceivePurchaseDialog(true) }, traderViewModel::dismissSupplierFeedback, traderViewModel::saveSupplier) })
+                                { traderViewModel.openReceivePurchaseDialog(true) }, traderViewModel::dismissSupplierFeedback, traderViewModel::saveSupplier,
+                                onSearchSuppliers = traderViewModel::searchSuppliers) })
                         TraderScreen.PURCHASES -> PurchasesScreen(
                             state = state,
                             onNewPurchase = { traderViewModel.openReceivePurchaseDialog(true) },
@@ -431,6 +432,9 @@ fun SmallTraderApp(
                                 onUpdateCustomerWithResult = { cid, name, phone, addr, limit, onComplete ->
                                     traderViewModel.updateCustomer(cid, name, phone, addr, limit, onComplete)
                                 },
+                                onUpdateCustomerWithDetails = { cid, name, phone, addr, upPhone, upAddr, upLimit, limitExact, onComplete ->
+                                    traderViewModel.updateCustomer(cid, name, phone, addr, upPhone, upAddr, upLimit, limitExact, onComplete)
+                                },
                                 onFormatStatementText = { cid ->
                                     state.customers.firstOrNull { it.id == cid }?.let {
                                         traderViewModel.formatCustomerStatementText(it)
@@ -449,6 +453,7 @@ fun SmallTraderApp(
                                 onSaveSupplierWithResult = { sid, name, comp, phone, onComplete ->
                                     traderViewModel.saveSupplier(sid, name, comp, phone, onComplete)
                                 },
+                                onSearchSuppliers = traderViewModel::searchSuppliers,
                                 launchCreate = state.pendingAction == MerchantAction.SUPPLIER,
                                 onLaunchConsumed = traderViewModel::consumeAction
                             )

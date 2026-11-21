@@ -272,31 +272,31 @@ class MobileMerchantApiClient(
         phone: String? = null,
         address: String? = null,
         creditLimit: BigDecimal? = null,
-        updatePhone: Boolean = true,
-        updateAddress: Boolean = true,
-        updateCreditLimit: Boolean = true,
+        updatePhone: Boolean = false,
+        updateAddress: Boolean = false,
+        updateCreditLimit: Boolean = false,
         idempotencyKey: String? = null
     ): Result<StrictJsonObject> {
         val payload = buildString {
             append("{")
             append("\"name_ar\":\"").append(escapeJson(name)).append("\"")
             if (updatePhone) {
-                if (phone == null || phone.isBlank()) {
+                if (phone.isNullOrBlank()) {
                     append(",\"phone\":\"\"")
                 } else {
                     append(",\"phone\":\"").append(escapeJson(phone)).append("\"")
                 }
             }
             if (updateAddress) {
-                if (address == null || address.isBlank()) {
-                    append(",\"address_ar\":\"\"")
+                if (address.isNullOrBlank()) {
+                    append(",\"address_ar\":null")
                 } else {
                     append(",\"address_ar\":\"").append(escapeJson(address)).append("\"")
                 }
             }
             if (updateCreditLimit) {
                 if (creditLimit != null) {
-                    append(",\"credit_limit\":\"").append(creditLimit.setScale(2, RoundingMode.HALF_UP).toPlainString()).append("\"")
+                    append(",\"credit_limit\":\"").append(creditLimit.toPlainString()).append("\"")
                 } else {
                     append(",\"credit_limit\":null")
                 }
@@ -346,8 +346,16 @@ class MobileMerchantApiClient(
     // Suppliers
     // -------------------------------------------------------------------------
 
-    fun getSuppliers(companyId: ServerUlid): Result<StrictJsonObject> {
-        val path = "/api/mobile/v1/companies/${companyId.value}/suppliers"
+    fun getSuppliers(companyId: ServerUlid, search: String? = null, limit: Int = 30): Result<StrictJsonObject> {
+        val qParams = mutableListOf<String>()
+        if (!search.isNullOrBlank()) {
+            qParams.add("search=" + java.net.URLEncoder.encode(search.trim(), "UTF-8"))
+        }
+        if (limit != 30) {
+            qParams.add("limit=$limit")
+        }
+        val queryStr = if (qParams.isNotEmpty()) "?" + qParams.joinToString("&") else ""
+        val path = "/api/mobile/v1/companies/${companyId.value}/suppliers$queryStr"
         return execute(HttpMethod.GET, path)
     }
 

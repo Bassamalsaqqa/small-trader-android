@@ -97,18 +97,37 @@ interface TraderRepository {
     fun getCustomers(): List<Customer>
     fun getCustomerTransactions(): List<CustomerTransaction>
     suspend fun recordCustomerPayment(customerId: String, amountIls: Double, note: String, paymentId: String = ""): Result<CustomerTransaction>
-    suspend fun createCustomer(name: String, phone: String, address: String, creditLimitIls: Double = 1000.0): Result<Customer>
+    suspend fun createCustomer(name: String, phone: String, address: String, creditLimitIls: Double = 1000.0, operationId: String = ""): Result<Customer>
+    suspend fun createCustomer(name: String, phone: String, address: String, creditLimitIls: Double = 1000.0): Result<Customer> =
+        createCustomer(name, phone, address, creditLimitIls, "")
+    suspend fun createCustomer(name: String, phone: String, address: String, operationId: String): Result<Customer> =
+        createCustomer(name, phone, address, 1000.0, operationId)
+    suspend fun updateCustomer(
+        customerId: String,
+        name: String,
+        phone: String? = null,
+        address: String? = null,
+        creditLimit: BigDecimal? = null,
+        updatePhone: Boolean = false,
+        updateAddress: Boolean = false,
+        updateCreditLimit: Boolean = false
+    ): Result<Customer>
     suspend fun updateCustomer(customerId: String, name: String, phone: String, address: String, creditLimitIls: Double): Result<Customer>
     suspend fun getCustomerDetail(customerId: String): Result<Customer> =
         getCustomers().firstOrNull { it.id == customerId }?.let { Result.success(it) }
             ?: Result.failure(NoSuchElementException("Customer not found: "))
 
     // Suppliers & Disbursements
-    suspend fun refreshSuppliers(): Result<Unit> = Result.success(Unit)
+    suspend fun refreshSuppliers(search: String? = null): Result<Unit> = Result.success(Unit)
+    suspend fun refreshSuppliers(): Result<Unit> = refreshSuppliers(null)
+    suspend fun searchSuppliers(query: String): Result<List<Supplier>> = refreshSuppliers(query).map { getSuppliers() }
+    suspend fun createSupplier(name: String, phone: String, company: String = "", operationId: String = ""): Result<Supplier>
     fun getSuppliers(): List<Supplier>
     fun getPurchaseBills(): List<PurchaseBill>
     fun getSupplierPayments(): List<SupplierPayment>
     suspend fun saveSupplier(supplierId: String?, name: String, company: String, phone: String, operator: UserSession): Result<Supplier>
+    suspend fun saveSupplier(supplierId: String?, name: String, company: String, phone: String, operator: UserSession, operationId: String): Result<Supplier> =
+        saveSupplier(supplierId, name, company, phone, operator)
     suspend fun recordPurchaseBill(supplierId: String, itemsSummary: String, totalIls: Double, paidNowIls: Double, operator: UserSession, expectedProductId: String? = null, expectedQuantity: Int = 0): Result<PurchaseBill>
     suspend fun recordStructuredPurchaseBill(supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, operator: UserSession, note: String = ""): Result<PurchaseBill>
     suspend fun recordStructuredPurchaseBill(supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, operator: UserSession, note: String, operationId: String): Result<PurchaseBill> =
@@ -225,6 +244,9 @@ class OfflineDemoTraderRepository(
 
     private val _suppliersFlow = MutableStateFlow<List<Supplier>>(suppliers.toList())
     override val suppliersFlow: StateFlow<List<Supplier>> = _suppliersFlow.asStateFlow()
+
+    private val _suppliersHasMoreFlow = MutableStateFlow(false)
+    override val suppliersHasMoreFlow: StateFlow<Boolean> = _suppliersHasMoreFlow.asStateFlow()
 
     private val _purchasesFlow = MutableStateFlow<List<PurchaseBill>>(purchaseBills.toList())
     override val purchasesFlow: StateFlow<List<PurchaseBill>> = _purchasesFlow.asStateFlow()
@@ -691,6 +713,17 @@ class OfflineDemoTraderRepository(
         return Result.success(tx)
     }
 
+    override suspend fun createCustomer(
+        name: String,
+        phone: String,
+        address: String,
+        creditLimitIls: Double,
+        operationId: String
+    ): Result<Customer> = createCustomer(name, phone, address, creditLimitIls)
+
+    override suspend fun createCustomer(name: String, phone: String, address: String, operationId: String): Result<Customer> =
+        createCustomer(name, phone, address, 1000.0, operationId)
+
     override suspend fun createCustomer(name: String, phone: String, address: String, creditLimitIls: Double): Result<Customer> {
         if (name.isBlank()) return Result.failure(IllegalArgumentException("Customer name cannot be empty."))
         val safeLimit = if (creditLimitIls > 0.0) {
@@ -712,7 +745,48 @@ class OfflineDemoTraderRepository(
         return Result.success(newCust)
     }
 
+    override suspend fun refreshSuppliers(search: String?): Result<Unit> = Result.success(Unit)
     override suspend fun refreshSuppliers(): Result<Unit> = Result.success(Unit)
+
+    override suspend fun searchSuppliers(query: String): Result<List<Supplier>> {
+        val q = query.trim().lowercase()
+        return Result.success(
+            if (q.isBlank()) suppliers.toList()
+            else suppliers.filter {
+                it.nameAr.lowercase().contains(q) ||
+                it.nameEn.lowercase().contains(q) ||
+                (it.companyAr ?: "").lowercase().contains(q) ||
+                (it.phone ?: "").contains(q)
+            }
+        )
+    }
+
+    override suspend fun createSupplier(
+        name: String,
+        phone: String,
+        company: String,
+        operationId: String
+    ): Result<Supplier> {
+        val cleanName = name.trim()
+        if (cleanName.isEmpty()) {
+            return Result.failure(IllegalArgumentException("اسم المورد مطلوب | Supplier name cannot be empty."))
+        }
+        val cleanCompany = company.trim().ifEmpty { cleanName }
+        val cleanPhone = phone.trim().ifEmpty { "09-2300000" }
+        val newSup = Supplier(
+            id = "sup_${System.currentTimeMillis()}",
+            nameAr = cleanName,
+            nameEn = cleanName,
+            companyAr = cleanCompany,
+            companyEn = cleanCompany,
+            phone = cleanPhone,
+            balanceOwedExact = null,
+            advancesExact = null
+        )
+        suppliers.add(0, newSup)
+        _suppliersFlow.value = suppliers.toList()
+        return Result.success(newSup)
+    }
 
     override suspend fun getCustomerDetail(customerId: String): Result<Customer> =
         getCustomers().firstOrNull { it.id == customerId }?.let { Result.success(it) }
@@ -721,27 +795,47 @@ class OfflineDemoTraderRepository(
     override suspend fun updateCustomer(
         customerId: String,
         name: String,
-        phone: String,
-        address: String,
-        creditLimitIls: Double
+        phone: String?,
+        address: String?,
+        creditLimit: BigDecimal?,
+        updatePhone: Boolean,
+        updateAddress: Boolean,
+        updateCreditLimit: Boolean
     ): Result<Customer> {
         if (name.isBlank()) return Result.failure(IllegalArgumentException("Customer name cannot be empty."))
-        if (creditLimitIls < 0.0) return Result.failure(IllegalArgumentException("Credit limit cannot be negative."))
         val idx = customers.indexOfFirst { it.id == customerId }
         if (idx == -1) return Result.failure(NoSuchElementException("Customer not found: $customerId"))
         val existing = customers[idx]
-        val exactLimit = BigDecimal(creditLimitIls.toString()).setScale(2, RoundingMode.HALF_UP)
         val updated = existing.copy(
             nameAr = name.trim(),
             nameEn = name.trim(),
-            phone = phone.trim().ifEmpty { existing.phone ?: "" },
-            addressAr = address.trim().ifEmpty { existing.addressAr ?: "" },
-            addressEn = address.trim().ifEmpty { existing.addressEn ?: "" },
-            creditLimitExact = exactLimit
+            phone = if (updatePhone) phone?.trim()?.ifEmpty { null } else existing.phone,
+            addressAr = if (updateAddress) address?.trim()?.ifEmpty { null } else existing.addressAr,
+            addressEn = if (updateAddress) address?.trim()?.ifEmpty { null } else existing.addressEn,
+            creditLimitExact = if (updateCreditLimit) creditLimit else existing.creditLimitExact
         )
         customers[idx] = updated
         _customersFlow.value = customers.toList()
         return Result.success(updated)
+    }
+
+    override suspend fun updateCustomer(
+        customerId: String,
+        name: String,
+        phone: String,
+        address: String,
+        creditLimitIls: Double
+    ): Result<Customer> {
+        return updateCustomer(
+            customerId = customerId,
+            name = name,
+            phone = phone,
+            address = address,
+            creditLimit = if (creditLimitIls >= 0.0) BigDecimal(creditLimitIls.toString()).setScale(2, RoundingMode.HALF_UP) else null,
+            updatePhone = true,
+            updateAddress = true,
+            updateCreditLimit = creditLimitIls >= 0.0
+        )
     }
 
     override fun getSuppliers(): List<Supplier> = suppliers.toList()
