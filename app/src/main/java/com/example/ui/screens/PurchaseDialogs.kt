@@ -1361,10 +1361,11 @@ fun ReceivePurchaseBillDialog(
     var isSubmitting by rememberSaveable { mutableStateOf(false) }
     var inlineError by rememberSaveable { mutableStateOf<String?>(null) }
 
+    val isServerSearchEnabled = onSearchProducts != null && !state.currentSession.isDemoSession
     val trackedProducts = remember(state.products) { state.products.filter { it.isStockTracked } }
     var productSearchQuery by rememberSaveable { mutableStateOf("") }
-    val filteredTrackedProducts = remember(trackedProducts, state.productSearchResults, state.productSearchQuery, productSearchQuery) {
-        val source = if (productSearchQuery.isNotBlank() &&
+    val filteredTrackedProducts = remember(trackedProducts, state.productSearchResults, state.productSearchQuery, productSearchQuery, isServerSearchEnabled) {
+        val source = if (isServerSearchEnabled && productSearchQuery.isNotBlank() &&
             state.productSearchQuery.trim().equals(productSearchQuery.trim(), ignoreCase = true) &&
             state.productSearchResults != null
         ) {
@@ -1706,7 +1707,7 @@ fun ReceivePurchaseBillDialog(
                             Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
                         },
                         trailingIcon = {
-                            if (state.isSearchingProducts) {
+                            if (isServerSearchEnabled && state.isSearchingProducts) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(18.dp).testTag("purchase_product_search_progress"),
                                     strokeWidth = 2.dp,
@@ -1716,7 +1717,9 @@ fun ReceivePurchaseBillDialog(
                                 IconButton(
                                     onClick = {
                                         productSearchQuery = ""
-                                        onSearchProducts?.invoke("")
+                                        if (isServerSearchEnabled) {
+                                            onSearchProducts?.invoke("")
+                                        }
                                     },
                                     enabled = !isSubmitting,
                                     modifier = Modifier.size(48.dp).testTag("clear_purchase_product_search")
@@ -1732,8 +1735,8 @@ fun ReceivePurchaseBillDialog(
                             .testTag("purchase_product_search_input")
                     )
 
-                    val isDebouncingOrSearching = productSearchQuery.isNotBlank() && (
-                        state.isSearchingProducts || !state.productSearchQuery.trim().equals(productSearchQuery.trim(), ignoreCase = true)
+                    val isDebouncingOrSearching = isServerSearchEnabled && productSearchQuery.isNotBlank() && (
+                        state.isSearchingProducts || (state.productSearchQuery.isNotBlank() && !state.productSearchQuery.trim().equals(productSearchQuery.trim(), ignoreCase = true))
                     )
 
                     // Candidates or zero-result feedback strictly below search input

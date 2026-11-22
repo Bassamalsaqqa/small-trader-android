@@ -167,8 +167,9 @@ fun NewSaleScreen(
                         color = MaterialTheme.colorScheme.outlineVariant
                     )
 
-                    val isDebouncingOrSearching = state.searchQuery.isNotBlank() && (
-                        state.isSearchingProducts || !state.productSearchQuery.trim().equals(state.searchQuery.trim(), ignoreCase = true)
+                    val isServerSearchEnabled = !state.currentSession.isDemoSession
+                    val isDebouncingOrSearching = isServerSearchEnabled && state.searchQuery.isNotBlank() && (
+                        state.isSearchingProducts || (state.productSearchQuery.isNotBlank() && !state.productSearchQuery.trim().equals(state.searchQuery.trim(), ignoreCase = true))
                     )
 
                     if (isDebouncingOrSearching) {
@@ -315,8 +316,9 @@ fun NewSaleScreen(
                     color = MaterialTheme.colorScheme.outlineVariant
                 )
 
-                val isDebouncingOrSearching = state.searchQuery.isNotBlank() && (
-                    state.isSearchingProducts || !state.productSearchQuery.trim().equals(state.searchQuery.trim(), ignoreCase = true)
+                val isServerSearchEnabled = !state.currentSession.isDemoSession
+                val isDebouncingOrSearching = isServerSearchEnabled && state.searchQuery.isNotBlank() && (
+                    state.isSearchingProducts || (state.productSearchQuery.isNotBlank() && !state.productSearchQuery.trim().equals(state.searchQuery.trim(), ignoreCase = true))
                 )
 
                 if (isDebouncingOrSearching) {

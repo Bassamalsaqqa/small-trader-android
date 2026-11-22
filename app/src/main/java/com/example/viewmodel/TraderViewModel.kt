@@ -3429,6 +3429,19 @@ class TraderViewModel(
     private var productSearchGeneration = 0L
 
     fun searchProductsOnServer(query: String) {
+        val session = _uiState.value.currentSession
+        if (session.isDemoSession) {
+            productSearchJob?.cancel()
+            _uiState.update {
+                it.copy(
+                    productSearchQuery = query,
+                    productSearchResults = null,
+                    isSearchingProducts = false,
+                    productSearchError = null
+                )
+            }
+            return
+        }
         productSearchJob?.cancel()
         val trimmed = query.trim()
         val generation = ++productSearchGeneration

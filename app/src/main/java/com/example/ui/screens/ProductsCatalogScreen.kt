@@ -540,8 +540,9 @@ fun ProductsCatalogScreen(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
         )
 
-        val isDebouncingOrSearching = state.searchQuery.isNotBlank() && (
-            state.isSearchingProducts || !state.productSearchQuery.trim().equals(state.searchQuery.trim(), ignoreCase = true)
+        val isServerSearchEnabled = !state.currentSession.isDemoSession
+        val isDebouncingOrSearching = isServerSearchEnabled && state.searchQuery.isNotBlank() && (
+            state.isSearchingProducts || (state.productSearchQuery.isNotBlank() && !state.productSearchQuery.trim().equals(state.searchQuery.trim(), ignoreCase = true))
         )
 
         // Scannable Product Directory List (Lower area preserved as approved)
