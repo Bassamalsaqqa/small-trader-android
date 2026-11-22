@@ -24,6 +24,8 @@ import com.example.data.mobile.readclient.http.HttpTransportException
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.UUID
+import com.example.model.PaymentAllocationInput
+import com.example.model.WesternFormatters
 
 /**
  * Typed client for native Mobile V1 and V2 merchant domain endpoints.
@@ -322,23 +324,62 @@ class MobileMerchantApiClient(
         return execute(HttpMethod.PUT, "/api/mobile/v1/companies/${companyId.value}/suppliers/${supplierId.value}", body = payload, idempotencyKey = UUID.randomUUID().toString())
     }
 
+    fun getCustomerSettlementTargets(
+        companyId: ServerUlid,
+        customerId: ServerUlid,
+        currency: String? = null,
+        limit: Int = 50,
+        cursor: String? = null
+    ): Result<StrictJsonObject> {
+        val qParams = mutableMapOf<String, String>()
+        if (!currency.isNullOrBlank()) {
+            val trimmedCurr = currency.trim().uppercase()
+            com.example.data.mobile.readclient.EndpointSecurity.validateCurrency(trimmedCurr)
+            qParams["currency"] = trimmedCurr
+        }
+        if (limit != 50) {
+            com.example.data.mobile.readclient.EndpointSecurity.validateLimit(limit, maxLimit = 250)
+            qParams["limit"] = limit.toString()
+        }
+        if (!cursor.isNullOrBlank()) {
+            com.example.data.mobile.readclient.EndpointSecurity.validateCursor(cursor)
+            qParams["cursor"] = cursor
+        }
+        val path = "/api/mobile/v1/companies/${companyId.value}/customers/${customerId.value}/settlement-targets"
+        return execute(HttpMethod.GET, path, queryParams = qParams)
+    }
+
     fun recordCustomerPayment(
         companyId: ServerUlid,
         customerId: ServerUlid,
         amount: BigDecimal,
         cashAccountId: ServerUlid?,
         note: String,
-        idempotencyKey: String? = null
+        idempotencyKey: String? = null,
+        paymentDate: String? = null,
+        allocations: List<PaymentAllocationInput> = emptyList()
     ): Result<StrictJsonObject> {
         val path = "/api/mobile/v1/companies/${companyId.value}/customers/${customerId.value}/payments"
         val payload = buildString {
             append("{")
             append("\"amount\":\"").append(amount.setScale(6, RoundingMode.HALF_UP).toPlainString()).append("\",")
+            val pDate = paymentDate ?: WesternFormatters.currentDate()
+            append("\"payment_date\":\"").append(escapeJson(pDate)).append("\",")
             if (cashAccountId != null) {
                 append("\"money_account_id\":\"").append(cashAccountId.value).append("\",")
             }
             append("\"notes\":\"").append(escapeJson(note)).append("\",")
-            append("\"note\":\"").append(escapeJson(note)).append("\"")
+            append("\"note\":\"").append(escapeJson(note)).append("\",")
+            append("\"allocations\":[")
+            allocations.forEachIndexed { idx, alloc ->
+                if (idx > 0) append(",")
+                append("{")
+                append("\"target_type\":\"").append(escapeJson(alloc.targetType)).append("\",")
+                append("\"target_id\":\"").append(escapeJson(alloc.targetId)).append("\",")
+                append("\"amount\":\"").append(alloc.amountExact.setScale(6, RoundingMode.HALF_UP).toPlainString()).append("\"")
+                append("}")
+            }
+            append("]")
             append("}")
         }
         val key = idempotencyKey ?: UUID.randomUUID().toString()
@@ -392,23 +433,62 @@ class MobileMerchantApiClient(
         return execute(HttpMethod.POST, path, body = payload, idempotencyKey = key)
     }
 
+    fun getSupplierSettlementTargets(
+        companyId: ServerUlid,
+        supplierId: ServerUlid,
+        currency: String? = null,
+        limit: Int = 50,
+        cursor: String? = null
+    ): Result<StrictJsonObject> {
+        val qParams = mutableMapOf<String, String>()
+        if (!currency.isNullOrBlank()) {
+            val trimmedCurr = currency.trim().uppercase()
+            com.example.data.mobile.readclient.EndpointSecurity.validateCurrency(trimmedCurr)
+            qParams["currency"] = trimmedCurr
+        }
+        if (limit != 50) {
+            com.example.data.mobile.readclient.EndpointSecurity.validateLimit(limit, maxLimit = 250)
+            qParams["limit"] = limit.toString()
+        }
+        if (!cursor.isNullOrBlank()) {
+            com.example.data.mobile.readclient.EndpointSecurity.validateCursor(cursor)
+            qParams["cursor"] = cursor
+        }
+        val path = "/api/mobile/v1/companies/${companyId.value}/suppliers/${supplierId.value}/settlement-targets"
+        return execute(HttpMethod.GET, path, queryParams = qParams)
+    }
+
     fun recordSupplierPayment(
         companyId: ServerUlid,
         supplierId: ServerUlid,
         amount: BigDecimal,
         cashAccountId: ServerUlid?,
         note: String,
-        idempotencyKey: String? = null
+        idempotencyKey: String? = null,
+        paymentDate: String? = null,
+        allocations: List<PaymentAllocationInput> = emptyList()
     ): Result<StrictJsonObject> {
         val path = "/api/mobile/v1/companies/${companyId.value}/suppliers/${supplierId.value}/payments"
         val payload = buildString {
             append("{")
             append("\"amount\":\"").append(amount.setScale(6, RoundingMode.HALF_UP).toPlainString()).append("\",")
+            val pDate = paymentDate ?: WesternFormatters.currentDate()
+            append("\"payment_date\":\"").append(escapeJson(pDate)).append("\",")
             if (cashAccountId != null) {
                 append("\"money_account_id\":\"").append(cashAccountId.value).append("\",")
             }
             append("\"notes\":\"").append(escapeJson(note)).append("\",")
-            append("\"note\":\"").append(escapeJson(note)).append("\"")
+            append("\"note\":\"").append(escapeJson(note)).append("\",")
+            append("\"allocations\":[")
+            allocations.forEachIndexed { idx, alloc ->
+                if (idx > 0) append(",")
+                append("{")
+                append("\"target_type\":\"").append(escapeJson(alloc.targetType)).append("\",")
+                append("\"target_id\":\"").append(escapeJson(alloc.targetId)).append("\",")
+                append("\"amount\":\"").append(alloc.amountExact.setScale(6, RoundingMode.HALF_UP).toPlainString()).append("\"")
+                append("}")
+            }
+            append("]")
             append("}")
         }
         val key = idempotencyKey ?: UUID.randomUUID().toString()

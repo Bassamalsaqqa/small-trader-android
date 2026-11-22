@@ -13,6 +13,8 @@ import com.example.model.PurchaseBill
 import com.example.model.PurchaseLineItem
 import com.example.model.ServerExpenseCategory
 import com.example.model.StockMovement
+import com.example.model.PaymentAllocationInput
+import com.example.model.SettlementTargetsResponse
 import com.example.model.Supplier
 import com.example.model.SupplierPayment
 import com.example.model.UserSession
@@ -100,6 +102,22 @@ interface TraderRepository {
     fun getCustomers(): List<Customer>
     fun getCustomerTransactions(): List<CustomerTransaction>
     suspend fun recordCustomerPayment(customerId: String, amountIls: Double, note: String, paymentId: String = ""): Result<CustomerTransaction>
+    suspend fun recordCustomerPayment(
+        customerId: String,
+        amount: BigDecimal,
+        note: String,
+        paymentId: String = "",
+        cashAccountId: String? = null,
+        paymentDate: String? = null,
+        allocations: List<PaymentAllocationInput> = emptyList()
+    ): Result<CustomerTransaction> = recordCustomerPayment(customerId, amount.toDouble(), note, paymentId)
+
+    suspend fun getCustomerSettlementTargets(
+        customerId: String,
+        currency: String? = null,
+        limit: Int = 50,
+        cursor: String? = null
+    ): Result<SettlementTargetsResponse> = Result.failure(UnsupportedOperationException("getCustomerSettlementTargets not implemented"))
     suspend fun createCustomer(name: String, phone: String, address: String, creditLimitIls: Double = 1000.0, operationId: String = ""): Result<Customer>
     suspend fun createCustomer(name: String, phone: String, address: String, creditLimitIls: Double = 1000.0): Result<Customer> =
         createCustomer(name, phone, address, creditLimitIls, "")
@@ -144,6 +162,23 @@ interface TraderRepository {
     suspend fun confirmPhysicalGoodsReceipt(billId: String, productId: String, receivedQty: BigDecimal, batchNote: String, operator: UserSession, operationId: String = "", lineId: String? = null): Result<StockMovement> =
         confirmPhysicalGoodsReceipt(billId, productId, receivedQty.toInt(), batchNote, operator, operationId, lineId)
     suspend fun recordSupplierPayment(supplierId: String, amountIls: Double, note: String, operator: UserSession, paymentId: String = ""): Result<SupplierPayment>
+    suspend fun recordSupplierPayment(
+        supplierId: String,
+        amount: BigDecimal,
+        note: String,
+        operator: UserSession,
+        paymentId: String = "",
+        cashAccountId: String? = null,
+        paymentDate: String? = null,
+        allocations: List<PaymentAllocationInput> = emptyList()
+    ): Result<SupplierPayment> = recordSupplierPayment(supplierId, amount.toDouble(), note, operator, paymentId)
+
+    suspend fun getSupplierSettlementTargets(
+        supplierId: String,
+        currency: String? = null,
+        limit: Int = 50,
+        cursor: String? = null
+    ): Result<SettlementTargetsResponse> = Result.failure(UnsupportedOperationException("getSupplierSettlementTargets not implemented"))
 
     // Expenses
     fun getExpenses(): List<ExpenseEntry>
@@ -686,14 +721,49 @@ class OfflineDemoTraderRepository(
         amountIls: Double,
         note: String,
         paymentId: String
+    ): Result<CustomerTransaction> = recordCustomerPayment(
+        customerId = customerId,
+        amount = BigDecimal(amountIls.toString()),
+        note = note,
+        paymentId = paymentId,
+        cashAccountId = null,
+        paymentDate = null,
+        allocations = emptyList()
+    )
+
+    override suspend fun recordCustomerPayment(
+        customerId: String,
+        amount: BigDecimal,
+        note: String,
+        paymentId: String,
+        cashAccountId: String?,
+        paymentDate: String?,
+        allocations: List<PaymentAllocationInput>
     ): Result<CustomerTransaction> {
         if (customerId.isBlank()) {
             return Result.failure(IllegalArgumentException("Customer ID cannot be blank."))
         }
         val idx = customers.indexOfFirst { it.id == customerId }
         if (idx == -1) return Result.failure(NoSuchElementException("Customer not found: $customerId"))
-        if (amountIls <= 0.0) {
+        val amountExact = amount.setScale(2, RoundingMode.HALF_UP)
+        if (amountExact <= BigDecimal.ZERO) {
             return Result.failure(IllegalArgumentException("Payment amount must be greater than zero."))
+        }
+
+        var totalAllocated = BigDecimal.ZERO
+        val targetSet = mutableSetOf<String>()
+        for (alloc in allocations) {
+            if (alloc.amountExact <= BigDecimal.ZERO) {
+                return Result.failure(IllegalArgumentException("Allocation amount must be strictly positive"))
+            }
+            val key = "${alloc.targetType}:${alloc.targetId}"
+            if (!targetSet.add(key)) {
+                return Result.failure(IllegalArgumentException("Duplicate allocation target: $key"))
+            }
+            totalAllocated = totalAllocated.add(alloc.amountExact)
+        }
+        if (totalAllocated > amountExact) {
+            return Result.failure(IllegalArgumentException("Sum of allocations ($totalAllocated) exceeds payment amount ($amountExact)"))
         }
 
         // True replay idempotency: if operation ID already recorded, return transaction without double deduction
@@ -705,29 +775,78 @@ class OfflineDemoTraderRepository(
         }
 
         val currentCust = customers[idx]
-        val amountExact = BigDecimal(amountIls.toString()).setScale(2, RoundingMode.HALF_UP)
         val newBalance = (currentCust.balanceExact ?: BigDecimal.ZERO)
             .subtract(amountExact)
             .setScale(2, RoundingMode.HALF_UP)
 
         customers[idx] = currentCust.copy(balanceExact = newBalance)
 
+        val isAdvance = allocations.isEmpty()
+        val allocResults = allocations.map {
+            com.example.model.PaymentAllocationResult(it.targetType, it.targetId, it.amountExact, it.amountExact)
+        }
+        val unallocExact = amountExact.subtract(totalAllocated).coerceAtLeast(BigDecimal.ZERO)
+
         val tx = CustomerTransaction(
             id = if (paymentId.isNotBlank()) paymentId else "ctx_${System.currentTimeMillis()}",
             customerId = customerId,
-            date = WesternFormatters.currentTimestamp(),
-            typeAr = "سند قبض نقدي (سداد حساب)",
-            typeEn = "Receipt Voucher (Payment)",
+            date = paymentDate ?: WesternFormatters.currentTimestamp(),
+            typeAr = if (isAdvance) "سند قبض نقدي (دفعة مقدمة غير مخصصة)" else "سند قبض نقدي (سداد ذمم محددة)",
+            typeEn = if (isAdvance) "Receipt Voucher (Unapplied Advance)" else "Receipt Voucher (Allocated Payment)",
             invoiceNumber = null,
-            debitIls = 0.0,
-            creditIls = amountExact.toDouble(),
-            runningBalanceIls = newBalance.toDouble(),
-            note = note.ifEmpty { "سند قبض نقدي بالصندوق" }
+            debitExact = BigDecimal.ZERO,
+            creditExact = amountExact,
+            runningBalanceExact = newBalance,
+            note = note.ifEmpty { "سند قبض نقدي بالصندوق" },
+            isAdvance = isAdvance,
+            allocatedAmountExact = totalAllocated,
+            unallocatedAmountExact = unallocExact,
+            allocations = allocResults,
+            currency = "ILS"
         )
         customerTransactions.add(0, tx)
         _customersFlow.value = customers.toList()
         _customerTransactionsFlow.value = customerTransactions.toList()
         return Result.success(tx)
+    }
+
+    override suspend fun getCustomerSettlementTargets(
+        customerId: String,
+        currency: String?,
+        limit: Int,
+        cursor: String?
+    ): Result<SettlementTargetsResponse> {
+        val cust = customers.firstOrNull { it.id == customerId }
+            ?: return Result.failure(NoSuchElementException("Customer not found: $customerId"))
+        val unpaidInvoices = invoices.filter { it.customerId == customerId && (!it.isPaidInFull || it.remainingDebitExact > BigDecimal.ZERO) }
+        val targets = unpaidInvoices.map { inv ->
+            val rem = if (inv.remainingDebitExact > BigDecimal.ZERO) inv.remainingDebitExact else inv.netTotalExact
+            com.example.model.SettlementTarget(
+                targetType = "invoice",
+                targetId = inv.id,
+                targetNumber = inv.serverInvoiceNumber ?: "INV-${inv.invoiceNumber}",
+                businessDate = inv.timestamp.take(10),
+                dueDate = null,
+                daysOverdue = 0,
+                currency = "ILS",
+                currencyMinorUnits = 2,
+                originalAmountExact = inv.netTotalExact,
+                allocatedAmountExact = inv.netTotalExact.subtract(rem).coerceAtLeast(BigDecimal.ZERO),
+                remainingAmountExact = rem
+            )
+        }
+        return Result.success(
+            SettlementTargetsResponse(
+                partyId = customerId,
+                partyName = cust.nameAr,
+                currency = currency ?: "ILS",
+                currencyMinorUnits = 2,
+                totalTargets = targets.size,
+                targets = targets,
+                hasMore = false,
+                nextCursor = null
+            )
+        )
     }
 
     override suspend fun createCustomer(
@@ -1252,6 +1371,26 @@ class OfflineDemoTraderRepository(
         note: String,
         operator: UserSession,
         paymentId: String
+    ): Result<SupplierPayment> = recordSupplierPayment(
+        supplierId = supplierId,
+        amount = BigDecimal(amountIls.toString()),
+        note = note,
+        operator = operator,
+        paymentId = paymentId,
+        cashAccountId = null,
+        paymentDate = null,
+        allocations = emptyList()
+    )
+
+    override suspend fun recordSupplierPayment(
+        supplierId: String,
+        amount: BigDecimal,
+        note: String,
+        operator: UserSession,
+        paymentId: String,
+        cashAccountId: String?,
+        paymentDate: String?,
+        allocations: List<PaymentAllocationInput>
     ): Result<SupplierPayment> {
         if (!operator.canManageSuppliers()) {
             return Result.failure(SecurityException("غير مصرح: سداد دفعات الموردين متاح للمالك والمدير فقط | Permission denied: Supplier disbursement requires Owner or Manager"))
@@ -1261,23 +1400,38 @@ class OfflineDemoTraderRepository(
         }
         val idx = suppliers.indexOfFirst { it.id == supplierId }
         if (idx == -1) return Result.failure(NoSuchElementException("المورد غير موجود | Supplier not found: $supplierId"))
-        if (amountIls <= 0.0) {
+        val amountExact = amount.setScale(2, RoundingMode.HALF_UP)
+        if (amountExact <= BigDecimal.ZERO) {
             return Result.failure(IllegalArgumentException("مبلغ السداد يجب أن يكون أكبر من صفر | Disbursement amount must be greater than zero."))
         }
 
-        val amountExact = BigDecimal(amountIls.toString()).setScale(2, RoundingMode.HALF_UP)
+        var totalAllocated = BigDecimal.ZERO
+        val targetSet = mutableSetOf<String>()
+        for (alloc in allocations) {
+            if (alloc.amountExact <= BigDecimal.ZERO) {
+                return Result.failure(IllegalArgumentException("Allocation amount must be strictly positive"))
+            }
+            val key = "${alloc.targetType}:${alloc.targetId}"
+            if (!targetSet.add(key)) {
+                return Result.failure(IllegalArgumentException("Duplicate allocation target: $key"))
+            }
+            totalAllocated = totalAllocated.add(alloc.amountExact)
+        }
+        if (totalAllocated > amountExact) {
+            return Result.failure(IllegalArgumentException("Sum of allocations ($totalAllocated) exceeds payment amount ($amountExact)"))
+        }
 
         // Idempotent Replay Guard for Supplier Payments
         if (paymentId.isNotBlank()) {
             val existing = recordedSupplierPayments[paymentId] ?: supplierPayments.firstOrNull { it.id == paymentId }
             if (existing != null) {
                 val matchesPayload = existing.supplierId == supplierId &&
-                        BigDecimal(existing.amountIls.toString()).setScale(2, RoundingMode.HALF_UP) == amountExact
+                        existing.amountExact == amountExact
                 if (matchesPayload) {
                     return Result.success(existing)
                 } else {
                     return Result.failure(
-                        IllegalStateException("Conflicting supplier payment payload with ID $paymentId: already recorded for supplier ${existing.supplierId} amount ${existing.amountIls}")
+                        IllegalStateException("Conflicting supplier payment payload with ID $paymentId: already recorded for supplier ${existing.supplierId} amount ${existing.amountExact}")
                     )
                 }
             }
@@ -1290,13 +1444,24 @@ class OfflineDemoTraderRepository(
 
         suppliers[idx] = currentSup.copy(balanceOwedExact = newOwed)
 
+        val isAdvance = allocations.isEmpty()
+        val allocResults = allocations.map {
+            com.example.model.PaymentAllocationResult(it.targetType, it.targetId, it.amountExact, it.amountExact)
+        }
+        val unallocExact = amountExact.subtract(totalAllocated).coerceAtLeast(BigDecimal.ZERO)
+
         val paymentGeneratedId = if (paymentId.isNotBlank()) paymentId else "spay_${System.currentTimeMillis()}"
         val payment = SupplierPayment(
             id = paymentGeneratedId,
             supplierId = supplierId,
-            date = WesternFormatters.currentTimestamp(),
-            amountIls = amountExact.toDouble(),
-            note = note.ifEmpty { "سداد نقدي من الصندوق" }
+            date = paymentDate ?: WesternFormatters.currentTimestamp(),
+            amountExact = amountExact,
+            note = note.ifEmpty { "سداد نقدي من الصندوق" },
+            isAdvance = isAdvance,
+            allocatedAmountExact = totalAllocated,
+            unallocatedAmountExact = unallocExact,
+            allocations = allocResults,
+            currency = "ILS"
         )
         supplierPayments.add(0, payment)
         _suppliersFlow.value = suppliers.toList()
@@ -1305,6 +1470,45 @@ class OfflineDemoTraderRepository(
             recordedSupplierPayments[paymentId] = payment
         }
         return Result.success(payment)
+    }
+
+    override suspend fun getSupplierSettlementTargets(
+        supplierId: String,
+        currency: String?,
+        limit: Int,
+        cursor: String?
+    ): Result<SettlementTargetsResponse> {
+        val sup = suppliers.firstOrNull { it.id == supplierId }
+            ?: return Result.failure(NoSuchElementException("Supplier not found: $supplierId"))
+        val unpaidBills = purchaseBills.filter { it.supplierId == supplierId }
+        val targets = unpaidBills.map { bill ->
+            val total = bill.totalExact ?: BigDecimal(bill.totalIls.toString()).setScale(2, RoundingMode.HALF_UP)
+            com.example.model.SettlementTarget(
+                targetType = "purchase",
+                targetId = bill.id,
+                targetNumber = bill.billNumber,
+                businessDate = bill.date,
+                dueDate = null,
+                daysOverdue = 0,
+                currency = "ILS",
+                currencyMinorUnits = 2,
+                originalAmountExact = total,
+                allocatedAmountExact = BigDecimal.ZERO,
+                remainingAmountExact = total
+            )
+        }
+        return Result.success(
+            SettlementTargetsResponse(
+                partyId = supplierId,
+                partyName = sup.nameAr,
+                currency = currency ?: "ILS",
+                currencyMinorUnits = 2,
+                totalTargets = targets.size,
+                targets = targets,
+                hasMore = false,
+                nextCursor = null
+            )
+        )
     }
 
     override fun getExpenses(): List<ExpenseEntry> = expenses.toList()

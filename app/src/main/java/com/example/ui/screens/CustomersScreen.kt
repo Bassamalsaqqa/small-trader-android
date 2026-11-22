@@ -54,6 +54,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import com.example.model.PaymentAllocationInput
+import com.example.model.SettlementTarget
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -1925,7 +1929,14 @@ fun CustomerPaymentCollectionDialog(
     customer: Customer,
     lang: AppLanguage,
     onDismiss: () -> Unit,
-    onConfirmPayment: (customerId: String, amountIls: Double, note: String, paymentId: String) -> Unit
+    onConfirmPayment: (customerId: String, amountIls: Double, note: String, paymentId: String) -> Unit,
+    onConfirmPaymentExact: ((customerId: String, amount: BigDecimal, note: String, paymentId: String, allocations: List<PaymentAllocationInput>) -> Unit)? = null,
+    settlementTargets: List<SettlementTarget> = emptyList(),
+    isLoadingTargets: Boolean = false,
+    targetsError: String? = null,
+    targetsHasMore: Boolean = false,
+    onLoadMoreTargets: (() -> Unit)? = null,
+    onRetryTargets: (() -> Unit)? = null
 ) {
     val financial = TraderTheme.financial
     val initialAmt = if (customer.balanceIls > 0.005) {
@@ -1938,10 +1949,38 @@ fun CustomerPaymentCollectionDialog(
     // Deterministic operation ID per dialog session to prevent duplicate processing
     val operationId = rememberSaveable(customer.id) { "cpay_${customer.id}_${System.currentTimeMillis()}" }
 
-    val enteredAmount = payAmountText.toDoubleOrNull() ?: 0.0
+    // Map of targetKey ("${targetType}:${targetId}") -> allocation amount text
+    val selectedAllocations = remember { mutableStateMapOf<String, String>() }
+
+    val totalAllocatedExact = remember(selectedAllocations.toMap()) {
+        selectedAllocations.values.fold(BigDecimal.ZERO) { acc, s ->
+            val bd = s.toBigDecimalOrNull() ?: BigDecimal.ZERO
+            acc.add(bd)
+        }.setScale(2, RoundingMode.HALF_UP)
+    }
+
+    val enteredAmountExact = remember(payAmountText) {
+        payAmountText.toBigDecimalOrNull()?.setScale(2, RoundingMode.HALF_UP) ?: BigDecimal.ZERO
+    }
+    val enteredAmount = enteredAmountExact.toDouble()
+
     val projectedBalance = remember(customer.balanceIls, enteredAmount) {
-        customer.balanceExact?.subtract(BigDecimal(enteredAmount.toString()))
+        customer.balanceExact?.subtract(enteredAmountExact)
             ?.setScale(2, RoundingMode.HALF_UP)?.toDouble() ?: Double.NaN
+    }
+
+    val hasAllocations = selectedAllocations.isNotEmpty()
+    val isOverAllocated = totalAllocatedExact > enteredAmountExact
+    val unallocatedSurplus = if (enteredAmountExact > totalAllocatedExact) {
+        enteredAmountExact.subtract(totalAllocatedExact).setScale(2, RoundingMode.HALF_UP)
+    } else {
+        BigDecimal.ZERO
+    }
+
+    LaunchedEffect(customer.id) {
+        if (settlementTargets.isEmpty() && !isLoadingTargets && targetsError == null) {
+            onRetryTargets?.invoke()
+        }
     }
 
     AlertDialog(
@@ -1964,32 +2003,86 @@ fun CustomerPaymentCollectionDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Notice: Unapplied advance payment banner (Finding 2)
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                // Notice: Unapplied advance payment banner or Allocated settlement summary
+                if (!hasAllocations) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth().testTag("customer_unapplied_advance_notice")
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = lang.tr(
-                                "تنبيه: تسجل الدفعة النقدية كدفعة مقدمة غير مخصصة (Unapplied Advance) ولا تسوي فواتير محددة مباشرة.",
-                                "Notice: Payments are recorded as Unapplied Advance and do not settle specific invoices directly."
-                            ),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
+                        Row(
+                            modifier = Modifier.padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = lang.tr(
+                                    "تنبيه: تسجل الدفعة النقدية كدفعة مقدمة غير مخصصة (Unapplied Advance) ولا تسوي فواتير محددة مباشرة.",
+                                    "Notice: Payments are recorded as Unapplied Advance and do not settle specific invoices directly."
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                } else {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isOverAllocated) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                        border = BorderStroke(1.dp, if (isOverAllocated) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth().testTag("customer_allocation_summary_card")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isOverAllocated) Icons.Default.Warning else Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = if (isOverAllocated) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = lang.tr(
+                                        "إجمالي المخصص للفواتير والذمم: ${StitchBidiUtils.formatIls(totalAllocatedExact.toDouble())}",
+                                        "Total allocated to targets: ${StitchBidiUtils.formatIls(totalAllocatedExact.toDouble())}"
+                                    ),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = if (isOverAllocated) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                            if (unallocatedSurplus > BigDecimal.ZERO) {
+                                Text(
+                                    text = lang.tr(
+                                        "المتبقي كدفعة مقدمة غير مخصصة: ${StitchBidiUtils.formatIls(unallocatedSurplus.toDouble())}",
+                                        "Unallocated advance remainder: ${StitchBidiUtils.formatIls(unallocatedSurplus.toDouble())}"
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                            if (isOverAllocated) {
+                                Text(
+                                    text = lang.tr(
+                                        "خطأ: مجموع المخصصات يتجاوز المبلغ المقبوض نقداً!",
+                                        "Error: Total allocations exceed cash collected!"
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -2034,12 +2127,275 @@ fun CustomerPaymentCollectionDialog(
                     }
                 }
 
-                // Quick Preset Chips (Full Debt, 50, 100, 200)
+                // Open Settlement Targets Selection Section (displayed when targets exist, loading, error, or has more)
+                val showCustomerTargetsSection = settlementTargets.isNotEmpty() || targetsHasMore || isLoadingTargets || targetsError != null
+                if (showCustomerTargetsSection) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth().testTag("customer_settlement_targets_section")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = lang.tr("الذمم والفواتير المفتوحة (اختياري)", "Open Settlement Targets (Optional)"),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                                if (hasAllocations) {
+                                    TextButton(
+                                        onClick = { selectedAllocations.clear() },
+                                        modifier = Modifier.heightIn(min = 32.dp).testTag("clear_customer_allocations_button")
+                                    ) {
+                                        Text(
+                                            text = lang.tr("إلغاء التخصيص", "Clear"),
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (isLoadingTargets) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = lang.tr("جاري تحميل الذمم المفتوحة...", "Loading open targets..."),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            if (targetsError != null) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = targetsError,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    TextButton(
+                                        onClick = { onRetryTargets?.invoke() },
+                                        modifier = Modifier.heightIn(min = 32.dp)
+                                    ) {
+                                        Text(lang.tr("إعادة المحاولة", "Retry"), style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+
+                            if (settlementTargets.isEmpty() && !isLoadingTargets && targetsError == null) {
+                                if (targetsHasMore) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+                                        modifier = Modifier.fillMaxWidth().testTag("customer_targets_continuation_banner")
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(8.dp),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(
+                                                text = lang.tr(
+                                                    "توجد سجلات إضافية في السجل التاريخي — اضغط لمتابعة فحص الذمم المفتوحة",
+                                                    "Historical records scan continuing — tap Load More to continue searching open targets"
+                                                ),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                            )
+                                            TextButton(
+                                                onClick = { onLoadMoreTargets?.invoke() },
+                                                modifier = Modifier.heightIn(min = 36.dp).testTag("load_more_targets_button")
+                                            ) {
+                                                Text(
+                                                    lang.tr("تحميل المزيد من الذمم", "Load More Targets"),
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                                                )
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Text(
+                                        text = lang.tr(
+                                            "لا توجد فواتير أو أرصدة افتتاحية مفتوحة — تسجل الدفعة كدفعة مقدمة على الحساب.",
+                                            "No open invoices or opening trade targets found — payment will be recorded as unapplied advance."
+                                        ),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            settlementTargets.forEach { target ->
+                                val key = "${target.targetType}:${target.targetId}"
+                                val isChecked = selectedAllocations.containsKey(key)
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isChecked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    border = BorderStroke(1.dp, if (isChecked) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant),
+                                    modifier = Modifier.fillMaxWidth().testTag("target_card_$key")
+                                ) {
+                                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Checkbox(
+                                                    checked = isChecked,
+                                                    onCheckedChange = { checked ->
+                                                        if (checked) {
+                                                            selectedAllocations[key] = target.remainingAmountExact.setScale(2, RoundingMode.HALF_UP).toPlainString()
+                                                            if (enteredAmountExact < target.remainingAmountExact) {
+                                                                payAmountText = target.remainingAmountExact.setScale(2, RoundingMode.HALF_UP).toPlainString()
+                                                            }
+                                                        } else {
+                                                            selectedAllocations.remove(key)
+                                                        }
+                                                    },
+                                                    modifier = Modifier.testTag("target_checkbox_${target.targetType}_${target.targetId}")
+                                                )
+                                                Column {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                    ) {
+                                                        if (target.targetType == "invoice") {
+                                                            StitchBadge(
+                                                                text = lang.tr("فاتورة #${target.targetNumber}", "Inv #${target.targetNumber}"),
+                                                                tone = StitchBadgeTone.PRIMARY
+                                                            )
+                                                        } else if (target.targetType == "opening_trade_item") {
+                                                            StitchBadge(
+                                                                text = lang.tr("رصيد افتتاحي #${target.targetNumber}", "Opening #${target.targetNumber}"),
+                                                                tone = StitchBadgeTone.WARNING
+                                                            )
+                                                        } else {
+                                                            StitchBadge(
+                                                                text = "${target.targetType} #${target.targetNumber}",
+                                                                tone = StitchBadgeTone.NEUTRAL
+                                                            )
+                                                        }
+                                                        Text(
+                                                            text = target.businessDate,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                    Text(
+                                                        text = lang.tr(
+                                                            "المتبقي: ${StitchBidiUtils.formatIls(target.remainingAmountExact.toDouble())}",
+                                                            "Remaining: ${StitchBidiUtils.formatIls(target.remainingAmountExact.toDouble())}"
+                                                        ),
+                                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                                                    )
+                                                }
+                                            }
+
+                                            if (isChecked) {
+                                                OutlinedTextField(
+                                                    value = selectedAllocations[key] ?: "",
+                                                    onValueChange = { newVal ->
+                                                        val sanitized = WesternFormatters.sanitizeWesternDigits(newVal)
+                                                        selectedAllocations[key] = sanitized
+                                                    },
+                                                    label = { Text(lang.tr("المخصص ₪", "Alloc ₪"), style = MaterialTheme.typography.labelSmall) },
+                                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                                    singleLine = true,
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    textStyle = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, textDirection = TextDirection.Ltr),
+                                                    modifier = Modifier.width(115.dp).testTag("target_allocation_input_${target.targetType}_${target.targetId}")
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (targetsHasMore && settlementTargets.isNotEmpty()) {
+                                TextButton(
+                                    onClick = { onLoadMoreTargets?.invoke() },
+                                    modifier = Modifier.fillMaxWidth().testTag("load_more_targets_button")
+                                ) {
+                                    Text(
+                                        lang.tr("تحميل المزيد من الذمم المفتوحة", "Load More Open Targets"),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Cash Amount Input (Large readable field with Western numbers)
+                OutlinedTextField(
+                    value = payAmountText,
+                    onValueChange = { payAmountText = WesternFormatters.sanitizeWesternDigits(it) },
+                    label = { Text(lang.tr("المبلغ المقبوض نقداً (₪) *", "Cash Collected (₪) *")) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    textStyle = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        textDirection = TextDirection.Ltr
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("payment_amount_input")
+                )
+
+                // Quick Preset Chips (Full Debt, 50, 100, 200, Total Allocated)
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    if (totalAllocatedExact > BigDecimal.ZERO) {
+                        item {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
+                                FilterChip(
+                                    selected = payAmountText == totalAllocatedExact.toPlainString(),
+                                    onClick = { payAmountText = totalAllocatedExact.toPlainString() },
+                                    label = {
+                                        Text(
+                                            text = lang.tr(
+                                                "مجموع المخصص (${StitchBidiUtils.formatIls(totalAllocatedExact.toDouble())})",
+                                                "Total Alloc (${StitchBidiUtils.formatIls(totalAllocatedExact.toDouble())})"
+                                            ),
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.secondary,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onSecondary
+                                    ),
+                                    modifier = Modifier.testTag("collect_preset_total_allocated")
+                                )
+                            }
+                        }
+                    }
                     if (customer.balanceIls > 0.005) {
                         val fullStr = WesternFormatters.formatNumber(customer.balanceIls).removeSuffix(".00")
                         item {
@@ -2082,24 +2438,6 @@ fun CustomerPaymentCollectionDialog(
                     }
                 }
 
-                // Cash Amount Input (Large readable field with Western numbers)
-                OutlinedTextField(
-                    value = payAmountText,
-                    onValueChange = { payAmountText = WesternFormatters.sanitizeWesternDigits(it) },
-                    label = { Text(lang.tr("المبلغ المقبوض نقداً (₪) *", "Cash Collected (₪) *")) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    textStyle = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        textDirection = TextDirection.Ltr
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp)
-                        .testTag("payment_amount_input")
-                )
-
                 // Projected Balance & Cash Drawer Status Banner (ST-35 Breakdown)
                 if (enteredAmount > 0.0) {
                     Surface(
@@ -2125,18 +2463,32 @@ fun CustomerPaymentCollectionDialog(
                             Text(
                                 text = when {
                                     customer.balanceExact == null -> lang.tr("الرصيد غير متاح", "Balance unavailable")
-                                    projectedBalance > 0.005 -> lang.tr(
-                                        "الرصيد الدفتري المتبقي بعد القبض: ${StitchBidiUtils.formatIls(projectedBalance)} (دفعة غير مخصصة)",
-                                        "Remaining ledger balance after payment: ${StitchBidiUtils.formatIls(projectedBalance)} (Unapplied advance)"
-                                    )
+                                    projectedBalance > 0.005 -> if (hasAllocations) {
+                                        lang.tr(
+                                            "الرصيد الدفتري المتبقي بعد القبض: ${StitchBidiUtils.formatIls(projectedBalance)}",
+                                            "Remaining ledger balance after payment: ${StitchBidiUtils.formatIls(projectedBalance)}"
+                                        )
+                                    } else {
+                                        lang.tr(
+                                            "الرصيد الدفتري المتبقي بعد القبض: ${StitchBidiUtils.formatIls(projectedBalance)} (دفعة غير مخصصة)",
+                                            "Remaining ledger balance after payment: ${StitchBidiUtils.formatIls(projectedBalance)} (Unapplied advance)"
+                                        )
+                                    }
                                     projectedBalance < -0.005 -> lang.tr(
-                                        "الرصيد الدفتري بعد القبض: يصبح له رصيد مقدم (أمانة غير مخصصة) ${StitchBidiUtils.formatIls(-projectedBalance)}",
-                                        "After collection: Unapplied customer advance credit of ${StitchBidiUtils.formatIls(-projectedBalance)}"
+                                        "الرصيد الدفتري بعد القبض: يصبح له رصيد مقدم (أمانة) ${StitchBidiUtils.formatIls(-projectedBalance)}",
+                                        "After collection: Customer advance credit of ${StitchBidiUtils.formatIls(-projectedBalance)}"
                                     )
-                                    else -> lang.tr(
-                                        "الرصيد الدفتري بعد القبض: رصيد متوازن دفترياً (0.00 ₪ — دفعة مقدمة غير مخصصة)",
-                                        "After collection: Balanced ledger (0.00 ₪ — unapplied advance, does not settle invoices directly)"
-                                    )
+                                    else -> if (hasAllocations) {
+                                        lang.tr(
+                                            "الرصيد الدفتري بعد القبض: رصيد خالص (0.00 ₪)",
+                                            "After collection: Settled balance (0.00 ₪)"
+                                        )
+                                    } else {
+                                        lang.tr(
+                                            "الرصيد الدفتري بعد القبض: رصيد متوازن دفترياً (0.00 ₪ — دفعة مقدمة غير مخصصة)",
+                                            "After collection: Balanced ledger (0.00 ₪ — unapplied advance, does not settle invoices directly)"
+                                        )
+                                    }
                                 },
                                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                                 color = if (projectedBalance > 0.005) {
@@ -2185,9 +2537,21 @@ fun CustomerPaymentCollectionDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    onConfirmPayment(customer.id, enteredAmount, payNoteText, operationId)
+                    val allocInputs = selectedAllocations.mapNotNull { (key, text) ->
+                        val amt = text.toBigDecimalOrNull() ?: return@mapNotNull null
+                        if (amt <= BigDecimal.ZERO) return@mapNotNull null
+                        val parts = key.split(":", limit = 2)
+                        if (parts.size == 2) {
+                            PaymentAllocationInput(parts[0], parts[1], amt.setScale(2, RoundingMode.HALF_UP))
+                        } else null
+                    }
+                    if (onConfirmPaymentExact != null) {
+                        onConfirmPaymentExact(customer.id, enteredAmountExact, payNoteText, operationId, allocInputs)
+                    } else {
+                        onConfirmPayment(customer.id, enteredAmount, payNoteText, operationId)
+                    }
                 },
-                enabled = enteredAmount > 0.0,
+                enabled = enteredAmountExact > BigDecimal.ZERO && !isOverAllocated,
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -2198,11 +2562,18 @@ fun CustomerPaymentCollectionDialog(
                     .testTag("confirm_customer_payment_button")
             ) {
                 Text(
-                    text = if (enteredAmount > 0.0) {
-                        lang.tr(
-                            "تأكيد قبض ${StitchBidiUtils.formatIls(enteredAmount)} وإيداعها بالصندوق",
-                            "Confirm ${StitchBidiUtils.formatIls(enteredAmount)} Collection"
-                        )
+                    text = if (enteredAmountExact > BigDecimal.ZERO) {
+                        if (hasAllocations) {
+                            lang.tr(
+                                "تأكيد قبض ${StitchBidiUtils.formatIls(enteredAmount)} (مخصص ${StitchBidiUtils.formatIls(totalAllocatedExact.toDouble())})",
+                                "Confirm ${StitchBidiUtils.formatIls(enteredAmount)} (${StitchBidiUtils.formatIls(totalAllocatedExact.toDouble())} allocated)"
+                            )
+                        } else {
+                            lang.tr(
+                                "تأكيد قبض ${StitchBidiUtils.formatIls(enteredAmount)} وإيداعها بالصندوق",
+                                "Confirm ${StitchBidiUtils.formatIls(enteredAmount)} Collection"
+                            )
+                        }
                     } else {
                         lang.tr("تأكيد القبض بالصندوق", "Confirm Collection")
                     },

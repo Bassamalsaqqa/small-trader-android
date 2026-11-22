@@ -472,11 +472,30 @@ fun SmallTraderApp(
                         TraderScreen.SUPPLIER_DETAIL -> {
                             SupplierDetailScreen(
                                 state = state,
-                                onBack = { traderViewModel.navigateBack() },
+                                onBack = {
+                                    traderViewModel.resetSupplierSettlementTargets()
+                                    traderViewModel.navigateBack()
+                                },
                                 onPaySupplier = { sup, amount -> traderViewModel.paySupplierAmount(sup.id, amount) },
                                 onPaySupplierResult = { sup, amount, paymentId -> traderViewModel.paySupplierAmountResult(sup.id, amount, paymentId = paymentId) },
                                 onPaySupplierWithResult = { sup, amount, paymentId, onComplete ->
                                     traderViewModel.paySupplierAmountResult(sup.id, amount, paymentId = paymentId, onComplete = onComplete)
+                                },
+                                onPaySupplierExactWithResult = { sup, amount, note, paymentId, allocations, onComplete ->
+                                    traderViewModel.paySupplierAmountExactResult(
+                                        supplierId = sup.id,
+                                        amount = amount,
+                                        note = note,
+                                        paymentId = paymentId,
+                                        allocations = allocations,
+                                        onComplete = onComplete
+                                    )
+                                },
+                                onLoadSupplierTargets = { supplierId, reset ->
+                                    traderViewModel.loadSupplierSettlementTargets(supplierId, resetPagination = reset)
+                                },
+                                onLoadMoreSupplierTargets = { supplierId ->
+                                    traderViewModel.loadSupplierSettlementTargets(supplierId, resetPagination = false)
                                 },
                                 onOpenReceivePurchaseDialog = { traderViewModel.openReceivePurchaseDialog(true) },
                                 onDismissFeedback = traderViewModel::dismissSupplierFeedback,
@@ -657,7 +676,10 @@ fun SmallTraderApp(
                     CustomerPaymentCollectionDialog(
                         customer = cust,
                         lang = state.language,
-                        onDismiss = { traderViewModel.openPaymentCollectionDialog(false) },
+                        onDismiss = {
+                            traderViewModel.openPaymentCollectionDialog(false)
+                            traderViewModel.resetCustomerSettlementTargets()
+                        },
                         onConfirmPayment = { customerId, amountIls, note, paymentId ->
                             traderViewModel.confirmCustomerCollection(
                                 customerId = customerId,
@@ -665,7 +687,22 @@ fun SmallTraderApp(
                                 note = note,
                                 paymentId = paymentId
                             )
-                        }
+                        },
+                        onConfirmPaymentExact = { customerId, amount, note, paymentId, allocations ->
+                            traderViewModel.confirmCustomerCollection(
+                                customerId = customerId,
+                                amount = amount,
+                                note = note,
+                                paymentId = paymentId,
+                                allocations = allocations
+                            )
+                        },
+                        settlementTargets = state.customerSettlementTargets,
+                        isLoadingTargets = state.isLoadingCustomerSettlementTargets,
+                        targetsError = state.customerSettlementTargetsError,
+                        targetsHasMore = state.customerSettlementTargetsHasMore,
+                        onLoadMoreTargets = { traderViewModel.loadCustomerSettlementTargets(cust.id) },
+                        onRetryTargets = { traderViewModel.loadCustomerSettlementTargets(cust.id, resetPagination = true) }
                     )
                     }
                 }

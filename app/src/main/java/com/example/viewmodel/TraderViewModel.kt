@@ -24,6 +24,9 @@ import com.example.model.ProductCategory
 import com.example.model.PurchaseBill
 import com.example.model.PurchaseLineItem
 import com.example.model.SaleDraft
+import com.example.model.PaymentAllocationInput
+import com.example.model.SettlementTarget
+import com.example.model.SettlementTargetsResponse
 import com.example.model.StockMovement
 import com.example.model.Supplier
 import com.example.model.SupplierPayment
@@ -1487,10 +1490,19 @@ class TraderViewModel(
     }
 
     fun openPaymentCollectionDialog(open: Boolean) {
+        if (!open) {
+            resetCustomerSettlementTargets()
+        } else {
+            val customer = _uiState.value.selectedCustomerForDetail
+            if (customer != null) {
+                loadCustomerSettlementTargets(customer.id, resetPagination = true)
+            }
+        }
         _uiState.update { it.copy(isPaymentCollectionDialogOpen = open) }
     }
 
     fun openPaymentCollectionForCustomer(customer: Customer) {
+        loadCustomerSettlementTargets(customer.id, resetPagination = true)
         _uiState.update { state ->
             val freshCustomer = state.customers.firstOrNull { it.id == customer.id } ?: customer
             state.copy(
@@ -1511,12 +1523,22 @@ class TraderViewModel(
 
     fun confirmCustomerCollection(
         customerId: String,
-        paymentAmountIls: Double,
+        amount: BigDecimal,
         note: String,
         paymentId: String,
+        allocations: List<PaymentAllocationInput> = emptyList(),
         onComplete: (Boolean) -> Unit = {}
     ): Boolean {
-        val saved = recordCustomerPayment(customerId, paymentAmountIls, note, paymentId) { success ->
+        val saved = recordCustomerPayment(
+            customerId = customerId,
+            amount = amount,
+            note = note,
+            paymentId = paymentId,
+            cashAccountId = null,
+            paymentDate = null,
+            allocations = allocations
+        ) { res ->
+            val success = res.isSuccess
             if (success) navigateTo(TraderScreen.CUSTOMER_DETAIL)
             onComplete(success)
         }
@@ -1524,41 +1546,122 @@ class TraderViewModel(
         return saved
     }
 
+    fun confirmCustomerCollection(
+        customerId: String,
+        paymentAmountIls: Double,
+        note: String,
+        paymentId: String,
+        onComplete: (Boolean) -> Unit = {}
+    ): Boolean = confirmCustomerCollection(
+        customerId = customerId,
+        amount = BigDecimal(paymentAmountIls.toString()),
+        note = note,
+        paymentId = paymentId,
+        allocations = emptyList(),
+        onComplete = onComplete
+    )
+
     fun recordCustomerPayment(
         customerId: String,
         paymentAmountIls: Double,
         note: String,
         paymentId: String = "",
         onComplete: (Boolean) -> Unit = {}
+    ): Boolean = recordCustomerPayment(
+        customerId = customerId,
+        amount = BigDecimal(paymentAmountIls.toString()),
+        note = note,
+        paymentId = paymentId,
+        cashAccountId = null,
+        paymentDate = null,
+        allocations = emptyList()
+    ) { res ->
+        onComplete(res.isSuccess)
+    }
+
+    fun recordCustomerPayment(
+        customerId: String,
+        amount: BigDecimal,
+        note: String,
+        paymentId: String = "",
+        cashAccountId: String? = null,
+        paymentDate: String? = null,
+        allocations: List<PaymentAllocationInput> = emptyList(),
+        onComplete: (Result<CustomerTransaction>) -> Unit = {}
     ): Boolean {
         if (!acquireActionLock()) {
-            onComplete(false)
+            val err = Result.failure<CustomerTransaction>(IllegalStateException("Action in progress"))
+            onComplete(err)
             return false
         }
         val pid = if (paymentId.isNotBlank()) paymentId else _uiState.value.draftCustomerPaymentOperationId
+        val currencyMinorUnits = 2
+        val amountExact = amount.setScale(currencyMinorUnits, RoundingMode.HALF_UP)
 
         if (repository is OfflineDemoTraderRepository) {
             try {
-                val result = kotlinx.coroutines.runBlocking { repository.recordCustomerPayment(customerId, paymentAmountIls, note, pid) }
-                val success = if (result.isSuccess) {
+                val result = kotlinx.coroutines.runBlocking {
+                    repository.recordCustomerPayment(
+                        customerId = customerId,
+                        amount = amountExact,
+                        note = note,
+                        paymentId = pid,
+                        cashAccountId = cashAccountId,
+                        paymentDate = paymentDate,
+                        allocations = allocations
+                    )
+                }
+                if (result.isSuccess) {
                     syncCustomers()
                     _uiState.update { state ->
                         val updatedCust = state.customers.firstOrNull { it.id == customerId }
-                        val paidStr = WesternFormatters.formatIls(paymentAmountIls)
+                        val paidStr = WesternFormatters.formatIls(amountExact.toDouble())
                         val isBalKnown = updatedCust?.balanceExact != null && updatedCust?.balanceIls?.isNaN() == false
                         val newBal = updatedCust?.balanceIls ?: Double.NaN
+                        val hasAllocs = allocations.isNotEmpty()
+                        val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
+                        val allocStr = WesternFormatters.formatIls(totalAllocExact.toDouble())
+
                         val msgAr = when {
-                            !isBalKnown -> "تم قبض $paidStr نقداً (دفعة مقدمة غير مخصصة) — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
-                            newBal > 0.005 -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري المتبقي: ${WesternFormatters.formatIls(newBal)}"
-                            newBal < -0.005 -> "تم قبض $paidStr نقداً — رصيد الزبون المقدم (دفعة غير مخصصة): ${WesternFormatters.formatIls(-newBal)}"
-                            else -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري: 0.00 ₪"
+                            !hasAllocs -> {
+                                when {
+                                    !isBalKnown -> "تم قبض $paidStr نقداً (دفعة مقدمة غير مخصصة) — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
+                                    newBal > 0.005 -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري المتبقي: ${WesternFormatters.formatIls(newBal)}"
+                                    newBal < -0.005 -> "تم قبض $paidStr نقداً — رصيد الزبون المقدم (دفعة غير مخصصة): ${WesternFormatters.formatIls(-newBal)}"
+                                    else -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري: 0.00 ₪"
+                                }
+                            }
+                            else -> {
+                                val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
+                                val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                                if (unallocExact > BigDecimal.ZERO) {
+                                    "تم قبض $paidStr نقداً (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد الدفتري: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "غير متاح"}"
+                                } else {
+                                    "تم قبض $paidStr نقداً وتخصيصها للذمم المحددة — الرصيد الدفتري المتبقي: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "غير متاح"}"
+                                }
+                            }
                         }
+
                         val msgEn = when {
-                            !isBalKnown -> "Collected $paidStr in cash (unapplied advance) — Current balance unavailable (statement refresh required)"
-                            newBal > 0.005 -> "Collected $paidStr in cash (unapplied advance) — Remaining ledger balance: ${WesternFormatters.formatIls(newBal)}"
-                            newBal < -0.005 -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatIls(-newBal)}"
-                            else -> "Collected $paidStr in cash (unapplied advance) — Ledger balance: 0.00 ₪"
+                            !hasAllocs -> {
+                                when {
+                                    !isBalKnown -> "Collected $paidStr in cash (unapplied advance) — Current balance unavailable (statement refresh required)"
+                                    newBal > 0.005 -> "Collected $paidStr in cash (unapplied advance) — Remaining ledger balance: ${WesternFormatters.formatIls(newBal)}"
+                                    newBal < -0.005 -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatIls(-newBal)}"
+                                    else -> "Collected $paidStr in cash (unapplied advance) — Ledger balance: 0.00 ₪"
+                                }
+                            }
+                            else -> {
+                                val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
+                                val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                                if (unallocExact > BigDecimal.ZERO) {
+                                    "Collected $paidStr in cash (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "unavailable"}"
+                                } else {
+                                    "Collected $paidStr in cash applied to selected targets — Remaining ledger balance: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "unavailable"}"
+                                }
+                            }
                         }
+
                         state.copy(
                             draftCustomerPaymentOperationId = repository.rotateDraftOperationId("customer_payment"),
                             isPaymentCollectionDialogOpen = false,
@@ -1567,14 +1670,12 @@ class TraderViewModel(
                             lastCustomerPaymentMessageEn = msgEn
                         )
                     }
-                    true
                 } else {
                     val err = result.exceptionOrNull()?.message ?: "Payment rejected"
                     showBanner(err, err, isError = true)
-                    false
                 }
-                onComplete(success)
-                return success
+                onComplete(result)
+                return result.isSuccess
             } finally {
                 releaseActionLock()
             }
@@ -1583,27 +1684,67 @@ class TraderViewModel(
         viewModelScope.launch {
             try {
                 val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                    repository.recordCustomerPayment(customerId, paymentAmountIls, note, pid)
+                    repository.recordCustomerPayment(
+                        customerId = customerId,
+                        amount = amountExact,
+                        note = note,
+                        paymentId = pid,
+                        cashAccountId = cashAccountId,
+                        paymentDate = paymentDate,
+                        allocations = allocations
+                    )
                 }
-                val success = if (result.isSuccess) {
+                if (result.isSuccess) {
                     syncCustomers()
                     _uiState.update { state ->
                         val updatedCust = state.customers.firstOrNull { it.id == customerId }
-                        val paidStr = WesternFormatters.formatIls(paymentAmountIls)
+                        val paidStr = WesternFormatters.formatIls(amountExact.toDouble())
                         val isBalKnown = updatedCust?.balanceExact != null && updatedCust?.balanceIls?.isNaN() == false
                         val newBal = updatedCust?.balanceIls ?: Double.NaN
+                        val hasAllocs = allocations.isNotEmpty()
+                        val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
+                        val allocStr = WesternFormatters.formatIls(totalAllocExact.toDouble())
+
                         val msgAr = when {
-                            !isBalKnown -> "تم قبض $paidStr نقداً (دفعة مقدمة غير مخصصة) — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
-                            newBal > 0.005 -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري المتبقي: ${WesternFormatters.formatIls(newBal)}"
-                            newBal < -0.005 -> "تم قبض $paidStr نقداً — رصيد الزبون المقدم (دفعة غير مخصصة): ${WesternFormatters.formatIls(-newBal)}"
-                            else -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري: 0.00 ₪"
+                            !hasAllocs -> {
+                                when {
+                                    !isBalKnown -> "تم قبض $paidStr نقداً (دفعة مقدمة غير مخصصة) — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
+                                    newBal > 0.005 -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري المتبقي: ${WesternFormatters.formatIls(newBal)}"
+                                    newBal < -0.005 -> "تم قبض $paidStr نقداً — رصيد الزبون المقدم (دفعة غير مخصصة): ${WesternFormatters.formatIls(-newBal)}"
+                                    else -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري: 0.00 ₪"
+                                }
+                            }
+                            else -> {
+                                val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
+                                val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                                if (unallocExact > BigDecimal.ZERO) {
+                                    "تم قبض $paidStr نقداً (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد الدفتري: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "غير متاح"}"
+                                } else {
+                                    "تم قبض $paidStr نقداً وتخصيصها للذمم المحددة — الرصيد الدفتري المتبقي: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "غير متاح"}"
+                                }
+                            }
                         }
+
                         val msgEn = when {
-                            !isBalKnown -> "Collected $paidStr in cash (unapplied advance) — Current balance unavailable (statement refresh required)"
-                            newBal > 0.005 -> "Collected $paidStr in cash (unapplied advance) — Remaining ledger balance: ${WesternFormatters.formatIls(newBal)}"
-                            newBal < -0.005 -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatIls(-newBal)}"
-                            else -> "Collected $paidStr in cash (unapplied advance) — Ledger balance: 0.00 ₪"
+                            !hasAllocs -> {
+                                when {
+                                    !isBalKnown -> "Collected $paidStr in cash (unapplied advance) — Current balance unavailable (statement refresh required)"
+                                    newBal > 0.005 -> "Collected $paidStr in cash (unapplied advance) — Remaining ledger balance: ${WesternFormatters.formatIls(newBal)}"
+                                    newBal < -0.005 -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatIls(-newBal)}"
+                                    else -> "Collected $paidStr in cash (unapplied advance) — Ledger balance: 0.00 ₪"
+                                }
+                            }
+                            else -> {
+                                val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
+                                val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                                if (unallocExact > BigDecimal.ZERO) {
+                                    "Collected $paidStr in cash (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "unavailable"}"
+                                } else {
+                                    "Collected $paidStr in cash applied to selected targets — Remaining ledger balance: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "unavailable"}"
+                                }
+                            }
                         }
+
                         state.copy(
                             draftCustomerPaymentOperationId = repository.rotateDraftOperationId("customer_payment"),
                             isPaymentCollectionDialogOpen = false,
@@ -1612,22 +1753,20 @@ class TraderViewModel(
                             lastCustomerPaymentMessageEn = msgEn
                         )
                     }
-                    true
                 } else {
                     val err = result.exceptionOrNull()?.message ?: "Payment rejected"
                     showBanner(err, err, isError = true)
-                    false
                 }
-                onComplete(success)
+                onComplete(result)
             } catch (e: Exception) {
                 val err = e.message ?: "Payment rejected"
                 showBanner(err, err, isError = true)
-                onComplete(false)
+                onComplete(Result.failure(e))
             } finally {
                 releaseActionLock()
             }
         }
-        return false
+        return true
     }
 
     fun createCustomer(name: String, phone: String, address: String, onComplete: (Boolean) -> Unit = {}) {
@@ -2036,11 +2175,44 @@ class TraderViewModel(
         return Result.failure(IllegalStateException("Action in progress"))
     }
 
+    fun paySupplierAmount(
+        supplierId: String,
+        amountIls: Double,
+        note: String = "سداد نقدي للمورد من الصندوق",
+        paymentId: String = "",
+        onComplete: (Boolean) -> Unit = {}
+    ): Boolean {
+        val result = paySupplierAmountResult(supplierId, amountIls, note, paymentId) { res ->
+            onComplete(res.isSuccess)
+        }
+        return result.isSuccess
+    }
+
     fun paySupplierAmountResult(
         supplierId: String,
         amountIls: Double,
         note: String = "سداد نقدي للمورد من الصندوق",
         paymentId: String = "",
+        onComplete: (Result<SupplierPayment>) -> Unit = {}
+    ): Result<SupplierPayment> = paySupplierAmountExactResult(
+        supplierId = supplierId,
+        amount = BigDecimal(amountIls.toString()),
+        note = note,
+        paymentId = paymentId,
+        cashAccountId = null,
+        paymentDate = null,
+        allocations = emptyList(),
+        onComplete = onComplete
+    )
+
+    fun paySupplierAmountExactResult(
+        supplierId: String,
+        amount: BigDecimal,
+        note: String = "سداد نقدي للمورد من الصندوق",
+        paymentId: String = "",
+        cashAccountId: String? = null,
+        paymentDate: String? = null,
+        allocations: List<PaymentAllocationInput> = emptyList(),
         onComplete: (Result<SupplierPayment>) -> Unit = {}
     ): Result<SupplierPayment> {
         if (!acquireActionLock()) {
@@ -2051,32 +2223,75 @@ class TraderViewModel(
 
         val pid = if (paymentId.isNotBlank()) paymentId else _uiState.value.draftSupplierPaymentOperationId
         val session = _uiState.value.currentSession
+        val currencyMinorUnits = 2
+        val amountExact = amount.setScale(currencyMinorUnits, RoundingMode.HALF_UP)
 
         if (repository is OfflineDemoTraderRepository) {
             try {
                 val result = kotlinx.coroutines.runBlocking {
-                    repository.recordSupplierPayment(supplierId, amountIls, note, session, pid)
+                    repository.recordSupplierPayment(
+                        supplierId = supplierId,
+                        amount = amountExact,
+                        note = note,
+                        operator = session,
+                        paymentId = pid,
+                        cashAccountId = cashAccountId,
+                        paymentDate = paymentDate,
+                        allocations = allocations
+                    )
                 }
                 if (result.isSuccess) {
                     val updatedSuppliers = repository.getSuppliers()
                     val updatedBills = repository.getPurchaseBills()
                     val updatedPayments = repository.getSupplierPayments()
                     val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
-                    val paidStr = WesternFormatters.formatIls(amountIls)
+                    val paidStr = WesternFormatters.formatIls(amountExact.toDouble())
                     val isOwedKnown = updatedSup?.balanceOwedExact != null && updatedSup?.balanceOwedIls?.isNaN() == false
                     val newOwed = updatedSup?.balanceOwedIls ?: Double.NaN
+                    val hasAllocs = allocations.isNotEmpty()
+                    val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
+                    val allocStr = WesternFormatters.formatIls(totalAllocExact.toDouble())
+
                     val msgAr = when {
-                        !isOwedKnown -> "تم صرف $paidStr للمورد — الرصيد الحالي غير متاح (يتطلب تحديث البيانات)"
-                        newOwed > 0.005 -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatIls(newOwed)}"
-                        newOwed < -0.005 -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatIls(-newOwed)}"
-                        else -> "تم صرف $paidStr للمورد — أصبح حساب المورد خالصاً (0.00 ₪)"
+                        !hasAllocs -> {
+                            when {
+                                !isOwedKnown -> "تم صرف $paidStr للمورد — الرصيد الحالي غير متاح (يتطلب تحديث البيانات)"
+                                newOwed > 0.005 -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatIls(newOwed)}"
+                                newOwed < -0.005 -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatIls(-newOwed)}"
+                                else -> "تم صرف $paidStr للمورد (دفعة غير مخصصة) — الرصيد الدفتري: 0.00 ₪"
+                            }
+                        }
+                        else -> {
+                            val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
+                            val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                            if (unallocExact > BigDecimal.ZERO) {
+                                "تم صرف $paidStr للمورد (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "غير متاح"}"
+                            } else {
+                                "تم صرف $paidStr للمورد وتخصيصها للذمم المحددة — الرصيد المتبقي له: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "غير متاح"}"
+                            }
+                        }
                     }
+
                     val msgEn = when {
-                        !isOwedKnown -> "Paid $paidStr to supplier — Current balance unavailable"
-                        newOwed > 0.005 -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatIls(newOwed)}"
-                        newOwed < -0.005 -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatIls(-newOwed)}"
-                        else -> "Paid $paidStr to supplier — Supplier account settled (0.00 ₪)"
+                        !hasAllocs -> {
+                            when {
+                                !isOwedKnown -> "Paid $paidStr to supplier — Current balance unavailable"
+                                newOwed > 0.005 -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatIls(newOwed)}"
+                                newOwed < -0.005 -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatIls(-newOwed)}"
+                                else -> "Paid $paidStr to supplier (unapplied advance) — Ledger balance: 0.00 ₪"
+                            }
+                        }
+                        else -> {
+                            val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
+                            val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                            if (unallocExact > BigDecimal.ZERO) {
+                                "Paid $paidStr to supplier (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "unavailable"}"
+                            } else {
+                                "Paid $paidStr to supplier applied to selected targets — Remaining payable: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "unavailable"}"
+                            }
+                        }
                     }
+
                     _uiState.update { state ->
                         state.copy(
                             draftSupplierPaymentOperationId = repository.rotateDraftOperationId("supplier_payment"),
@@ -2115,28 +2330,69 @@ class TraderViewModel(
             var completionResult: Result<SupplierPayment>? = null
             try {
                 val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                    repository.recordSupplierPayment(supplierId, amountIls, note, session, pid)
+                    repository.recordSupplierPayment(
+                        supplierId = supplierId,
+                        amount = amountExact,
+                        note = note,
+                        operator = session,
+                        paymentId = pid,
+                        cashAccountId = cashAccountId,
+                        paymentDate = paymentDate,
+                        allocations = allocations
+                    )
                 }
                 if (result.isSuccess) {
                     val updatedSuppliers = repository.getSuppliers()
                     val updatedBills = repository.getPurchaseBills()
                     val updatedPayments = repository.getSupplierPayments()
                     val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
-                    val paidStr = WesternFormatters.formatIls(amountIls)
+                    val paidStr = WesternFormatters.formatIls(amountExact.toDouble())
                     val isOwedKnown = updatedSup?.balanceOwedExact != null && updatedSup?.balanceOwedIls?.isNaN() == false
                     val newOwed = updatedSup?.balanceOwedIls ?: Double.NaN
+                    val hasAllocs = allocations.isNotEmpty()
+                    val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
+                    val allocStr = WesternFormatters.formatIls(totalAllocExact.toDouble())
+
                     val msgAr = when {
-                        !isOwedKnown -> "تم صرف $paidStr للمورد — الرصيد الحالي غير متاح (يتطلب تحديث البيانات)"
-                        newOwed > 0.005 -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatIls(newOwed)}"
-                        newOwed < -0.005 -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatIls(-newOwed)}"
-                        else -> "تم صرف $paidStr للمورد — أصبح حساب المورد خالصاً (0.00 ₪)"
+                        !hasAllocs -> {
+                            when {
+                                !isOwedKnown -> "تم صرف $paidStr للمورد — الرصيد الحالي غير متاح (يتطلب تحديث البيانات)"
+                                newOwed > 0.005 -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatIls(newOwed)}"
+                                newOwed < -0.005 -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatIls(-newOwed)}"
+                                else -> "تم صرف $paidStr للمورد (دفعة غير مخصصة) — الرصيد الدفتري: 0.00 ₪"
+                            }
+                        }
+                        else -> {
+                            val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
+                            val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                            if (unallocExact > BigDecimal.ZERO) {
+                                "تم صرف $paidStr للمورد (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "غير متاح"}"
+                            } else {
+                                "تم صرف $paidStr للمورد وتخصيصها للذمم المحددة — الرصيد المتبقي له: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "غير متاح"}"
+                            }
+                        }
                     }
+
                     val msgEn = when {
-                        !isOwedKnown -> "Paid $paidStr to supplier — Current balance unavailable"
-                        newOwed > 0.005 -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatIls(newOwed)}"
-                        newOwed < -0.005 -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatIls(-newOwed)}"
-                        else -> "Paid $paidStr to supplier — Supplier account settled (0.00 ₪)"
+                        !hasAllocs -> {
+                            when {
+                                !isOwedKnown -> "Paid $paidStr to supplier — Current balance unavailable"
+                                newOwed > 0.005 -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatIls(newOwed)}"
+                                newOwed < -0.005 -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatIls(-newOwed)}"
+                                else -> "Paid $paidStr to supplier (unapplied advance) — Ledger balance: 0.00 ₪"
+                            }
+                        }
+                        else -> {
+                            val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
+                            val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                            if (unallocExact > BigDecimal.ZERO) {
+                                "Paid $paidStr to supplier (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "unavailable"}"
+                            } else {
+                                "Paid $paidStr to supplier applied to selected targets — Remaining payable: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "unavailable"}"
+                            }
+                        }
                     }
+
                     _uiState.update { state ->
                         state.copy(
                             draftSupplierPaymentOperationId = repository.rotateDraftOperationId("supplier_payment"),
@@ -2175,19 +2431,6 @@ class TraderViewModel(
             completionResult?.let { onComplete(it) }
         }
         return Result.failure(IllegalStateException("Action in progress"))
-    }
-
-    fun paySupplierAmount(
-        supplierId: String,
-        amountIls: Double,
-        note: String = "سداد نقدي للمورد من الصندوق",
-        paymentId: String = "",
-        onComplete: (Boolean) -> Unit = {}
-    ): Boolean {
-        val result = paySupplierAmountResult(supplierId, amountIls, note, paymentId) { res ->
-            onComplete(res.isSuccess)
-        }
-        return result.isSuccess
     }
 
     fun openAddExpenseDialog(open: Boolean) {
@@ -3392,6 +3635,184 @@ class TraderViewModel(
             )
         }
         return true
+    }
+
+    private var customerSettlementJob: Job? = null
+    private var customerSettlementGeneration = 0L
+
+    fun loadCustomerSettlementTargets(customerId: String, resetPagination: Boolean = false): Job {
+        if (customerId.isBlank()) return Job().apply { complete() }
+        if (resetPagination) {
+            customerSettlementJob?.cancel()
+        }
+        val generation = if (resetPagination) ++customerSettlementGeneration else customerSettlementGeneration
+        val currentCursor = if (resetPagination) null else _uiState.value.customerSettlementTargetsNextCursor
+
+        _uiState.update { state ->
+            state.copy(
+                isLoadingCustomerSettlementTargets = true,
+                customerSettlementTargetsError = null,
+                customerSettlementTargets = if (resetPagination) emptyList() else state.customerSettlementTargets,
+                customerSettlementTargetsNextCursor = if (resetPagination) null else state.customerSettlementTargetsNextCursor,
+                customerSettlementTargetsHasMore = if (resetPagination) false else state.customerSettlementTargetsHasMore
+            )
+        }
+
+        val job = viewModelScope.launch {
+            try {
+                val res = repository.getCustomerSettlementTargets(
+                    customerId = customerId,
+                    currency = null,
+                    limit = 50,
+                    cursor = currentCursor
+                )
+                if (generation == customerSettlementGeneration) {
+                    if (res.isSuccess) {
+                        val data = res.getOrThrow()
+                        _uiState.update { state ->
+                            val existing = if (resetPagination) emptyList() else state.customerSettlementTargets
+                            val existingKeys = existing.map { "${it.targetType}:${it.targetId}" }.toSet()
+                            val newTargets = data.targets.filter { "${it.targetType}:${it.targetId}" !in existingKeys }
+                            state.copy(
+                                customerSettlementTargets = existing + newTargets,
+                                customerSettlementTargetsHasMore = data.hasMore,
+                                customerSettlementTargetsNextCursor = data.nextCursor,
+                                isLoadingCustomerSettlementTargets = false,
+                                customerSettlementTargetsError = null
+                            )
+                        }
+                    } else {
+                        val ex = res.exceptionOrNull()
+                        val err = ex?.message ?: "Failed to load customer settlement targets"
+                        _uiState.update { state ->
+                            state.copy(
+                                isLoadingCustomerSettlementTargets = false,
+                                customerSettlementTargetsError = err
+                            )
+                        }
+                    }
+                }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                if (generation == customerSettlementGeneration) {
+                    _uiState.update { state ->
+                        state.copy(
+                            isLoadingCustomerSettlementTargets = false,
+                            customerSettlementTargetsError = e.message ?: "Error loading customer settlement targets"
+                        )
+                    }
+                }
+            }
+        }
+        customerSettlementJob = job
+        return job
+    }
+
+    fun resetCustomerSettlementTargets() {
+        customerSettlementJob?.cancel()
+        customerSettlementGeneration++
+        _uiState.update { state ->
+            state.copy(
+                customerSettlementTargets = emptyList(),
+                isLoadingCustomerSettlementTargets = false,
+                customerSettlementTargetsError = null,
+                customerSettlementTargetsHasMore = false,
+                customerSettlementTargetsNextCursor = null
+            )
+        }
+    }
+
+    private var supplierSettlementJob: Job? = null
+    private var supplierSettlementGeneration = 0L
+
+    fun loadSupplierSettlementTargets(supplierId: String, resetPagination: Boolean = false): Job {
+        if (supplierId.isBlank()) return Job().apply { complete() }
+        if (resetPagination) {
+            supplierSettlementJob?.cancel()
+        }
+        val generation = if (resetPagination) ++supplierSettlementGeneration else supplierSettlementGeneration
+        val currentCursor = if (resetPagination) null else _uiState.value.supplierSettlementTargetsNextCursor
+
+        _uiState.update { state ->
+            state.copy(
+                isLoadingSupplierSettlementTargets = true,
+                supplierSettlementTargetsError = null,
+                supplierSettlementTargets = if (resetPagination) emptyList() else state.supplierSettlementTargets,
+                supplierSettlementTargetsNextCursor = if (resetPagination) null else state.supplierSettlementTargetsNextCursor,
+                supplierSettlementTargetsHasMore = if (resetPagination) false else state.supplierSettlementTargetsHasMore
+            )
+        }
+
+        val job = viewModelScope.launch {
+            try {
+                val res = repository.getSupplierSettlementTargets(
+                    supplierId = supplierId,
+                    currency = null,
+                    limit = 50,
+                    cursor = currentCursor
+                )
+                if (generation == supplierSettlementGeneration) {
+                    if (res.isSuccess) {
+                        val data = res.getOrThrow()
+                        _uiState.update { state ->
+                            val existing = if (resetPagination) emptyList() else state.supplierSettlementTargets
+                            val existingKeys = existing.map { "${it.targetType}:${it.targetId}" }.toSet()
+                            val newTargets = data.targets.filter { "${it.targetType}:${it.targetId}" !in existingKeys }
+                            state.copy(
+                                supplierSettlementTargets = existing + newTargets,
+                                supplierSettlementTargetsHasMore = data.hasMore,
+                                supplierSettlementTargetsNextCursor = data.nextCursor,
+                                isLoadingSupplierSettlementTargets = false,
+                                supplierSettlementTargetsError = null
+                            )
+                        }
+                    } else {
+                        val ex = res.exceptionOrNull()
+                        val rawErr = ex?.message ?: "Failed to load supplier settlement targets"
+                        val isCostDenied = rawErr.contains("403") || rawErr.contains("FORBIDDEN") || rawErr.contains("purchasing cost")
+                        val err = if (isCostDenied) {
+                            "غير مصرح: استعراض الذمم المالية للموردين يتطلب صلاحية تكلفة المشتريات | Permission denied: Viewing supplier financial settlement targets requires purchasing cost permission"
+                        } else {
+                            rawErr
+                        }
+                        _uiState.update { state ->
+                            state.copy(
+                                isLoadingSupplierSettlementTargets = false,
+                                supplierSettlementTargetsError = err
+                            )
+                        }
+                    }
+                }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                if (generation == supplierSettlementGeneration) {
+                    _uiState.update { state ->
+                        state.copy(
+                            isLoadingSupplierSettlementTargets = false,
+                            supplierSettlementTargetsError = e.message ?: "Error loading supplier settlement targets"
+                        )
+                    }
+                }
+            }
+        }
+        supplierSettlementJob = job
+        return job
+    }
+
+    fun resetSupplierSettlementTargets() {
+        supplierSettlementJob?.cancel()
+        supplierSettlementGeneration++
+        _uiState.update { state ->
+            state.copy(
+                supplierSettlementTargets = emptyList(),
+                isLoadingSupplierSettlementTargets = false,
+                supplierSettlementTargetsError = null,
+                supplierSettlementTargetsHasMore = false,
+                supplierSettlementTargetsNextCursor = null
+            )
+        }
     }
 
     fun updateCountedPhysicalCashText(rawInput: String) {

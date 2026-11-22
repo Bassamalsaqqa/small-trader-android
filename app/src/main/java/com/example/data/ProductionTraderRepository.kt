@@ -64,6 +64,11 @@ import com.example.model.BasketItem
 import com.example.model.BusinessInfo
 import com.example.model.Customer
 import com.example.model.CustomerTransaction
+import com.example.model.PaymentAllocationInput
+import com.example.model.PaymentAllocationResult
+import com.example.model.SettlementCurrencyTotal
+import com.example.model.SettlementTarget
+import com.example.model.SettlementTargetsResponse
 import com.example.model.ExpenseCategory
 import com.example.model.ExpenseEntry
 import com.example.model.InvoiceRecord
@@ -1627,32 +1632,137 @@ class ProductionTraderRepository(
 
     override fun getCustomerTransactions(): List<CustomerTransaction> = _customerTransactionsFlow.value
 
+    override suspend fun getCustomerSettlementTargets(
+        customerId: String,
+        currency: String?,
+        limit: Int,
+        cursor: String?
+    ): Result<SettlementTargetsResponse> = withContext(ioDispatcher) {
+        val currentScope = authScopeProvider?.invoke()
+        if (authScopeProvider != null && (currentScope == null || currentScope.companyId != companyId || currentScope.actorId != actorId || currentScope.deviceId != deviceId)) {
+            return@withContext Result.failure(SecurityException("Scope validation failed: current session is superseded or revoked."))
+        }
+        val before = requireActiveScope()
+        if (!ServerUlid.isValid(customerId)) {
+            return@withContext Result.failure(IllegalArgumentException("Invalid customer ULID: $customerId"))
+        }
+        try {
+            val res = apiClient.getCustomerSettlementTargets(
+                companyId = companyId,
+                customerId = ServerUlid.parse(customerId),
+                currency = currency,
+                limit = limit,
+                cursor = cursor
+            )
+            if (res.isSuccess) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                check(requireActiveScope() == before) { "Session changed during customer settlement targets read" }
+                val parsed = parseSettlementTargetsResponse(res.getOrThrow(), isSupplier = false)
+                Result.success(parsed)
+            } else {
+                val ex = res.exceptionOrNull() ?: RuntimeException("Failed to read customer settlement targets")
+                Result.failure(ex)
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Result.failure(e)
+        }
+    }
+
     override suspend fun recordCustomerPayment(
         customerId: String,
         amountIls: Double,
         note: String,
         paymentId: String
+    ): Result<CustomerTransaction> = recordCustomerPayment(
+        customerId = customerId,
+        amount = BigDecimal(amountIls.toString()),
+        note = note,
+        paymentId = paymentId,
+        cashAccountId = null,
+        paymentDate = null,
+        allocations = emptyList()
+    )
+
+    override suspend fun recordCustomerPayment(
+        customerId: String,
+        amount: BigDecimal,
+        note: String,
+        paymentId: String,
+        cashAccountId: String?,
+        paymentDate: String?,
+        allocations: List<PaymentAllocationInput>
     ): Result<CustomerTransaction> = withContext(ioDispatcher) {
-        requireActiveScope()
+        val currentScope = authScopeProvider?.invoke()
+        if (authScopeProvider != null && (currentScope == null || currentScope.companyId != companyId || currentScope.actorId != actorId || currentScope.deviceId != deviceId)) {
+            return@withContext Result.failure(SecurityException("Scope validation failed: current session is superseded or revoked."))
+        }
+        val before = requireActiveScope()
         if (!ServerUlid.isValid(customerId)) {
             return@withContext Result.failure(IllegalArgumentException("Invalid customer ULID: $customerId"))
         }
-        val amountExact = BigDecimal(amountIls.toString()).setScale(currencyMinorUnits, RoundingMode.HALF_UP)
+        val amountExact = amount.setScale(currencyMinorUnits, RoundingMode.HALF_UP)
         if (amountExact <= BigDecimal.ZERO) {
             return@withContext Result.failure(IllegalArgumentException("Payment amount must be strictly positive"))
+        }
+
+        var totalAllocated = BigDecimal.ZERO
+        val targetSet = mutableSetOf<String>()
+        for (alloc in allocations) {
+            if (alloc.amountExact <= BigDecimal.ZERO) {
+                return@withContext Result.failure(IllegalArgumentException("Allocation amount must be strictly positive"))
+            }
+            val key = "${alloc.targetType}:${alloc.targetId}"
+            if (!targetSet.add(key)) {
+                return@withContext Result.failure(IllegalArgumentException("Duplicate allocation target detected: $key"))
+            }
+            totalAllocated = totalAllocated.add(alloc.amountExact)
+        }
+        if (totalAllocated > amountExact) {
+            return@withContext Result.failure(IllegalArgumentException("Allocations ($totalAllocated) exceed total payment amount ($amountExact)"))
+        }
+
+        val effectivePaymentDate = paymentDate ?: WesternFormatters.currentDate()
+        val effectiveCashAccount = if (!cashAccountId.isNullOrBlank()) {
+            ServerUlid.parse(cashAccountId)
+        } else {
+            approvedCashAccount.id
         }
 
         val commandId = if (paymentId.isNotBlank()) paymentId else UUID.randomUUID().toString()
         val idempotencyKey = "custpay-$commandId"
 
+        val activeDraft = commandStore.getActiveDraftRecord(before.companyId.value, before.actorId.value, before.deviceId.value, "customer_payment")
+
+        val allocElements = allocations.map { alloc ->
+            StrictJsonObject(
+                mapOf(
+                    "target_type" to StrictJsonString(alloc.targetType),
+                    "target_id" to StrictJsonString(alloc.targetId),
+                    "amount" to StrictJsonString(alloc.amountExact.setScale(6, RoundingMode.HALF_UP).toPlainString())
+                )
+            )
+        }
         val payloadObj = StrictJsonObject(
             mapOf(
                 "customer_id" to StrictJsonString(customerId),
-                "amount" to StrictJsonString(amountExact.toPlainString()),
-                "notes" to StrictJsonString(note)
+                "amount" to StrictJsonString(amountExact.setScale(6, RoundingMode.HALF_UP).toPlainString()),
+                "currency" to StrictJsonString("ILS"),
+                "payment_date" to StrictJsonString(effectivePaymentDate),
+                "money_account_id" to StrictJsonString(effectiveCashAccount.value),
+                "notes" to StrictJsonString(note),
+                "allocations" to StrictJsonArray(allocElements)
             )
         )
         val payloadBytes = CanonicalJsonSerializer.serializeToUtf8Bytes(payloadObj)
+        val existingCmd = commandStore.findCommand(before.companyId.value, before.actorId.value, before.deviceId.value, idempotencyKey)
+        val effectivePayloadBytes = if (existingCmd != null) {
+            commandStore.decryptPayload(existingCmd)
+        } else if (activeDraft != null && activeDraft.commandId == commandId) {
+            commandStore.decryptPayload(activeDraft)
+        } else {
+            payloadBytes
+        }
 
         val inFlightCounter = customerInFlightPayments.computeIfAbsent(customerId) { java.util.concurrent.atomic.AtomicInteger(0) }
         inFlightCounter.incrementAndGet()
@@ -1663,10 +1773,26 @@ class ProductionTraderRepository(
                 companyId = companyId,
                 customerId = ServerUlid.parse(customerId),
                 amount = amountExact,
-                cashAccountId = approvedCashAccount.id,
+                cashAccountId = effectiveCashAccount,
                 note = note,
-                idempotencyKey = key
+                idempotencyKey = key,
+                paymentDate = effectivePaymentDate,
+                allocations = allocations
             )
+        }
+
+        val validatePaymentResponse: (StrictJsonObject) -> Result<StrictJsonObject> = { snap ->
+            val id = snap.properties["id"]?.asString() ?: snap.properties["receipt_id"]?.asString()
+            if (id.isNullOrBlank()) {
+                Result.failure(IllegalStateException("Server response missing payment id"))
+            } else {
+                val respCustId = snap.properties["customer_id"]?.asString()
+                if (respCustId != null && respCustId != customerId) {
+                    Result.failure(IllegalStateException("Server returned payment for customer $respCustId, expected $customerId"))
+                } else {
+                    Result.success(snap)
+                }
+            }
         }
 
         try {
@@ -1674,8 +1800,9 @@ class ProductionTraderRepository(
                 commandType = "customer.payment",
                 commandId = commandId,
                 idempotencyKey = idempotencyKey,
-                canonicalPayloadBytes = payloadBytes,
+                canonicalPayloadBytes = effectivePayloadBytes,
                 isReceiptStatusChecked = true,
+                validateResponse = validatePaymentResponse,
                 postAction = postCall
             )
 
@@ -1687,8 +1814,36 @@ class ProductionTraderRepository(
             val officialId = snapshot.properties["id"]?.asString()
                 ?: snapshot.properties["receipt_id"]?.asString()
                 ?: return@withContext Result.failure(IllegalStateException("Server did not return payment ID"))
-            val officialAmount = snapshot.properties["amount"]?.asString()?.let { BigDecimal(it) } ?: amountExact
-            val postedAt = snapshot.properties["posted_at"]?.asString() ?: WesternFormatters.currentDate()
+            val officialAmount = snapshot.properties["amount"].toNullableBigDecimal(currencyMinorUnits)
+                ?: snapshot.properties["amount"]?.asString()?.let { BigDecimal(it) }
+                ?: amountExact
+            val postedAt = snapshot.properties["posted_at"]?.asString() ?: effectivePaymentDate
+
+            val isAdvance = snapshot.properties["is_advance"]?.asBoolean() ?: (allocations.isEmpty())
+            val allocatedAmount = snapshot.properties["allocated_amount"].toNullableBigDecimal(currencyMinorUnits)
+                ?: snapshot.properties["allocated_amount_exact"].toNullableBigDecimal(currencyMinorUnits)
+                ?: totalAllocated
+            val unallocatedAmount = snapshot.properties["unallocated_amount"].toNullableBigDecimal(currencyMinorUnits)
+                ?: snapshot.properties["unallocated_amount_exact"].toNullableBigDecimal(currencyMinorUnits)
+                ?: (officialAmount - allocatedAmount).coerceAtLeast(BigDecimal.ZERO)
+
+            val parsedAllocations = mutableListOf<PaymentAllocationResult>()
+            val respAllocs = snapshot.properties["allocations"]
+            if (respAllocs is StrictJsonArray) {
+                for (el in respAllocs.elements) {
+                    if (el is StrictJsonObject) {
+                        val tType = el.properties["target_type"]?.asString() ?: ""
+                        val tId = el.properties["target_id"]?.asString() ?: ""
+                        val amt = el.properties["allocated_amount"].toNullableBigDecimal(currencyMinorUnits)
+                            ?: el.properties["allocated_amount_exact"].toNullableBigDecimal(currencyMinorUnits)
+                            ?: el.properties["amount"].toNullableBigDecimal(currencyMinorUnits)
+                            ?: BigDecimal.ZERO
+                        if (tId.isNotBlank()) {
+                            parsedAllocations.add(PaymentAllocationResult(tType, tId, amt, amt))
+                        }
+                    }
+                }
+            }
 
             // Authoritative customer detail from server with strict session recheck
             val snapshotBalance = snapshot.properties["balance"].toNullableBigDecimal(currencyMinorUnits)
@@ -1746,12 +1901,17 @@ class ProductionTraderRepository(
                 id = officialId,
                 customerId = customerId,
                 date = postedAt,
-                typeAr = "دفعة نقدية مقبوضة",
-                typeEn = "Cash Collection",
+                typeAr = if (isAdvance) "دفعة مقدمة غير مخصصة" else "دفعة نقدية مقبوضة",
+                typeEn = if (isAdvance) "Unallocated Advance Receipt" else "Cash Collection",
                 debitExact = BigDecimal.ZERO,
                 creditExact = officialAmount,
                 runningBalanceExact = authoritativeBalanceExact,
-                note = note
+                note = note,
+                isAdvance = isAdvance,
+                allocatedAmountExact = allocatedAmount,
+                unallocatedAmountExact = unallocatedAmount,
+                allocations = parsedAllocations,
+                currency = "ILS"
             )
             _customerTransactionsFlow.update { listOf(tx) + it }
             Result.success(tx)
@@ -2735,33 +2895,145 @@ class ProductionTraderRepository(
         Result.success(movement)
     }
 
+    override suspend fun getSupplierSettlementTargets(
+        supplierId: String,
+        currency: String?,
+        limit: Int,
+        cursor: String?
+    ): Result<SettlementTargetsResponse> = withContext(ioDispatcher) {
+        val currentScope = authScopeProvider?.invoke()
+        if (authScopeProvider != null && (currentScope == null || currentScope.companyId != companyId || currentScope.actorId != actorId || currentScope.deviceId != deviceId)) {
+            return@withContext Result.failure(SecurityException("Scope validation failed: current session is superseded or revoked."))
+        }
+        val before = requireActiveScope()
+        if (!ServerUlid.isValid(supplierId)) {
+            return@withContext Result.failure(IllegalArgumentException("Invalid supplier ULID: $supplierId"))
+        }
+        try {
+            val res = apiClient.getSupplierSettlementTargets(
+                companyId = companyId,
+                supplierId = ServerUlid.parse(supplierId),
+                currency = currency,
+                limit = limit,
+                cursor = cursor
+            )
+            if (res.isSuccess) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                check(requireActiveScope() == before) { "Session changed during supplier settlement targets read" }
+                val parsed = parseSettlementTargetsResponse(res.getOrThrow(), isSupplier = true)
+                Result.success(parsed)
+            } else {
+                val ex = res.exceptionOrNull() ?: RuntimeException("Failed to read supplier settlement targets")
+                val msg = ex.message ?: ""
+                if (msg.contains("403") || msg.contains("FORBIDDEN") || msg.contains("purchasing cost")) {
+                    Result.failure(SecurityException("Viewing supplier financial settlement targets requires purchasing cost permission."))
+                } else {
+                    Result.failure(ex)
+                }
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Result.failure(e)
+        }
+    }
+
     override suspend fun recordSupplierPayment(
         supplierId: String,
         amountIls: Double,
         note: String,
         operator: UserSession,
         paymentId: String
+    ): Result<SupplierPayment> = recordSupplierPayment(
+        supplierId = supplierId,
+        amount = BigDecimal(amountIls.toString()),
+        note = note,
+        operator = operator,
+        paymentId = paymentId,
+        cashAccountId = null,
+        paymentDate = null,
+        allocations = emptyList()
+    )
+
+    override suspend fun recordSupplierPayment(
+        supplierId: String,
+        amount: BigDecimal,
+        note: String,
+        operator: UserSession,
+        paymentId: String,
+        cashAccountId: String?,
+        paymentDate: String?,
+        allocations: List<PaymentAllocationInput>
     ): Result<SupplierPayment> = withContext(ioDispatcher) {
-        requireActiveScope()
+        val currentScope = authScopeProvider?.invoke()
+        if (authScopeProvider != null && (currentScope == null || currentScope.companyId != companyId || currentScope.actorId != actorId || currentScope.deviceId != deviceId)) {
+            return@withContext Result.failure(SecurityException("Scope validation failed: current session is superseded or revoked."))
+        }
+        val before = requireActiveScope()
         if (!ServerUlid.isValid(supplierId)) {
             return@withContext Result.failure(IllegalArgumentException("Invalid supplier ULID: $supplierId"))
         }
-        val amountExact = BigDecimal(amountIls.toString()).setScale(currencyMinorUnits, RoundingMode.HALF_UP)
+        val amountExact = amount.setScale(currencyMinorUnits, RoundingMode.HALF_UP)
         if (amountExact <= BigDecimal.ZERO) {
             return@withContext Result.failure(IllegalArgumentException("Payment amount must be strictly positive"))
+        }
+
+        var totalAllocated = BigDecimal.ZERO
+        val targetSet = mutableSetOf<String>()
+        for (alloc in allocations) {
+            if (alloc.amountExact <= BigDecimal.ZERO) {
+                return@withContext Result.failure(IllegalArgumentException("Allocation amount must be strictly positive"))
+            }
+            val key = "${alloc.targetType}:${alloc.targetId}"
+            if (!targetSet.add(key)) {
+                return@withContext Result.failure(IllegalArgumentException("Duplicate allocation target detected: $key"))
+            }
+            totalAllocated = totalAllocated.add(alloc.amountExact)
+        }
+        if (totalAllocated > amountExact) {
+            return@withContext Result.failure(IllegalArgumentException("Allocations ($totalAllocated) exceed total payment amount ($amountExact)"))
+        }
+
+        val effectivePaymentDate = paymentDate ?: WesternFormatters.currentDate()
+        val effectiveCashAccount = if (!cashAccountId.isNullOrBlank()) {
+            ServerUlid.parse(cashAccountId)
+        } else {
+            approvedCashAccount.id
         }
 
         val commandId = if (paymentId.isNotBlank()) paymentId else UUID.randomUUID().toString()
         val idempotencyKey = "suppay-$commandId"
 
+        val activeDraft = commandStore.getActiveDraftRecord(before.companyId.value, before.actorId.value, before.deviceId.value, "supplier_payment")
+
+        val allocElements = allocations.map { alloc ->
+            StrictJsonObject(
+                mapOf(
+                    "target_type" to StrictJsonString(alloc.targetType),
+                    "target_id" to StrictJsonString(alloc.targetId),
+                    "amount" to StrictJsonString(alloc.amountExact.setScale(6, RoundingMode.HALF_UP).toPlainString())
+                )
+            )
+        }
         val payloadObj = StrictJsonObject(
             mapOf(
                 "supplier_id" to StrictJsonString(supplierId),
-                "amount" to StrictJsonString(amountExact.toPlainString()),
-                "notes" to StrictJsonString(note)
+                "amount" to StrictJsonString(amountExact.setScale(6, RoundingMode.HALF_UP).toPlainString()),
+                "currency" to StrictJsonString("ILS"),
+                "payment_date" to StrictJsonString(effectivePaymentDate),
+                "money_account_id" to StrictJsonString(effectiveCashAccount.value),
+                "notes" to StrictJsonString(note),
+                "allocations" to StrictJsonArray(allocElements)
             )
         )
         val payloadBytes = CanonicalJsonSerializer.serializeToUtf8Bytes(payloadObj)
+        val existingCmd = commandStore.findCommand(before.companyId.value, before.actorId.value, before.deviceId.value, idempotencyKey)
+        val effectivePayloadBytes = if (existingCmd != null) {
+            commandStore.decryptPayload(existingCmd)
+        } else if (activeDraft != null && activeDraft.commandId == commandId) {
+            commandStore.decryptPayload(activeDraft)
+        } else {
+            payloadBytes
+        }
 
         val inFlightCounter = supplierInFlightPayments.computeIfAbsent(supplierId) { java.util.concurrent.atomic.AtomicInteger(0) }
         inFlightCounter.incrementAndGet()
@@ -2772,10 +3044,28 @@ class ProductionTraderRepository(
                 companyId = companyId,
                 supplierId = ServerUlid.parse(supplierId),
                 amount = amountExact,
-                cashAccountId = approvedCashAccount.id,
+                cashAccountId = effectiveCashAccount,
                 note = note,
-                idempotencyKey = key
+                idempotencyKey = key,
+                paymentDate = effectivePaymentDate,
+                allocations = allocations
             )
+        }
+
+        val validatePaymentResponse: (StrictJsonObject) -> Result<StrictJsonObject> = { snap ->
+            val id = snap.properties["id"].toNullableString()
+                ?: snap.properties["voucher_id"].toNullableString()
+                ?: snap.properties["receipt_id"].toNullableString()
+            if (id.isNullOrBlank()) {
+                Result.failure(IllegalStateException("Server response missing payment id"))
+            } else {
+                val respSupId = snap.properties["supplier_id"].toNullableString()
+                if (respSupId != null && respSupId != supplierId) {
+                    Result.failure(IllegalStateException("Server returned payment for supplier $respSupId, expected $supplierId"))
+                } else {
+                    Result.success(snap)
+                }
+            }
         }
 
         try {
@@ -2783,8 +3073,9 @@ class ProductionTraderRepository(
                 commandType = "supplier.payment",
                 commandId = commandId,
                 idempotencyKey = idempotencyKey,
-                canonicalPayloadBytes = payloadBytes,
+                canonicalPayloadBytes = effectivePayloadBytes,
                 isReceiptStatusChecked = true,
+                validateResponse = validatePaymentResponse,
                 postAction = postCall
             )
 
@@ -2795,9 +3086,36 @@ class ProductionTraderRepository(
             val snapshot = durableRes.getOrThrow()
             val officialId = snapshot.properties["id"].toNullableString()
                 ?: snapshot.properties["voucher_id"].toNullableString()
+                ?: snapshot.properties["receipt_id"].toNullableString()
                 ?: return@withContext Result.failure(IllegalStateException("Server did not return payment ID"))
-            val officialAmount = snapshot.properties["amount"].toNullableBigDecimal() ?: amountExact
-            val postedAt = snapshot.properties["posted_at"].toNullableString() ?: WesternFormatters.currentDate()
+            val officialAmount = snapshot.properties["amount"].toNullableBigDecimal(currencyMinorUnits) ?: amountExact
+            val postedAt = snapshot.properties["posted_at"].toNullableString() ?: effectivePaymentDate
+
+            val isAdvance = snapshot.properties["is_advance"]?.asBoolean() ?: (allocations.isEmpty())
+            val allocatedAmount = snapshot.properties["allocated_amount"].toNullableBigDecimal(currencyMinorUnits)
+                ?: snapshot.properties["allocated_amount_exact"].toNullableBigDecimal(currencyMinorUnits)
+                ?: totalAllocated
+            val unallocatedAmount = snapshot.properties["unallocated_amount"].toNullableBigDecimal(currencyMinorUnits)
+                ?: snapshot.properties["unallocated_amount_exact"].toNullableBigDecimal(currencyMinorUnits)
+                ?: (officialAmount - allocatedAmount).coerceAtLeast(BigDecimal.ZERO)
+
+            val parsedAllocations = mutableListOf<PaymentAllocationResult>()
+            val respAllocs = snapshot.properties["allocations"]
+            if (respAllocs is StrictJsonArray) {
+                for (el in respAllocs.elements) {
+                    if (el is StrictJsonObject) {
+                        val tType = el.properties["target_type"]?.asString() ?: ""
+                        val tId = el.properties["target_id"]?.asString() ?: ""
+                        val amt = el.properties["allocated_amount"].toNullableBigDecimal(currencyMinorUnits)
+                            ?: el.properties["allocated_amount_exact"].toNullableBigDecimal(currencyMinorUnits)
+                            ?: el.properties["amount"].toNullableBigDecimal(currencyMinorUnits)
+                            ?: BigDecimal.ZERO
+                        if (tId.isNotBlank()) {
+                            parsedAllocations.add(PaymentAllocationResult(tType, tId, amt, amt))
+                        }
+                    }
+                }
+            }
 
             // Authoritative supplier detail from server (unknown balance remains null) with strict session recheck
             val snapshotBalanceOwed: BigDecimal? = snapshot.properties["balance_owed"].toNullableBigDecimal(currencyMinorUnits)
@@ -2854,13 +3172,132 @@ class ProductionTraderRepository(
                 supplierId = supplierId,
                 date = postedAt,
                 amountExact = officialAmount,
-                note = note
+                note = note,
+                isAdvance = isAdvance,
+                allocatedAmountExact = allocatedAmount,
+                unallocatedAmountExact = unallocatedAmount,
+                allocations = parsedAllocations,
+                currency = "ILS"
             )
             _supplierPaymentsFlow.update { listOf(payment) + it }
             Result.success(payment)
         } finally {
             inFlightCounter.decrementAndGet()
         }
+    }
+
+    private fun parseSettlementTargetsResponse(root: StrictJsonObject, isSupplier: Boolean): SettlementTargetsResponse {
+        val partyId = if (isSupplier) {
+            root.properties["supplier_id"].toNullableString() ?: ""
+        } else {
+            root.properties["customer_id"].toNullableString() ?: ""
+        }
+        val partyName = if (isSupplier) {
+            root.properties["supplier_name"].toNullableString() ?: ""
+        } else {
+            root.properties["customer_name"].toNullableString() ?: ""
+        }
+        val currency = root.properties["currency"].toNullableString()
+        val minorUnits = root.properties["currency_minor_units"]?.asNumber()?.toInt() ?: currencyMinorUnits
+        val totalTargets = root.properties["total_targets"]?.asNumber()?.toInt() ?: 0
+
+        val targetsList = mutableListOf<SettlementTarget>()
+        val targetsEl = root.properties["targets"]
+        if (targetsEl is StrictJsonArray) {
+            for (item in targetsEl.elements) {
+                if (item is StrictJsonObject) {
+                    val tType = item.properties["target_type"].toNullableString() ?: continue
+                    val tId = item.properties["target_id"].toNullableString() ?: continue
+                    val tNum = item.properties["target_number"].toNullableString() ?: tId
+                    val bDate = item.properties["business_date"].toNullableString()
+                        ?: item.properties["opening_date"].toNullableString()
+                        ?: item.properties["issue_date"].toNullableString()
+                        ?: item.properties["purchase_date"].toNullableString()
+                        ?: WesternFormatters.currentDate()
+                    val dDate = item.properties["due_date"].toNullableString()
+                    val overdue = item.properties["days_overdue"]?.asNumber()?.toInt() ?: 0
+                    val curr = item.properties["currency"].toNullableString() ?: currency ?: "ILS"
+                    val itemMinUnits = item.properties["currency_minor_units"]?.asNumber()?.toInt() ?: minorUnits
+
+                    val orig = item.properties["original_amount_exact"].toNullableBigDecimal(itemMinUnits)
+                        ?: item.properties["original_amount"].toNullableBigDecimal(itemMinUnits)
+                        ?: BigDecimal.ZERO
+                    val alloc = item.properties["allocated_amount_exact"].toNullableBigDecimal(itemMinUnits)
+                        ?: item.properties["allocated_amount"].toNullableBigDecimal(itemMinUnits)
+                        ?: BigDecimal.ZERO
+                    val rem = item.properties["remaining_amount_exact"].toNullableBigDecimal(itemMinUnits)
+                        ?: item.properties["remaining_amount"].toNullableBigDecimal(itemMinUnits)
+                        ?: BigDecimal.ZERO
+
+                    targetsList.add(
+                        SettlementTarget(
+                            targetType = tType,
+                            targetId = tId,
+                            targetNumber = tNum,
+                            businessDate = bDate,
+                            dueDate = dDate,
+                            daysOverdue = overdue,
+                            currency = curr,
+                            currencyMinorUnits = itemMinUnits,
+                            originalAmountExact = orig,
+                            allocatedAmountExact = alloc,
+                            remainingAmountExact = rem
+                        )
+                    )
+                }
+            }
+        }
+
+        var hasMore = false
+        var nextCursor: String? = null
+        val pagEl = root.properties["pagination"]
+        if (pagEl is StrictJsonObject) {
+            hasMore = pagEl.properties["has_more"]?.asBoolean() ?: false
+            nextCursor = pagEl.properties["next_cursor"].toNullableString()
+        }
+
+        val remainingTotals = mutableMapOf<String, SettlementCurrencyTotal>()
+        val originalTotals = mutableMapOf<String, SettlementCurrencyTotal>()
+        val totalsEl = root.properties["totals"]
+        if (totalsEl is StrictJsonObject) {
+            val remEl = totalsEl.properties["remaining_by_currency"]
+            if (remEl is StrictJsonObject) {
+                for ((cCode, cVal) in remEl.properties) {
+                    if (cVal is StrictJsonObject) {
+                        val mUnits = cVal.properties["minor_units"]?.asNumber()?.toInt() ?: minorUnits
+                        val amt = cVal.properties["amount_exact"].toNullableBigDecimal(mUnits)
+                            ?: cVal.properties["amount"].toNullableBigDecimal(mUnits)
+                            ?: BigDecimal.ZERO
+                        remainingTotals[cCode] = SettlementCurrencyTotal(amt, mUnits)
+                    }
+                }
+            }
+            val origEl = totalsEl.properties["original_by_currency"]
+            if (origEl is StrictJsonObject) {
+                for ((cCode, cVal) in origEl.properties) {
+                    if (cVal is StrictJsonObject) {
+                        val mUnits = cVal.properties["minor_units"]?.asNumber()?.toInt() ?: minorUnits
+                        val amt = cVal.properties["amount_exact"].toNullableBigDecimal(mUnits)
+                            ?: cVal.properties["amount"].toNullableBigDecimal(mUnits)
+                            ?: BigDecimal.ZERO
+                        originalTotals[cCode] = SettlementCurrencyTotal(amt, mUnits)
+                    }
+                }
+            }
+        }
+
+        return SettlementTargetsResponse(
+            partyId = partyId,
+            partyName = partyName,
+            currency = currency,
+            currencyMinorUnits = minorUnits,
+            totalTargets = totalTargets,
+            targets = targetsList,
+            hasMore = hasMore,
+            nextCursor = nextCursor,
+            totalsRemainingByCurrency = remainingTotals,
+            totalsOriginalByCurrency = originalTotals
+        )
     }
 
     private fun updateSupplierFromServer(supObj: StrictJsonObject) {

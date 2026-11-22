@@ -37,6 +37,20 @@ sealed interface StrictJsonElement {
         }
         return longVal
     }
+
+    fun asBoolean(): Boolean =
+        when (this) {
+            is StrictJsonBoolean -> value
+            is StrictJsonString -> value.toBooleanStrictOrNull() ?: throw CanonicalSerializationException("Expected boolean, got string '$value'")
+            else -> throw CanonicalSerializationException("Expected boolean, got ${this::class.simpleName}")
+        }
+
+    fun asNumber(): String =
+        when (this) {
+            is StrictJsonNumber -> rawString
+            is StrictJsonString -> value
+            else -> throw CanonicalSerializationException("Expected number, got ${this::class.simpleName}")
+        }
 }
 
 data class StrictJsonObject(val properties: Map<String, StrictJsonElement>) : StrictJsonElement {

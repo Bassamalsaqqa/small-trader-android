@@ -77,6 +77,7 @@ import com.example.model.PurchaseBill
 import com.example.model.StockMovement
 import com.example.model.Supplier
 import com.example.model.SupplierPayment
+import com.example.model.PaymentAllocationInput
 import com.example.model.WesternFormatters
 import com.example.ui.components.StitchBadge
 import com.example.ui.components.StitchBadgeTone
@@ -857,7 +858,10 @@ fun SupplierDetailScreen(
     onPaySupplierResult: ((supplier: Supplier, amount: Double, paymentId: String) -> Result<SupplierPayment>)? = null,
     onPaySupplierWithResult: ((supplier: Supplier, amount: Double, paymentId: String, onComplete: (Result<SupplierPayment>) -> Unit) -> Unit)? = null,
     onConfirmGoodsReceiptResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String, lineId: String?) -> Result<StockMovement>)? = null,
-    onConfirmGoodsReceiptWithResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String, lineId: String?, onComplete: (Result<StockMovement>) -> Unit) -> Unit)? = null
+    onConfirmGoodsReceiptWithResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String, lineId: String?, onComplete: (Result<StockMovement>) -> Unit) -> Unit)? = null,
+    onPaySupplierExactWithResult: ((supplier: Supplier, amount: BigDecimal, note: String, paymentId: String, allocations: List<PaymentAllocationInput>, onComplete: (Result<SupplierPayment>) -> Unit) -> Unit)? = null,
+    onLoadSupplierTargets: ((supplierId: String, resetPagination: Boolean) -> Unit)? = null,
+    onLoadMoreSupplierTargets: ((supplierId: String) -> Unit)? = null
 ) {
     val paymentDraft = rememberSaveableStateHolder()
     val lang = state.language
@@ -876,6 +880,11 @@ fun SupplierDetailScreen(
         if (launchPayment && canManageSuppliers) {
             isPayDialogOpen = true
             onLaunchConsumed()
+        }
+    }
+    LaunchedEffect(isPayDialogOpen, supplier.id) {
+        if (isPayDialogOpen && canManageSuppliers) {
+            onLoadSupplierTargets?.invoke(supplier.id, true)
         }
     }
     if (!canManageSuppliers) return
@@ -1401,7 +1410,23 @@ fun SupplierDetailScreen(
                             onComplete(res)
                         }
                     }
-                } else null
+                } else null,
+                onPaySupplierExactWithResult = if (onPaySupplierExactWithResult != null) {
+                    { sup, amount, note, paymentId, allocations, onComplete ->
+                        onPaySupplierExactWithResult(sup, amount, note, paymentId, allocations) { res ->
+                            if (res.isSuccess) {
+                                isPayDialogOpen = false
+                            }
+                            onComplete(res)
+                        }
+                    }
+                } else null,
+                settlementTargets = state.supplierSettlementTargets,
+                isLoadingTargets = state.isLoadingSupplierSettlementTargets,
+                targetsError = state.supplierSettlementTargetsError,
+                targetsHasMore = state.supplierSettlementTargetsHasMore,
+                onLoadMoreTargets = { onLoadMoreSupplierTargets?.invoke(supplier.id) },
+                onRetryTargets = { onLoadSupplierTargets?.invoke(supplier.id, true) }
             )
         }
     }

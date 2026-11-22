@@ -25,6 +25,7 @@ import com.example.model.ProductCategory
 import com.example.model.PurchaseBill
 import com.example.model.PurchaseLineItem
 import com.example.model.SaleDraft
+import com.example.model.SettlementTarget
 import com.example.model.StockMovement
 import com.example.model.Supplier
 import com.example.model.SupplierPayment
@@ -141,6 +142,11 @@ data class TraderUiState(
     val lastCustomerPaymentMessageEn: String? = null,
     val activeCustomerCreateDraft: com.example.data.mobile.contract.StrictJsonObject? = null,
     val isCustomerCreateRecovering: Boolean = false,
+    val customerSettlementTargets: List<SettlementTarget> = emptyList(),
+    val isLoadingCustomerSettlementTargets: Boolean = false,
+    val customerSettlementTargetsError: String? = null,
+    val customerSettlementTargetsHasMore: Boolean = false,
+    val customerSettlementTargetsNextCursor: String? = null,
 
     // Suppliers & Purchasing
     val suppliers: List<Supplier> = emptyList(),
@@ -151,6 +157,11 @@ data class TraderUiState(
     val supplierSearchError: String? = null,
     val activeSupplierCreateDraft: com.example.data.mobile.contract.StrictJsonObject? = null,
     val isSupplierCreateRecovering: Boolean = false,
+    val supplierSettlementTargets: List<SettlementTarget> = emptyList(),
+    val isLoadingSupplierSettlementTargets: Boolean = false,
+    val supplierSettlementTargetsError: String? = null,
+    val supplierSettlementTargetsHasMore: Boolean = false,
+    val supplierSettlementTargetsNextCursor: String? = null,
     val purchaseBills: List<PurchaseBill> = emptyList(),
     val supplierPayments: List<SupplierPayment> = emptyList(),
     val selectedSupplierForDetail: Supplier? = null,

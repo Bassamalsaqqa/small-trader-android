@@ -451,7 +451,12 @@ data class CustomerTransaction(
     val debitExact: BigDecimal,
     val creditExact: BigDecimal,
     val runningBalanceExact: BigDecimal? = null,
-    val note: String = ""
+    val note: String = "",
+    val isAdvance: Boolean = false,
+    val allocatedAmountExact: BigDecimal = BigDecimal.ZERO,
+    val unallocatedAmountExact: BigDecimal = BigDecimal.ZERO,
+    val allocations: List<PaymentAllocationResult> = emptyList(),
+    val currency: String = "ILS"
 ) {
     constructor(
         id: String,
@@ -474,7 +479,12 @@ data class CustomerTransaction(
         debitExact = BigDecimal(debitIls.toString()).setScale(2, RoundingMode.HALF_UP),
         creditExact = BigDecimal(creditIls.toString()).setScale(2, RoundingMode.HALF_UP),
         runningBalanceExact = BigDecimal(runningBalanceIls.toString()).setScale(2, RoundingMode.HALF_UP),
-        note = note
+        note = note,
+        isAdvance = false,
+        allocatedAmountExact = BigDecimal.ZERO,
+        unallocatedAmountExact = BigDecimal.ZERO,
+        allocations = emptyList(),
+        currency = "ILS"
     )
 
     val debitIls: Double get() = debitExact.toDouble()
@@ -748,7 +758,12 @@ data class SupplierPayment(
     val supplierId: String,
     val date: String,
     val amountExact: BigDecimal,
-    val note: String = "سداد نقدي من الصندوق"
+    val note: String = "سداد نقدي من الصندوق",
+    val isAdvance: Boolean = false,
+    val allocatedAmountExact: BigDecimal = BigDecimal.ZERO,
+    val unallocatedAmountExact: BigDecimal = BigDecimal.ZERO,
+    val allocations: List<PaymentAllocationResult> = emptyList(),
+    val currency: String = "ILS"
 ) {
     constructor(
         id: String,
@@ -761,11 +776,78 @@ data class SupplierPayment(
         supplierId = supplierId,
         date = date,
         amountExact = BigDecimal(amountIls.toString()).setScale(2, RoundingMode.HALF_UP),
-        note = note
+        note = note,
+        isAdvance = false,
+        allocatedAmountExact = BigDecimal.ZERO,
+        unallocatedAmountExact = BigDecimal.ZERO,
+        allocations = emptyList(),
+        currency = "ILS"
     )
 
     val amountIls: Double get() = amountExact.toDouble()
 }
+
+/**
+ * Typed allocation result returned from authoritative backend payment responses.
+ */
+data class PaymentAllocationResult(
+    val targetType: String,
+    val targetId: String,
+    val amountExact: BigDecimal,
+    val allocatedAmountExact: BigDecimal = amountExact
+)
+
+/**
+ * Client input for allocating a payment to a specific invoice, purchase bill, or opening trade item.
+ */
+data class PaymentAllocationInput(
+    val targetType: String,
+    val targetId: String,
+    val amountExact: BigDecimal
+) {
+    init {
+        require(amountExact > BigDecimal.ZERO) { "Allocation amount must be strictly positive" }
+    }
+}
+
+/**
+ * Authoritative open settlement target (Invoice, Purchase Bill, or Opening Trade Item).
+ */
+data class SettlementTarget(
+    val targetType: String,
+    val targetId: String,
+    val targetNumber: String,
+    val businessDate: String,
+    val dueDate: String? = null,
+    val daysOverdue: Int = 0,
+    val currency: String = "ILS",
+    val currencyMinorUnits: Int = 2,
+    val originalAmountExact: BigDecimal,
+    val allocatedAmountExact: BigDecimal,
+    val remainingAmountExact: BigDecimal
+) {
+    init {
+        require(remainingAmountExact >= BigDecimal.ZERO) { "Remaining amount must be non-negative" }
+    }
+}
+
+data class SettlementCurrencyTotal(
+    val amountExact: BigDecimal,
+    val minorUnits: Int
+)
+
+data class SettlementTargetsResponse(
+    val partyId: String,
+    val partyName: String,
+    val currency: String?,
+    val currencyMinorUnits: Int,
+    val totalTargets: Int,
+    val targets: List<SettlementTarget>,
+    val hasMore: Boolean,
+    val nextCursor: String?,
+    val totalsRemainingByCurrency: Map<String, SettlementCurrencyTotal> = emptyMap(),
+    val totalsOriginalByCurrency: Map<String, SettlementCurrencyTotal> = emptyMap()
+)
 
 enum class ExpenseCategory(val labelAr: String, val labelEn: String) {
     RENT("إيجار المحل", "Store Rent"),

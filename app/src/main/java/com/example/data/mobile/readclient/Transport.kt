@@ -152,9 +152,13 @@ object EndpointSecurity {
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers/[0-7][0-9A-HJKMNP-TV-Z]{25}$"""),
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers/[0-7][0-9A-HJKMNP-TV-Z]{25}/statement$"""),
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers/[0-7][0-9A-HJKMNP-TV-Z]{25}/payments$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers/[0-7][0-9A-HJKMNP-TV-Z]{25}/settlement-targets$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/customers/[0-7][0-9A-HJKMNP-TV-Z]{25}/outstanding$"""),
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers$"""),
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers/[0-7][0-9A-HJKMNP-TV-Z]{25}$"""),
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers/[0-7][0-9A-HJKMNP-TV-Z]{25}/payments$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers/[0-7][0-9A-HJKMNP-TV-Z]{25}/settlement-targets$"""),
+        Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/suppliers/[0-7][0-9A-HJKMNP-TV-Z]{25}/outstanding$"""),
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices$"""),
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/[0-7][0-9A-HJKMNP-TV-Z]{25}$"""),
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/invoices/draft$"""),
@@ -247,9 +251,9 @@ object EndpointSecurity {
         }
     }
 
-    fun validateLimit(limit: Int?) {
+    fun validateLimit(limit: Int?, maxLimit: Int = 100) {
         if (limit == null) return
-        require(limit in 1..100) { "Limit must be between 1 and 100, got: $limit" }
+        require(limit in 1..maxLimit) { "Limit must be between 1 and $maxLimit, got: $limit" }
     }
 
     fun validateIdempotencyKey(key: String?) {
@@ -260,12 +264,20 @@ object EndpointSecurity {
         }
     }
 
+    fun validateCurrency(currency: String?) {
+        if (currency == null) return
+        require(currency.length == 3 && Regex("""^[A-Z]{3}$""").matches(currency)) {
+            "Invalid currency parameter: '$currency'. Must be a 3-letter ISO-4217 code."
+        }
+    }
+
     fun validateEndpointQueryParams(basePath: String, queryParams: Map<String, String>) {
         for ((key, value) in queryParams) {
             val isAllowed = when (key) {
                 "search" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/suppliers") || basePath.endsWith("/sales/invoices")
-                "limit" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/suppliers") || basePath.endsWith("/sales/invoices") || basePath.endsWith("/movements") || basePath.endsWith("/statement")
-                "cursor" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/sales/invoices") || basePath.endsWith("/movements") || basePath.endsWith("/statement")
+                "limit" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/suppliers") || basePath.endsWith("/sales/invoices") || basePath.endsWith("/movements") || basePath.endsWith("/statement") || basePath.endsWith("/settlement-targets") || basePath.endsWith("/outstanding")
+                "cursor" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/sales/invoices") || basePath.endsWith("/movements") || basePath.endsWith("/statement") || basePath.endsWith("/settlement-targets") || basePath.endsWith("/outstanding")
+                "currency" -> basePath.endsWith("/settlement-targets") || basePath.endsWith("/outstanding")
                 "idempotency_key" -> basePath.endsWith("/receipts/status")
                 "status" -> basePath.endsWith("/sales/invoices")
                 "customer_id" -> basePath.endsWith("/sales/invoices")
@@ -277,8 +289,12 @@ object EndpointSecurity {
             }
             when (key) {
                 "search" -> validateSearchQuery(value)
-                "limit" -> validateLimit(value.toIntOrNull() ?: throw IllegalArgumentException("Invalid limit"))
+                "limit" -> {
+                    val max = if (basePath.endsWith("/settlement-targets") || basePath.endsWith("/outstanding")) 250 else 100
+                    validateLimit(value.toIntOrNull() ?: throw IllegalArgumentException("Invalid limit"), maxLimit = max)
+                }
                 "cursor" -> validateCursor(value)
+                "currency" -> validateCurrency(value)
                 "idempotency_key" -> validateIdempotencyKey(value)
                 "status" -> {
                     require(value.length <= 32) { "Status query parameter exceeds length bound" }
@@ -421,4 +437,8 @@ object EndpointSecurity {
     fun bootstrapPath(companyId: ServerUlid): String = "/api/mobile/v1/companies/${companyId.value}/bootstrap"
     fun productsPath(companyId: ServerUlid): String = "/api/mobile/v1/companies/${companyId.value}/products"
     fun customersPath(companyId: ServerUlid): String = "/api/mobile/v1/companies/${companyId.value}/customers"
+    fun customerSettlementTargetsPath(companyId: ServerUlid, customerId: ServerUlid): String =
+        "/api/mobile/v1/companies/${companyId.value}/customers/${customerId.value}/settlement-targets"
+    fun supplierSettlementTargetsPath(companyId: ServerUlid, supplierId: ServerUlid): String =
+        "/api/mobile/v1/companies/${companyId.value}/suppliers/${supplierId.value}/settlement-targets"
 }
