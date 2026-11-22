@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.mobile.client.MobileMerchantApiClient
@@ -19,16 +20,24 @@ import com.example.data.mobile.session.JvmAesGcmCryptoEngine
 import com.example.model.AppLanguage
 import com.example.model.Customer
 import com.example.model.PaymentAllocationInput
+import com.example.model.Product
+import com.example.model.ProductCategory
+import com.example.model.PurchaseBill
+import com.example.model.PurchaseLineItem
 import com.example.model.SettlementCurrencyTotal
 import com.example.model.SettlementTarget
 import com.example.model.SettlementTargetsResponse
+import com.example.model.StockMovement
 import com.example.model.Supplier
 import com.example.model.SupplierPayment
 import com.example.model.UserRole
 import com.example.model.UserSession
 import com.example.ui.screens.CustomerPaymentCollectionDialog
+import com.example.ui.screens.NewSaleScreen
 import com.example.ui.screens.PaySupplierDialog
+import com.example.ui.screens.ProductsCatalogScreen
 import com.example.ui.theme.SmallTraderTheme
+import com.example.viewmodel.TraderUiState
 import com.example.viewmodel.TraderViewModel
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -937,5 +946,313 @@ class SettlementTargetsAndPaymentAllocationTest {
         composeTestRule.onNodeWithTag("load_more_supplier_targets_button").assertIsDisplayed()
         composeTestRule.onNodeWithTag("load_more_supplier_targets_button").performClick()
         assertTrue("Supplier load more callback must be triggered", loadMoreClicked)
+    }
+
+    // -------------------------------------------------------------------------
+    // 9. Contract Regressions: JOD 3-Digits, Strict Scale, Fractional GRN & Search Retry
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun testCustomerPaymentCollectionDialog_jodThreeDecimals_andNullableBalance() {
+        val customer = Customer(
+            id = "cust_jod_1",
+            nameAr = "محل الهدى",
+            nameEn = "Al-Huda Store",
+            balanceExact = null
+        )
+
+        val target = SettlementTarget(
+            targetType = "invoice",
+            targetId = "inv_jod_1",
+            targetNumber = "INV-JOD-001",
+            businessDate = "2026-11-22",
+            dueDate = null,
+            daysOverdue = 0,
+            currency = "JOD",
+            currencyMinorUnits = 3,
+            originalAmountExact = BigDecimal("150.500"),
+            allocatedAmountExact = BigDecimal.ZERO,
+            remainingAmountExact = BigDecimal("150.500")
+        )
+
+        var confirmedAllocs: List<PaymentAllocationInput>? = null
+        var confirmedAmount: BigDecimal? = null
+
+        composeTestRule.setContent {
+            SmallTraderTheme {
+                CustomerPaymentCollectionDialog(
+                    customer = customer,
+                    lang = AppLanguage.EN,
+                    onDismiss = {},
+                    onConfirmPayment = { _, _, _, _ -> },
+                    onConfirmPaymentExact = { _, amount, _, _, allocs ->
+                        confirmedAmount = amount
+                        confirmedAllocs = allocs
+                    },
+                    settlementTargets = listOf(target),
+                    isLoadingTargets = false,
+                    targetsHasMore = false,
+                    currency = "JOD",
+                    minorUnits = 3
+                )
+            }
+        }
+
+        // Nullable unknown balance renders "Balance unavailable" without crash or Double conversion
+        composeTestRule.onNodeWithText("Balance unavailable").assertIsDisplayed()
+
+        // Click target checkbox
+        composeTestRule.onNodeWithTag("target_checkbox_invoice_inv_jod_1").performClick()
+        composeTestRule.onNodeWithTag("customer_allocation_summary_card").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("confirm_customer_payment_button").performClick()
+
+        assertNotNull(confirmedAllocs)
+        assertEquals(1, confirmedAllocs!!.size)
+        assertEquals("inv_jod_1", confirmedAllocs!![0].targetId)
+        // Normalized exact scale 3 for JOD without loss or HALF_UP rounding
+        assertEquals(BigDecimal("150.500"), confirmedAllocs!![0].amountExact)
+        assertEquals(3, confirmedAllocs!![0].amountExact.scale())
+        assertEquals(BigDecimal("150.500"), confirmedAmount)
+        assertEquals(3, confirmedAmount!!.scale())
+    }
+
+    @Test
+    fun testPaySupplierDialog_jodThreeDecimals_andNullableBalance() {
+        val supplier = Supplier(
+            id = "sup_jod_1",
+            nameAr = "مؤسسة الأردن",
+            nameEn = "Jordan Trading",
+            balanceOwedExact = null
+        )
+
+        val target = SettlementTarget(
+            targetType = "purchase",
+            targetId = "pur_jod_1",
+            targetNumber = "BILL-JOD-99",
+            businessDate = "2026-11-22",
+            dueDate = null,
+            daysOverdue = 0,
+            currency = "JOD",
+            currencyMinorUnits = 3,
+            originalAmountExact = BigDecimal("75.250"),
+            allocatedAmountExact = BigDecimal.ZERO,
+            remainingAmountExact = BigDecimal("75.250")
+        )
+
+        var confirmedAllocs: List<PaymentAllocationInput>? = null
+        var confirmedAmount: BigDecimal? = null
+
+        composeTestRule.setContent {
+            SmallTraderTheme {
+                PaySupplierDialog(
+                    supplier = supplier,
+                    lang = AppLanguage.EN,
+                    onDismiss = {},
+                    onPaySupplier = { _, _, _ -> Result.success(SupplierPayment("sp_jod", "sup_jod_1", "today", 75.25, "")) },
+                    onPaySupplierExactWithResult = { _, amount, _, _, allocs, onComplete ->
+                        confirmedAmount = amount
+                        confirmedAllocs = allocs
+                        onComplete(Result.success(SupplierPayment("sp_jod_ack", supplier.id, "today", amount.toDouble(), "")))
+                    },
+                    settlementTargets = listOf(target),
+                    isLoadingTargets = false,
+                    targetsHasMore = false,
+                    currency = "JOD",
+                    minorUnits = 3
+                )
+            }
+        }
+
+        // Nullable unknown balance handled
+        composeTestRule.onNodeWithText("Balance unavailable").assertIsDisplayed()
+
+        // Click target checkbox
+        composeTestRule.onNodeWithTag("target_checkbox_purchase_pur_jod_1").performClick()
+        composeTestRule.onNodeWithTag("supplier_allocation_summary_card").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("confirm_supplier_payment_button").performClick()
+
+        assertNotNull(confirmedAllocs)
+        assertEquals(1, confirmedAllocs!!.size)
+        assertEquals("pur_jod_1", confirmedAllocs!![0].targetId)
+        assertEquals(BigDecimal("75.250"), confirmedAllocs!![0].amountExact)
+        assertEquals(3, confirmedAllocs!![0].amountExact.scale())
+        assertEquals(BigDecimal("75.250"), confirmedAmount)
+        assertEquals(3, confirmedAmount!!.scale())
+    }
+
+    @Test
+    fun testOfflineAndProductionRepository_fractionalGoodsReceipt_lossless2_5Units() = runBlocking {
+        val offlineRepo = OfflineDemoTraderRepository()
+        val operator = SampleCatalog.demoStaff.first()
+
+        val product = offlineRepo.getProducts().first { it.isStockTracked }
+        val initialStockExact = product.stockCountExact
+        val billResult = offlineRepo.recordStructuredPurchaseBill(
+            supplierId = offlineRepo.getSuppliers().first().id,
+            lines = listOf(
+                PurchaseLineItem(
+                    productId = product.id,
+                    productNameAr = product.nameAr,
+                    productNameEn = product.nameEn,
+                    quantityExact = BigDecimal("10.00"),
+                    unitCostExact = BigDecimal("20.00"),
+                    receivedQuantityExact = BigDecimal.ZERO
+                )
+            ),
+            paidNowIls = 0.0,
+            operator = operator,
+            note = "Fractional Goods Receipt Test"
+        )
+        assertTrue(billResult.isSuccess)
+        val bill = billResult.getOrThrow()
+        val lineId = bill.lines.first().id
+
+        // Confirm fractional 2.5 receipt
+        val fractionalQty = BigDecimal("2.5")
+        val grnResult = offlineRepo.confirmPhysicalGoodsReceipt(
+            billId = bill.id,
+            productId = product.id,
+            receivedQty = fractionalQty,
+            batchNote = "Batch 2.5kg",
+            operator = operator,
+            lineId = lineId
+        )
+        assertTrue(grnResult.isSuccess)
+        val movement = grnResult.getOrThrow()
+
+        // Verify exact decimal preservation
+        assertEquals(fractionalQty, movement.deltaExact)
+        assertEquals(initialStockExact + fractionalQty, movement.resultingStockExact)
+
+        val updatedBill = offlineRepo.getPurchaseBills().first { it.id == bill.id }
+        assertEquals(fractionalQty, updatedBill.receivedQuantityExact)
+        assertEquals(fractionalQty, updatedBill.lines.first().receivedQuantityExact)
+        assertFalse(updatedBill.isReceived)
+    }
+
+    @Test
+    fun testProductionRepository_strictCurrencyScaleNormalization_andExcessPrecisionRejection() = runBlocking {
+        val transport = RecordingTransport { _ ->
+            TransportResponse(200, mapOf("Content-Type" to "application/json"), "{\"id\":\"ack_1\"}")
+        }
+        val apiClient = MobileMerchantApiClient(transport, baseOrigin) { validToken }
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            authScopeProvider = { validScope },
+            baseCurrency = "JOD",
+            currencyMinorUnits = 3
+        )
+
+        // 1. Amount with scale <= 3 normalizes with UNNECESSARY
+        val validAlloc = listOf(PaymentAllocationInput("invoice", "inv_1", BigDecimal("50.00")))
+        val normResult = repo.recordCustomerPayment(
+            customerId = targetCustomerId.value,
+            amount = BigDecimal("50.00"),
+            note = "Valid JOD scale",
+            allocations = validAlloc
+        )
+        assertTrue("Normalizing scale <= 3 with UNNECESSARY must succeed: ${normResult.exceptionOrNull()?.message}", normResult.isSuccess)
+
+        // 2. Amount with excess fractional precision (e.g. 4 decimals for JOD) is rejected with precision error
+        val excessResult = repo.recordCustomerPayment(
+            customerId = targetCustomerId.value,
+            amount = BigDecimal("50.1234"),
+            note = "Excess precision"
+        )
+        assertTrue("Excessive precision must be rejected", excessResult.isFailure)
+        assertTrue(excessResult.exceptionOrNull()?.message?.contains("exceeds allowed precision") == true)
+    }
+
+    @Test
+    fun testProductCatalog_truthfulHasMore_rendersPartialNoticeAndBanner() {
+        val base = SampleCatalog.initialProducts
+        val sampleProducts = (0 until 30).map { i ->
+            base[i % base.size].copy(id = "prod_test_$i")
+        }
+
+        val stateWithMore = TraderUiState(
+            products = sampleProducts,
+            productsHasMore = true,
+            language = AppLanguage.EN
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme {
+                ProductsCatalogScreen(
+                    state = stateWithMore,
+                    onSearchChange = {},
+                    onCategorySelect = {},
+                    onProductClick = {}
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("catalog_limited_banner").assertIsDisplayed()
+        composeTestRule.onNodeWithText("30+ registered (partial catalog)", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w412dp-h915dp-440dpi")
+    fun testProductSearchErrorRetry_triggersCallback_inCatalog() {
+        var catalogRetriedQuery: String? = null
+
+        val catalogErrorState = TraderUiState(
+            searchQuery = "biscuit",
+            productSearchQuery = "biscuit",
+            productSearchError = "Network connection timeout",
+            language = AppLanguage.EN
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme {
+                ProductsCatalogScreen(
+                    state = catalogErrorState,
+                    onSearchChange = { q -> catalogRetriedQuery = q },
+                    onCategorySelect = {},
+                    onProductClick = {}
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("product_search_retry_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("product_search_retry_button").performClick()
+        assertEquals("biscuit", catalogRetriedQuery)
+    }
+
+    @Test
+    @Config(qualifiers = "w412dp-h915dp-440dpi")
+    fun testProductSearchErrorRetry_triggersCallback_inNewSale() {
+        var newSaleRetriedQuery: String? = null
+
+        val newSaleErrorState = TraderUiState(
+            searchQuery = "juice",
+            productSearchQuery = "juice",
+            productSearchError = "Server unavailable 503",
+            language = AppLanguage.EN
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme {
+                NewSaleScreen(
+                    state = newSaleErrorState,
+                    onSearchQueryChange = { q -> newSaleRetriedQuery = q },
+                    onSelectCategory = {},
+                    onAddProduct = {},
+                    onDecrementProduct = {},
+                    onRemoveProduct = {},
+                    onClearBasket = {},
+                    onOpenScanner = {},
+                    onOpenCustomItem = {},
+                    onProceedToInvoiceReview = {}
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("product_search_retry_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("product_search_retry_button").performClick()
+        assertEquals("juice", newSaleRetriedQuery)
     }
 }

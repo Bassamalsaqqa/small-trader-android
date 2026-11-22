@@ -706,7 +706,9 @@ fun SmallTraderApp(
                         targetsError = state.customerSettlementTargetsError,
                         targetsHasMore = state.customerSettlementTargetsHasMore,
                         onLoadMoreTargets = { traderViewModel.loadCustomerSettlementTargets(cust.id) },
-                        onRetryTargets = { traderViewModel.loadCustomerSettlementTargets(cust.id, resetPagination = true) }
+                        onRetryTargets = { traderViewModel.loadCustomerSettlementTargets(cust.id, resetPagination = true) },
+                        currency = state.customerSettlementTargets.firstOrNull()?.currency ?: "ILS",
+                        minorUnits = state.customerSettlementTargets.firstOrNull()?.currencyMinorUnits ?: 2
                     )
                     }
                 }

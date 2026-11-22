@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import java.math.BigDecimal
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -165,7 +167,74 @@ fun NewSaleScreen(
                         color = MaterialTheme.colorScheme.outlineVariant
                     )
 
-                    if (state.filteredProducts.isEmpty()) {
+                    val isDebouncingOrSearching = state.searchQuery.isNotBlank() && (
+                        state.isSearchingProducts || !state.productSearchQuery.trim().equals(state.searchQuery.trim(), ignoreCase = true)
+                    )
+
+                    if (isDebouncingOrSearching) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .testTag("product_search_progress"),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = lang.tr("جاري البحث في الأصناف...", "Searching products..."),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    } else if (state.searchQuery.isNotBlank() && state.productSearchError != null) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(40.dp),
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                                Text(
+                                    text = lang.tr(
+                                        "فشل البحث في الأصناف: ${state.productSearchError}",
+                                        "Product search failed: ${state.productSearchError}"
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.error,
+                                    textAlign = TextAlign.Center
+                                )
+                                Button(
+                                    onClick = { onSearchQueryChange(state.searchQuery) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .heightIn(min = 48.dp)
+                                        .testTag("product_search_retry_button")
+                                ) {
+                                    Text(lang.tr("إعادة المحاولة", "Retry"))
+                                }
+                            }
+                        }
+                    } else if (state.filteredProducts.isEmpty()) {
                         ZeroResultCatalogState(
                             searchQuery = state.searchQuery,
                             selectedCategory = state.selectedCategory,
@@ -246,7 +315,74 @@ fun NewSaleScreen(
                     color = MaterialTheme.colorScheme.outlineVariant
                 )
 
-                if (state.filteredProducts.isEmpty()) {
+                val isDebouncingOrSearching = state.searchQuery.isNotBlank() && (
+                    state.isSearchingProducts || !state.productSearchQuery.trim().equals(state.searchQuery.trim(), ignoreCase = true)
+                )
+
+                if (isDebouncingOrSearching) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("product_search_progress"),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = lang.tr("جاري البحث في الأصناف...", "Searching products..."),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else if (state.searchQuery.isNotBlank() && state.productSearchError != null) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                modifier = Modifier.size(40.dp),
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                text = lang.tr(
+                                    "فشل البحث في الأصناف: ${state.productSearchError}",
+                                    "Product search failed: ${state.productSearchError}"
+                                ),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error,
+                                textAlign = TextAlign.Center
+                            )
+                            Button(
+                                onClick = { onSearchQueryChange(state.searchQuery) },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("product_search_retry_button")
+                            ) {
+                                Text(lang.tr("إعادة المحاولة", "Retry"))
+                            }
+                        }
+                    }
+                } else if (state.filteredProducts.isEmpty()) {
                     ZeroResultCatalogState(
                         searchQuery = state.searchQuery,
                         selectedCategory = state.selectedCategory,

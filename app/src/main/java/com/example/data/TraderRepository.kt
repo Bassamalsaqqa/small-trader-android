@@ -101,7 +101,6 @@ interface TraderRepository {
     // Customers & Collections
     fun getCustomers(): List<Customer>
     fun getCustomerTransactions(): List<CustomerTransaction>
-    suspend fun recordCustomerPayment(customerId: String, amountIls: Double, note: String, paymentId: String = ""): Result<CustomerTransaction>
     suspend fun recordCustomerPayment(
         customerId: String,
         amount: BigDecimal,
@@ -110,7 +109,19 @@ interface TraderRepository {
         cashAccountId: String? = null,
         paymentDate: String? = null,
         allocations: List<PaymentAllocationInput> = emptyList()
-    ): Result<CustomerTransaction> = recordCustomerPayment(customerId, amount.toDouble(), note, paymentId)
+    ): Result<CustomerTransaction>
+
+    suspend fun recordCustomerPayment(
+        customerId: String,
+        amountIls: Double,
+        note: String,
+        paymentId: String = ""
+    ): Result<CustomerTransaction> = recordCustomerPayment(
+        customerId = customerId,
+        amount = BigDecimal(amountIls.toString()),
+        note = note,
+        paymentId = paymentId
+    )
 
     suspend fun getCustomerSettlementTargets(
         customerId: String,
@@ -158,10 +169,34 @@ interface TraderRepository {
     suspend fun recordStructuredPurchaseBill(supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, operator: UserSession, note: String = ""): Result<PurchaseBill>
     suspend fun recordStructuredPurchaseBill(supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, operator: UserSession, note: String, operationId: String): Result<PurchaseBill> =
         recordStructuredPurchaseBill(supplierId, lines, paidNowIls, operator, note)
-    suspend fun confirmPhysicalGoodsReceipt(billId: String, productId: String, receivedQty: Int, batchNote: String, operator: UserSession, operationId: String = "", lineId: String? = null): Result<StockMovement>
-    suspend fun confirmPhysicalGoodsReceipt(billId: String, productId: String, receivedQty: BigDecimal, batchNote: String, operator: UserSession, operationId: String = "", lineId: String? = null): Result<StockMovement> =
-        confirmPhysicalGoodsReceipt(billId, productId, receivedQty.toInt(), batchNote, operator, operationId, lineId)
-    suspend fun recordSupplierPayment(supplierId: String, amountIls: Double, note: String, operator: UserSession, paymentId: String = ""): Result<SupplierPayment>
+    suspend fun confirmPhysicalGoodsReceipt(
+        billId: String,
+        productId: String,
+        receivedQty: BigDecimal,
+        batchNote: String,
+        operator: UserSession,
+        operationId: String = "",
+        lineId: String? = null
+    ): Result<StockMovement>
+
+    suspend fun confirmPhysicalGoodsReceipt(
+        billId: String,
+        productId: String,
+        receivedQty: Int,
+        batchNote: String,
+        operator: UserSession,
+        operationId: String = "",
+        lineId: String? = null
+    ): Result<StockMovement> = confirmPhysicalGoodsReceipt(
+        billId = billId,
+        productId = productId,
+        receivedQty = BigDecimal.valueOf(receivedQty.toLong()),
+        batchNote = batchNote,
+        operator = operator,
+        operationId = operationId,
+        lineId = lineId
+    )
+
     suspend fun recordSupplierPayment(
         supplierId: String,
         amount: BigDecimal,
@@ -171,7 +206,21 @@ interface TraderRepository {
         cashAccountId: String? = null,
         paymentDate: String? = null,
         allocations: List<PaymentAllocationInput> = emptyList()
-    ): Result<SupplierPayment> = recordSupplierPayment(supplierId, amount.toDouble(), note, operator, paymentId)
+    ): Result<SupplierPayment>
+
+    suspend fun recordSupplierPayment(
+        supplierId: String,
+        amountIls: Double,
+        note: String,
+        operator: UserSession,
+        paymentId: String = ""
+    ): Result<SupplierPayment> = recordSupplierPayment(
+        supplierId = supplierId,
+        amount = BigDecimal(amountIls.toString()),
+        note = note,
+        operator = operator,
+        paymentId = paymentId
+    )
 
     suspend fun getSupplierSettlementTargets(
         supplierId: String,
@@ -254,10 +303,26 @@ data class RecordedGrnOperation(
     val billId: String,
     val lineId: String,
     val productId: String,
-    val receivedQty: Int,
+    val receivedQty: BigDecimal,
     val batchNote: String,
     val movement: StockMovement
-)
+) {
+    constructor(
+        billId: String,
+        lineId: String,
+        productId: String,
+        receivedQty: Int,
+        batchNote: String,
+        movement: StockMovement
+    ) : this(
+        billId = billId,
+        lineId = lineId,
+        productId = productId,
+        receivedQty = BigDecimal.valueOf(receivedQty.toLong()),
+        batchNote = batchNote,
+        movement = movement
+    )
+}
 
 /**
  * In-memory reference implementation strictly adhering to accounting, stock, and role integrity.
@@ -745,7 +810,7 @@ class OfflineDemoTraderRepository(
         }
         val idx = customers.indexOfFirst { it.id == customerId }
         if (idx == -1) return Result.failure(NoSuchElementException("Customer not found: $customerId"))
-        val amountExact = amount.setScale(2, RoundingMode.HALF_UP)
+        val amountExact = amount
         if (amountExact <= BigDecimal.ZERO) {
             return Result.failure(IllegalArgumentException("Payment amount must be greater than zero."))
         }
@@ -777,7 +842,6 @@ class OfflineDemoTraderRepository(
         val currentCust = customers[idx]
         val newBalance = (currentCust.balanceExact ?: BigDecimal.ZERO)
             .subtract(amountExact)
-            .setScale(2, RoundingMode.HALF_UP)
 
         customers[idx] = currentCust.copy(balanceExact = newBalance)
 
@@ -1217,7 +1281,7 @@ class OfflineDemoTraderRepository(
     override suspend fun confirmPhysicalGoodsReceipt(
         billId: String,
         productId: String,
-        receivedQty: Int,
+        receivedQty: BigDecimal,
         batchNote: String,
         operator: UserSession,
         operationId: String,
@@ -1237,7 +1301,7 @@ class OfflineDemoTraderRepository(
                 val matchesBill = existing.billId == billId
                 val matchesLine = if (!lineId.isNullOrBlank()) existing.lineId == lineId else (existing.billId == billId && existing.productId == productId)
                 val matchesProduct = existing.productId == productId
-                val matchesQty = existing.receivedQty == receivedQty
+                val matchesQty = existing.receivedQty.compareTo(receivedQty) == 0
                 val matchesNote = existing.batchNote == batchNote
                 if (matchesBill && matchesLine && matchesProduct && matchesQty && matchesNote) {
                     return Result.success(existing.movement)
@@ -1299,8 +1363,8 @@ class OfflineDemoTraderRepository(
         }
 
         val targetLine = effectiveLines[targetLineIndex]
-        val pendingQty = targetLine.pendingQuantity
-        if (receivedQty <= 0 || receivedQty > pendingQty) {
+        val pendingQty = targetLine.pendingQuantityExact
+        if (receivedQty <= BigDecimal.ZERO || receivedQty > pendingQty) {
             return Result.failure(
                 IllegalArgumentException("الكمية المدخلة ($receivedQty) يجب أن تكون أكبر من صفر ولا تتجاوز الكمية المتبقية ($pendingQty) في فاتورة الشراء $billCode | Received quantity ($receivedQty) must be positive and not exceed pending quantity ($pendingQty) for bill $billCode")
             )
@@ -1315,38 +1379,40 @@ class OfflineDemoTraderRepository(
 
         // 3. Update line and bill receiving state
         val updatedLine = targetLine.copy(
-            receivedQuantity = targetLine.receivedQuantity + receivedQty,
-            receivedQuantityExact = targetLine.receivedQuantityExact + BigDecimal.valueOf(receivedQty.toLong())
+            receivedQuantity = (targetLine.receivedQuantityExact + receivedQty).toInt(),
+            receivedQuantityExact = targetLine.receivedQuantityExact + receivedQty
         )
         val updatedLines = effectiveLines.toMutableList()
         updatedLines[targetLineIndex] = updatedLine
 
-        val newReceivedTotal = updatedLines.sumOf { it.receivedQuantity }
+        val newReceivedTotalExact = updatedLines.fold(BigDecimal.ZERO) { total, line -> total + line.receivedQuantityExact }
         val isFullyReceived = updatedLines.all { it.isReceived }
         purchaseBills[billIdx] = bill.copy(
             lines = updatedLines,
-            receivedQuantity = newReceivedTotal,
-            receivedQuantityExact = updatedLines.fold(BigDecimal.ZERO) { total, line -> total + line.receivedQuantityExact },
+            receivedQuantity = newReceivedTotalExact.toInt(),
+            receivedQuantityExact = newReceivedTotalExact,
             isReceived = isFullyReceived
         )
 
         // 4. Atomically increment physical stock
-        val newStock = prod.stockCount + receivedQty
-        products[prodIdx] = prod.copy(stockCount = newStock, stockCountExact = BigDecimal.valueOf(newStock.toLong()))
+        val newStockExact = prod.stockCountExact + receivedQty
+        products[prodIdx] = prod.copy(stockCount = newStockExact.toInt(), stockCountExact = newStockExact)
 
         val noteSuffix = batchNote.trim().takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: ""
-        val receiptTypeAr = if (updatedLine.isReceived) "سند استلام بضاعة مخزني" else "سند استلام جزئي (+${WesternFormatters.formatInt(receivedQty)}/${WesternFormatters.formatInt(targetLine.quantity)})"
-        val receiptTypeEn = if (updatedLine.isReceived) "Physical Goods Receipt Note" else "Partial Goods Receipt (+$receivedQty/${targetLine.quantity})"
+        val qtyDisplay = receivedQty.stripTrailingZeros().toPlainString()
+        val totalQtyDisplay = targetLine.quantityExact.stripTrailingZeros().toPlainString()
+        val receiptTypeAr = if (updatedLine.isReceived) "سند استلام بضاعة مخزني" else "سند استلام جزئي (+$qtyDisplay/$totalQtyDisplay)"
+        val receiptTypeEn = if (updatedLine.isReceived) "Physical Goods Receipt Note" else "Partial Goods Receipt (+$qtyDisplay/$totalQtyDisplay)"
 
         val movementId = if (operationId.isNotBlank()) operationId else "sm_grn_${System.currentTimeMillis()}"
         val movement = StockMovement(
             id = movementId,
             productId = productId,
             date = WesternFormatters.currentTimestamp(),
-            delta = receivedQty,
+            deltaExact = receivedQty,
             reasonAr = "$receiptTypeAr $billCode$noteSuffix",
             reasonEn = "$receiptTypeEn $billCode$noteSuffix",
-            resultingStock = newStock
+            resultingStockExact = newStockExact
         )
         stockMovements.add(0, movement)
         _productsFlow.value = products.toList()
@@ -1364,6 +1430,24 @@ class OfflineDemoTraderRepository(
         }
         return Result.success(movement)
     }
+
+    override suspend fun confirmPhysicalGoodsReceipt(
+        billId: String,
+        productId: String,
+        receivedQty: Int,
+        batchNote: String,
+        operator: UserSession,
+        operationId: String,
+        lineId: String?
+    ): Result<StockMovement> = confirmPhysicalGoodsReceipt(
+        billId = billId,
+        productId = productId,
+        receivedQty = BigDecimal.valueOf(receivedQty.toLong()),
+        batchNote = batchNote,
+        operator = operator,
+        operationId = operationId,
+        lineId = lineId
+    )
 
     override suspend fun recordSupplierPayment(
         supplierId: String,
@@ -1400,7 +1484,7 @@ class OfflineDemoTraderRepository(
         }
         val idx = suppliers.indexOfFirst { it.id == supplierId }
         if (idx == -1) return Result.failure(NoSuchElementException("المورد غير موجود | Supplier not found: $supplierId"))
-        val amountExact = amount.setScale(2, RoundingMode.HALF_UP)
+        val amountExact = amount
         if (amountExact <= BigDecimal.ZERO) {
             return Result.failure(IllegalArgumentException("مبلغ السداد يجب أن يكون أكبر من صفر | Disbursement amount must be greater than zero."))
         }
@@ -1440,7 +1524,6 @@ class OfflineDemoTraderRepository(
         val currentSup = suppliers[idx]
         val newOwed = (currentSup.balanceOwedExact ?: BigDecimal.ZERO)
             .subtract(amountExact)
-            .setScale(2, RoundingMode.HALF_UP)
 
         suppliers[idx] = currentSup.copy(balanceOwedExact = newOwed)
 

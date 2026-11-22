@@ -1426,7 +1426,9 @@ fun SupplierDetailScreen(
                 targetsError = state.supplierSettlementTargetsError,
                 targetsHasMore = state.supplierSettlementTargetsHasMore,
                 onLoadMoreTargets = { onLoadMoreSupplierTargets?.invoke(supplier.id) },
-                onRetryTargets = { onLoadSupplierTargets?.invoke(supplier.id, true) }
+                onRetryTargets = { onLoadSupplierTargets?.invoke(supplier.id, true) },
+                currency = state.supplierSettlementTargets.firstOrNull()?.currency ?: "ILS",
+                minorUnits = state.supplierSettlementTargets.firstOrNull()?.currencyMinorUnits ?: 2
             )
         }
     }

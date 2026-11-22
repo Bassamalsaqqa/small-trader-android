@@ -36,7 +36,9 @@ import androidx.compose.material.icons.filled.AddShoppingCart
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -204,7 +206,19 @@ fun ProductsCatalogScreen(
                                 )
                             }
                             Text(
-                                text = if (lowOrOutCount > 0) {
+                                text = if (state.productsHasMore) {
+                                    if (lowOrOutCount > 0) {
+                                        lang.tr(
+                                            "${WesternFormatters.formatInt(state.products.size)}+ صنفاً مسجلاً (كتالوج جزئي) — ${WesternFormatters.formatInt(lowOrOutCount)} بحاجة لإعادة طلب",
+                                            "${WesternFormatters.formatInt(state.products.size)}+ registered (partial catalog) — ${WesternFormatters.formatInt(lowOrOutCount)} need reorder"
+                                        )
+                                    } else {
+                                        lang.tr(
+                                            "${WesternFormatters.formatInt(state.products.size)}+ صنفاً مسجلاً (كتالوج جزئي)",
+                                            "${WesternFormatters.formatInt(state.products.size)}+ registered (partial catalog)"
+                                        )
+                                    }
+                                } else if (lowOrOutCount > 0) {
                                     lang.tr(
                                         "${WesternFormatters.formatInt(state.products.size)} صنفاً مسجلاً — ${WesternFormatters.formatInt(lowOrOutCount)} بحاجة لإعادة طلب",
                                         "${WesternFormatters.formatInt(state.products.size)} registered — ${WesternFormatters.formatInt(lowOrOutCount)} need reorder"
@@ -344,7 +358,13 @@ fun ProductsCatalogScreen(
                         )
                     },
                     trailingIcon = {
-                        if (state.searchQuery.isNotEmpty()) {
+                        if (state.isSearchingProducts) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else if (state.searchQuery.isNotEmpty()) {
                             IconButton(
                                 onClick = { onSearchChange("") },
                                 modifier = Modifier.size(48.dp)
@@ -358,6 +378,38 @@ fun ProductsCatalogScreen(
                     },
                     shape = RoundedCornerShape(10.dp)
                 )
+
+                if (state.productsHasMore && state.searchQuery.isBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("catalog_limited_banner")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = lang.tr(
+                                    "يتم عرض أول ${WesternFormatters.formatInt(state.products.size)} صنفاً مسجلاً فقط — استخدم البحث للوصول المباشر إلى بقية الأصناف على الخادم.",
+                                    "Showing the first ${WesternFormatters.formatInt(state.products.size)} registered items only — use search to query the full server catalog."
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                }
 
                 // Category Browsing Filter Chips
                 LazyRow(
@@ -384,10 +436,11 @@ fun ProductsCatalogScreen(
                             selected = stockFilter == CatalogStockFilter.ALL,
                             onClick = { stockFilter = CatalogStockFilter.ALL },
                             label = {
+                                val allCountStr = if (state.productsHasMore) "${WesternFormatters.formatInt(state.products.size)}+" else WesternFormatters.formatInt(state.products.size)
                                 Text(
                                     lang.tr(
-                                        "كل الأصناف (${WesternFormatters.formatInt(state.products.size)})",
-                                        "All (${WesternFormatters.formatInt(state.products.size)})"
+                                        "كل الأصناف ($allCountStr)",
+                                        "All ($allCountStr)"
                                     )
                                 )
                             },
@@ -465,12 +518,13 @@ fun ProductsCatalogScreen(
                     val total = state.products.count {
                         state.selectedCategory == ProductCategory.ALL || it.category == state.selectedCategory
                     }
+                    val totalSuffix = if (state.productsHasMore) "+" else ""
                     if (total > displayedProducts.size) lang.tr(
-                        "عرض ${WesternFormatters.formatInt(displayedProducts.size)} من أصل ${WesternFormatters.formatInt(total)}",
-                        "Showing ${WesternFormatters.formatInt(displayedProducts.size)} of ${WesternFormatters.formatInt(total)}"
+                        "عرض ${WesternFormatters.formatInt(displayedProducts.size)} من أصل ${WesternFormatters.formatInt(total)}$totalSuffix",
+                        "Showing ${WesternFormatters.formatInt(displayedProducts.size)} of ${WesternFormatters.formatInt(total)}$totalSuffix"
                     ) else lang.tr(
-                        "${WesternFormatters.formatInt(displayedProducts.size)} صنف",
-                        "${WesternFormatters.formatInt(displayedProducts.size)} items"
+                        "${WesternFormatters.formatInt(displayedProducts.size)}$totalSuffix صنف",
+                        "${WesternFormatters.formatInt(displayedProducts.size)}$totalSuffix items"
                     )
                 } else lang.tr(
                     "${WesternFormatters.formatInt(displayedProducts.size)} صنف",
@@ -486,8 +540,75 @@ fun ProductsCatalogScreen(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
         )
 
+        val isDebouncingOrSearching = state.searchQuery.isNotBlank() && (
+            state.isSearchingProducts || !state.productSearchQuery.trim().equals(state.searchQuery.trim(), ignoreCase = true)
+        )
+
         // Scannable Product Directory List (Lower area preserved as approved)
-        if (displayedProducts.isEmpty()) {
+        if (isDebouncingOrSearching) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .testTag("product_search_progress"),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = lang.tr("جاري البحث في الأصناف...", "Searching products..."),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        } else if (state.searchQuery.isNotBlank() && state.productSearchError != null) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                    Text(
+                        text = lang.tr(
+                            "فشل البحث في الأصناف: ${state.productSearchError}",
+                            "Product search failed: ${state.productSearchError}"
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center
+                    )
+                    Button(
+                        onClick = { onSearchChange(state.searchQuery) },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("product_search_retry_button")
+                    ) {
+                        Text(lang.tr("إعادة المحاولة", "Retry"))
+                    }
+                }
+            }
+        } else if (displayedProducts.isEmpty()) {
             Box(
                 modifier = Modifier
                     .weight(1f)
