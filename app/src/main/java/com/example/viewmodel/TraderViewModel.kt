@@ -81,7 +81,10 @@ class TraderViewModel(
             draftCustomerPaymentOperationId = repository.getDraftOperationId("customer_payment"),
             draftCustomerCreateOperationId = repository.getDraftOperationId("customer_create"),
             draftSupplierCreateOperationId = repository.getDraftOperationId("supplier_create"),
-            draftGrnOperationId = repository.getDraftOperationId("goods_receipt_note")
+            draftGrnOperationId = repository.getDraftOperationId("goods_receipt_note"),
+            productsHasMore = repository.productsHasMoreFlow.value,
+            customersHasMore = repository.customersHasMoreFlow.value,
+            suppliersHasMore = repository.suppliersHasMoreFlow.value
         )
     )
     val uiState: StateFlow<TraderUiState> = _uiState.asStateFlow()
@@ -420,6 +423,11 @@ class TraderViewModel(
         _uiState.update { it.copy(searchQuery = query,
             saleSearchQuery = if (it.currentScreen == TraderScreen.NEW_SALE) query else it.saleSearchQuery,
             inventorySearchQuery = if (it.currentScreen == TraderScreen.PRODUCTS_CATALOG) query else it.inventorySearchQuery) }
+        searchProductsOnServer(query)
+    }
+
+    fun clearSearchQuery() {
+        updateSearchQuery("")
     }
 
     fun openLowStockInventory() {
@@ -3444,7 +3452,7 @@ class TraderViewModel(
         productSearchJob = viewModelScope.launch {
             delay(250)
             try {
-                val res = repository.searchProductsOnServer(trimmed, limit = 50)
+                val res = repository.searchProductsOnServer(trimmed, limit = 30)
                 if (generation == productSearchGeneration) {
                     if (res.isSuccess) {
                         _uiState.update {

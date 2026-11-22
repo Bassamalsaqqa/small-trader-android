@@ -1,6 +1,10 @@
 package com.example.model
 
 import com.example.data.ProductSearch
+import com.example.data.mobile.contract.StrictJsonObject
+import com.example.data.mobile.contract.StrictJsonArray
+import com.example.data.mobile.contract.toNullableString
+import com.example.data.mobile.contract.toNullableBigDecimal
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.DecimalFormat
@@ -117,6 +121,7 @@ data class Product(
     val conversionToBaseExact: BigDecimal = BigDecimal.ONE,
     val sku: String? = null
 ) {
+    val code: String? get() = sku
     constructor(
         id: String,
         nameAr: String,
@@ -847,7 +852,127 @@ data class SettlementTargetsResponse(
     val nextCursor: String?,
     val totalsRemainingByCurrency: Map<String, SettlementCurrencyTotal> = emptyMap(),
     val totalsOriginalByCurrency: Map<String, SettlementCurrencyTotal> = emptyMap()
-)
+) {
+    companion object {
+        fun fromStrictJson(
+            root: StrictJsonObject,
+            isSupplier: Boolean = false,
+            fallbackMinorUnits: Int = 2
+        ): SettlementTargetsResponse {
+            val partyId = if (isSupplier) {
+                root.properties["supplier_id"].toNullableString() ?: ""
+            } else {
+                root.properties["customer_id"].toNullableString() ?: ""
+            }
+            val partyName = if (isSupplier) {
+                root.properties["supplier_name"].toNullableString() ?: ""
+            } else {
+                root.properties["customer_name"].toNullableString() ?: ""
+            }
+            val currency = root.properties["currency"].toNullableString()
+            val minorUnits = root.properties["currency_minor_units"]?.asNumber()?.toInt() ?: fallbackMinorUnits
+            val totalTargets = root.properties["total_targets"]?.asNumber()?.toInt() ?: 0
+
+            val targetsList = mutableListOf<SettlementTarget>()
+            val targetsEl = root.properties["targets"]
+            if (targetsEl is StrictJsonArray) {
+                for (item in targetsEl.elements) {
+                    if (item is StrictJsonObject) {
+                        val tType = item.properties["target_type"].toNullableString() ?: continue
+                        val tId = item.properties["target_id"].toNullableString() ?: continue
+                        val tNum = item.properties["target_number"].toNullableString() ?: tId
+                        val bDate = item.properties["business_date"].toNullableString()
+                            ?: item.properties["opening_date"].toNullableString()
+                            ?: item.properties["issue_date"].toNullableString()
+                            ?: item.properties["purchase_date"].toNullableString()
+                            ?: WesternFormatters.currentDate()
+                        val dDate = item.properties["due_date"].toNullableString()
+                        val overdue = item.properties["days_overdue"]?.asNumber()?.toInt() ?: 0
+                        val curr = item.properties["currency"].toNullableString() ?: currency ?: "ILS"
+                        val itemMinUnits = item.properties["currency_minor_units"]?.asNumber()?.toInt() ?: minorUnits
+
+                        val orig = item.properties["original_amount_exact"].toNullableBigDecimal()
+                            ?: item.properties["original_amount"].toNullableBigDecimal(itemMinUnits)
+                            ?: BigDecimal.ZERO
+                        val alloc = item.properties["allocated_amount_exact"].toNullableBigDecimal()
+                            ?: item.properties["allocated_amount"].toNullableBigDecimal(itemMinUnits)
+                            ?: BigDecimal.ZERO
+                        val rem = item.properties["remaining_amount_exact"].toNullableBigDecimal()
+                            ?: item.properties["remaining_amount"].toNullableBigDecimal(itemMinUnits)
+                            ?: BigDecimal.ZERO
+
+                        targetsList.add(
+                            SettlementTarget(
+                                targetType = tType,
+                                targetId = tId,
+                                targetNumber = tNum,
+                                businessDate = bDate,
+                                dueDate = dDate,
+                                daysOverdue = overdue,
+                                currency = curr,
+                                currencyMinorUnits = itemMinUnits,
+                                originalAmountExact = orig,
+                                allocatedAmountExact = alloc,
+                                remainingAmountExact = rem
+                            )
+                        )
+                    }
+                }
+            }
+
+            var hasMore = false
+            var nextCursor: String? = null
+            val pagEl = root.properties["pagination"]
+            if (pagEl is StrictJsonObject) {
+                hasMore = pagEl.properties["has_more"]?.asBoolean() ?: false
+                nextCursor = pagEl.properties["next_cursor"].toNullableString()
+            }
+
+            val remainingTotals = mutableMapOf<String, SettlementCurrencyTotal>()
+            val originalTotals = mutableMapOf<String, SettlementCurrencyTotal>()
+            val totalsEl = root.properties["totals"]
+            if (totalsEl is StrictJsonObject) {
+                val remEl = totalsEl.properties["remaining_by_currency"]
+                if (remEl is StrictJsonObject) {
+                    for ((cCode, cVal) in remEl.properties) {
+                        if (cVal is StrictJsonObject) {
+                            val mUnits = cVal.properties["minor_units"]?.asNumber()?.toInt() ?: minorUnits
+                            val amt = cVal.properties["amount_exact"].toNullableBigDecimal(mUnits)
+                                ?: cVal.properties["amount"].toNullableBigDecimal(mUnits)
+                                ?: BigDecimal.ZERO
+                            remainingTotals[cCode] = SettlementCurrencyTotal(amt, mUnits)
+                        }
+                    }
+                }
+                val origEl = totalsEl.properties["original_by_currency"]
+                if (origEl is StrictJsonObject) {
+                    for ((cCode, cVal) in origEl.properties) {
+                        if (cVal is StrictJsonObject) {
+                            val mUnits = cVal.properties["minor_units"]?.asNumber()?.toInt() ?: minorUnits
+                            val amt = cVal.properties["amount_exact"].toNullableBigDecimal(mUnits)
+                                ?: cVal.properties["amount"].toNullableBigDecimal(mUnits)
+                                ?: BigDecimal.ZERO
+                            originalTotals[cCode] = SettlementCurrencyTotal(amt, mUnits)
+                        }
+                    }
+                }
+            }
+
+            return SettlementTargetsResponse(
+                partyId = partyId,
+                partyName = partyName,
+                currency = currency,
+                currencyMinorUnits = minorUnits,
+                totalTargets = totalTargets,
+                targets = targetsList,
+                hasMore = hasMore,
+                nextCursor = nextCursor,
+                totalsRemainingByCurrency = remainingTotals,
+                totalsOriginalByCurrency = originalTotals
+            )
+        }
+    }
+}
 
 enum class ExpenseCategory(val labelAr: String, val labelEn: String) {
     RENT("إيجار المحل", "Store Rent"),

@@ -138,7 +138,8 @@ fun CashPaymentScreen(
     onDismissCheckoutError: () -> Unit = {},
     onEditInvoice: () -> Unit = {},
     onCompleteSale: () -> Unit,
-    onCompleteCreditSale: () -> Unit = {}
+    onCompleteCreditSale: () -> Unit = {},
+    onSearchCustomers: ((String) -> Unit)? = null
 ) {
     val lang = state.language
     val financial = TraderTheme.financial
@@ -1450,7 +1451,9 @@ fun CashPaymentScreen(
             onSelectCustomer = { customer ->
                 onAssignCustomer(customer)
                 isCustomerPickerOpen = false
-            }
+            },
+            state = state,
+            onSearchCustomers = onSearchCustomers
         )
     }
 }

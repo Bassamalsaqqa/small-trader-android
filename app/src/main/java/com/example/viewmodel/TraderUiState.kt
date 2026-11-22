@@ -221,19 +221,26 @@ data class TraderUiState(
 
     val filteredProducts: List<Product>
         get() {
-            val currentProducts = products
             val currentQuery = searchQuery
             val currentCategory = selectedCategory
+            val sourceProducts = if (currentQuery.isNotBlank() &&
+                productSearchQuery.trim().equals(currentQuery.trim(), ignoreCase = true) &&
+                productSearchResults != null
+            ) {
+                productSearchResults!!
+            } else {
+                products
+            }
             val cachedResult = cachedFilteredResult
             if (cachedResult != null &&
                 cachedFilteredQuery == currentQuery &&
                 cachedFilteredCategory == currentCategory &&
-                cachedFilteredProductsRef === currentProducts
+                cachedFilteredProductsRef === sourceProducts
             ) {
                 return cachedResult
             }
             val result = ProductSearch.search(
-                products = currentProducts,
+                products = sourceProducts,
                 query = currentQuery,
                 category = currentCategory,
                 limit = 30,
@@ -241,7 +248,7 @@ data class TraderUiState(
             )
             cachedFilteredQuery = currentQuery
             cachedFilteredCategory = currentCategory
-            cachedFilteredProductsRef = currentProducts
+            cachedFilteredProductsRef = sourceProducts
             cachedFilteredResult = result
             return result
         }
@@ -255,23 +262,30 @@ data class TraderUiState(
 
     val allCategoriesMatchCount: Int
         get() {
-            val currentProducts = products
             val currentQuery = searchQuery
+            val sourceProducts = if (currentQuery.isNotBlank() &&
+                productSearchQuery.trim().equals(currentQuery.trim(), ignoreCase = true) &&
+                productSearchResults != null
+            ) {
+                productSearchResults!!
+            } else {
+                products
+            }
             val cachedCount = cachedCountResult
             if (cachedCount != null &&
                 cachedCountQuery == currentQuery &&
-                cachedCountProductsRef === currentProducts
+                cachedCountProductsRef === sourceProducts
             ) {
                 return cachedCount
             }
             val count = ProductSearch.countMatches(
-                products = currentProducts,
+                products = sourceProducts,
                 query = currentQuery,
                 category = ProductCategory.ALL,
                 stockTrackedOnly = false
             )
             cachedCountQuery = currentQuery
-            cachedCountProductsRef = currentProducts
+            cachedCountProductsRef = sourceProducts
             cachedCountResult = count
             return count
         }

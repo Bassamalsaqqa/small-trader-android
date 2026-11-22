@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -136,7 +137,8 @@ fun InvoiceReviewScreen(
     onSaveDraft: (() -> Unit)? = null,
     onResumeDraft: ((String) -> Unit)? = null,
     onDeleteDraft: ((String) -> Unit)? = null,
-    onFormatQuotation: (() -> String)? = null
+    onFormatQuotation: (() -> String)? = null,
+    onSearchCustomers: ((String) -> Unit)? = null
 ) {
     val lang = state.language
     var isCustomerPickerOpen by rememberSaveable { mutableStateOf(false) }
@@ -241,7 +243,9 @@ fun InvoiceReviewScreen(
             onSelectCustomer = { cust ->
                 onAssignCustomer(cust)
                 isCustomerPickerOpen = false
-            }
+            },
+            state = state,
+            onSearchCustomers = onSearchCustomers
         )
     }
 
@@ -1612,7 +1616,9 @@ internal fun CustomerPickerModalSheet(
     basketNetTotalIls: Double,
     lang: AppLanguage,
     onDismiss: () -> Unit,
-    onSelectCustomer: (Customer?) -> Unit
+    onSelectCustomer: (Customer?) -> Unit,
+    state: TraderUiState? = null,
+    onSearchCustomers: ((String) -> Unit)? = null
 ) {
     val financial = TraderTheme.financial
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1621,15 +1627,25 @@ internal fun CustomerPickerModalSheet(
     val normalizedQuery = TraderUiState.normalizeForSearch(
         WesternFormatters.sanitizeWesternDigits(searchQuery.trim())
     )
-    val filteredCustomers = if (normalizedQuery.isEmpty()) {
-        customers
+    val sourceList = if (searchQuery.isNotBlank() &&
+        state != null &&
+        state.customerSearchQuery.trim().equals(searchQuery.trim(), ignoreCase = true) &&
+        state.customerSearchResults != null
+    ) {
+        state.customerSearchResults!!
     } else {
-        customers.filter { cust ->
+        customers
+    }
+    val filteredCustomers = if (normalizedQuery.isEmpty()) {
+        sourceList
+    } else {
+        sourceList.filter { cust ->
             TraderUiState.normalizeForSearch(cust.nameAr).contains(normalizedQuery) ||
                 TraderUiState.normalizeForSearch(cust.nameEn).contains(normalizedQuery) ||
                 (cust.phone?.contains(normalizedQuery) ?: false) ||
                 TraderUiState.normalizeForSearch(cust.addressAr ?: "").contains(normalizedQuery) ||
-                TraderUiState.normalizeForSearch(cust.addressEn ?: "").contains(normalizedQuery)
+                TraderUiState.normalizeForSearch(cust.addressEn ?: "").contains(normalizedQuery) ||
+                (cust.code ?: "").lowercase().contains(normalizedQuery)
         }
     }
 
@@ -1679,7 +1695,10 @@ internal fun CustomerPickerModalSheet(
 
             OutlinedTextField(
                 value = searchQuery,
-                onValueChange = { searchQuery = it },
+                onValueChange = {
+                    searchQuery = it
+                    onSearchCustomers?.invoke(it)
+                },
                 singleLine = true,
                 shape = RoundedCornerShape(10.dp),
                 placeholder = {
@@ -1699,9 +1718,18 @@ internal fun CustomerPickerModalSheet(
                     )
                 },
                 trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
+                    if (state?.isSearchingCustomers == true) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else if (searchQuery.isNotEmpty()) {
                         IconButton(
-                            onClick = { searchQuery = "" },
+                            onClick = {
+                                searchQuery = ""
+                                onSearchCustomers?.invoke("")
+                            },
                             modifier = Modifier.size(48.dp)
                         ) {
                             Icon(

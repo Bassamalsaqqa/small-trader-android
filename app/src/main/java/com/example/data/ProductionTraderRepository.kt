@@ -174,105 +174,118 @@ class ProductionTraderRepository(
         postAction: suspend (key: String) -> Result<StrictJsonObject>
     ): Result<StrictJsonObject> {
         val scopeBefore = requireActiveScope()
-        val payloadDigest = com.example.data.mobile.contract.PayloadDigest("sha256:" + java.security.MessageDigest.getInstance("SHA-256").digest(canonicalPayloadBytes).joinToString("") { "%02x".format(it) })
+        val admissionKey = "${scopeBefore.companyId.value}:${scopeBefore.actorId.value}:${scopeBefore.deviceId.value}:$commandId"
+        if (!inFlightCommands.add(admissionKey)) {
+            return Result.failure(IllegalStateException("Command is already being submitted"))
+        }
 
-        val record = commandStore.recordPendingCommand(
-            companyId = scopeBefore.companyId.value,
-            commandId = commandId,
-            actorId = scopeBefore.actorId.value,
-            deviceId = scopeBefore.deviceId.value,
-            commandType = commandType,
-            idempotencyKey = idempotencyKey,
-            payloadDigest = payloadDigest.value,
-            canonicalPayloadBytes = canonicalPayloadBytes
-        )
+        try {
+            val payloadDigest = com.example.data.mobile.contract.PayloadDigest("sha256:" + java.security.MessageDigest.getInstance("SHA-256").digest(canonicalPayloadBytes).joinToString("") { "%02x".format(it) })
 
-        if (record.status == CommandStatus.COMPLETED && record.responseSnapshot != null) {
-            val activeScope = requireActiveScope()
-            if (record.companyId != activeScope.companyId.value ||
-                record.actorId != activeScope.actorId.value ||
-                record.deviceId != activeScope.deviceId.value
-            ) {
-                throw SecurityException("Cached command belongs to different authenticated scope")
+            val record = commandStore.recordPendingCommand(
+                companyId = scopeBefore.companyId.value,
+                commandId = commandId,
+                actorId = scopeBefore.actorId.value,
+                deviceId = scopeBefore.deviceId.value,
+                commandType = commandType,
+                idempotencyKey = idempotencyKey,
+                payloadDigest = payloadDigest.value,
+                canonicalPayloadBytes = canonicalPayloadBytes
+            )
+
+            if (record.status == CommandStatus.COMPLETED && record.responseSnapshot != null) {
+                val activeScope = requireActiveScope()
+                if (record.companyId != activeScope.companyId.value ||
+                    record.actorId != activeScope.actorId.value ||
+                    record.deviceId != activeScope.deviceId.value
+                ) {
+                    throw SecurityException("Cached command belongs to different authenticated scope")
+                }
+                return try {
+                    val snapBytes = commandStore.decryptSnapshot(record)
+                        ?: throw IllegalStateException("Decrypted snapshot was null")
+                    val jsonStr = String(snapBytes, StandardCharsets.UTF_8)
+                    val parsed = StrictJsonParser.parse(jsonStr).asObject()
+                    if (validateResponse != null) {
+                        val valRes = validateResponse(parsed)
+                        if (valRes.isFailure) {
+                            val valErr = valRes.exceptionOrNull() ?: IllegalStateException("Authoritative response validation failed")
+                            commandStore.markUnknownAck(scopeBefore.companyId.value, commandId, valErr.message ?: "Authoritative response validation failed")
+                            return Result.failure(valErr)
+                        }
+                    }
+                    Result.success(parsed)
+                } catch (ex: Exception) {
+                    if (isReceiptStatusChecked) {
+                        checkReceiptStatusOnServer(scopeBefore.companyId, idempotencyKey, commandId, validateResponse)
+                            ?: Result.failure(IllegalStateException("Failed to parse cached command response: ${ex.message}"))
+                    } else {
+                        Result.failure(ex)
+                    }
+                }
             }
-            return try {
-                val snapBytes = commandStore.decryptSnapshot(record)
-                    ?: throw IllegalStateException("Decrypted snapshot was null")
-                val jsonStr = String(snapBytes, StandardCharsets.UTF_8)
-                val parsed = StrictJsonParser.parse(jsonStr).asObject()
+
+            if (isReceiptStatusChecked && (record.status == CommandStatus.UNKNOWN_ACK || record.status == CommandStatus.SUBMITTED)) {
+                val statusCheck = checkReceiptStatusOnServer(scopeBefore.companyId, idempotencyKey, commandId, validateResponse)
+                if (statusCheck != null) {
+                    return statusCheck
+                }
+            }
+
+            if (record.status != CommandStatus.SUBMITTED) {
+                if (!commandStore.transitionStatus(scopeBefore.companyId.value, commandId, record.status, CommandStatus.SUBMITTED)) {
+                    return Result.failure(IllegalStateException("Command is already being submitted"))
+                }
+            } else {
+                if (!commandStore.claimSubmittedCommand(scopeBefore.companyId.value, commandId, record.updatedAt)) {
+                    return Result.failure(IllegalStateException("Command is already being submitted"))
+                }
+            }
+
+            val postResult = postAction(record.idempotencyKey)
+
+            val scopeAfter = requireActiveScope()
+            if (scopeAfter != scopeBefore) {
+                throw SecurityException("Authenticated scope changed during command execution")
+            }
+
+            if (postResult.isSuccess) {
+                val snapshot = postResult.getOrThrow()
                 if (validateResponse != null) {
-                    val valRes = validateResponse(parsed)
+                    val valRes = validateResponse(snapshot)
                     if (valRes.isFailure) {
                         val valErr = valRes.exceptionOrNull() ?: IllegalStateException("Authoritative response validation failed")
-                        commandStore.markUnknownAck(scopeBefore.companyId.value, commandId, valErr.message ?: "Authoritative response validation failed")
+                        val valErrMsg = valErr.message ?: "Authoritative response validation failed"
+                        commandStore.markUnknownAck(scopeAfter.companyId.value, commandId, valErrMsg)
                         return Result.failure(valErr)
                     }
                 }
-                Result.success(parsed)
-            } catch (ex: Exception) {
-                if (isReceiptStatusChecked) {
-                    checkReceiptStatusOnServer(scopeBefore.companyId, idempotencyKey, commandId, validateResponse)
-                        ?: Result.failure(IllegalStateException("Failed to parse cached command response: ${ex.message}"))
-                } else {
-                    Result.failure(ex)
+                val snapBytes = CanonicalJsonSerializer.serialize(snapshot).toByteArray(StandardCharsets.UTF_8)
+                commandStore.markCompleted(scopeAfter.companyId.value, commandId, snapBytes)
+                return Result.success(snapshot)
+            }
+
+            val err = postResult.exceptionOrNull()
+            val errMsg = err?.message ?: "Command execution failed"
+
+            if (isReceiptStatusChecked) {
+                val statusAfterError = checkReceiptStatusOnServer(scopeAfter.companyId, idempotencyKey, commandId, validateResponse)
+                if (statusAfterError != null) {
+                    return statusAfterError
                 }
             }
-        }
 
-        if (isReceiptStatusChecked && (record.status == CommandStatus.UNKNOWN_ACK || record.status == CommandStatus.SUBMITTED)) {
-            val statusCheck = checkReceiptStatusOnServer(scopeBefore.companyId, idempotencyKey, commandId, validateResponse)
-            if (statusCheck != null) {
-                return statusCheck
+            val isDefinitiveFailure = errMsg.contains("HTTP 4") || errMsg.contains("VALIDATION_FAILED") || errMsg.contains("FORBIDDEN")
+            if (isDefinitiveFailure) {
+                commandStore.markFailed(scopeAfter.companyId.value, commandId, errMsg)
+            } else {
+                commandStore.markUnknownAck(scopeAfter.companyId.value, commandId, errMsg)
             }
+
+            return Result.failure(err ?: RuntimeException(errMsg))
+        } finally {
+            inFlightCommands.remove(admissionKey)
         }
-
-        if (record.status != CommandStatus.SUBMITTED) {
-            if (!commandStore.transitionStatus(scopeBefore.companyId.value, commandId, record.status, CommandStatus.SUBMITTED)) {
-                return Result.failure(IllegalStateException("Command is already being submitted"))
-            }
-        }
-
-        val postResult = postAction(record.idempotencyKey)
-
-        val scopeAfter = requireActiveScope()
-        if (scopeAfter != scopeBefore) {
-            throw SecurityException("Authenticated scope changed during command execution")
-        }
-
-        if (postResult.isSuccess) {
-            val snapshot = postResult.getOrThrow()
-            if (validateResponse != null) {
-                val valRes = validateResponse(snapshot)
-                if (valRes.isFailure) {
-                    val valErr = valRes.exceptionOrNull() ?: IllegalStateException("Authoritative response validation failed")
-                    val valErrMsg = valErr.message ?: "Authoritative response validation failed"
-                    commandStore.markUnknownAck(scopeAfter.companyId.value, commandId, valErrMsg)
-                    return Result.failure(valErr)
-                }
-            }
-            val snapBytes = CanonicalJsonSerializer.serialize(snapshot).toByteArray(StandardCharsets.UTF_8)
-            commandStore.markCompleted(scopeAfter.companyId.value, commandId, snapBytes)
-            return Result.success(snapshot)
-        }
-
-        val err = postResult.exceptionOrNull()
-        val errMsg = err?.message ?: "Command execution failed"
-
-        if (isReceiptStatusChecked) {
-            val statusAfterError = checkReceiptStatusOnServer(scopeAfter.companyId, idempotencyKey, commandId, validateResponse)
-            if (statusAfterError != null) {
-                return statusAfterError
-            }
-        }
-
-        val isDefinitiveFailure = errMsg.contains("HTTP 4") || errMsg.contains("VALIDATION_FAILED") || errMsg.contains("FORBIDDEN")
-        if (isDefinitiveFailure) {
-            commandStore.markFailed(scopeAfter.companyId.value, commandId, errMsg)
-        } else {
-            commandStore.markUnknownAck(scopeAfter.companyId.value, commandId, errMsg)
-        }
-
-        return Result.failure(err ?: RuntimeException(errMsg))
     }
 
     private fun checkReceiptStatusOnServer(
@@ -636,7 +649,7 @@ class ProductionTraderRepository(
             return@withContext Result.success(_customersFlow.value)
         }
         try {
-            val res = apiClient.getCustomers(companyId, search = trimmed, limit = 50)
+            val res = apiClient.getCustomers(companyId, search = trimmed, limit = 30)
             if (res.isSuccess) {
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 check(requireActiveScope() == before) { "Session changed during customer search" }
@@ -1701,7 +1714,11 @@ class ProductionTraderRepository(
         if (!ServerUlid.isValid(customerId)) {
             return@withContext Result.failure(IllegalArgumentException("Invalid customer ULID: $customerId"))
         }
-        val amountExact = amount.setScale(currencyMinorUnits, RoundingMode.HALF_UP)
+        val amountExact = try {
+            amount.setScale(currencyMinorUnits, RoundingMode.UNNECESSARY)
+        } catch (e: ArithmeticException) {
+            return@withContext Result.failure(IllegalArgumentException("Payment amount $amount exceeds allowed precision of $currencyMinorUnits minor units for $baseCurrency"))
+        }
         if (amountExact <= BigDecimal.ZERO) {
             return@withContext Result.failure(IllegalArgumentException("Payment amount must be strictly positive"))
         }
@@ -1711,6 +1728,11 @@ class ProductionTraderRepository(
         for (alloc in allocations) {
             if (alloc.amountExact <= BigDecimal.ZERO) {
                 return@withContext Result.failure(IllegalArgumentException("Allocation amount must be strictly positive"))
+            }
+            try {
+                alloc.amountExact.setScale(ContractConstants.DECIMAL_SCALE, RoundingMode.UNNECESSARY)
+            } catch (e: ArithmeticException) {
+                return@withContext Result.failure(IllegalArgumentException("Allocation amount ${alloc.amountExact} exceeds allowed precision of ${ContractConstants.DECIMAL_SCALE} decimal places"))
             }
             val key = "${alloc.targetType}:${alloc.targetId}"
             if (!targetSet.add(key)) {
@@ -1747,7 +1769,7 @@ class ProductionTraderRepository(
             mapOf(
                 "customer_id" to StrictJsonString(customerId),
                 "amount" to StrictJsonString(amountExact.setScale(6, RoundingMode.HALF_UP).toPlainString()),
-                "currency" to StrictJsonString("ILS"),
+                "currency" to StrictJsonString(baseCurrency),
                 "payment_date" to StrictJsonString(effectivePaymentDate),
                 "money_account_id" to StrictJsonString(effectiveCashAccount.value),
                 "notes" to StrictJsonString(note),
@@ -1755,13 +1777,14 @@ class ProductionTraderRepository(
             )
         )
         val payloadBytes = CanonicalJsonSerializer.serializeToUtf8Bytes(payloadObj)
+        val payloadDigest = "sha256:" + java.security.MessageDigest.getInstance("SHA-256").digest(payloadBytes).joinToString("") { "%02x".format(it) }
+
         val existingCmd = commandStore.findCommand(before.companyId.value, before.actorId.value, before.deviceId.value, idempotencyKey)
-        val effectivePayloadBytes = if (existingCmd != null) {
-            commandStore.decryptPayload(existingCmd)
-        } else if (activeDraft != null && activeDraft.commandId == commandId) {
-            commandStore.decryptPayload(activeDraft)
-        } else {
-            payloadBytes
+        if (existingCmd != null && existingCmd.payloadDigest != payloadDigest) {
+            return@withContext Result.failure(IllegalStateException("Idempotency key [$idempotencyKey] was previously committed with different parameters"))
+        }
+        if (activeDraft != null && activeDraft.commandId == commandId && activeDraft.payloadDigest != payloadDigest) {
+            return@withContext Result.failure(IllegalStateException("Draft command [$commandId] has different parameters"))
         }
 
         val inFlightCounter = customerInFlightPayments.computeIfAbsent(customerId) { java.util.concurrent.atomic.AtomicInteger(0) }
@@ -1777,7 +1800,8 @@ class ProductionTraderRepository(
                 note = note,
                 idempotencyKey = key,
                 paymentDate = effectivePaymentDate,
-                allocations = allocations
+                allocations = allocations,
+                currency = baseCurrency
             )
         }
 
@@ -1800,7 +1824,7 @@ class ProductionTraderRepository(
                 commandType = "customer.payment",
                 commandId = commandId,
                 idempotencyKey = idempotencyKey,
-                canonicalPayloadBytes = effectivePayloadBytes,
+                canonicalPayloadBytes = payloadBytes,
                 isReceiptStatusChecked = true,
                 validateResponse = validatePaymentResponse,
                 postAction = postCall
@@ -1911,7 +1935,7 @@ class ProductionTraderRepository(
                 allocatedAmountExact = allocatedAmount,
                 unallocatedAmountExact = unallocatedAmount,
                 allocations = parsedAllocations,
-                currency = "ILS"
+                currency = baseCurrency
             )
             _customerTransactionsFlow.update { listOf(tx) + it }
             Result.success(tx)
@@ -2972,7 +2996,11 @@ class ProductionTraderRepository(
         if (!ServerUlid.isValid(supplierId)) {
             return@withContext Result.failure(IllegalArgumentException("Invalid supplier ULID: $supplierId"))
         }
-        val amountExact = amount.setScale(currencyMinorUnits, RoundingMode.HALF_UP)
+        val amountExact = try {
+            amount.setScale(currencyMinorUnits, RoundingMode.UNNECESSARY)
+        } catch (e: ArithmeticException) {
+            return@withContext Result.failure(IllegalArgumentException("Payment amount $amount exceeds allowed precision of $currencyMinorUnits minor units for $baseCurrency"))
+        }
         if (amountExact <= BigDecimal.ZERO) {
             return@withContext Result.failure(IllegalArgumentException("Payment amount must be strictly positive"))
         }
@@ -2982,6 +3010,11 @@ class ProductionTraderRepository(
         for (alloc in allocations) {
             if (alloc.amountExact <= BigDecimal.ZERO) {
                 return@withContext Result.failure(IllegalArgumentException("Allocation amount must be strictly positive"))
+            }
+            try {
+                alloc.amountExact.setScale(ContractConstants.DECIMAL_SCALE, RoundingMode.UNNECESSARY)
+            } catch (e: ArithmeticException) {
+                return@withContext Result.failure(IllegalArgumentException("Allocation amount ${alloc.amountExact} exceeds allowed precision of ${ContractConstants.DECIMAL_SCALE} decimal places"))
             }
             val key = "${alloc.targetType}:${alloc.targetId}"
             if (!targetSet.add(key)) {
@@ -3018,7 +3051,7 @@ class ProductionTraderRepository(
             mapOf(
                 "supplier_id" to StrictJsonString(supplierId),
                 "amount" to StrictJsonString(amountExact.setScale(6, RoundingMode.HALF_UP).toPlainString()),
-                "currency" to StrictJsonString("ILS"),
+                "currency" to StrictJsonString(baseCurrency),
                 "payment_date" to StrictJsonString(effectivePaymentDate),
                 "money_account_id" to StrictJsonString(effectiveCashAccount.value),
                 "notes" to StrictJsonString(note),
@@ -3026,13 +3059,14 @@ class ProductionTraderRepository(
             )
         )
         val payloadBytes = CanonicalJsonSerializer.serializeToUtf8Bytes(payloadObj)
+        val payloadDigest = "sha256:" + java.security.MessageDigest.getInstance("SHA-256").digest(payloadBytes).joinToString("") { "%02x".format(it) }
+
         val existingCmd = commandStore.findCommand(before.companyId.value, before.actorId.value, before.deviceId.value, idempotencyKey)
-        val effectivePayloadBytes = if (existingCmd != null) {
-            commandStore.decryptPayload(existingCmd)
-        } else if (activeDraft != null && activeDraft.commandId == commandId) {
-            commandStore.decryptPayload(activeDraft)
-        } else {
-            payloadBytes
+        if (existingCmd != null && existingCmd.payloadDigest != payloadDigest) {
+            return@withContext Result.failure(IllegalStateException("Idempotency key [$idempotencyKey] was previously committed with different parameters"))
+        }
+        if (activeDraft != null && activeDraft.commandId == commandId && activeDraft.payloadDigest != payloadDigest) {
+            return@withContext Result.failure(IllegalStateException("Draft command [$commandId] has different parameters"))
         }
 
         val inFlightCounter = supplierInFlightPayments.computeIfAbsent(supplierId) { java.util.concurrent.atomic.AtomicInteger(0) }
@@ -3048,7 +3082,8 @@ class ProductionTraderRepository(
                 note = note,
                 idempotencyKey = key,
                 paymentDate = effectivePaymentDate,
-                allocations = allocations
+                allocations = allocations,
+                currency = baseCurrency
             )
         }
 
@@ -3073,7 +3108,7 @@ class ProductionTraderRepository(
                 commandType = "supplier.payment",
                 commandId = commandId,
                 idempotencyKey = idempotencyKey,
-                canonicalPayloadBytes = effectivePayloadBytes,
+                canonicalPayloadBytes = payloadBytes,
                 isReceiptStatusChecked = true,
                 validateResponse = validatePaymentResponse,
                 postAction = postCall
@@ -3177,7 +3212,7 @@ class ProductionTraderRepository(
                 allocatedAmountExact = allocatedAmount,
                 unallocatedAmountExact = unallocatedAmount,
                 allocations = parsedAllocations,
-                currency = "ILS"
+                currency = baseCurrency
             )
             _supplierPaymentsFlow.update { listOf(payment) + it }
             Result.success(payment)
@@ -3187,117 +3222,7 @@ class ProductionTraderRepository(
     }
 
     private fun parseSettlementTargetsResponse(root: StrictJsonObject, isSupplier: Boolean): SettlementTargetsResponse {
-        val partyId = if (isSupplier) {
-            root.properties["supplier_id"].toNullableString() ?: ""
-        } else {
-            root.properties["customer_id"].toNullableString() ?: ""
-        }
-        val partyName = if (isSupplier) {
-            root.properties["supplier_name"].toNullableString() ?: ""
-        } else {
-            root.properties["customer_name"].toNullableString() ?: ""
-        }
-        val currency = root.properties["currency"].toNullableString()
-        val minorUnits = root.properties["currency_minor_units"]?.asNumber()?.toInt() ?: currencyMinorUnits
-        val totalTargets = root.properties["total_targets"]?.asNumber()?.toInt() ?: 0
-
-        val targetsList = mutableListOf<SettlementTarget>()
-        val targetsEl = root.properties["targets"]
-        if (targetsEl is StrictJsonArray) {
-            for (item in targetsEl.elements) {
-                if (item is StrictJsonObject) {
-                    val tType = item.properties["target_type"].toNullableString() ?: continue
-                    val tId = item.properties["target_id"].toNullableString() ?: continue
-                    val tNum = item.properties["target_number"].toNullableString() ?: tId
-                    val bDate = item.properties["business_date"].toNullableString()
-                        ?: item.properties["opening_date"].toNullableString()
-                        ?: item.properties["issue_date"].toNullableString()
-                        ?: item.properties["purchase_date"].toNullableString()
-                        ?: WesternFormatters.currentDate()
-                    val dDate = item.properties["due_date"].toNullableString()
-                    val overdue = item.properties["days_overdue"]?.asNumber()?.toInt() ?: 0
-                    val curr = item.properties["currency"].toNullableString() ?: currency ?: "ILS"
-                    val itemMinUnits = item.properties["currency_minor_units"]?.asNumber()?.toInt() ?: minorUnits
-
-                    val orig = item.properties["original_amount_exact"].toNullableBigDecimal(itemMinUnits)
-                        ?: item.properties["original_amount"].toNullableBigDecimal(itemMinUnits)
-                        ?: BigDecimal.ZERO
-                    val alloc = item.properties["allocated_amount_exact"].toNullableBigDecimal(itemMinUnits)
-                        ?: item.properties["allocated_amount"].toNullableBigDecimal(itemMinUnits)
-                        ?: BigDecimal.ZERO
-                    val rem = item.properties["remaining_amount_exact"].toNullableBigDecimal(itemMinUnits)
-                        ?: item.properties["remaining_amount"].toNullableBigDecimal(itemMinUnits)
-                        ?: BigDecimal.ZERO
-
-                    targetsList.add(
-                        SettlementTarget(
-                            targetType = tType,
-                            targetId = tId,
-                            targetNumber = tNum,
-                            businessDate = bDate,
-                            dueDate = dDate,
-                            daysOverdue = overdue,
-                            currency = curr,
-                            currencyMinorUnits = itemMinUnits,
-                            originalAmountExact = orig,
-                            allocatedAmountExact = alloc,
-                            remainingAmountExact = rem
-                        )
-                    )
-                }
-            }
-        }
-
-        var hasMore = false
-        var nextCursor: String? = null
-        val pagEl = root.properties["pagination"]
-        if (pagEl is StrictJsonObject) {
-            hasMore = pagEl.properties["has_more"]?.asBoolean() ?: false
-            nextCursor = pagEl.properties["next_cursor"].toNullableString()
-        }
-
-        val remainingTotals = mutableMapOf<String, SettlementCurrencyTotal>()
-        val originalTotals = mutableMapOf<String, SettlementCurrencyTotal>()
-        val totalsEl = root.properties["totals"]
-        if (totalsEl is StrictJsonObject) {
-            val remEl = totalsEl.properties["remaining_by_currency"]
-            if (remEl is StrictJsonObject) {
-                for ((cCode, cVal) in remEl.properties) {
-                    if (cVal is StrictJsonObject) {
-                        val mUnits = cVal.properties["minor_units"]?.asNumber()?.toInt() ?: minorUnits
-                        val amt = cVal.properties["amount_exact"].toNullableBigDecimal(mUnits)
-                            ?: cVal.properties["amount"].toNullableBigDecimal(mUnits)
-                            ?: BigDecimal.ZERO
-                        remainingTotals[cCode] = SettlementCurrencyTotal(amt, mUnits)
-                    }
-                }
-            }
-            val origEl = totalsEl.properties["original_by_currency"]
-            if (origEl is StrictJsonObject) {
-                for ((cCode, cVal) in origEl.properties) {
-                    if (cVal is StrictJsonObject) {
-                        val mUnits = cVal.properties["minor_units"]?.asNumber()?.toInt() ?: minorUnits
-                        val amt = cVal.properties["amount_exact"].toNullableBigDecimal(mUnits)
-                            ?: cVal.properties["amount"].toNullableBigDecimal(mUnits)
-                            ?: BigDecimal.ZERO
-                        originalTotals[cCode] = SettlementCurrencyTotal(amt, mUnits)
-                    }
-                }
-            }
-        }
-
-        return SettlementTargetsResponse(
-            partyId = partyId,
-            partyName = partyName,
-            currency = currency,
-            currencyMinorUnits = minorUnits,
-            totalTargets = totalTargets,
-            targets = targetsList,
-            hasMore = hasMore,
-            nextCursor = nextCursor,
-            totalsRemainingByCurrency = remainingTotals,
-            totalsOriginalByCurrency = originalTotals
-        )
+        return SettlementTargetsResponse.fromStrictJson(root, isSupplier, currencyMinorUnits)
     }
 
     private fun updateSupplierFromServer(supObj: StrictJsonObject) {
@@ -3561,6 +3486,17 @@ class ProductionTraderRepository(
     }
 
     companion object {
+        // Atomic in-flight admission across coroutines and repository instances in the process
+        private val inFlightCommands = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+        fun isInFlight(companyId: String, actorId: String, deviceId: String, commandId: String): Boolean {
+            return inFlightCommands.contains("$companyId:$actorId:$deviceId:$commandId")
+        }
+
+        internal fun clearInFlightForTest() {
+            inFlightCommands.clear()
+        }
+
         suspend fun fromReadReady(
             readReady: StaffAuthState.ReadReady,
             outboxRepository: OutboxRepository,
@@ -3691,7 +3627,10 @@ class ProductionTraderRepository(
             warehouseId: ServerUlid = ServerUlid.parse("01JMB000000000000000000003"),
             commandStore: MerchantCommandStore = InMemoryMerchantCommandStore(),
             authScopeProvider: (() -> CurrentAuthScope?)? = null,
-            merchantReadClient: MerchantReadClient? = null
+            merchantReadClient: MerchantReadClient? = null,
+            baseCurrency: String = "ILS",
+            currencyMinorUnits: Int = 2,
+            ioDispatcher: CoroutineDispatcher = Dispatchers.IO
         ): ProductionTraderRepository {
             val readTokenProvider = MerchantReadTokenProvider { reqCompanyId, retainedGen ->
                 val current = (authScopeProvider ?: { CurrentAuthScope(companyId = companyId, actorId = actorId, deviceId = deviceId, token = "test-token", generation = 1L) }).invoke()
@@ -3723,14 +3662,15 @@ class ProductionTraderRepository(
                 role = UserRole.OWNER,
                 permissions = setOf("pos.sale", "purchases.manage", "expenses.manage"),
                 deviceId = deviceId,
-                baseCurrency = "ILS",
-                currencyMinorUnits = 2,
+                baseCurrency = baseCurrency,
+                currencyMinorUnits = currencyMinorUnits,
                 defaultWarehouse = DefaultWarehouse(id = warehouseId, code = "WH-01", name = "Main Warehouse"),
-                approvedCashAccount = ApprovedCashAccount(id = ServerUlid.parse("01JMB000000000000000000004"), code = "CASH-01", name = "Main Drawer", currency = "ILS"),
+                approvedCashAccount = ApprovedCashAccount(id = ServerUlid.parse("01JMB000000000000000000004"), code = "CASH-01", name = "Main Drawer", currency = baseCurrency),
                 walkInCustomerId = ServerUlid.parse("01JMB000000000000000000005"),
                 bootstrapUnits = emptyList(),
                 bootstrapTaxes = emptyList(),
                 apiClient = apiClient,
+                ioDispatcher = ioDispatcher,
                 authScopeProvider = authScopeProvider ?: { CurrentAuthScope(companyId = companyId, actorId = actorId, deviceId = deviceId, token = "test-token", generation = 1L) },
                 commandStore = commandStore,
                 merchantReadClient = effectiveReadClient,

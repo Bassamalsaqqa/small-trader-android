@@ -110,7 +110,9 @@ fun PaySupplierDialog(
     targetsError: String? = null,
     targetsHasMore: Boolean = false,
     onLoadMoreTargets: (() -> Unit)? = null,
-    onRetryTargets: (() -> Unit)? = null
+    onRetryTargets: (() -> Unit)? = null,
+    currency: String = "ILS",
+    minorUnits: Int = 2
 ) {
     var submissionId by rememberSaveable(supplier.id) { mutableStateOf(UUID.randomUUID().toString()) }
     val initialPayStr = if (supplier.balanceOwedIls > 0.005) {
@@ -130,23 +132,22 @@ fun PaySupplierDialog(
         selectedAllocations.values.fold(BigDecimal.ZERO) { acc, s ->
             val bd = s.toBigDecimalOrNull() ?: BigDecimal.ZERO
             acc.add(bd)
-        }.setScale(2, RoundingMode.HALF_UP)
+        }
     }
 
     val enteredAmountExact = remember(payAmountText) {
-        payAmountText.toBigDecimalOrNull()?.setScale(2, RoundingMode.HALF_UP) ?: BigDecimal.ZERO
+        payAmountText.toBigDecimalOrNull() ?: BigDecimal.ZERO
     }
     val enteredAmount = enteredAmountExact.toDouble()
 
     val projectedOwed = remember(supplier.balanceOwedIls, enteredAmount) {
-        supplier.balanceOwedExact?.subtract(enteredAmountExact)
-            ?.setScale(2, RoundingMode.HALF_UP)?.toDouble() ?: Double.NaN
+        supplier.balanceOwedExact?.subtract(enteredAmountExact)?.toDouble() ?: Double.NaN
     }
 
     val hasAllocations = selectedAllocations.isNotEmpty()
     val isOverAllocated = totalAllocatedExact > enteredAmountExact
     val unallocatedSurplus = if (enteredAmountExact > totalAllocatedExact) {
-        enteredAmountExact.subtract(totalAllocatedExact).setScale(2, RoundingMode.HALF_UP)
+        enteredAmountExact.subtract(totalAllocatedExact)
     } else {
         BigDecimal.ZERO
     }
@@ -221,8 +222,8 @@ fun PaySupplierDialog(
                                 )
                                 Text(
                                     text = lang.tr(
-                                        "إجمالي المخصص للفواتير والذمم: ${StitchBidiUtils.formatIls(totalAllocatedExact.toDouble())}",
-                                        "Total allocated to targets: ${StitchBidiUtils.formatIls(totalAllocatedExact.toDouble())}"
+                                        "إجمالي المخصص للفواتير والذمم: ${StitchBidiUtils.formatCurrency(totalAllocatedExact, currency, minorUnits)}",
+                                        "Total allocated to targets: ${StitchBidiUtils.formatCurrency(totalAllocatedExact, currency, minorUnits)}"
                                     ),
                                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                     color = if (isOverAllocated) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
@@ -231,8 +232,8 @@ fun PaySupplierDialog(
                             if (unallocatedSurplus > BigDecimal.ZERO) {
                                 Text(
                                     text = lang.tr(
-                                        "المتبقي كدفعة مقدمة غير مخصصة: ${StitchBidiUtils.formatIls(unallocatedSurplus.toDouble())}",
-                                        "Unallocated advance remainder: ${StitchBidiUtils.formatIls(unallocatedSurplus.toDouble())}"
+                                        "المتبقي كدفعة مقدمة غير مخصصة: ${StitchBidiUtils.formatCurrency(unallocatedSurplus, currency, minorUnits)}",
+                                        "Unallocated advance remainder: ${StitchBidiUtils.formatCurrency(unallocatedSurplus, currency, minorUnits)}"
                                     ),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -443,9 +444,9 @@ fun PaySupplierDialog(
                                                     checked = isChecked,
                                                     onCheckedChange = { checked ->
                                                         if (checked) {
-                                                            selectedAllocations[key] = target.remainingAmountExact.setScale(2, RoundingMode.HALF_UP).toPlainString()
+                                                            selectedAllocations[key] = target.remainingAmountExact.setScale(minorUnits, RoundingMode.UNNECESSARY).toPlainString()
                                                             if (enteredAmountExact < target.remainingAmountExact) {
-                                                                payAmountText = target.remainingAmountExact.setScale(2, RoundingMode.HALF_UP).toPlainString()
+                                                                payAmountText = target.remainingAmountExact.setScale(minorUnits, RoundingMode.UNNECESSARY).toPlainString()
                                                             }
                                                         } else {
                                                             selectedAllocations.remove(key)
@@ -695,12 +696,17 @@ fun PaySupplierDialog(
                             if (amt <= BigDecimal.ZERO) return@mapNotNull null
                             val parts = key.split(":", limit = 2)
                             if (parts.size == 2) {
-                                PaymentAllocationInput(parts[0], parts[1], amt.setScale(2, RoundingMode.HALF_UP))
+                                PaymentAllocationInput(parts[0], parts[1], amt.setScale(minorUnits, RoundingMode.UNNECESSARY))
                             } else null
                         }
 
+                        val finalAmount = if (enteredAmountExact.scale() < minorUnits) {
+                            enteredAmountExact.setScale(minorUnits, RoundingMode.UNNECESSARY)
+                        } else {
+                            enteredAmountExact
+                        }
                         if (onPaySupplierExactWithResult != null) {
-                            onPaySupplierExactWithResult(supplier, enteredAmountExact, payNoteText, submissionId, allocInputs) { result ->
+                            onPaySupplierExactWithResult(supplier, finalAmount, payNoteText, submissionId, allocInputs) { result ->
                                 isSubmittingPay = false
                                 if (result.isSuccess) {
                                     onDismiss()
@@ -1247,7 +1253,8 @@ fun ReceivePurchaseBillDialog(
     onConfirmStructuredBill: ((supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, note: String) -> Result<PurchaseBill>)? = null,
     onConfirmBillWithResult: ((supplierId: String, itemsSummary: String, totalIls: Double, paidNowIls: Double, expectedProductId: String?, expectedQuantity: Int, onComplete: (Boolean) -> Unit) -> Unit)? = null,
     onConfirmStructuredBillWithResult: ((supplierId: String, lines: List<PurchaseLineItem>, paidNowIls: Double, note: String, onComplete: (Result<PurchaseBill>) -> Unit) -> Unit)? = null,
-    onSearchSuppliers: ((String) -> Unit)? = null
+    onSearchSuppliers: ((String) -> Unit)? = null,
+    onSearchProducts: ((String) -> Unit)? = null
 ) {
     val lang = state.language
     val suppliers = state.suppliers
@@ -1268,9 +1275,17 @@ fun ReceivePurchaseBillDialog(
 
     val trackedProducts = remember(state.products) { state.products.filter { it.isStockTracked } }
     var productSearchQuery by rememberSaveable { mutableStateOf("") }
-    val filteredTrackedProducts = remember(trackedProducts, productSearchQuery) {
+    val filteredTrackedProducts = remember(trackedProducts, state.productSearchResults, state.productSearchQuery, productSearchQuery) {
+        val source = if (productSearchQuery.isNotBlank() &&
+            state.productSearchQuery.trim().equals(productSearchQuery.trim(), ignoreCase = true) &&
+            state.productSearchResults != null
+        ) {
+            state.productSearchResults!!.filter { it.isStockTracked }
+        } else {
+            trackedProducts
+        }
         ProductSearch.search(
-            products = trackedProducts,
+            products = source,
             query = productSearchQuery,
             category = ProductCategory.ALL,
             limit = 30,
@@ -1588,7 +1603,10 @@ fun ReceivePurchaseBillDialog(
                     // Primary search input placed strictly ABOVE candidate results
                     OutlinedTextField(
                         value = productSearchQuery,
-                        onValueChange = { productSearchQuery = it },
+                        onValueChange = {
+                            productSearchQuery = it
+                            onSearchProducts?.invoke(it)
+                        },
                         enabled = !isSubmitting,
                         placeholder = {
                             Text(
@@ -1600,9 +1618,18 @@ fun ReceivePurchaseBillDialog(
                             Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
                         },
                         trailingIcon = {
-                            if (productSearchQuery.isNotEmpty()) {
+                            if (state.isSearchingProducts) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            } else if (productSearchQuery.isNotEmpty()) {
                                 IconButton(
-                                    onClick = { productSearchQuery = "" },
+                                    onClick = {
+                                        productSearchQuery = ""
+                                        onSearchProducts?.invoke("")
+                                    },
                                     enabled = !isSubmitting,
                                     modifier = Modifier.size(48.dp).testTag("clear_purchase_product_search")
                                 ) {

@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.text.style.TextAlign
 import com.example.data.mobile.contract.toNullableString
 
 import java.math.BigDecimal
@@ -137,7 +138,8 @@ fun CustomersScreen(
     onStartSaleForCustomer: (Customer) -> Unit,
     onQuickCollectPayment: ((Customer) -> Unit)? = null,
     onDismissFeedback: (() -> Unit)? = null,
-    onRetryRefresh: (() -> Unit)? = null
+    onRetryRefresh: (() -> Unit)? = null,
+    onSearchCustomers: ((String) -> Unit)? = null
 ) {
     val readStatus = state.readStatusFor(TraderScreen.CUSTOMERS)
     val lang = state.language
@@ -149,9 +151,17 @@ fun CustomersScreen(
     val advanceCount = remember(state.customers) { state.customers.count { it.balanceExact != null && it.balanceExact < BigDecimal.ZERO } }
     val settledCount = remember(state.customers) { state.customers.count { it.balanceExact != null && it.balanceExact.compareTo(BigDecimal.ZERO) == 0 } }
 
-    val filteredCustomers = remember(state.customers, searchQuery, selectedFilter) {
+    val filteredCustomers = remember(state.customers, state.customerSearchResults, state.customerSearchQuery, searchQuery, selectedFilter) {
         val q = TraderUiState.normalizeForSearch(WesternFormatters.sanitizeWesternDigits(searchQuery.trim()))
-        state.customers.filter { c ->
+        val sourceList = if (searchQuery.isNotBlank() &&
+            state.customerSearchQuery.trim().equals(searchQuery.trim(), ignoreCase = true) &&
+            state.customerSearchResults != null
+        ) {
+            state.customerSearchResults!!
+        } else {
+            state.customers
+        }
+        sourceList.filter { c ->
             val matchesFilter = when (selectedFilter) {
                 CustomerBalanceFilter.ALL -> true
                 CustomerBalanceFilter.DEBTORS -> c.balanceExact != null && c.balanceExact > BigDecimal.ZERO
@@ -165,6 +175,7 @@ fun CustomersScreen(
                 TraderUiState.normalizeForSearch(c.nameEn).contains(q) ||
                 (c.addressAr?.let { TraderUiState.normalizeForSearch(it).contains(q) } ?: false) ||
                 (c.addressEn?.let { TraderUiState.normalizeForSearch(it).contains(q) } ?: false) ||
+                (c.code ?: "").lowercase().contains(q) ||
                 (c.phone?.replace("-", "")?.contains(q.replace("-", "")) ?: false) ||
                 (c.phone?.contains(q) ?: false)
         }
@@ -324,7 +335,10 @@ fun CustomersScreen(
                 // Instant Search by Name, Phone, or Neighborhood
                 OutlinedTextField(
                     value = searchQuery,
-                    onValueChange = { searchQuery = it },
+                    onValueChange = {
+                        searchQuery = it
+                        onSearchCustomers?.invoke(it)
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp)
@@ -351,7 +365,10 @@ fun CustomersScreen(
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
                             IconButton(
-                                onClick = { searchQuery = "" },
+                                onClick = {
+                                    searchQuery = ""
+                                    onSearchCustomers?.invoke("")
+                                },
                                 modifier = Modifier.size(48.dp)
                             ) {
                                 Icon(
@@ -382,10 +399,11 @@ fun CustomersScreen(
                                 selected = selectedFilter == CustomerBalanceFilter.ALL,
                                 onClick = { selectedFilter = CustomerBalanceFilter.ALL },
                                 label = {
+                                    val countSuffix = if (state.customersHasMore) "+" else ""
                                     Text(
                                         text = lang.tr(
-                                            "الكل (${WesternFormatters.formatInt(state.customers.size)})",
-                                            "All (${WesternFormatters.formatInt(state.customers.size)})"
+                                            "الكل (${WesternFormatters.formatInt(state.customers.size)}$countSuffix)",
+                                            "All (${WesternFormatters.formatInt(state.customers.size)}$countSuffix)"
                                         ),
                                         style = MaterialTheme.typography.labelMedium.copy(
                                             fontWeight = if (selectedFilter == CustomerBalanceFilter.ALL) FontWeight.Bold else FontWeight.Medium
@@ -482,12 +500,80 @@ fun CustomersScreen(
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
 
-        if (filteredCustomers.isEmpty()) {
+        val isDebouncingOrSearching = searchQuery.isNotBlank() && (
+            state.isSearchingCustomers || !state.customerSearchQuery.trim().equals(searchQuery.trim(), ignoreCase = true)
+        )
+
+        if (isDebouncingOrSearching) {
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .testTag("customer_search_progress"),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = lang.tr("جاري البحث في الزبائن...", "Searching customers..."),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        } else if (searchQuery.isNotBlank() && state.customerSearchError != null) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                    Text(
+                        text = lang.tr(
+                            "فشل البحث في الزبائن: ${state.customerSearchError}",
+                            "Customer search failed: ${state.customerSearchError}"
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center
+                    )
+                    Button(
+                        onClick = { onSearchCustomers?.invoke(searchQuery) },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("customer_search_retry_button")
+                    ) {
+                        Text(lang.tr("إعادة المحاولة", "Retry"))
+                    }
+                }
+            }
+        } else if (filteredCustomers.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(24.dp)
+                    .testTag("customer_zero_results"),
                 contentAlignment = Alignment.Center
             ) {
                 Column(
@@ -1936,7 +2022,9 @@ fun CustomerPaymentCollectionDialog(
     targetsError: String? = null,
     targetsHasMore: Boolean = false,
     onLoadMoreTargets: (() -> Unit)? = null,
-    onRetryTargets: (() -> Unit)? = null
+    onRetryTargets: (() -> Unit)? = null,
+    currency: String = "ILS",
+    minorUnits: Int = 2
 ) {
     val financial = TraderTheme.financial
     val initialAmt = if (customer.balanceIls > 0.005) {
@@ -1956,23 +2044,22 @@ fun CustomerPaymentCollectionDialog(
         selectedAllocations.values.fold(BigDecimal.ZERO) { acc, s ->
             val bd = s.toBigDecimalOrNull() ?: BigDecimal.ZERO
             acc.add(bd)
-        }.setScale(2, RoundingMode.HALF_UP)
+        }
     }
 
     val enteredAmountExact = remember(payAmountText) {
-        payAmountText.toBigDecimalOrNull()?.setScale(2, RoundingMode.HALF_UP) ?: BigDecimal.ZERO
+        payAmountText.toBigDecimalOrNull() ?: BigDecimal.ZERO
     }
     val enteredAmount = enteredAmountExact.toDouble()
 
     val projectedBalance = remember(customer.balanceIls, enteredAmount) {
-        customer.balanceExact?.subtract(enteredAmountExact)
-            ?.setScale(2, RoundingMode.HALF_UP)?.toDouble() ?: Double.NaN
+        customer.balanceExact?.subtract(enteredAmountExact)?.toDouble() ?: Double.NaN
     }
 
     val hasAllocations = selectedAllocations.isNotEmpty()
     val isOverAllocated = totalAllocatedExact > enteredAmountExact
     val unallocatedSurplus = if (enteredAmountExact > totalAllocatedExact) {
-        enteredAmountExact.subtract(totalAllocatedExact).setScale(2, RoundingMode.HALF_UP)
+        enteredAmountExact.subtract(totalAllocatedExact)
     } else {
         BigDecimal.ZERO
     }
@@ -2055,8 +2142,8 @@ fun CustomerPaymentCollectionDialog(
                                 )
                                 Text(
                                     text = lang.tr(
-                                        "إجمالي المخصص للفواتير والذمم: ${StitchBidiUtils.formatIls(totalAllocatedExact.toDouble())}",
-                                        "Total allocated to targets: ${StitchBidiUtils.formatIls(totalAllocatedExact.toDouble())}"
+                                        "إجمالي المخصص للفواتير والذمم: ${StitchBidiUtils.formatCurrency(totalAllocatedExact, currency, minorUnits)}",
+                                        "Total allocated to targets: ${StitchBidiUtils.formatCurrency(totalAllocatedExact, currency, minorUnits)}"
                                     ),
                                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                     color = if (isOverAllocated) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
@@ -2065,8 +2152,8 @@ fun CustomerPaymentCollectionDialog(
                             if (unallocatedSurplus > BigDecimal.ZERO) {
                                 Text(
                                     text = lang.tr(
-                                        "المتبقي كدفعة مقدمة غير مخصصة: ${StitchBidiUtils.formatIls(unallocatedSurplus.toDouble())}",
-                                        "Unallocated advance remainder: ${StitchBidiUtils.formatIls(unallocatedSurplus.toDouble())}"
+                                        "المتبقي كدفعة مقدمة غير مخصصة: ${StitchBidiUtils.formatCurrency(unallocatedSurplus, currency, minorUnits)}",
+                                        "Unallocated advance remainder: ${StitchBidiUtils.formatCurrency(unallocatedSurplus, currency, minorUnits)}"
                                     ),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -2265,9 +2352,9 @@ fun CustomerPaymentCollectionDialog(
                                                     checked = isChecked,
                                                     onCheckedChange = { checked ->
                                                         if (checked) {
-                                                            selectedAllocations[key] = target.remainingAmountExact.setScale(2, RoundingMode.HALF_UP).toPlainString()
+                                                            selectedAllocations[key] = target.remainingAmountExact.setScale(minorUnits, RoundingMode.UNNECESSARY).toPlainString()
                                                             if (enteredAmountExact < target.remainingAmountExact) {
-                                                                payAmountText = target.remainingAmountExact.setScale(2, RoundingMode.HALF_UP).toPlainString()
+                                                                payAmountText = target.remainingAmountExact.setScale(minorUnits, RoundingMode.UNNECESSARY).toPlainString()
                                                             }
                                                         } else {
                                                             selectedAllocations.remove(key)
@@ -2542,11 +2629,16 @@ fun CustomerPaymentCollectionDialog(
                         if (amt <= BigDecimal.ZERO) return@mapNotNull null
                         val parts = key.split(":", limit = 2)
                         if (parts.size == 2) {
-                            PaymentAllocationInput(parts[0], parts[1], amt.setScale(2, RoundingMode.HALF_UP))
+                            PaymentAllocationInput(parts[0], parts[1], amt.setScale(minorUnits, RoundingMode.UNNECESSARY))
                         } else null
                     }
+                    val finalAmount = if (enteredAmountExact.scale() < minorUnits) {
+                        enteredAmountExact.setScale(minorUnits, RoundingMode.UNNECESSARY)
+                    } else {
+                        enteredAmountExact
+                    }
                     if (onConfirmPaymentExact != null) {
-                        onConfirmPaymentExact(customer.id, enteredAmountExact, payNoteText, operationId, allocInputs)
+                        onConfirmPaymentExact(customer.id, finalAmount, payNoteText, operationId, allocInputs)
                     } else {
                         onConfirmPayment(customer.id, enteredAmount, payNoteText, operationId)
                     }

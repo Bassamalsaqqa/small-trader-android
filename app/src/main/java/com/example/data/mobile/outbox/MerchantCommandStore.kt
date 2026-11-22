@@ -93,6 +93,7 @@ interface MerchantCommandStore {
 
     fun markSubmitted(companyId: String, commandId: String): Boolean
     fun markSubmitted(commandId: String): Boolean
+    fun claimSubmittedCommand(companyId: String, commandId: String, expectedUpdatedAt: Long): Boolean
 
     fun markCompleted(
         companyId: String,
@@ -548,6 +549,20 @@ class RoomMerchantCommandStore internal constructor(
         return markSubmitted(companyId, commandId)
     }
 
+    override fun claimSubmittedCommand(companyId: String, commandId: String, expectedUpdatedAt: Long): Boolean {
+        val db = dbProvider()
+        val now = System.currentTimeMillis()
+        val stmt = db.compileStatement(
+            "UPDATE merchant_commands SET updated_at = ? " +
+                "WHERE company_id = ? AND command_id = ? AND status = 'SUBMITTED' AND updated_at = ?"
+        )
+        stmt.bindLong(1, now)
+        stmt.bindString(2, companyId)
+        stmt.bindString(3, commandId)
+        stmt.bindLong(4, expectedUpdatedAt)
+        return stmt.executeUpdateDelete() > 0
+    }
+
     override fun markCompleted(
         companyId: String,
         commandId: String,
@@ -919,6 +934,19 @@ class InMemoryMerchantCommandStore : MerchantCommandStore {
     override fun markSubmitted(commandId: String): Boolean = synchronized(lock) {
         val existing = records.values.firstOrNull { it.commandId == commandId } ?: return false
         return markSubmitted(existing.companyId, commandId)
+    }
+
+    override fun claimSubmittedCommand(companyId: String, commandId: String, expectedUpdatedAt: Long): Boolean = synchronized(lock) {
+        val idKey = "id:$companyId:$commandId"
+        val existing = records[idKey] ?: return false
+        if (existing.status != CommandStatus.SUBMITTED || existing.updatedAt != expectedUpdatedAt) {
+            return false
+        }
+        val now = System.currentTimeMillis()
+        val updated = existing.copy(updatedAt = now)
+        records[idKey] = updated
+        records["$companyId:${existing.idempotencyKey}"] = updated
+        return true
     }
 
     override fun markCompleted(

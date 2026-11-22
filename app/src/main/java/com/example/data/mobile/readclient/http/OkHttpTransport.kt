@@ -291,7 +291,9 @@ class OkHttpTransport(
         if (limitStr != null) {
             try {
                 val limit = limitStr.toIntOrNull() ?: throw IllegalArgumentException("Invalid limit integer")
-                EndpointSecurity.validateLimit(limit)
+                val isSettlementOrOutstanding = request.path.endsWith("/settlement-targets") || request.path.endsWith("/outstanding")
+                val maxLimit = if (isSettlementOrOutstanding) 250 else 100
+                EndpointSecurity.validateLimit(limit, maxLimit = maxLimit)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 if (e is VirtualMachineError) throw e

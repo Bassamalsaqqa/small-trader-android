@@ -67,7 +67,7 @@ interface TraderRepository {
     // Product & Inventory
     fun getProducts(): List<Product>
     fun searchProducts(query: String, category: ProductCategory = ProductCategory.ALL, limit: Int = 30): List<Product>
-    suspend fun searchProductsOnServer(query: String, limit: Int = 50): Result<List<Product>> = Result.success(searchProducts(query, ProductCategory.ALL, limit))
+    suspend fun searchProductsOnServer(query: String, limit: Int = 30): Result<List<Product>> = Result.success(searchProducts(query, ProductCategory.ALL, limit))
     fun findProductById(id: String): Product?
     suspend fun updateProductPrice(productId: String, newPriceIls: Double, operator: UserSession): Result<Unit>
     suspend fun adjustProductStock(productId: String, adjustment: Int, reason: String, operator: UserSession): Result<StockMovement>

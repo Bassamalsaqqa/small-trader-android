@@ -328,7 +328,7 @@ class MobileMerchantApiClient(
         companyId: ServerUlid,
         customerId: ServerUlid,
         currency: String? = null,
-        limit: Int = 50,
+        limit: Int? = null,
         cursor: String? = null
     ): Result<StrictJsonObject> {
         val qParams = mutableMapOf<String, String>()
@@ -337,7 +337,7 @@ class MobileMerchantApiClient(
             com.example.data.mobile.readclient.EndpointSecurity.validateCurrency(trimmedCurr)
             qParams["currency"] = trimmedCurr
         }
-        if (limit != 50) {
+        if (limit != null) {
             com.example.data.mobile.readclient.EndpointSecurity.validateLimit(limit, maxLimit = 250)
             qParams["limit"] = limit.toString()
         }
@@ -349,6 +349,31 @@ class MobileMerchantApiClient(
         return execute(HttpMethod.GET, path, queryParams = qParams)
     }
 
+    fun getCustomerOutstanding(
+        companyId: ServerUlid,
+        customerId: ServerUlid,
+        currency: String? = null,
+        limit: Int? = null,
+        cursor: String? = null
+    ): Result<StrictJsonObject> {
+        val qParams = mutableMapOf<String, String>()
+        if (!currency.isNullOrBlank()) {
+            val trimmedCurr = currency.trim().uppercase()
+            com.example.data.mobile.readclient.EndpointSecurity.validateCurrency(trimmedCurr)
+            qParams["currency"] = trimmedCurr
+        }
+        if (limit != null) {
+            com.example.data.mobile.readclient.EndpointSecurity.validateLimit(limit, maxLimit = 250)
+            qParams["limit"] = limit.toString()
+        }
+        if (!cursor.isNullOrBlank()) {
+            com.example.data.mobile.readclient.EndpointSecurity.validateCursor(cursor)
+            qParams["cursor"] = cursor
+        }
+        val path = "/api/mobile/v1/companies/${companyId.value}/customers/${customerId.value}/outstanding"
+        return execute(HttpMethod.GET, path, queryParams = qParams)
+    }
+
     fun recordCustomerPayment(
         companyId: ServerUlid,
         customerId: ServerUlid,
@@ -357,12 +382,16 @@ class MobileMerchantApiClient(
         note: String,
         idempotencyKey: String? = null,
         paymentDate: String? = null,
-        allocations: List<PaymentAllocationInput> = emptyList()
+        allocations: List<PaymentAllocationInput> = emptyList(),
+        currency: String? = null
     ): Result<StrictJsonObject> {
         val path = "/api/mobile/v1/companies/${companyId.value}/customers/${customerId.value}/payments"
         val payload = buildString {
             append("{")
             append("\"amount\":\"").append(amount.setScale(6, RoundingMode.HALF_UP).toPlainString()).append("\",")
+            if (!currency.isNullOrBlank()) {
+                append("\"currency\":\"").append(escapeJson(currency)).append("\",")
+            }
             val pDate = paymentDate ?: WesternFormatters.currentDate()
             append("\"payment_date\":\"").append(escapeJson(pDate)).append("\",")
             if (cashAccountId != null) {
@@ -437,7 +466,7 @@ class MobileMerchantApiClient(
         companyId: ServerUlid,
         supplierId: ServerUlid,
         currency: String? = null,
-        limit: Int = 50,
+        limit: Int? = null,
         cursor: String? = null
     ): Result<StrictJsonObject> {
         val qParams = mutableMapOf<String, String>()
@@ -446,7 +475,7 @@ class MobileMerchantApiClient(
             com.example.data.mobile.readclient.EndpointSecurity.validateCurrency(trimmedCurr)
             qParams["currency"] = trimmedCurr
         }
-        if (limit != 50) {
+        if (limit != null) {
             com.example.data.mobile.readclient.EndpointSecurity.validateLimit(limit, maxLimit = 250)
             qParams["limit"] = limit.toString()
         }
@@ -458,6 +487,31 @@ class MobileMerchantApiClient(
         return execute(HttpMethod.GET, path, queryParams = qParams)
     }
 
+    fun getSupplierOutstanding(
+        companyId: ServerUlid,
+        supplierId: ServerUlid,
+        currency: String? = null,
+        limit: Int? = null,
+        cursor: String? = null
+    ): Result<StrictJsonObject> {
+        val qParams = mutableMapOf<String, String>()
+        if (!currency.isNullOrBlank()) {
+            val trimmedCurr = currency.trim().uppercase()
+            com.example.data.mobile.readclient.EndpointSecurity.validateCurrency(trimmedCurr)
+            qParams["currency"] = trimmedCurr
+        }
+        if (limit != null) {
+            com.example.data.mobile.readclient.EndpointSecurity.validateLimit(limit, maxLimit = 250)
+            qParams["limit"] = limit.toString()
+        }
+        if (!cursor.isNullOrBlank()) {
+            com.example.data.mobile.readclient.EndpointSecurity.validateCursor(cursor)
+            qParams["cursor"] = cursor
+        }
+        val path = "/api/mobile/v1/companies/${companyId.value}/suppliers/${supplierId.value}/outstanding"
+        return execute(HttpMethod.GET, path, queryParams = qParams)
+    }
+
     fun recordSupplierPayment(
         companyId: ServerUlid,
         supplierId: ServerUlid,
@@ -466,12 +520,16 @@ class MobileMerchantApiClient(
         note: String,
         idempotencyKey: String? = null,
         paymentDate: String? = null,
-        allocations: List<PaymentAllocationInput> = emptyList()
+        allocations: List<PaymentAllocationInput> = emptyList(),
+        currency: String? = null
     ): Result<StrictJsonObject> {
         val path = "/api/mobile/v1/companies/${companyId.value}/suppliers/${supplierId.value}/payments"
         val payload = buildString {
             append("{")
             append("\"amount\":\"").append(amount.setScale(6, RoundingMode.HALF_UP).toPlainString()).append("\",")
+            if (!currency.isNullOrBlank()) {
+                append("\"currency\":\"").append(escapeJson(currency)).append("\",")
+            }
             val pDate = paymentDate ?: WesternFormatters.currentDate()
             append("\"payment_date\":\"").append(escapeJson(pDate)).append("\",")
             if (cashAccountId != null) {

@@ -175,7 +175,8 @@ fun SmallTraderApp(
                                 { traderViewModel.openAddCustomerDialog(true) },
                                 { customer -> traderViewModel.assignCustomerToSale(customer); traderViewModel.navigateTo(TraderScreen.NEW_SALE) },
                                 traderViewModel::openPaymentCollectionForCustomer, traderViewModel::dismissCustomerFeedback,
-                                onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.CUSTOMERS, retry = true) }) },
+                                onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.CUSTOMERS, retry = true) },
+                                onSearchCustomers = traderViewModel::searchCustomers) },
                             suppliers = { SuppliersScreen(
                                 state = state,
                                 onSupplierClick = traderViewModel::selectSupplierForDetail,
@@ -267,7 +268,8 @@ fun SmallTraderApp(
                                 onSaveDraft = { traderViewModel.saveCurrentBasketAsDraft() },
                                 onResumeDraft = traderViewModel::resumeSaleDraft,
                                 onDeleteDraft = traderViewModel::deleteSaleDraft,
-                                onFormatQuotation = traderViewModel::formatQuotationShareText
+                                onFormatQuotation = traderViewModel::formatQuotationShareText,
+                                onSearchCustomers = traderViewModel::searchCustomers
                             )
                         }
 
@@ -283,7 +285,8 @@ fun SmallTraderApp(
                                 onDismissCheckoutError = traderViewModel::dismissCheckoutError,
                                 onEditInvoice = { traderViewModel.navigateTo(TraderScreen.INVOICE_REVIEW) },
                                 onCompleteSale = { traderViewModel.completeCashSale(asCreditDebt = false) },
-                                onCompleteCreditSale = { traderViewModel.completeCashSale(asCreditDebt = true) }
+                                onCompleteCreditSale = { traderViewModel.completeCashSale(asCreditDebt = true) },
+                                onSearchCustomers = traderViewModel::searchCustomers
                             )
                         }
 
@@ -420,7 +423,8 @@ fun SmallTraderApp(
                                     traderViewModel.openPaymentCollectionForCustomer(cust)
                                 },
                                 onDismissFeedback = traderViewModel::dismissCustomerFeedback,
-                                onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.CUSTOMERS, retry = true) }
+                                onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.CUSTOMERS, retry = true) },
+                                onSearchCustomers = traderViewModel::searchCustomers
                             )
                         }
 
@@ -745,6 +749,7 @@ fun SmallTraderApp(
                         state = state,
                         onDismiss = { traderViewModel.openReceivePurchaseDialog(false) },
                         onSearchSuppliers = traderViewModel::searchSuppliers,
+                        onSearchProducts = traderViewModel::searchProductsOnServer,
                         onConfirmBill = { supplierId, itemsSummary, totalIls, paidNowIls, expectedProductId, expectedQty ->
                             traderViewModel.recordPurchaseBill(
                                 supplierId = supplierId,
