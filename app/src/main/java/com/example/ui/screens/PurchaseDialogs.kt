@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -35,6 +36,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -122,7 +124,7 @@ fun PaySupplierDialog(
         shape = RoundedCornerShape(12.dp),
         title = {
             Text(
-                text = lang.tr("صرف دفعة نقدية للمورد", "Pay Supplier from Cash Drawer"),
+                text = lang.tr("صرف دفعة نقدية للمورد (دفعة مقدمة غير مخصصة)", "Pay Supplier (Unapplied Advance)"),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
             )
         },
@@ -131,6 +133,25 @@ fun PaySupplierDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("supplier_unapplied_advance_notice")
+                ) {
+                    Text(
+                        text = lang.tr(
+                            "سند صرف نقدي غير مخصص (دفعة مقدمة على الحساب). لا يقوم هذا السند بتسوية فواتير مشتريات أو ذمم محددة آلياً.",
+                            "Unapplied advance disbursement on account. This transaction does not automatically settle specific purchase bills or debts."
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+
                 if (payInlineError != null) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
@@ -219,16 +240,16 @@ fun PaySupplierDialog(
                                 text = when {
                                     supplier.balanceOwedExact == null -> lang.tr("الرصيد غير متاح", "Balance unavailable")
                                     projectedOwed > 0.005 -> lang.tr(
-                                        "المتبقي للمورد: ${StitchBidiUtils.formatIls(projectedOwed)}",
-                                        "Remaining due: ${StitchBidiUtils.formatIls(projectedOwed)}"
+                                        "الرصيد الدفتري المتبقي: ${StitchBidiUtils.formatIls(projectedOwed)} (دفعة غير مخصصة)",
+                                        "Remaining book balance: ${StitchBidiUtils.formatIls(projectedOwed)} (Unapplied advance)"
                                     )
                                     projectedOwed < -0.005 -> lang.tr(
-                                        "دفعة مقدمة للمتجر: ${StitchBidiUtils.formatIls(-projectedOwed)}",
-                                        "Store credit: ${StitchBidiUtils.formatIls(-projectedOwed)}"
+                                        "دفعة مقدمة للمتجر (أمانة غير مخصصة): ${StitchBidiUtils.formatIls(-projectedOwed)}",
+                                        "Store unapplied advance credit: ${StitchBidiUtils.formatIls(-projectedOwed)}"
                                     )
                                     else -> lang.tr(
-                                        "حساب المورد خالص بالكامل (0.00 ₪)",
-                                        "Account settled (0.00 ₪)"
+                                        "الرصيد بعد السند: دفعة مقدمة غير مخصصة (لا تسوي الفواتير آلياً)",
+                                        "Balance after payment: Unapplied advance (does not settle bills directly)"
                                     )
                                 },
                                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
@@ -776,36 +797,6 @@ fun ReceivePurchaseBillDialog(
 ) {
     val lang = state.language
     val suppliers = state.suppliers
-    if (suppliers.isEmpty() && (state.supplierSearchResults == null || state.supplierSearchResults!!.isEmpty())) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            shape = RoundedCornerShape(12.dp),
-            title = {
-                Text(
-                    text = lang.tr("لا يوجد موردين", "No Suppliers"),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
-            },
-            text = {
-                Text(
-                    text = lang.tr(
-                        "يرجى إضافة مورد أولاً لتسجيل فاتورة شراء.",
-                        "Please add a supplier first before recording a purchase bill."
-                    ),
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = onDismiss,
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Text(lang.tr("حسناً", "OK"))
-                }
-            }
-        )
-        return
-    }
 
     var billMode by rememberSaveable { mutableStateOf(PurchaseBillMode.STRUCTURED) }
     var submissionId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
@@ -856,11 +847,11 @@ fun ReceivePurchaseBillDialog(
         purchaseDesc.trim()
     }
 
-    val isFormValid = if (billMode == PurchaseBillMode.STRUCTURED) {
+    val isFormValid = selectedSupplierId.isNotBlank() && (if (billMode == PurchaseBillMode.STRUCTURED) {
         structuredLines.isNotEmpty() && totalVal > 0.0 && isPaidValid && effectiveDesc.isNotBlank()
     } else {
         effectiveDesc.isNotBlank() && totalVal > 0.0 && isPaidValid
-    }
+    })
 
     val payableAdded = if (totalVal > 0.0 && isPaidValid) {
         BigDecimal(totalVal.toString())
@@ -954,6 +945,18 @@ fun ReceivePurchaseBillDialog(
                     } else suppliers
                 }
 
+                val allKnownSuppliers = remember(suppliers, state.supplierSearchResults) {
+                    (suppliers + (state.supplierSearchResults ?: emptyList())).distinctBy { it.id }
+                }
+                val finalChips = remember(displayedSuppliers, selectedSupplierId, allKnownSuppliers) {
+                    if (selectedSupplierId.isNotBlank() && displayedSuppliers.none { it.id == selectedSupplierId }) {
+                        val selectedSup = allKnownSuppliers.find { it.id == selectedSupplierId }
+                        if (selectedSup != null) listOf(selectedSup) + displayedSuppliers else displayedSuppliers
+                    } else {
+                        displayedSuppliers
+                    }
+                }
+
                 if (onSearchSuppliers != null) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
@@ -970,7 +973,7 @@ fun ReceivePurchaseBillDialog(
                                 supplierPickerSearch = it
                                 onSearchSuppliers.invoke(it)
                             },
-                            placeholder = { Text(lang.tr("بحث في الموردين...", "Search suppliers..."), style = MaterialTheme.typography.labelSmall) },
+                            placeholder = { Text(lang.tr("بحث في الموردين بالاسم أو الهاتف...", "Search suppliers by name or phone..."), style = MaterialTheme.typography.labelSmall) },
                             singleLine = true,
                             shape = RoundedCornerShape(8.dp),
                             textStyle = MaterialTheme.typography.bodySmall,
@@ -978,54 +981,126 @@ fun ReceivePurchaseBillDialog(
                                 .fillMaxWidth()
                                 .testTag("purchase_supplier_search_input")
                         )
-                        LazyRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            items(displayedSuppliers, key = { it.id }) { s ->
-                                FilterChip(
-                                    selected = s.id == selectedSupplierId,
-                                    enabled = !isSubmitting,
-                                    onClick = { selectedSupplierId = s.id },
-                                    label = { Text(s.name(lang), style = MaterialTheme.typography.labelSmall) },
-                                    shape = RoundedCornerShape(8.dp),
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
-                                    ),
-                                    modifier = Modifier.testTag("purchase_supplier_chip_${s.id}")
+
+                        val isDebouncingOrSearching = state.isSearchingSuppliers || (supplierPickerSearch.isNotBlank() && !state.supplierSearchQuery.trim().equals(supplierPickerSearch.trim(), ignoreCase = true))
+                        if (isDebouncingOrSearching) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(lang.tr("جاري البحث في الموردين...", "Searching suppliers..."), style = MaterialTheme.typography.labelSmall)
+                            }
+                        } else if (state.supplierSearchError != null && supplierPickerSearch.isNotBlank()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = state.supplierSearchError ?: "",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.weight(1f)
                                 )
+                                TextButton(
+                                    onClick = { onSearchSuppliers.invoke(supplierPickerSearch) },
+                                    modifier = Modifier.heightIn(min = 28.dp)
+                                ) {
+                                    Text(lang.tr("إعادة المحاولة", "Retry"), style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        } else if (supplierPickerSearch.isNotBlank() && displayedSuppliers.isEmpty()) {
+                            Text(
+                                text = lang.tr("لا توجد نتائج بحث للموردين", "No matching suppliers found"),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+                        } else if (suppliers.isEmpty() && displayedSuppliers.isEmpty()) {
+                            Text(
+                                text = lang.tr("دليل الموردين فارغ، استخدم البحث أعلاه لاختيار مورد", "Supplier directory is empty, use search above to select a supplier"),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+                        }
+
+                        if (finalChips.isNotEmpty()) {
+                            LazyRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                items(finalChips, key = { it.id }) { s ->
+                                    FilterChip(
+                                        selected = s.id == selectedSupplierId,
+                                        enabled = !isSubmitting,
+                                        onClick = { selectedSupplierId = s.id },
+                                        label = { Text(s.name(lang), style = MaterialTheme.typography.labelSmall) },
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                        ),
+                                        modifier = Modifier.testTag("purchase_supplier_chip_${s.id}")
+                                    )
+                                }
+                                if (state.suppliersHasMore && supplierPickerSearch.isBlank()) {
+                                    item {
+                                        Text(
+                                            text = lang.tr("+ المزيد في الخادم", "+ More on server"),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    if (finalChips.isEmpty()) {
                         Text(
-                            text = lang.tr("المورد:", "Supplier:"),
+                            text = lang.tr("لا يوجد موردين متاحين حالياً", "No suppliers available currently"),
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 4.dp)
                         )
-                        LazyRow(
-                            modifier = Modifier.weight(1f),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            items(displayedSuppliers, key = { it.id }) { s ->
-                                FilterChip(
-                                    selected = s.id == selectedSupplierId,
-                                    enabled = !isSubmitting,
-                                    onClick = { selectedSupplierId = s.id },
-                                    label = { Text(s.name(lang), style = MaterialTheme.typography.labelSmall) },
-                                    shape = RoundedCornerShape(8.dp),
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
-                                    ),
-                                    modifier = Modifier.testTag("purchase_supplier_chip_${s.id}")
-                                )
+                            Text(
+                                text = lang.tr("المورد:", "Supplier:"),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            LazyRow(
+                                modifier = Modifier.weight(1f),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                items(finalChips, key = { it.id }) { s ->
+                                    FilterChip(
+                                        selected = s.id == selectedSupplierId,
+                                        enabled = !isSubmitting,
+                                        onClick = { selectedSupplierId = s.id },
+                                        label = { Text(s.name(lang), style = MaterialTheme.typography.labelSmall) },
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                        ),
+                                        modifier = Modifier.testTag("purchase_supplier_chip_${s.id}")
+                                    )
+                                }
                             }
                         }
                     }
@@ -1780,21 +1855,21 @@ fun PurchaseBillRow(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${lang.tr("القيمة:", "Total:")} ${StitchBidiUtils.formatIls(bill.totalIls)}",
+                    text = "${lang.tr("القيمة:", "Total:")} ${StitchBidiUtils.formatCurrency(bill.totalExact, bill.currency, bill.currencyMinorUnits)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "${lang.tr("دُفع نقداً:", "Paid Cash:")} ${StitchBidiUtils.formatIls(bill.paidIls)}",
+                    text = "${lang.tr("دُفع نقداً:", "Paid Cash:")} ${StitchBidiUtils.formatCurrency(bill.paidExact, bill.currency, bill.currencyMinorUnits)}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (bill.paidIls > 0.005) TraderTheme.financial.income else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (bill.paidExact > BigDecimal.ZERO) TraderTheme.financial.income else MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "${lang.tr("ذمة للمورد:", "Payable:")} ${StitchBidiUtils.formatIls(bill.remainingPayableIls)}",
+                    text = "${lang.tr("ذمة للمورد:", "Payable:")} ${StitchBidiUtils.formatCurrency(bill.remainingPayableExact, bill.currency, bill.currencyMinorUnits)}",
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontWeight = FontWeight.Bold
                     ),
-                    color = if (bill.remainingPayableIls > 0.005) TraderTheme.financial.debit else TraderTheme.financial.income
+                    color = if (bill.remainingPayableExact > BigDecimal.ZERO) TraderTheme.financial.debit else TraderTheme.financial.income
                 )
             }
 

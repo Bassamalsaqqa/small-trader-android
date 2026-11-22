@@ -99,10 +99,11 @@ class MobileMerchantApiClient(
     // Products
     // -------------------------------------------------------------------------
 
-    fun getProducts(companyId: ServerUlid, limit: Int = 30, cursor: String? = null): Result<ProductCatalogResponse> {
+    fun getProducts(companyId: ServerUlid, limit: Int = 30, cursor: String? = null, search: String? = null): Result<ProductCatalogResponse> {
         val path = "/api/mobile/v1/companies/${companyId.value}/products"
         val params = mutableMapOf("limit" to limit.coerceIn(1, 100).toString())
         if (cursor != null) params["cursor"] = cursor
+        if (search != null && search.isNotBlank()) params["search"] = search.trim()
         val request = TransportRequest(
             method = HttpMethod.GET,
             path = path,
@@ -209,10 +210,11 @@ class MobileMerchantApiClient(
     // Customers
     // -------------------------------------------------------------------------
 
-    fun getCustomers(companyId: ServerUlid, limit: Int = 30, cursor: String? = null): Result<CustomerDirectoryResponse> {
+    fun getCustomers(companyId: ServerUlid, limit: Int = 30, cursor: String? = null, search: String? = null): Result<CustomerDirectoryResponse> {
         val path = "/api/mobile/v1/companies/${companyId.value}/customers"
         val params = mutableMapOf("limit" to limit.coerceIn(1, 100).toString())
         if (cursor != null) params["cursor"] = cursor
+        if (search != null && search.isNotBlank()) params["search"] = search.trim()
         val request = TransportRequest(
             method = HttpMethod.GET,
             path = path,

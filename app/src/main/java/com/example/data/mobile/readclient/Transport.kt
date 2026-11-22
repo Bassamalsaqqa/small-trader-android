@@ -264,10 +264,12 @@ object EndpointSecurity {
         for ((key, value) in queryParams) {
             val isAllowed = when (key) {
                 "search" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/suppliers") || basePath.endsWith("/sales/invoices")
-                "limit" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/suppliers") || basePath.endsWith("/sales/invoices")
-                "cursor" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/sales/invoices") || basePath.endsWith("/movements")
+                "limit" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/suppliers") || basePath.endsWith("/sales/invoices") || basePath.endsWith("/movements") || basePath.endsWith("/statement")
+                "cursor" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/sales/invoices") || basePath.endsWith("/movements") || basePath.endsWith("/statement")
                 "idempotency_key" -> basePath.endsWith("/receipts/status")
-                "from_date", "to_date" -> basePath.endsWith("/sales/invoices") || basePath.endsWith("/statement") || basePath.endsWith("/shift-summary")
+                "status" -> basePath.endsWith("/sales/invoices")
+                "customer_id" -> basePath.endsWith("/sales/invoices")
+                "date_from", "date_to", "from_date", "to_date" -> basePath.endsWith("/sales/invoices") || basePath.endsWith("/statement") || basePath.endsWith("/shift-summary")
                 else -> false
             }
             require(isAllowed) {
@@ -278,10 +280,25 @@ object EndpointSecurity {
                 "limit" -> validateLimit(value.toIntOrNull() ?: throw IllegalArgumentException("Invalid limit"))
                 "cursor" -> validateCursor(value)
                 "idempotency_key" -> validateIdempotencyKey(value)
-                "from_date", "to_date" -> {
-                    require(value.length <= 32) { "Date query parameter exceeds length bound" }
+                "status" -> {
+                    require(value.length <= 32) { "Status query parameter exceeds length bound" }
+                    val allowed = setOf(
+                        "DRAFT", "POSTED", "VOID", "PAID_CASH", "PAID", "PARTIAL", "ON_CREDIT",
+                        "draft", "posted", "void", "paid"
+                    )
+                    require(allowed.contains(value)) { "Invalid status query parameter: '$value'" }
+                }
+                "customer_id" -> {
+                    require(value.length in 1..64) { "Customer ID query parameter length bound exceeded" }
+                    require(Regex("^[a-zA-Z0-9_-]+$").matches(value)) { "Invalid customer_id format: '$value'" }
+                }
+                "date_from", "date_to", "from_date", "to_date" -> {
+                    require(value.length in 10..32) { "Date query parameter invalid length" }
                     require(value.none { it == '\r' || it == '\n' || it.code < 32 || it.code == 127 }) {
                         "Date query parameter contains prohibited control characters"
+                    }
+                    require(Regex("""^\d{4}-\d{2}-\d{2}$""").matches(value)) {
+                        "Invalid $key format: Date query parameter must follow YYYY-MM-DD format, got '$value'"
                     }
                 }
             }

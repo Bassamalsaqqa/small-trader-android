@@ -58,10 +58,13 @@ object ProductSearch {
     fun computeScore(product: Product, normalizedQuery: String): Int {
         if (normalizedQuery.isEmpty()) return 0
         if (product.normalizedBarcode == normalizedQuery) return 1000
+        if (product.normalizedSku.isNotEmpty() && product.normalizedSku == normalizedQuery) return 950
         if (product.normalizedBarcode.startsWith(normalizedQuery)) return 800
+        if (product.normalizedSku.isNotEmpty() && product.normalizedSku.startsWith(normalizedQuery)) return 750
         if (product.normalizedNameAr == normalizedQuery || product.normalizedNameEn == normalizedQuery) return 700
         if (product.normalizedNameAr.startsWith(normalizedQuery) || product.normalizedNameEn.startsWith(normalizedQuery)) return 600
         if (product.normalizedNameAr.contains(" $normalizedQuery") || product.normalizedNameEn.contains(" $normalizedQuery")) return 500
+        if (product.normalizedSku.isNotEmpty() && product.normalizedSku.contains(normalizedQuery)) return 450
         if (product.normalizedNameAr.contains(normalizedQuery) || product.normalizedNameEn.contains(normalizedQuery)) return 400
         if (product.normalizedSearchTokens.contains(normalizedQuery)) return 200
         return 0

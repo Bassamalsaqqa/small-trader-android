@@ -188,11 +188,11 @@ private fun PurchasesListView(
         state.purchaseBills.count { it.expectedProductId == null || it.expectedQuantity <= 0 }
     }
 
-    val totalOpenPayables = remember(state.purchaseBills) {
-        state.purchaseBills.sumOf { it.remainingPayableIls }
+    val totalOpenPayablesExact = remember(state.purchaseBills) {
+        state.purchaseBills.fold(BigDecimal.ZERO) { acc, bill -> acc + bill.remainingPayableExact }
     }
     val countOpenPayables = remember(state.purchaseBills) {
-        state.purchaseBills.count { it.remainingPayableIls > 0.005 }
+        state.purchaseBills.count { it.remainingPayableExact > BigDecimal.ZERO }
     }
 
     // Active filtering & search logic
@@ -202,9 +202,9 @@ private fun PurchasesListView(
             val matchesFilter = when (selectedFilter) {
                 PurchasesFilter.ALL -> true
                 PurchasesFilter.AWAITING_RECEIPT -> !bill.isReceived && bill.expectedProductId != null && bill.expectedQuantity > 0
-                PurchasesFilter.OPEN_PAYABLES -> bill.remainingPayableIls > 0.005
-                PurchasesFilter.UNPAID -> bill.paidIls <= 0.005
-                PurchasesFilter.PARTIALLY_PAID -> bill.paidIls > 0.005 && bill.remainingPayableIls > 0.005
+                PurchasesFilter.OPEN_PAYABLES -> bill.remainingPayableExact > BigDecimal.ZERO
+                PurchasesFilter.UNPAID -> bill.paidExact <= BigDecimal.ZERO
+                PurchasesFilter.PARTIALLY_PAID -> bill.paidExact > BigDecimal.ZERO && bill.remainingPayableExact > BigDecimal.ZERO
                 PurchasesFilter.RECEIVED -> bill.isReceived
                 PurchasesFilter.TEXT_ONLY -> bill.expectedProductId == null || bill.expectedQuantity <= 0
             }
@@ -333,9 +333,9 @@ private fun PurchasesListView(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = StitchBidiUtils.formatIls(totalOpenPayables),
+                                text = StitchBidiUtils.formatIls(totalOpenPayablesExact),
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = if (totalOpenPayables > 0.005) TraderTheme.financial.debit else MaterialTheme.colorScheme.onSurface
+                                color = if (totalOpenPayablesExact > BigDecimal.ZERO) TraderTheme.financial.debit else MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
@@ -579,7 +579,7 @@ private fun PurchaseBillLedgerCard(
 
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = StitchBidiUtils.formatIls(bill.totalIls),
+                        text = StitchBidiUtils.formatCurrency(bill.totalExact, bill.currency, bill.currencyMinorUnits),
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -667,14 +667,14 @@ private fun PurchaseBillLedgerCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val (financialText, financialTone) = when {
-                        bill.remainingPayableIls <= 0.005 -> lang.tr("مدفوعة بالكامل", "Fully Paid") to StitchBadgeTone.SUCCESS
-                        bill.paidIls > 0.005 -> lang.tr(
-                            "سداد جزئي (مدفوع ${StitchBidiUtils.formatIls(bill.paidIls)} • متبقي ${StitchBidiUtils.formatIls(bill.remainingPayableIls)})",
-                            "Partial (Paid ${StitchBidiUtils.formatIls(bill.paidIls)} • Rem: ${StitchBidiUtils.formatIls(bill.remainingPayableIls)})"
+                        bill.remainingPayableExact <= BigDecimal.ZERO -> lang.tr("مدفوعة بالكامل", "Fully Paid") to StitchBadgeTone.SUCCESS
+                        bill.paidExact > BigDecimal.ZERO -> lang.tr(
+                            "سداد جزئي (مدفوع ${StitchBidiUtils.formatCurrency(bill.paidExact, bill.currency, bill.currencyMinorUnits)} • متبقي ${StitchBidiUtils.formatCurrency(bill.remainingPayableExact, bill.currency, bill.currencyMinorUnits)})",
+                            "Partial (Paid ${StitchBidiUtils.formatCurrency(bill.paidExact, bill.currency, bill.currencyMinorUnits)} • Rem: ${StitchBidiUtils.formatCurrency(bill.remainingPayableExact, bill.currency, bill.currencyMinorUnits)})"
                         ) to StitchBadgeTone.PRIMARY
                         else -> lang.tr(
-                            "غير مدفوعة (ذمة: ${StitchBidiUtils.formatIls(bill.remainingPayableIls)})",
-                            "Unpaid (Due: ${StitchBidiUtils.formatIls(bill.remainingPayableIls)})"
+                            "غير مدفوعة (ذمة: ${StitchBidiUtils.formatCurrency(bill.remainingPayableExact, bill.currency, bill.currencyMinorUnits)})",
+                            "Unpaid (Due: ${StitchBidiUtils.formatCurrency(bill.remainingPayableExact, bill.currency, bill.currencyMinorUnits)})"
                         ) to StitchBadgeTone.DANGER
                     }
                     StitchBadge(
@@ -879,9 +879,17 @@ private fun PurchaseBillDetailView(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = StitchBidiUtils.formatIls(supplier?.balanceOwedIls ?: bill.remainingPayableIls),
+                            text = if (supplier != null) {
+                                if (supplier.balanceOwedExact != null) {
+                                    StitchBidiUtils.formatIls(supplier.balanceOwedExact)
+                                } else {
+                                    lang.tr("الرصيد غير متاح", "Balance unavailable")
+                                }
+                            } else {
+                                StitchBidiUtils.formatCurrency(bill.remainingPayableExact, bill.currency, bill.currencyMinorUnits)
+                            },
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                            color = if ((supplier?.balanceOwedIls ?: 0.0) > 0.005) TraderTheme.financial.debit else MaterialTheme.colorScheme.onSurface
+                            color = if ((supplier?.balanceOwedExact ?: bill.remainingPayableExact) > BigDecimal.ZERO) TraderTheme.financial.debit else MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
@@ -939,7 +947,7 @@ private fun PurchaseBillDetailView(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = StitchBidiUtils.formatIls(bill.totalIls),
+                                    text = StitchBidiUtils.formatCurrency(bill.totalExact, bill.currency, bill.currencyMinorUnits),
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
@@ -964,9 +972,9 @@ private fun PurchaseBillDetailView(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = StitchBidiUtils.formatIls(bill.paidIls),
+                                    text = StitchBidiUtils.formatCurrency(bill.paidExact, bill.currency, bill.currencyMinorUnits),
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = if (bill.paidIls > 0.005) TraderTheme.financial.income else MaterialTheme.colorScheme.onSurface
+                                    color = if (bill.paidExact > BigDecimal.ZERO) TraderTheme.financial.income else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
@@ -974,8 +982,8 @@ private fun PurchaseBillDetailView(
                         // Remaining
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = if (bill.remainingPayableIls > 0.005) TraderTheme.financial.debitContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            border = BorderStroke(1.dp, if (bill.remainingPayableIls > 0.005) TraderTheme.financial.debit.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outlineVariant),
+                            color = if (bill.remainingPayableExact > BigDecimal.ZERO) TraderTheme.financial.debitContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            border = BorderStroke(1.dp, if (bill.remainingPayableExact > BigDecimal.ZERO) TraderTheme.financial.debit.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outlineVariant),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
@@ -986,12 +994,12 @@ private fun PurchaseBillDetailView(
                                 Text(
                                     text = lang.tr("ذمة معلقة", "Remaining Due"),
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (bill.remainingPayableIls > 0.005) TraderTheme.financial.debit else MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = if (bill.remainingPayableExact > BigDecimal.ZERO) TraderTheme.financial.debit else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = StitchBidiUtils.formatIls(bill.remainingPayableIls),
+                                    text = StitchBidiUtils.formatCurrency(bill.remainingPayableExact, bill.currency, bill.currencyMinorUnits),
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = if (bill.remainingPayableIls > 0.005) TraderTheme.financial.debit else MaterialTheme.colorScheme.onSurface
+                                    color = if (bill.remainingPayableExact > BigDecimal.ZERO) TraderTheme.financial.debit else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
@@ -1122,7 +1130,7 @@ private fun PurchaseBillDetailView(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Text(
-                                        text = StitchBidiUtils.formatIls(bill.totalIls),
+                                        text = StitchBidiUtils.formatCurrency(bill.totalExact, bill.currency, bill.currencyMinorUnits),
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.primary
                                     )

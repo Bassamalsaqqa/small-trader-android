@@ -82,6 +82,14 @@ object StitchBidiUtils {
     fun formatIls(amount: java.math.BigDecimal?): String {
         return "\u2066${WesternFormatters.formatIls(amount)}\u2069"
     }
+
+    fun formatCurrency(amount: Double, currency: String = "ILS", minorUnits: Int = 2): String {
+        return "\u2066${WesternFormatters.formatCurrency(amount, currency, minorUnits)}\u2069"
+    }
+
+    fun formatCurrency(amount: java.math.BigDecimal?, currency: String = "ILS", minorUnits: Int = 2): String {
+        return "\u2066${WesternFormatters.formatCurrency(amount, currency, minorUnits)}\u2069"
+    }
 }
 
 enum class StitchBadgeTone {

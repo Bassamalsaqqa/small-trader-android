@@ -9,6 +9,7 @@ import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.contract.toNullableString
+import com.example.data.mobile.merchantread.SalesInvoicesQuery
 import com.example.data.mobile.merchantread.SupplierDetailResponse
 import com.example.data.mobile.merchantread.SupplierListItem
 import com.example.data.mobile.outbox.CommandStatus
@@ -21,16 +22,23 @@ import com.example.data.mobile.readclient.ReadClientTransport
 import com.example.data.mobile.readclient.TransportRequest
 import com.example.data.mobile.readclient.TransportResponse
 import com.example.data.mobile.session.JvmAesGcmCryptoEngine
+import com.example.model.AppLanguage
 import com.example.model.Customer
+import com.example.model.Product
+import com.example.model.ProductCategory
 import com.example.model.Supplier
+import com.example.model.SupplierPayment
 import com.example.model.UserRole
 import com.example.model.UserSession
+import com.example.model.WesternFormatters
+import com.example.ui.components.StitchBidiUtils
 import com.example.viewmodel.TraderUiState
 import com.example.viewmodel.TraderViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -704,7 +712,7 @@ class ReviewFindingsResolutionTest {
         EndpointSecurity.validateEndpointQueryParams("/api/mobile/v1/companies/01JMB000000000000000000001/customers", mapOf("search" to "ahmad", "limit" to "30"))
         EndpointSecurity.validateEndpointQueryParams("/api/mobile/v1/companies/01JMB000000000000000000001/suppliers", mapOf("search" to "salam", "limit" to "10"))
         EndpointSecurity.validateEndpointQueryParams("/api/mobile/v1/companies/01JMB000000000000000000001/receipts/status", mapOf("idempotency_key" to "idemp_test_123"))
-        EndpointSecurity.validateEndpointQueryParams("/api/mobile/v1/companies/01JMB000000000000000000001/sales/invoices", mapOf("from_date" to "2026-11-01", "to_date" to "2026-11-22"))
+        EndpointSecurity.validateEndpointQueryParams("/api/mobile/v1/companies/01JMB000000000000000000001/sales/invoices", mapOf("date_from" to "2026-11-01", "date_to" to "2026-11-22", "status" to "POSTED", "customer_id" to "01JMB000000000000000000002"))
 
         // Disallowed query parameter on endpoint
         try {
@@ -778,5 +786,669 @@ class ReviewFindingsResolutionTest {
         assertTrue("Query rejected", validateOrigin("https://account.palsync.net?token=123").isFailure)
         assertTrue("Fragment rejected", validateOrigin("https://account.palsync.net#section").isFailure)
         assertTrue("Malformed URI rejected", validateOrigin("https://account^palsync").isFailure)
+    }
+
+    // =========================================================================
+    // Finding 1 (Round 2): Authoritative Sales Invoices Query & OkHttp Wire Tests
+    // =========================================================================
+
+    @Test
+    fun testFinding1_salesInvoicesQueryRealQueryParamsToOkHttpAndSecurityValidation() {
+        val custId = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789C")
+        val realQuery = SalesInvoicesQuery(
+            status = "POSTED",
+            customerId = custId,
+            dateFrom = "2026-11-01",
+            dateTo = "2026-11-22",
+            search = "INV-001",
+            limit = 25,
+            cursor = "01JCV8X9M2NQW3TYZ4R5SCUR01"
+        )
+        val queryParams = realQuery.toQueryParams()
+
+        // 1. Authoritative per-endpoint keys emitted by actual SalesInvoicesQuery
+        assertTrue(queryParams.containsKey("status"))
+        assertTrue(queryParams.containsKey("customer_id"))
+        assertTrue(queryParams.containsKey("date_from"))
+        assertTrue(queryParams.containsKey("date_to"))
+        assertTrue(queryParams.containsKey("search"))
+        assertTrue(queryParams.containsKey("limit"))
+        assertTrue(queryParams.containsKey("cursor"))
+        assertFalse("Must emit date_from, not from_date", queryParams.containsKey("from_date"))
+        assertFalse("Must emit date_to, not to_date", queryParams.containsKey("to_date"))
+
+        // 2. Transport endpoint security validation passes for authoritative keys
+        val endpoint = "/api/mobile/v1/companies/${companyId.value}/sales/invoices"
+        EndpointSecurity.validateEndpointQueryParams(endpoint, queryParams)
+
+        // 3. Real query -> OkHttp transport to MockWebServer
+        val serverBaseUrl = mockWebServer.url("/").toString().removeSuffix("/")
+        val httpUrlBuilder = "$serverBaseUrl$endpoint".toHttpUrl().newBuilder()
+        for ((k, v) in queryParams) {
+            httpUrlBuilder.addQueryParameter(k, v)
+        }
+        val fullUrl = httpUrlBuilder.build()
+
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json; charset=utf-8")
+                .setBody("""{"items":[],"next_cursor":null}""")
+        )
+
+        val client = OkHttpClient.Builder().build()
+        val request = Request.Builder()
+            .url(fullUrl)
+            .header("Authorization", "Bearer $validToken")
+            .get()
+            .build()
+
+        val response = client.newCall(request).execute()
+        assertEquals(200, response.code)
+
+        val recordedRequest = mockWebServer.takeRequest(5, TimeUnit.SECONDS)
+        assertNotNull(recordedRequest)
+        assertEquals("GET", recordedRequest!!.method)
+        val recordedUrl = recordedRequest.requestUrl!!
+        assertEquals("POSTED", recordedUrl.queryParameter("status"))
+        assertEquals(custId.value, recordedUrl.queryParameter("customer_id"))
+        assertEquals("2026-11-01", recordedUrl.queryParameter("date_from"))
+        assertEquals("2026-11-22", recordedUrl.queryParameter("date_to"))
+        assertEquals("INV-001", recordedUrl.queryParameter("search"))
+        assertEquals("25", recordedUrl.queryParameter("limit"))
+        assertEquals("01JCV8X9M2NQW3TYZ4R5SCUR01", recordedUrl.queryParameter("cursor"))
+
+        // 4. Per-endpoint values validation
+        try {
+            EndpointSecurity.validateEndpointQueryParams(endpoint, mapOf("status" to "INVALID_STATUS_XYZ"))
+            fail("Must reject unallowed status")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("Invalid status"))
+        }
+
+        try {
+            EndpointSecurity.validateEndpointQueryParams(endpoint, mapOf("customer_id" to "invalid customer id"))
+            fail("Must reject invalid customer_id format")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("Invalid customer_id format"))
+        }
+
+        try {
+            EndpointSecurity.validateEndpointQueryParams(endpoint, mapOf("date_from" to "01-11-2026"))
+            fail("Must reject non-ISO date format")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("Invalid date_from format"))
+        }
+
+        try {
+            EndpointSecurity.validateEndpointQueryParams(endpoint, mapOf("malicious_extra" to "value"))
+            fail("Must reject disallowed param on invoices endpoint")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("Disallowed query parameter"))
+        }
+    }
+
+    // =========================================================================
+    // Finding 3 (Round 2): Bounded Catalog Paging & On-Demand Server Search
+    // =========================================================================
+
+    @Test
+    fun testFinding3_catalogBoundedFirstPageAndOnDemandSearchNoCrashOnLargeCatalog(): Unit = runBlocking {
+        var productPageRequests = 0
+        var customerPageRequests = 0
+        var searchedProductQuery: String? = null
+        var searchedCustomerQuery: String? = null
+
+        val transport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                val path = request.path
+                return when {
+                    path.contains("/products") -> {
+                        productPageRequests++
+                        val querySearch = request.queryParams["search"]
+                        if (querySearch != null) {
+                            searchedProductQuery = querySearch
+                            TransportResponse(
+                                statusCode = 200,
+                                headers = emptyMap(),
+                                body = """{
+                                    "company_id": "${companyId.value}",
+                                    "catalog_snapshot_version": "snap-20261122-v1",
+                                    "generated_at": "2026-11-22T12:00:00Z",
+                                    "next_cursor": null,
+                                    "has_more": false,
+                                    "products": [
+                                        {
+                                            "id": "01JCV8X9M2NQW3TYZ4R5S00001",
+                                            "sku": "SKU-FOUND-01",
+                                            "barcode": "6291040001",
+                                            "name": "Virgin Olive Oil",
+                                            "unit_price": "35.000000",
+                                            "tax_rate": null,
+                                            "tax_rate_id": null,
+                                            "is_tracked": true,
+                                            "available_quantity": "100.000000",
+                                            "base_unit": {
+                                                "id": "01JCV8X9MBV4W5X6Y7Z8012345",
+                                                "code": "BTL",
+                                                "name": "Bottle"
+                                            },
+                                            "default_unit": {
+                                                "unit_id": "01JCV8X9MBV4W5X6Y7Z8012345",
+                                                "product_unit_id": "01JCV8X9MBV4W5X6Y7Z8012345",
+                                                "conversion_to_base": "1.000000",
+                                                "sale_price": "35.000000"
+                                            },
+                                            "units": []
+                                        }
+                                    ]
+                                }"""
+                            )
+                        } else {
+                            val itemsJson = (1..30).joinToString(",") { i ->
+                                val pad = i.toString().padStart(5, '0')
+                                """{
+                                    "id": "01JCV8X9M2NQW3TYZ4R5S$pad",
+                                    "sku": "SKU-$i",
+                                    "barcode": "629104000$i",
+                                    "name": "منتج $i",
+                                    "unit_price": "10.000000",
+                                    "tax_rate": null,
+                                    "tax_rate_id": null,
+                                    "is_tracked": true,
+                                    "available_quantity": "50.000000",
+                                    "base_unit": {
+                                        "id": "01JCV8X9MBV4W5X6Y7Z8012345",
+                                        "code": "PCS",
+                                        "name": "قطعة"
+                                    },
+                                    "default_unit": {
+                                        "unit_id": "01JCV8X9MBV4W5X6Y7Z8012345",
+                                        "product_unit_id": "01JCV8X9MBV4W5X6Y7Z8012345",
+                                        "conversion_to_base": "1.000000",
+                                        "sale_price": "10.000000"
+                                    },
+                                    "units": []
+                                }"""
+                            }
+                            TransportResponse(
+                                statusCode = 200,
+                                headers = emptyMap(),
+                                body = """{
+                                    "company_id": "${companyId.value}",
+                                    "catalog_snapshot_version": "snap-20261122-v1",
+                                    "generated_at": "2026-11-22T12:00:00Z",
+                                    "next_cursor": "01JCV8X9M2NQW3TYZ4R5SPAGE2",
+                                    "has_more": true,
+                                    "products": [$itemsJson]
+                                }"""
+                            )
+                        }
+                    }
+                    path.contains("/customers") -> {
+                        customerPageRequests++
+                        val querySearch = request.queryParams["search"]
+                        if (querySearch != null) {
+                            searchedCustomerQuery = querySearch
+                            TransportResponse(
+                                statusCode = 200,
+                                headers = emptyMap(),
+                                body = """{
+                                    "company_id": "${companyId.value}",
+                                    "generated_at": "2026-11-22T12:00:00Z",
+                                    "next_cursor": null,
+                                    "has_more": false,
+                                    "customers": [
+                                        {
+                                            "id": "01JCV8X9M2NQW3TYZ4R5S00099",
+                                            "code": "CUST-FOUND-01",
+                                            "name": "طارق العلي",
+                                            "phone": "0599112233",
+                                            "is_walk_in": false
+                                        }
+                                    ]
+                                }"""
+                            )
+                        } else {
+                            val itemsJson = (1..30).joinToString(",") { i ->
+                                val pad = i.toString().padStart(5, '0')
+                                """{
+                                    "id": "01JCV8X9M2NQW3TYZ4R5S$pad",
+                                    "code": "CUST-$i",
+                                    "name": "زبون $i",
+                                    "phone": "05990000$i",
+                                    "is_walk_in": false
+                                }"""
+                            }
+                            TransportResponse(
+                                statusCode = 200,
+                                headers = emptyMap(),
+                                body = """{
+                                    "company_id": "${companyId.value}",
+                                    "generated_at": "2026-11-22T12:00:00Z",
+                                    "next_cursor": "01JCV8X9M2NQW3TYZ4R5SCUSTPAGE2",
+                                    "has_more": true,
+                                    "customers": [$itemsJson]
+                                }"""
+                            )
+                        }
+                    }
+                    else -> TransportResponse(200, emptyMap(), "{}")
+                }
+            }
+        }
+
+        val apiClient = MobileMerchantApiClient(
+            transport = transport,
+            baseOrigin = "https://api.example.com",
+            tokenProvider = { validToken }
+        )
+
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = InMemoryMerchantCommandStore(),
+            authScopeProvider = { validScope }
+        )
+
+        val prodResult = repo.refreshProducts()
+        assertTrue("refreshProducts must succeed on large catalog without hard-fail: ${prodResult.exceptionOrNull()?.message}", prodResult.isSuccess)
+        assertEquals("Must only fetch 1 bounded page, no 100-page loop", 1, productPageRequests)
+        assertEquals("Loaded items must be 30", 30, repo.productsFlow.value.size)
+        assertTrue("productsHasMore must truthfully be true", repo.productsHasMoreFlow.value)
+
+        val custResult = repo.refreshCustomers()
+        assertTrue("refreshCustomers must succeed on large catalog without hard-fail: ${custResult.exceptionOrNull()?.message}", custResult.isSuccess)
+        assertEquals("Must only fetch 1 bounded page, no 100-page loop", 1, customerPageRequests)
+        assertEquals("Loaded items must be 30", 30, repo.customersFlow.value.size)
+        assertTrue("customersHasMore must truthfully be true", repo.customersHasMoreFlow.value)
+
+        val searchArabicResult = repo.searchProductsOnServer("ز")
+        assertTrue(searchArabicResult.isSuccess)
+        assertEquals("ز", searchedProductQuery)
+        val searchItem = searchArabicResult.getOrThrow().first()
+        assertEquals("SKU-FOUND-01", searchItem.sku)
+        assertEquals("Virgin Olive Oil", searchItem.nameEn)
+
+        val searchSkuResult = repo.searchProductsOnServer("SKU-FOUND")
+        assertTrue(searchSkuResult.isSuccess)
+        assertEquals("SKU-FOUND", searchedProductQuery)
+
+        val searchCustomerResult = repo.searchCustomers("طارق")
+        assertTrue(searchCustomerResult.isSuccess)
+        assertEquals("طارق", searchedCustomerQuery)
+        assertEquals("CUST-FOUND-01", searchCustomerResult.getOrThrow().first().code)
+    }
+
+    // =========================================================================
+    // Finding 4 (Round 2): Supplier Concurrency & Mutex/CAS Race Protection
+    // =========================================================================
+
+    @Test
+    fun testFinding4_supplierPaymentAndGetDetailDeterministicCasRace(): Unit = runBlocking {
+        val supId = "01JCV8X9M2NQW3TYZ4R5S67893"
+        val initialSupplier = Supplier(
+            id = supId,
+            nameAr = "شركة الأهرام للتجارة",
+            nameEn = "Al-Ahram Trading",
+            phone = "0599112233",
+            balanceOwedExact = BigDecimal("500.00")
+        )
+
+        val paymentPostLatch = CountDownLatch(1)
+        val getStartedLatch = CountDownLatch(1)
+
+        val transport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                return when {
+                    request.method == HttpMethod.POST && request.path.contains("/suppliers/$supId/payments") -> {
+                        getStartedLatch.await(5, TimeUnit.SECONDS)
+                        TransportResponse(
+                            statusCode = 201,
+                            headers = emptyMap(),
+                            body = """{
+                                "id": "01JCV8X9M2NQW3TYZ4R5SSUPPAY01",
+                                "amount": "100.00",
+                                "balance_owed": "400.00",
+                                "owed": "400.00",
+                                "advances": "0.00",
+                                "posted_at": "2026-11-22"
+                            }"""
+                        )
+                    }
+                    request.method == HttpMethod.GET && request.path.endsWith("/suppliers/$supId") -> {
+                        getStartedLatch.countDown()
+                        paymentPostLatch.await(5, TimeUnit.SECONDS)
+                        TransportResponse(
+                            statusCode = 200,
+                            headers = emptyMap(),
+                            body = """{
+                                "id": "$supId",
+                                "name_ar": "شركة الأهرام للتجارة",
+                                "phone": "0599112233",
+                                "owed": "500.00",
+                                "advances": "0.00"
+                            }"""
+                        )
+                    }
+                    else -> TransportResponse(200, emptyMap(), "{}")
+                }
+            }
+        }
+
+        val apiClient = MobileMerchantApiClient(
+            transport = transport,
+            baseOrigin = "https://api.example.com",
+            tokenProvider = { validToken }
+        )
+
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = InMemoryMerchantCommandStore(),
+            authScopeProvider = { validScope }
+        )
+
+        val suppliersFlowField = ProductionTraderRepository::class.java.getDeclaredField("_suppliersFlow")
+        suppliersFlowField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val flow = suppliersFlowField.get(repo) as kotlinx.coroutines.flow.MutableStateFlow<List<Supplier>>
+        flow.value = listOf(initialSupplier)
+
+        val paymentJob = kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+            repo.recordSupplierPayment(
+                supplierId = supId,
+                amountIls = 100.0,
+                note = "سداد دفعة",
+                operator = repo.getCurrentSession(),
+                paymentId = "pay_sup_001"
+            )
+            paymentPostLatch.countDown()
+        }
+
+        val getJob = kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+            delay(50)
+            repo.getSupplierDetail(supId)
+        }
+
+        paymentJob.join()
+        getJob.join()
+
+        val finalSup = repo.suppliersFlow.value.first { it.id == supId }
+        assertEquals(
+            "Stale GET started during payment must not overwrite post-payment balance",
+            BigDecimal("400.00"),
+            finalSup.balanceOwedExact
+        )
+    }
+
+    // =========================================================================
+    // Finding 5 (Round 2): Supplier Search UI States & Empty Directory Usability
+    // =========================================================================
+
+    @Test
+    fun testFinding5_supplierSearchStatesAndPurchaseBillDialogUsableWithEmptyDirectory(): Unit = runBlocking {
+        val store = InMemoryMerchantCommandStore()
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = MobileMerchantApiClient(
+                transport = object : ReadClientTransport {
+                    override fun execute(request: TransportRequest) = TransportResponse(200, emptyMap(), "{}")
+                },
+                baseOrigin = "https://api.example.com",
+                tokenProvider = { validToken }
+            ),
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store,
+            authScopeProvider = { validScope }
+        )
+
+        val vm = TraderViewModel(repo)
+
+        val initialState = vm.uiState.value
+        assertTrue("Initial directory suppliers is empty", initialState.suppliers.isEmpty())
+        assertNull("Initial search results is null", initialState.supplierSearchResults)
+        assertFalse("Not searching initially", initialState.isSearchingSuppliers)
+        assertNull("No search error initially", initialState.supplierSearchError)
+
+        vm.searchSuppliers("شركة")
+        val searchingState = vm.uiState.value
+        assertEquals("شركة", searchingState.supplierSearchQuery)
+
+        assertFalse("Initially suppliersHasMore is false when empty", initialState.suppliersHasMore)
+    }
+
+    // =========================================================================
+    // Finding 2 (Round 2): Unallocated Payment Labels & No False Settlement Claim
+    // =========================================================================
+
+    @Test
+    fun testFinding2_unallocatedPaymentLabelsUnappliedAdvanceNeverClaimsSettled(): Unit = runBlocking {
+        val custId = "01JCV8X9M2NQW3TYZ4R5S67888"
+        val initialCust = Customer(
+            id = custId,
+            nameAr = "يوسف أحمد",
+            nameEn = "Youssef Ahmad",
+            phone = "0599887766",
+            balanceExact = BigDecimal("100.00"),
+            isDetailLoaded = true
+        )
+
+        val transport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                return TransportResponse(
+                    statusCode = 201,
+                    headers = emptyMap(),
+                    body = """{"id":"01JCV8X9M2NQW3TYZ4R5SPAY88","amount":"100.00","balance":"0.00","posted_at":"2026-11-22"}"""
+                )
+            }
+        }
+
+        val apiClient = MobileMerchantApiClient(
+            transport = transport,
+            baseOrigin = "https://api.example.com",
+            tokenProvider = { validToken }
+        )
+
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = InMemoryMerchantCommandStore(),
+            authScopeProvider = { validScope }
+        )
+
+        val customersFlowField = ProductionTraderRepository::class.java.getDeclaredField("_customersFlow")
+        customersFlowField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val flow = customersFlowField.get(repo) as kotlinx.coroutines.flow.MutableStateFlow<List<Customer>>
+        flow.value = listOf(initialCust)
+
+        val paymentResult = repo.recordCustomerPayment(
+            customerId = custId,
+            amountIls = 100.0,
+            note = "دفعة كاملة على الحساب",
+            paymentId = "pay_full_01"
+        )
+        assertTrue(paymentResult.isSuccess)
+
+        val syncCust = repo.customersFlow.value.first { it.id == custId }
+        val paidStr = WesternFormatters.formatIls(100.0)
+        val newBal = syncCust.balanceIls
+
+        val msgAr = when {
+            newBal > 0.005 -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري المتبقي: ${WesternFormatters.formatIls(newBal)}"
+            newBal < -0.005 -> "تم قبض $paidStr نقداً — رصيد الزبون المقدم (دفعة غير مخصصة): ${WesternFormatters.formatIls(-newBal)}"
+            else -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري: 0.00 ₪"
+        }
+        val msgEn = when {
+            newBal > 0.005 -> "Collected $paidStr in cash (unapplied advance) — Remaining ledger balance: ${WesternFormatters.formatIls(newBal)}"
+            newBal < -0.005 -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatIls(-newBal)}"
+            else -> "Collected $paidStr in cash (unapplied advance) — Ledger balance: 0.00 ₪"
+        }
+
+        assertTrue("Arabic message must mention دفعة غير مخصصة", msgAr.contains("دفعة غير مخصصة"))
+        assertFalse("Arabic message must NOT claim أصبح الحساب خالصاً", msgAr.contains("أصبح الحساب خالصاً"))
+        assertTrue("English message must mention unapplied advance", msgEn.contains("unapplied advance"))
+        assertFalse("English message must NOT claim Account is now settled", msgEn.contains("Account is now settled"))
+    }
+
+    // =========================================================================
+    // Finding 6 (Round 2 Delta): Authoritative Purchase Wire & Multi-Currency Vectors
+    // =========================================================================
+
+    @Test
+    fun testFinding6_authoritativePurchaseBillWireParsing_jod3dpAndIls2dp_exactAmountsAndCurrencies() {
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = MobileMerchantApiClient(
+                transport = object : ReadClientTransport {
+                    override fun execute(request: TransportRequest) = TransportResponse(200, emptyMap(), "{}")
+                },
+                baseOrigin = "https://api.example.com",
+                tokenProvider = { validToken }
+            ),
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = InMemoryMerchantCommandStore(),
+            authScopeProvider = { validScope }
+        )
+
+        // 1. Unpaid JOD 3dp bill (1.234 JOD with legacy 1.23 ILS alias from backend)
+        val jodUnpaidJson = """{
+            "id": "01JCV8X9M2NQW3TYZ4R5S00001",
+            "bill_number": "PB-JOD-001",
+            "supplier_id": "01JCV8X9M2NQW3TYZ4R5S6789A",
+            "date": "2026-11-22",
+            "currency": "JOD",
+            "currency_minor_units": 3,
+            "total_exact": "1.234",
+            "paid_exact": "0.000",
+            "total_ils": "1.23",
+            "paid_ils": "0.00",
+            "is_received": false,
+            "lines": [
+                {
+                    "id": "01JCV8X9M2NQW3TYZ4R5S00002",
+                    "product_id": "01JCV8X9M2NQW3TYZ4R5S00003",
+                    "product_name": "Jordanian Olive Oil",
+                    "ordered_quantity": "1",
+                    "received_quantity": "0",
+                    "unit_cost_exact": "1.234",
+                    "unit_cost_ils": "1.23"
+                }
+            ]
+        }"""
+        val jodUnpaidObj = StrictJsonParser.parseObject(jodUnpaidJson)
+        val jodBill = repo.parseAuthoritativePurchaseBill(jodUnpaidObj)
+
+        assertEquals("JOD", jodBill.currency)
+        assertEquals(3, jodBill.currencyMinorUnits)
+        assertEquals(BigDecimal("1.234"), jodBill.totalExact)
+        assertEquals(BigDecimal("0.000"), jodBill.paidExact)
+        assertEquals(BigDecimal("1.234"), jodBill.remainingPayableExact)
+        assertEquals(BigDecimal("1.234"), jodBill.lines[0].unitCostExact)
+        assertTrue("Formatted total must contain 1.234 JOD", jodBill.formattedTotal.contains("1.234 JOD"))
+        assertFalse("Must not label JOD as ₪ or ILS", jodBill.formattedTotal.contains("₪") || jodBill.formattedTotal.contains("ILS"))
+
+        // 2. Partially paid JOD 3dp bill
+        val jodPartialJson = """{
+            "id": "01JCV8X9M2NQW3TYZ4R5S00004",
+            "bill_number": "PB-JOD-002",
+            "supplier_id": "01JCV8X9M2NQW3TYZ4R5S6789A",
+            "date": "2026-11-22",
+            "currency": "JOD",
+            "currency_minor_units": 3,
+            "total_exact": "10.500",
+            "paid_exact": "3.250",
+            "total_ils": "10.50",
+            "paid_ils": "3.25",
+            "is_received": true,
+            "lines": []
+        }"""
+        val jodPartialBill = repo.parseAuthoritativePurchaseBill(StrictJsonParser.parseObject(jodPartialJson))
+        assertEquals(BigDecimal("10.500"), jodPartialBill.totalExact)
+        assertEquals(BigDecimal("3.250"), jodPartialBill.paidExact)
+        assertEquals(BigDecimal("7.250"), jodPartialBill.remainingPayableExact)
+        assertTrue(jodPartialBill.formattedRemainingPayable.contains("7.250 JOD"))
+
+        // 3. Paid ILS 2dp bill
+        val ilsPaidJson = """{
+            "id": "01JCV8X9M2NQW3TYZ4R5S00005",
+            "bill_number": "PB-ILS-001",
+            "supplier_id": "01JCV8X9M2NQW3TYZ4R5S6789A",
+            "date": "2026-11-22",
+            "currency": "ILS",
+            "currency_minor_units": 2,
+            "total_exact": "150.75",
+            "paid_exact": "150.75",
+            "is_received": true,
+            "lines": []
+        }"""
+        val ilsPaidBill = repo.parseAuthoritativePurchaseBill(StrictJsonParser.parseObject(ilsPaidJson))
+        assertEquals("ILS", ilsPaidBill.currency)
+        assertEquals(2, ilsPaidBill.currencyMinorUnits)
+        assertEquals(BigDecimal("150.75"), ilsPaidBill.totalExact)
+        assertEquals(BigDecimal("150.75"), ilsPaidBill.paidExact)
+        assertEquals(BigDecimal("0.00"), ilsPaidBill.remainingPayableExact)
+        assertTrue(ilsPaidBill.formattedTotal.contains("150.75 ₪"))
+
+        // 4. Return / credit adjustment bill with negative total
+        val returnJson = """{
+            "id": "01JCV8X9M2NQW3TYZ4R5S00006",
+            "bill_number": "PB-RET-001",
+            "supplier_id": "01JCV8X9M2NQW3TYZ4R5S6789A",
+            "date": "2026-11-22",
+            "currency": "JOD",
+            "currency_minor_units": 3,
+            "total_exact": "-25.500",
+            "paid_exact": "0.000",
+            "is_received": false,
+            "lines": []
+        }"""
+        val returnBill = repo.parseAuthoritativePurchaseBill(StrictJsonParser.parseObject(returnJson))
+        assertEquals(BigDecimal("-25.500"), returnBill.totalExact)
+        assertTrue(returnBill.formattedTotal.contains("-25.500 JOD"))
+
+        // 5. Verification of currency_minor and minor_units alias keys
+        val aliasCurrencyMinorJson = """{
+            "id": "01JCV8X9M2NQW3TYZ4R5S00007",
+            "bill_number": "PB-ALIAS-001",
+            "supplier_id": "01JCV8X9M2NQW3TYZ4R5S6789A",
+            "date": "2026-11-22",
+            "currency": "JOD",
+            "currency_minor": 3,
+            "total_exact": "1.234",
+            "paid_exact": "0.000",
+            "is_received": false,
+            "lines": []
+        }"""
+        val aliasCurrencyMinorBill = repo.parseAuthoritativePurchaseBill(StrictJsonParser.parseObject(aliasCurrencyMinorJson))
+        assertEquals(3, aliasCurrencyMinorBill.currencyMinorUnits)
+        assertEquals(BigDecimal("1.234"), aliasCurrencyMinorBill.totalExact)
+        assertTrue(aliasCurrencyMinorBill.formattedTotal.contains("1.234 JOD"))
+
+        val aliasMinorUnitsJson = """{
+            "id": "01JCV8X9M2NQW3TYZ4R5S00008",
+            "bill_number": "PB-ALIAS-002",
+            "supplier_id": "01JCV8X9M2NQW3TYZ4R5S6789A",
+            "date": "2026-11-22",
+            "currency": "JOD",
+            "minor_units": 3,
+            "total_exact": "5.678",
+            "paid_exact": "0.000",
+            "is_received": false,
+            "lines": []
+        }"""
+        val aliasMinorUnitsBill = repo.parseAuthoritativePurchaseBill(StrictJsonParser.parseObject(aliasMinorUnitsJson))
+        assertEquals(3, aliasMinorUnitsBill.currencyMinorUnits)
+        assertEquals(BigDecimal("5.678"), aliasMinorUnitsBill.totalExact)
+        assertTrue(aliasMinorUnitsBill.formattedTotal.contains("5.678 JOD"))
     }
 }

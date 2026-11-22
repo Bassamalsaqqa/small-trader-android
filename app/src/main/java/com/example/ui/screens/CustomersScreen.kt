@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Person
@@ -1963,6 +1964,35 @@ fun CustomerPaymentCollectionDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                // Notice: Unapplied advance payment banner (Finding 2)
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = lang.tr(
+                                "تنبيه: تسجل الدفعة النقدية كدفعة مقدمة غير مخصصة (Unapplied Advance) ولا تسوي فواتير محددة مباشرة.",
+                                "Notice: Payments are recorded as Unapplied Advance and do not settle specific invoices directly."
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+
                 // Customer Identity & Current Debt Status Card
                 Surface(
                     shape = RoundedCornerShape(10.dp),
@@ -2096,16 +2126,16 @@ fun CustomerPaymentCollectionDialog(
                                 text = when {
                                     customer.balanceExact == null -> lang.tr("الرصيد غير متاح", "Balance unavailable")
                                     projectedBalance > 0.005 -> lang.tr(
-                                        "الرصيد المتبقي بعد القبض: ${StitchBidiUtils.formatIls(projectedBalance)} (دين متبقي)",
-                                        "Remaining debt after payment: ${StitchBidiUtils.formatIls(projectedBalance)}"
+                                        "الرصيد الدفتري المتبقي بعد القبض: ${StitchBidiUtils.formatIls(projectedBalance)} (دفعة غير مخصصة)",
+                                        "Remaining ledger balance after payment: ${StitchBidiUtils.formatIls(projectedBalance)} (Unapplied advance)"
                                     )
                                     projectedBalance < -0.005 -> lang.tr(
-                                        "الرصيد بعد القبض: يصبح له رصيد مقدم (أمانة) ${StitchBidiUtils.formatIls(-projectedBalance)}",
-                                        "After collection: Customer advance credit of ${StitchBidiUtils.formatIls(-projectedBalance)}"
+                                        "الرصيد الدفتري بعد القبض: يصبح له رصيد مقدم (أمانة غير مخصصة) ${StitchBidiUtils.formatIls(-projectedBalance)}",
+                                        "After collection: Unapplied customer advance credit of ${StitchBidiUtils.formatIls(-projectedBalance)}"
                                     )
                                     else -> lang.tr(
-                                        "الرصيد بعد القبض: يصبح حساب الزبون خالصاً تماماً (0.00 ₪)",
-                                        "After collection: Account becomes completely settled (0.00 ₪)"
+                                        "الرصيد الدفتري بعد القبض: رصيد متوازن دفترياً (0.00 ₪ — دفعة مقدمة غير مخصصة)",
+                                        "After collection: Balanced ledger (0.00 ₪ — unapplied advance, does not settle invoices directly)"
                                     )
                                 },
                                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),

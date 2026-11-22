@@ -39,6 +39,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -66,6 +67,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
@@ -520,7 +522,74 @@ fun SuppliersScreen(
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
 
-        if (filteredSuppliers.isEmpty()) {
+        val isDebouncingOrSearching = searchQuery.isNotBlank() && (
+            state.isSearchingSuppliers || !state.supplierSearchQuery.trim().equals(searchQuery.trim(), ignoreCase = true)
+        )
+
+        if (isDebouncingOrSearching) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .testTag("supplier_search_progress"),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = lang.tr("جاري البحث في الموردين...", "Searching suppliers..."),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        } else if (searchQuery.isNotBlank() && state.supplierSearchError != null) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                    Text(
+                        text = lang.tr(
+                            "فشل البحث في الموردين: ${state.supplierSearchError}",
+                            "Supplier search failed: ${state.supplierSearchError}"
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center
+                    )
+                    Button(
+                        onClick = { onSearchSuppliers?.invoke(searchQuery) },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("supplier_search_retry_button")
+                    ) {
+                        Text(lang.tr("إعادة المحاولة", "Retry"))
+                    }
+                }
+            }
+        } else if (filteredSuppliers.isEmpty()) {
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -579,6 +648,29 @@ fun SuppliersScreen(
                         lang = lang,
                         onClick = { onSupplierClick(supplier) }
                     )
+                }
+                if (searchQuery.isBlank() && state.suppliersHasMore) {
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
+                                .testTag("suppliers_has_more_indicator")
+                        ) {
+                            Text(
+                                text = lang.tr(
+                                    "يتم عرض أول 30 مورد • تتوفر نتائج إضافية عبر البحث",
+                                    "Showing first 30 suppliers • Search to find additional suppliers"
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(12.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
                 }
             }
         }

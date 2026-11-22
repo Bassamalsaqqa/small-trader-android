@@ -81,6 +81,11 @@ data class TraderUiState(
 
     // Products & Inventory
     val products: List<Product> = emptyList(),
+    val productsHasMore: Boolean = false,
+    val productSearchQuery: String = "",
+    val productSearchResults: List<Product>? = null,
+    val isSearchingProducts: Boolean = false,
+    val productSearchError: String? = null,
     val stockMovements: List<StockMovement> = emptyList(),
     val selectedProductForDetail: Product? = null,
     val searchQuery: String = "",
@@ -125,6 +130,11 @@ data class TraderUiState(
 
     // Customers & Balances
     val customers: List<Customer> = emptyList(),
+    val customersHasMore: Boolean = false,
+    val customerSearchQuery: String = "",
+    val customerSearchResults: List<Customer>? = null,
+    val isSearchingCustomers: Boolean = false,
+    val customerSearchError: String? = null,
     val customerTransactions: List<CustomerTransaction> = emptyList(),
     val selectedCustomerForDetail: Customer? = null,
     val lastCustomerPaymentMessageAr: String? = null,

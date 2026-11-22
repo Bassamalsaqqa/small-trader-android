@@ -56,6 +56,8 @@ interface TraderRepository {
     val expensesFlow: StateFlow<List<ExpenseEntry>>
     val invoicesFlow: StateFlow<List<InvoiceRecord>>
     val suppliersHasMoreFlow: StateFlow<Boolean>
+    val productsHasMoreFlow: StateFlow<Boolean>
+    val customersHasMoreFlow: StateFlow<Boolean>
     val stockMovementsFlow: StateFlow<List<StockMovement>>
     val customerTransactionsFlow: StateFlow<List<CustomerTransaction>>
     val supplierPaymentsFlow: StateFlow<List<SupplierPayment>>
@@ -63,6 +65,7 @@ interface TraderRepository {
     // Product & Inventory
     fun getProducts(): List<Product>
     fun searchProducts(query: String, category: ProductCategory = ProductCategory.ALL, limit: Int = 30): List<Product>
+    suspend fun searchProductsOnServer(query: String, limit: Int = 50): Result<List<Product>> = Result.success(searchProducts(query, ProductCategory.ALL, limit))
     fun findProductById(id: String): Product?
     suspend fun updateProductPrice(productId: String, newPriceIls: Double, operator: UserSession): Result<Unit>
     suspend fun adjustProductStock(productId: String, adjustment: Int, reason: String, operator: UserSession): Result<StockMovement>
@@ -113,6 +116,8 @@ interface TraderRepository {
         updateCreditLimit: Boolean = false
     ): Result<Customer>
     suspend fun updateCustomer(customerId: String, name: String, phone: String, address: String, creditLimitIls: Double): Result<Customer>
+    suspend fun searchCustomers(query: String): Result<List<Customer>> =
+        Result.success(getCustomers().filter { it.nameAr.contains(query, ignoreCase = true) || it.nameEn.contains(query, ignoreCase = true) || (it.phone?.contains(query) ?: false) })
     suspend fun getCustomerDetail(customerId: String): Result<Customer> =
         getCustomers().firstOrNull { it.id == customerId }?.let { Result.success(it) }
             ?: Result.failure(NoSuchElementException("Customer not found: "))
@@ -253,6 +258,12 @@ class OfflineDemoTraderRepository(
 
     private val _suppliersHasMoreFlow = MutableStateFlow(false)
     override val suppliersHasMoreFlow: StateFlow<Boolean> = _suppliersHasMoreFlow.asStateFlow()
+
+    private val _productsHasMoreFlow = MutableStateFlow(false)
+    override val productsHasMoreFlow: StateFlow<Boolean> = _productsHasMoreFlow.asStateFlow()
+
+    private val _customersHasMoreFlow = MutableStateFlow(false)
+    override val customersHasMoreFlow: StateFlow<Boolean> = _customersHasMoreFlow.asStateFlow()
 
     private val _purchasesFlow = MutableStateFlow<List<PurchaseBill>>(purchaseBills.toList())
     override val purchasesFlow: StateFlow<List<PurchaseBill>> = _purchasesFlow.asStateFlow()

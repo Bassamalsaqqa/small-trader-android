@@ -114,7 +114,8 @@ data class Product(
     val taxRateExact: BigDecimal? = null,
     val stockCountExact: BigDecimal = BigDecimal.valueOf(stockCount.toLong()),
     val minStockThresholdExact: BigDecimal? = BigDecimal.valueOf(minStockThreshold.toLong()),
-    val conversionToBaseExact: BigDecimal = BigDecimal.ONE
+    val conversionToBaseExact: BigDecimal = BigDecimal.ONE,
+    val sku: String? = null
 ) {
     constructor(
         id: String,
@@ -134,7 +135,8 @@ data class Product(
         warehouseEn: String? = null,
         lotBatchCode: String? = null,
         expiryDate: String? = null,
-        isWeightedDisplayOnly: Boolean = false
+        isWeightedDisplayOnly: Boolean = false,
+        sku: String? = null
     ) : this(
         id = id,
         nameAr = nameAr,
@@ -158,7 +160,8 @@ data class Product(
         taxRateExact = null,
         stockCountExact = BigDecimal.valueOf(stockCount.toLong()),
         minStockThresholdExact = BigDecimal.valueOf(minStockThreshold.toLong()),
-        conversionToBaseExact = BigDecimal.ONE
+        conversionToBaseExact = BigDecimal.ONE,
+        sku = sku
     )
 
     constructor(
@@ -182,7 +185,8 @@ data class Product(
         productUnitId: String? = null,
         taxRateId: String? = null,
         taxRateExact: BigDecimal? = null,
-        conversionToBaseExact: BigDecimal = BigDecimal.ONE
+        conversionToBaseExact: BigDecimal = BigDecimal.ONE,
+        sku: String? = null
     ) : this(
         id = id,
         nameAr = nameAr,
@@ -206,7 +210,8 @@ data class Product(
         taxRateExact = taxRateExact,
         stockCountExact = stockCountExact,
         minStockThresholdExact = minStockThresholdExact,
-        conversionToBaseExact = conversionToBaseExact
+        conversionToBaseExact = conversionToBaseExact,
+        sku = sku
     )
 
     val priceIls: Double get() = priceExact?.toDouble() ?: 0.0
@@ -225,8 +230,9 @@ data class Product(
     val isLowStock: Boolean
         get() = isStockTracked && stockCountExact <= (minStockThresholdExact ?: BigDecimal.valueOf(8))
 
-    val normalizedSearchTokens: String = ProductSearch.normalize("$nameAr $nameEn $unitAr $unitEn $barcode ${category.labelAr} ${category.labelEn}")
+    val normalizedSearchTokens: String = ProductSearch.normalize("$nameAr $nameEn $unitAr $unitEn $barcode ${sku ?: ""} ${category.labelAr} ${category.labelEn}")
     val normalizedBarcode: String = ProductSearch.normalize(barcode)
+    val normalizedSku: String = ProductSearch.normalize(sku ?: "")
     val normalizedNameAr: String = ProductSearch.normalize(nameAr)
     val normalizedNameEn: String = ProductSearch.normalize(nameEn)
     val normalizedUnitAr: String = ProductSearch.normalize(unitAr)
@@ -601,7 +607,9 @@ data class PurchaseBill(
     val expectedQuantity: Int = 0,
     val receivedQuantity: Int = 0,
     val expectedQuantityExact: BigDecimal = BigDecimal.valueOf(expectedQuantity.toLong()),
-    val receivedQuantityExact: BigDecimal = BigDecimal.valueOf(receivedQuantity.toLong())
+    val receivedQuantityExact: BigDecimal = BigDecimal.valueOf(receivedQuantity.toLong()),
+    val currency: String = "ILS",
+    val currencyMinorUnits: Int = 2
 ) {
     val billNumberInt: Int get() = billNumber.filter { it.isDigit() }.toIntOrNull() ?: 0
 
@@ -691,6 +699,10 @@ data class PurchaseBill(
     val paidIls: Double get() = paidExact.toDouble()
     val remainingPayableExact: BigDecimal get() = (totalExact - paidExact).coerceAtLeast(BigDecimal.ZERO)
     val remainingPayableIls: Double get() = remainingPayableExact.toDouble()
+    val isIls: Boolean get() = currency.equals("ILS", ignoreCase = true)
+    val formattedTotal: String get() = WesternFormatters.formatCurrency(totalExact, currency, currencyMinorUnits)
+    val formattedPaid: String get() = WesternFormatters.formatCurrency(paidExact, currency, currencyMinorUnits)
+    val formattedRemainingPayable: String get() = WesternFormatters.formatCurrency(remainingPayableExact, currency, currencyMinorUnits)
 
     val effectiveLines: List<PurchaseLineItem>
         get() = if (lines.isNotEmpty()) {
@@ -874,6 +886,20 @@ object WesternFormatters {
         if (amount == null) return "-- ₪"
         val safe = if (amount.abs() < BigDecimal("0.005")) BigDecimal.ZERO else amount
         return "${moneyFormat.format(safe)} ₪"
+    }
+
+    fun formatCurrency(amount: BigDecimal?, currency: String = "ILS", minorUnits: Int = 2): String {
+        if (amount == null) return if (currency == "ILS") "-- ₪" else "-- $currency"
+        val pattern = if (minorUnits <= 0) "#,##0" else "#,##0." + "0".repeat(minorUnits)
+        val fmt = DecimalFormat(pattern, usSymbols)
+        val threshold = if (minorUnits <= 0) BigDecimal("0.5") else BigDecimal("0.5").movePointLeft(minorUnits)
+        val safe = if (amount.abs() < threshold) BigDecimal.ZERO.setScale(minorUnits, RoundingMode.HALF_UP) else amount.setScale(minorUnits, RoundingMode.HALF_UP)
+        return if (currency == "ILS") "${fmt.format(safe)} ₪" else "${fmt.format(safe)} $currency"
+    }
+
+    fun formatCurrency(amount: Double, currency: String = "ILS", minorUnits: Int = 2): String {
+        if (!amount.isFinite()) return if (currency == "ILS") "-- ₪" else "-- $currency"
+        return formatCurrency(BigDecimal(amount.toString()), currency, minorUnits)
     }
 
     fun formatIls(amount: Double): String {

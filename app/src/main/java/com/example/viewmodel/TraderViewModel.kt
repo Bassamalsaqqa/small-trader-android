@@ -126,6 +126,16 @@ class TraderViewModel(
             }
         }
         viewModelScope.launch {
+            repository.productsHasMoreFlow.collect { hasMore ->
+                _uiState.update { current -> current.copy(productsHasMore = hasMore) }
+            }
+        }
+        viewModelScope.launch {
+            repository.customersHasMoreFlow.collect { hasMore ->
+                _uiState.update { current -> current.copy(customersHasMore = hasMore) }
+            }
+        }
+        viewModelScope.launch {
             repository.purchasesFlow.collect { list ->
                 _uiState.update { current ->
                     current.copy(
@@ -1538,16 +1548,16 @@ class TraderViewModel(
                         val isBalKnown = updatedCust?.balanceExact != null && updatedCust?.balanceIls?.isNaN() == false
                         val newBal = updatedCust?.balanceIls ?: Double.NaN
                         val msgAr = when {
-                            !isBalKnown -> "تم قبض $paidStr نقداً — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
-                            newBal > 0.005 -> "تم قبض $paidStr نقداً — المتبقي على الزبون: ${WesternFormatters.formatIls(newBal)}"
-                            newBal < -0.005 -> "تم قبض $paidStr نقداً — أصبح للزبون رصيد مقدم: ${WesternFormatters.formatIls(-newBal)}"
-                            else -> "تم قبض $paidStr نقداً — أصبح الحساب خالصاً (0.00 ₪)"
+                            !isBalKnown -> "تم قبض $paidStr نقداً (دفعة مقدمة غير مخصصة) — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
+                            newBal > 0.005 -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري المتبقي: ${WesternFormatters.formatIls(newBal)}"
+                            newBal < -0.005 -> "تم قبض $paidStr نقداً — رصيد الزبون المقدم (دفعة غير مخصصة): ${WesternFormatters.formatIls(-newBal)}"
+                            else -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري: 0.00 ₪"
                         }
                         val msgEn = when {
-                            !isBalKnown -> "Collected $paidStr in cash — Current balance unavailable (statement refresh required)"
-                            newBal > 0.005 -> "Collected $paidStr in cash — Remaining debt: ${WesternFormatters.formatIls(newBal)}"
+                            !isBalKnown -> "Collected $paidStr in cash (unapplied advance) — Current balance unavailable (statement refresh required)"
+                            newBal > 0.005 -> "Collected $paidStr in cash (unapplied advance) — Remaining ledger balance: ${WesternFormatters.formatIls(newBal)}"
                             newBal < -0.005 -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatIls(-newBal)}"
-                            else -> "Collected $paidStr in cash — Account is now settled (0.00 ₪)"
+                            else -> "Collected $paidStr in cash (unapplied advance) — Ledger balance: 0.00 ₪"
                         }
                         state.copy(
                             draftCustomerPaymentOperationId = repository.rotateDraftOperationId("customer_payment"),
@@ -1583,16 +1593,16 @@ class TraderViewModel(
                         val isBalKnown = updatedCust?.balanceExact != null && updatedCust?.balanceIls?.isNaN() == false
                         val newBal = updatedCust?.balanceIls ?: Double.NaN
                         val msgAr = when {
-                            !isBalKnown -> "تم قبض $paidStr نقداً — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
-                            newBal > 0.005 -> "تم قبض $paidStr نقداً — المتبقي على الزبون: ${WesternFormatters.formatIls(newBal)}"
-                            newBal < -0.005 -> "تم قبض $paidStr نقداً — أصبح للزبون رصيد مقدم: ${WesternFormatters.formatIls(-newBal)}"
-                            else -> "تم قبض $paidStr نقداً — أصبح الحساب خالصاً (0.00 ₪)"
+                            !isBalKnown -> "تم قبض $paidStr نقداً (دفعة مقدمة غير مخصصة) — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
+                            newBal > 0.005 -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري المتبقي: ${WesternFormatters.formatIls(newBal)}"
+                            newBal < -0.005 -> "تم قبض $paidStr نقداً — رصيد الزبون المقدم (دفعة غير مخصصة): ${WesternFormatters.formatIls(-newBal)}"
+                            else -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري: 0.00 ₪"
                         }
                         val msgEn = when {
-                            !isBalKnown -> "Collected $paidStr in cash — Current balance unavailable (statement refresh required)"
-                            newBal > 0.005 -> "Collected $paidStr in cash — Remaining debt: ${WesternFormatters.formatIls(newBal)}"
+                            !isBalKnown -> "Collected $paidStr in cash (unapplied advance) — Current balance unavailable (statement refresh required)"
+                            newBal > 0.005 -> "Collected $paidStr in cash (unapplied advance) — Remaining ledger balance: ${WesternFormatters.formatIls(newBal)}"
                             newBal < -0.005 -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatIls(-newBal)}"
-                            else -> "Collected $paidStr in cash — Account is now settled (0.00 ₪)"
+                            else -> "Collected $paidStr in cash (unapplied advance) — Ledger balance: 0.00 ₪"
                         }
                         state.copy(
                             draftCustomerPaymentOperationId = repository.rotateDraftOperationId("customer_payment"),
@@ -3093,6 +3103,134 @@ class TraderViewModel(
                             supplierSearchResults = emptyList(),
                             isSearchingSuppliers = false,
                             supplierSearchError = e.message
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var customerSearchJob: Job? = null
+    private var customerSearchGeneration = 0L
+
+    fun searchCustomers(query: String) {
+        customerSearchJob?.cancel()
+        val trimmed = query.trim()
+        val generation = ++customerSearchGeneration
+        _uiState.update {
+            it.copy(
+                customerSearchQuery = query,
+                isSearchingCustomers = trimmed.isNotBlank(),
+                customerSearchError = null
+            )
+        }
+        if (trimmed.isBlank()) {
+            _uiState.update {
+                it.copy(
+                    customerSearchResults = null,
+                    isSearchingCustomers = false,
+                    customerSearchError = null
+                )
+            }
+            return
+        }
+        customerSearchJob = viewModelScope.launch {
+            delay(250)
+            try {
+                val res = repository.searchCustomers(trimmed)
+                if (generation == customerSearchGeneration) {
+                    if (res.isSuccess) {
+                        _uiState.update {
+                            it.copy(
+                                customerSearchResults = res.getOrThrow(),
+                                isSearchingCustomers = false,
+                                customerSearchError = null
+                            )
+                        }
+                    } else {
+                        val errMsg = res.exceptionOrNull()?.message ?: "Customer search failed"
+                        _uiState.update {
+                            it.copy(
+                                customerSearchResults = emptyList(),
+                                isSearchingCustomers = false,
+                                customerSearchError = errMsg
+                            )
+                        }
+                    }
+                }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                if (generation == customerSearchGeneration) {
+                    _uiState.update {
+                        it.copy(
+                            customerSearchResults = emptyList(),
+                            isSearchingCustomers = false,
+                            customerSearchError = e.message
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var productSearchJob: Job? = null
+    private var productSearchGeneration = 0L
+
+    fun searchProductsOnServer(query: String) {
+        productSearchJob?.cancel()
+        val trimmed = query.trim()
+        val generation = ++productSearchGeneration
+        _uiState.update {
+            it.copy(
+                productSearchQuery = query,
+                isSearchingProducts = trimmed.isNotBlank(),
+                productSearchError = null
+            )
+        }
+        if (trimmed.isBlank()) {
+            _uiState.update {
+                it.copy(
+                    productSearchResults = null,
+                    isSearchingProducts = false,
+                    productSearchError = null
+                )
+            }
+            return
+        }
+        productSearchJob = viewModelScope.launch {
+            delay(250)
+            try {
+                val res = repository.searchProductsOnServer(trimmed, limit = 50)
+                if (generation == productSearchGeneration) {
+                    if (res.isSuccess) {
+                        _uiState.update {
+                            it.copy(
+                                productSearchResults = res.getOrThrow(),
+                                isSearchingProducts = false,
+                                productSearchError = null
+                            )
+                        }
+                    } else {
+                        val errMsg = res.exceptionOrNull()?.message ?: "Product search failed"
+                        _uiState.update {
+                            it.copy(
+                                productSearchResults = emptyList(),
+                                isSearchingProducts = false,
+                                productSearchError = errMsg
+                            )
+                        }
+                    }
+                }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                if (generation == productSearchGeneration) {
+                    _uiState.update {
+                        it.copy(
+                            productSearchResults = emptyList(),
+                            isSearchingProducts = false,
+                            productSearchError = e.message
                         )
                     }
                 }
