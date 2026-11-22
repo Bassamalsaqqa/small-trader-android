@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.net.URI
 
 plugins {
   alias(libs.plugins.android.application)
@@ -42,7 +43,11 @@ android {
 
     val staffReadWorkspace = project.findProperty("smalltrader.staffReadWorkspace")?.toString()?.toBoolean() ?: false
     val configuredPropertyOrigin = project.findProperty("smalltrader.staffWorkspaceOrigin")?.toString()?.trim()
-    val staffWorkspaceOrigin = if (!configuredPropertyOrigin.isNullOrBlank()) configuredPropertyOrigin else "https://account.palsync.net"
+    val staffWorkspaceOrigin = if (configuredPropertyOrigin != null) {
+      if (configuredPropertyOrigin.isBlank()) "unconfigured" else configuredPropertyOrigin
+    } else {
+      "https://account.palsync.net"
+    }
 
     buildConfigField("boolean", "STAFF_READ_WORKSPACE", staffReadWorkspace.toString())
     buildConfigField("String", "STAFF_WORKSPACE_ORIGIN", escapeJavaStringLiteral(staffWorkspaceOrigin))
@@ -203,8 +208,28 @@ abstract class ValidateReleaseOriginTask : DefaultTask() {
     if (origin.isBlank() || origin.equals("unconfigured", ignoreCase = true)) {
       throw GradleException("Release build distribution rejected: STAFF_WORKSPACE_ORIGIN is empty or unconfigured. A valid production HTTPS origin (e.g. https://account.palsync.net) is mandatory.")
     }
-    if (!origin.startsWith("https://")) {
+    val uri = try {
+      URI(origin)
+    } catch (e: Exception) {
+      throw GradleException("Release build distribution rejected: STAFF_WORKSPACE_ORIGIN is not a valid URI: '$origin'. Error: ${e.message}")
+    }
+    if (uri.scheme != "https") {
       throw GradleException("Release build distribution rejected: STAFF_WORKSPACE_ORIGIN must use secure HTTPS. Found: '$origin'")
+    }
+    if (uri.host.isNullOrBlank()) {
+      throw GradleException("Release build distribution rejected: STAFF_WORKSPACE_ORIGIN must have a valid host. Found: '$origin'")
+    }
+    if (!uri.rawUserInfo.isNullOrBlank()) {
+      throw GradleException("Release build distribution rejected: STAFF_WORKSPACE_ORIGIN must not contain user credentials. Found: '$origin'")
+    }
+    if (!uri.rawPath.isNullOrBlank() && uri.rawPath != "/") {
+      throw GradleException("Release build distribution rejected: STAFF_WORKSPACE_ORIGIN must not contain a path component. Found: '$origin'")
+    }
+    if (!uri.rawQuery.isNullOrBlank()) {
+      throw GradleException("Release build distribution rejected: STAFF_WORKSPACE_ORIGIN must not contain a query string. Found: '$origin'")
+    }
+    if (!uri.rawFragment.isNullOrBlank()) {
+      throw GradleException("Release build distribution rejected: STAFF_WORKSPACE_ORIGIN must not contain a fragment. Found: '$origin'")
     }
   }
 }
@@ -212,10 +237,16 @@ abstract class ValidateReleaseOriginTask : DefaultTask() {
 val validateReleaseOrigin = tasks.register<ValidateReleaseOriginTask>("validateReleaseOrigin") {
   configuredOrigin.set(
     providers.gradleProperty("smalltrader.staffWorkspaceOrigin")
+      .map { it.trim().ifBlank { "unconfigured" } }
       .orElse("https://account.palsync.net")
   )
 }
 
-tasks.matching { it.name.startsWith("packageRelease") || it.name.startsWith("assembleRelease") || it.name.startsWith("bundleRelease") }.configureEach {
+tasks.matching {
+  it.name.startsWith("packageRelease") ||
+  it.name.startsWith("assembleRelease") ||
+  it.name.startsWith("bundleRelease") ||
+  it.name == "preReleaseBuild"
+}.configureEach {
   dependsOn(validateReleaseOrigin)
 }

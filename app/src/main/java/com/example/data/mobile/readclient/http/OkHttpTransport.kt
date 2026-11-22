@@ -247,6 +247,18 @@ class OkHttpTransport(
         }
 
         // 4. Query Parameter Validation & Bounding
+        val basePath = if (request.path.contains('?')) request.path.substringBefore('?') else request.path
+        try {
+            EndpointSecurity.validateEndpointQueryParams(basePath, request.queryParams)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            if (e is VirtualMachineError) throw e
+            throw HttpTransportException(
+                HttpTransportException.CATEGORY_SECURITY_VIOLATION,
+                e.message ?: "Invalid query parameter for endpoint $basePath"
+            )
+        }
+
         val cursor = request.queryParams["cursor"]
         if (cursor != null) {
             try {

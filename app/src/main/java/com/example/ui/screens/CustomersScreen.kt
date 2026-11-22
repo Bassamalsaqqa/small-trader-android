@@ -2290,9 +2290,9 @@ fun AddCustomerDialog(
         },
         confirmButton = {
             Button(
-                enabled = !isSubmitting && !isRecovering && newCustName.isNotBlank(),
+                enabled = !isSubmitting && (isRecovering || newCustName.isNotBlank()),
                 onClick = {
-                    if (!isSubmitting && !isRecovering && newCustName.isNotBlank()) {
+                    if (!isSubmitting && (isRecovering || newCustName.isNotBlank())) {
                         val trimmedName = newCustName.trim()
                         val trimmedPhone = newCustPhone.trim()
                         val trimmedAddr = newCustAddr.trim()

@@ -121,6 +121,9 @@ interface TraderRepository {
     suspend fun refreshSuppliers(search: String? = null): Result<Unit> = Result.success(Unit)
     suspend fun refreshSuppliers(): Result<Unit> = refreshSuppliers(null)
     suspend fun searchSuppliers(query: String): Result<List<Supplier>> = refreshSuppliers(query).map { getSuppliers() }
+    suspend fun getSupplierDetail(supplierId: String): Result<Supplier> =
+        getSuppliers().firstOrNull { it.id == supplierId }?.let { Result.success(it) }
+            ?: Result.failure(NoSuchElementException("Supplier not found: $supplierId"))
     suspend fun createSupplier(name: String, phone: String, company: String = "", operationId: String = ""): Result<Supplier>
     fun getSuppliers(): List<Supplier>
     fun getPurchaseBills(): List<PurchaseBill>
@@ -793,7 +796,11 @@ class OfflineDemoTraderRepository(
 
     override suspend fun getCustomerDetail(customerId: String): Result<Customer> =
         getCustomers().firstOrNull { it.id == customerId }?.let { Result.success(it) }
-            ?: Result.failure(NoSuchElementException("Customer not found: "))
+            ?: Result.failure(NoSuchElementException("Customer not found: $customerId"))
+
+    override suspend fun getSupplierDetail(supplierId: String): Result<Supplier> =
+        suppliers.firstOrNull { it.id == supplierId }?.let { Result.success(it) }
+            ?: Result.failure(NoSuchElementException("Supplier not found: $supplierId"))
 
     override suspend fun updateCustomer(
         customerId: String,

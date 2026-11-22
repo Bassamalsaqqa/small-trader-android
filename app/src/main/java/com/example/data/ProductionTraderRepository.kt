@@ -220,8 +220,10 @@ class ProductionTraderRepository(
             }
         }
 
-        if (!commandStore.transitionStatus(scopeBefore.companyId.value, commandId, record.status, CommandStatus.SUBMITTED)) {
-            return Result.failure(IllegalStateException("Command is already being submitted"))
+        if (record.status != CommandStatus.SUBMITTED) {
+            if (!commandStore.transitionStatus(scopeBefore.companyId.value, commandId, record.status, CommandStatus.SUBMITTED)) {
+                return Result.failure(IllegalStateException("Command is already being submitted"))
+            }
         }
 
         val postResult = postAction(record.idempotencyKey)
@@ -454,6 +456,9 @@ class ProductionTraderRepository(
 
     private val _lastRefreshError = MutableStateFlow<String?>(null)
     private val customerRevisions = ConcurrentHashMap<String, AtomicLong>()
+    private val customerLocks = ConcurrentHashMap<String, Any>()
+    private fun getCustomerLock(customerId: String): Any = customerLocks.computeIfAbsent(customerId) { Any() }
+    private val customerInFlightPayments = ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
     private fun getCustomerRevision(customerId: String): Long = customerRevisions.computeIfAbsent(customerId) { AtomicLong(0L) }.get()
     private fun incrementCustomerRevision(customerId: String): Long = customerRevisions.computeIfAbsent(customerId) { AtomicLong(0L) }.incrementAndGet()
     val lastRefreshError: StateFlow<String?> = _lastRefreshError.asStateFlow()
@@ -632,7 +637,9 @@ class ProductionTraderRepository(
                             ?: return@mapNotNull null
                         val company = obj.properties["company_name"].toNullableString() ?: obj.properties["company"].toNullableString()
                         val phone = obj.properties["phone"].toNullableString()
-                        val balanceStr = obj.properties["balance_owed"].toNullableString() ?: obj.properties["balance"].toNullableString()
+                        val balanceStr = obj.properties["balance_owed"].toNullableString()
+                            ?: obj.properties["owed"].toNullableString()
+                            ?: obj.properties["balance"].toNullableString()
                         val balanceExact = balanceStr?.let { try { BigDecimal(it) } catch (_: Exception) { null } }
                         val advancesStr = obj.properties["advances"].toNullableString()
                         val advancesExact = advancesStr?.let { try { BigDecimal(it) } catch (_: Exception) { null } }
@@ -702,18 +709,22 @@ class ProductionTraderRepository(
 
     private fun parseSupplier(obj: com.example.data.mobile.contract.StrictJsonObject): Supplier? {
         val id = obj.properties["id"].toNullableString() ?: return null
+        val code = obj.properties["code"].toNullableString()
         val name = obj.properties["name"].toNullableString()
             ?: obj.properties["name_ar"].toNullableString()
             ?: obj.properties["name_en"].toNullableString()
             ?: return null
         val company = obj.properties["company_name"].toNullableString() ?: obj.properties["company"].toNullableString()
         val phone = obj.properties["phone"].toNullableString()
-        val balanceStr = obj.properties["balance_owed"].toNullableString() ?: obj.properties["balance"].toNullableString()
+        val balanceStr = obj.properties["balance_owed"].toNullableString()
+            ?: obj.properties["owed"].toNullableString()
+            ?: obj.properties["balance"].toNullableString()
         val balanceExact = balanceStr?.let { try { BigDecimal(it) } catch (_: Exception) { null } }
         val advancesStr = obj.properties["advances"].toNullableString()
         val advancesExact = advancesStr?.let { try { BigDecimal(it) } catch (_: Exception) { null } }
         return Supplier(
             id = id,
+            code = code,
             nameAr = name,
             nameEn = name,
             companyAr = company,
@@ -1562,6 +1573,8 @@ class ProductionTraderRepository(
         )
         val payloadBytes = CanonicalJsonSerializer.serializeToUtf8Bytes(payloadObj)
 
+        val inFlightCounter = customerInFlightPayments.computeIfAbsent(customerId) { java.util.concurrent.atomic.AtomicInteger(0) }
+        inFlightCounter.incrementAndGet()
         val postPaymentRevision = incrementCustomerRevision(customerId)
 
         val postCall: suspend (String) -> Result<StrictJsonObject> = { key ->
@@ -1575,64 +1588,95 @@ class ProductionTraderRepository(
             )
         }
 
-        val durableRes = executeDurableCommand(
-            commandType = "customer.payment",
-            commandId = commandId,
-            idempotencyKey = idempotencyKey,
-            canonicalPayloadBytes = payloadBytes,
-            isReceiptStatusChecked = true,
-            postAction = postCall
-        )
+        try {
+            val durableRes = executeDurableCommand(
+                commandType = "customer.payment",
+                commandId = commandId,
+                idempotencyKey = idempotencyKey,
+                canonicalPayloadBytes = payloadBytes,
+                isReceiptStatusChecked = true,
+                postAction = postCall
+            )
 
-        if (durableRes.isFailure) {
-            return@withContext Result.failure(durableRes.exceptionOrNull() ?: RuntimeException("Customer payment failed"))
-        }
+            if (durableRes.isFailure) {
+                return@withContext Result.failure(durableRes.exceptionOrNull() ?: RuntimeException("Customer payment failed"))
+            }
 
-        val snapshot = durableRes.getOrThrow()
-        val officialId = snapshot.properties["id"]?.asString()
-            ?: snapshot.properties["receipt_id"]?.asString()
-            ?: return@withContext Result.failure(IllegalStateException("Server did not return payment ID"))
-        val officialAmount = snapshot.properties["amount"]?.asString()?.let { BigDecimal(it) } ?: amountExact
-        val postedAt = snapshot.properties["posted_at"]?.asString() ?: WesternFormatters.currentDate()
+            val snapshot = durableRes.getOrThrow()
+            val officialId = snapshot.properties["id"]?.asString()
+                ?: snapshot.properties["receipt_id"]?.asString()
+                ?: return@withContext Result.failure(IllegalStateException("Server did not return payment ID"))
+            val officialAmount = snapshot.properties["amount"]?.asString()?.let { BigDecimal(it) } ?: amountExact
+            val postedAt = snapshot.properties["posted_at"]?.asString() ?: WesternFormatters.currentDate()
 
-        // Authoritative customer detail from server (unknown balance remains null, NEVER 0)
-        val serverCustomerObj = apiClient.getCustomer(companyId, ServerUlid.parse(customerId)).getOrNull()
-        val latestRevision = getCustomerRevision(customerId)
-        val authoritativeBalanceExact: BigDecimal? = if (latestRevision == postPaymentRevision) {
-            serverCustomerObj?.properties?.get("balance").toNullableBigDecimal(currencyMinorUnits)
-                ?: serverCustomerObj?.properties?.get("balance_ils").toNullableBigDecimal(currencyMinorUnits)
-                ?: snapshot.properties["balance"].toNullableBigDecimal(currencyMinorUnits)
+            // Authoritative customer detail from server with strict session recheck
+            val snapshotBalance = snapshot.properties["balance"].toNullableBigDecimal(currencyMinorUnits)
                 ?: snapshot.properties["running_balance"].toNullableBigDecimal(currencyMinorUnits)
-        } else null
 
-        if (authoritativeBalanceExact != null) {
-            _customersFlow.update { list ->
-                list.map { c ->
-                    if (c.id == customerId) c.copy(balanceExact = authoritativeBalanceExact) else c
+            val getCustomerRes = if (snapshotBalance == null) {
+                val beforeFollowup = requireActiveScope()
+                val res = apiClient.getCustomer(companyId, ServerUlid.parse(customerId))
+                if (requireActiveScope() != beforeFollowup) {
+                    throw SecurityException("Authenticated scope changed during customer balance refresh")
+                }
+                res
+            } else null
+
+            val refreshFailed = getCustomerRes != null && getCustomerRes.isFailure
+            val serverCustomerObj = getCustomerRes?.getOrNull()
+
+            val authoritativeBalanceExact: BigDecimal? = synchronized(getCustomerLock(customerId)) {
+                val currentRevision = getCustomerRevision(customerId)
+                val isLatest = (currentRevision == postPaymentRevision) || (inFlightCounter.get() == 1 && currentRevision <= postPaymentRevision)
+                val authBalance = snapshotBalance
+                    ?: serverCustomerObj?.properties?.get("balance").toNullableBigDecimal(currencyMinorUnits)
+                    ?: serverCustomerObj?.properties?.get("balance_ils").toNullableBigDecimal(currencyMinorUnits)
+
+                if (isLatest) {
+                    incrementCustomerRevision(customerId)
+                    if (refreshFailed) {
+                        _customersFlow.update { list ->
+                            list.map { c ->
+                                if (c.id == customerId) c.copy(balanceExact = null) else c
+                            }
+                        }
+                        null
+                    } else {
+                        val existingCust = _customersFlow.value.firstOrNull { it.id == customerId }
+                        val newBalance = authBalance
+                            ?: existingCust?.balanceExact?.subtract(officialAmount)?.setScale(currencyMinorUnits, RoundingMode.HALF_UP)
+                            ?: existingCust?.balanceExact
+                        if (newBalance != null) {
+                            _customersFlow.update { list ->
+                                list.map { c ->
+                                    if (c.id == customerId) c.copy(balanceExact = newBalance) else c
+                                }
+                            }
+                        }
+                        newBalance
+                    }
+                } else {
+                    // Older payment cannot clear newer state! Leave existing state in _customersFlow
+                    _customersFlow.value.firstOrNull { it.id == customerId }?.balanceExact
                 }
             }
-        } else {
-            // Invalidate prepayment balance if refresh fails or balance is unknown or revision mismatch
-            _customersFlow.update { list ->
-                list.map { c ->
-                    if (c.id == customerId) c.copy(balanceExact = null) else c
-                }
-            }
+
+            val tx = CustomerTransaction(
+                id = officialId,
+                customerId = customerId,
+                date = postedAt,
+                typeAr = "دفعة نقدية مقبوضة",
+                typeEn = "Cash Collection",
+                debitExact = BigDecimal.ZERO,
+                creditExact = officialAmount,
+                runningBalanceExact = authoritativeBalanceExact,
+                note = note
+            )
+            _customerTransactionsFlow.update { listOf(tx) + it }
+            Result.success(tx)
+        } finally {
+            inFlightCounter.decrementAndGet()
         }
-
-        val tx = CustomerTransaction(
-            id = officialId,
-            customerId = customerId,
-            date = postedAt,
-            typeAr = "دفعة نقدية مقبوضة",
-            typeEn = "Cash Collection",
-            debitExact = BigDecimal.ZERO,
-            creditExact = officialAmount,
-            runningBalanceExact = authoritativeBalanceExact,
-            note = note
-        )
-        _customerTransactionsFlow.update { listOf(tx) + it }
-        Result.success(tx)
     }
 
     override suspend fun createCustomer(
@@ -1668,6 +1712,14 @@ class ProductionTraderRepository(
         val payloadObj = com.example.data.mobile.contract.StrictJsonObject(payloadMap)
         val payloadBytes = com.example.data.mobile.contract.CanonicalJsonSerializer.serializeToUtf8Bytes(payloadObj)
 
+        val scope = requireActiveScope()
+        val activeDraft = commandStore.getActiveDraftRecord(scope.companyId.value, scope.actorId.value, scope.deviceId.value, "customer_create")
+        val effectivePayloadBytes = if (activeDraft != null && activeDraft.commandId == commandId) {
+            commandStore.decryptPayload(activeDraft)
+        } else {
+            payloadBytes
+        }
+
         val validateCustomer: (StrictJsonObject) -> Result<StrictJsonObject> = { obj ->
             val rawId = obj.properties["id"].toNullableString()
             if (rawId == null) {
@@ -1680,12 +1732,21 @@ class ProductionTraderRepository(
         }
 
         val postCall: suspend (String) -> Result<com.example.data.mobile.contract.StrictJsonObject> = { key ->
+            val effectiveObj = if (activeDraft != null && activeDraft.commandId == commandId) {
+                try {
+                    StrictJsonParser.parse(String(effectivePayloadBytes, StandardCharsets.UTF_8)).asObject()
+                } catch (_: Exception) { payloadObj }
+            } else payloadObj
+            val effName = effectiveObj.properties["name_ar"]?.asString() ?: cleanName
+            val effPhone = effectiveObj.properties["phone"]?.asString() ?: cleanPhone
+            val effAddress = effectiveObj.properties["address_ar"]?.asString() ?: cleanAddress
+            val effLimit = effectiveObj.properties["credit_limit"]?.asString()?.let { BigDecimal(it) } ?: creditLimitExact
             apiClient.createCustomer(
                 companyId = companyId,
-                nameAr = cleanName,
-                phone = cleanPhone,
-                creditLimit = creditLimitExact,
-                address = cleanAddress,
+                nameAr = effName,
+                phone = effPhone,
+                creditLimit = effLimit,
+                address = effAddress,
                 idempotencyKey = key
             )
         }
@@ -1695,7 +1756,7 @@ class ProductionTraderRepository(
                 commandType = "customer_create",
                 commandId = commandId,
                 idempotencyKey = idempotencyKey,
-                canonicalPayloadBytes = payloadBytes,
+                canonicalPayloadBytes = effectivePayloadBytes,
                 isReceiptStatusChecked = true,
                 validateResponse = validateCustomer,
                 postAction = postCall
@@ -1723,6 +1784,10 @@ class ProductionTraderRepository(
                 ?: responseObj.properties["address_ar"].toNullableString()
             val authCreditLimit = if (responseObj.properties.containsKey("credit_limit")) {
                 responseObj.properties["credit_limit"].toNullableBigDecimal()
+            } else if (responseObj.properties.containsKey("credit_limit_exact")) {
+                responseObj.properties["credit_limit_exact"].toNullableBigDecimal()
+            } else if (responseObj.properties.containsKey("credit_limit_ils")) {
+                responseObj.properties["credit_limit_ils"].toNullableBigDecimal()
             } else {
                 creditLimitExact
             }
@@ -1819,6 +1884,12 @@ class ProductionTraderRepository(
                     } else {
                         prop.toNullableBigDecimal()
                     }
+                } else if (response.properties.containsKey("credit_limit_exact")) {
+                    val prop = response.properties["credit_limit_exact"]
+                    if (prop == null || prop is StrictJsonNull) null else prop.toNullableBigDecimal()
+                } else if (response.properties.containsKey("credit_limit_ils")) {
+                    val prop = response.properties["credit_limit_ils"]
+                    if (prop == null || prop is StrictJsonNull) null else prop.toNullableBigDecimal()
                 } else {
                     creditLimit
                 }
@@ -1860,15 +1931,16 @@ class ProductionTraderRepository(
         }
 
         val isCreditLimitUnloaded = existing.creditLimitExact == null
-        val shouldUpdateCreditLimit = if (isCreditLimitUnloaded) {
+        val shouldUpdateCreditLimit = if (creditLimitIls.isNaN()) {
+            false
+        } else if (isCreditLimitUnloaded) {
             creditLimitIls > 0.0
         } else {
-            true
+            val newExact = BigDecimal(creditLimitIls.toString()).setScale(currencyMinorUnits, RoundingMode.HALF_UP)
+            existing.creditLimitExact.compareTo(newExact) != 0
         }
-
-        val creditLimitExact = if (shouldUpdateCreditLimit) {
-            if (creditLimitIls >= 0.0) BigDecimal(creditLimitIls.toString()).setScale(currencyMinorUnits, RoundingMode.HALF_UP)
-            else null
+        val creditLimitExact = if (shouldUpdateCreditLimit && !creditLimitIls.isNaN() && creditLimitIls >= 0.0) {
+            BigDecimal(creditLimitIls.toString()).setScale(currencyMinorUnits, RoundingMode.HALF_UP)
         } else null
 
         return updateCustomer(
@@ -1895,6 +1967,7 @@ class ProductionTraderRepository(
             return@withContext Result.failure(IllegalArgumentException("Invalid customerId ULID: '$customerId'", e))
         }
         val revisionBefore = getCustomerRevision(customerId)
+        val inFlightBefore = customerInFlightPayments[customerId]?.get() ?: 0
         try {
             val res = apiClient.getCustomer(companyId, ulid)
             if (res.isFailure) {
@@ -1914,6 +1987,10 @@ class ProductionTraderRepository(
             val existing = _customersFlow.value.firstOrNull { it.id == customerId }
             val creditLimit = if (obj.properties.containsKey("credit_limit")) {
                 obj.properties["credit_limit"].toNullableBigDecimal()
+            } else if (obj.properties.containsKey("credit_limit_exact")) {
+                obj.properties["credit_limit_exact"].toNullableBigDecimal()
+            } else if (obj.properties.containsKey("credit_limit_ils")) {
+                obj.properties["credit_limit_ils"].toNullableBigDecimal()
             } else {
                 existing?.creditLimitExact
             }
@@ -1921,11 +1998,16 @@ class ProductionTraderRepository(
                 obj.properties["balance"].toNullableBigDecimal()
             } else null
 
-            val currentRevision = getCustomerRevision(customerId)
-            val balance = if (currentRevision == revisionBefore) {
-                serverBalance ?: existing?.balanceExact
-            } else {
-                existing?.balanceExact
+            val balance = synchronized(getCustomerLock(customerId)) {
+                val currentRevision = getCustomerRevision(customerId)
+                val inFlightNow = customerInFlightPayments[customerId]?.get() ?: 0
+                val currentCust = _customersFlow.value.firstOrNull { it.id == customerId }
+                val canPublishBalance = (currentRevision == revisionBefore && inFlightBefore == 0 && inFlightNow == 0)
+                if (canPublishBalance) {
+                    serverBalance ?: currentCust?.balanceExact
+                } else {
+                    currentCust?.balanceExact
+                }
             }
 
             val detail = Customer(
@@ -1941,7 +2023,84 @@ class ProductionTraderRepository(
                 isWalkIn = existing?.isWalkIn ?: false,
                 isDetailLoaded = true
             )
-            _customersFlow.update { list -> if (list.none { it.id == id }) list + detail else list.map { if (it.id == id) detail else it } }
+            _customersFlow.update { list ->
+                if (list.none { it.id == id }) list + detail
+                else list.map { c ->
+                    if (c.id == id) {
+                        c.copy(
+                            nameAr = nameAr,
+                            nameEn = nameEn,
+                            phone = phone ?: c.phone,
+                            code = code ?: c.code,
+                            addressAr = address ?: c.addressAr,
+                            addressEn = address ?: c.addressEn,
+                            creditLimitExact = creditLimit ?: c.creditLimitExact,
+                            balanceExact = balance ?: c.balanceExact,
+                            isDetailLoaded = true
+                        )
+                    } else c
+                }
+            }
+            Result.success(detail)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun getSupplierDetail(supplierId: String): Result<Supplier> = withContext(ioDispatcher) {
+        val currentScope = authScopeProvider?.invoke()
+        if (authScopeProvider != null && (currentScope == null || currentScope.companyId != companyId || currentScope.actorId != actorId || currentScope.deviceId != deviceId)) {
+            return@withContext Result.failure(SecurityException("Scope validation failed: current session is superseded or revoked."))
+        }
+        val before = requireActiveScope()
+        val ulid = try {
+            ServerUlid.parse(supplierId)
+        } catch (e: Exception) {
+            return@withContext Result.failure(IllegalArgumentException("Invalid supplierId ULID: '$supplierId'", e))
+        }
+        try {
+            val res = apiClient.getSupplier(companyId, ulid)
+            if (res.isFailure) {
+                return@withContext Result.failure(res.exceptionOrNull() ?: RuntimeException("Failed to get supplier detail"))
+            }
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            check(requireActiveScope() == before) { "Session changed" }
+            val obj = res.getOrThrow()
+            val id = obj.properties["id"].toNullableString() ?: return@withContext Result.failure(IllegalStateException("Missing supplier ID"))
+            require(id == supplierId)
+            val name = obj.properties["name"].toNullableString()
+                ?: obj.properties["name_ar"].toNullableString()
+                ?: obj.properties["name_en"].toNullableString()
+                ?: ""
+            val nameAr = obj.properties["name_ar"].toNullableString() ?: name
+            val nameEn = obj.properties["name_en"].toNullableString() ?: name
+            val company = obj.properties["company_name"].toNullableString() ?: obj.properties["company"].toNullableString()
+            val phone = obj.properties["phone"].toNullableString()
+            val code = obj.properties["code"].toNullableString()
+            val existing = _suppliersFlow.value.firstOrNull { it.id == supplierId }
+            val balanceStr = obj.properties["balance_owed"].toNullableString()
+                ?: obj.properties["owed"].toNullableString()
+                ?: obj.properties["balance"].toNullableString()
+            val balanceExact = balanceStr?.let { try { BigDecimal(it) } catch (_: Exception) { null } } ?: existing?.balanceOwedExact
+            val advancesStr = obj.properties["advances"].toNullableString()
+            val advancesExact = advancesStr?.let { try { BigDecimal(it) } catch (_: Exception) { null } } ?: existing?.advancesExact
+
+            val detail = Supplier(
+                id = id,
+                code = code ?: existing?.code,
+                nameAr = nameAr,
+                nameEn = nameEn,
+                companyAr = company ?: existing?.companyAr,
+                companyEn = company ?: existing?.companyEn,
+                phone = phone ?: existing?.phone,
+                balanceOwedExact = balanceExact,
+                advancesExact = advancesExact
+            )
+            _suppliersFlow.update { list ->
+                if (list.none { it.id == id }) list + detail else list.map { if (it.id == id) detail else it }
+            }
             Result.success(detail)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
@@ -2028,6 +2187,14 @@ class ProductionTraderRepository(
         val payloadObj = com.example.data.mobile.contract.StrictJsonObject(payloadMap)
         val payloadBytes = com.example.data.mobile.contract.CanonicalJsonSerializer.serializeToUtf8Bytes(payloadObj)
 
+        val scope = requireActiveScope()
+        val activeDraft = commandStore.getActiveDraftRecord(scope.companyId.value, scope.actorId.value, scope.deviceId.value, "supplier_create")
+        val effectivePayloadBytes = if (activeDraft != null && activeDraft.commandId == commandId) {
+            commandStore.decryptPayload(activeDraft)
+        } else {
+            payloadBytes
+        }
+
         val validateSupplier: (StrictJsonObject) -> Result<StrictJsonObject> = { obj ->
             val rawId = obj.properties["id"].toNullableString()
             if (rawId == null) {
@@ -2040,11 +2207,19 @@ class ProductionTraderRepository(
         }
 
         val postCall: suspend (String) -> Result<com.example.data.mobile.contract.StrictJsonObject> = { key ->
+            val effectiveObj = if (activeDraft != null && activeDraft.commandId == commandId) {
+                try {
+                    StrictJsonParser.parse(String(effectivePayloadBytes, StandardCharsets.UTF_8)).asObject()
+                } catch (_: Exception) { payloadObj }
+            } else payloadObj
+            val effName = effectiveObj.properties["name_ar"]?.asString() ?: cleanName
+            val effCompany = effectiveObj.properties["company_name"]?.asString() ?: cleanCompany
+            val effPhone = effectiveObj.properties["phone"]?.asString() ?: cleanPhone
             apiClient.createSupplier(
                 companyId = companyId,
-                nameAr = cleanName,
-                company = cleanCompany,
-                phone = cleanPhone,
+                nameAr = effName,
+                company = effCompany,
+                phone = effPhone,
                 idempotencyKey = key
             )
         }
@@ -2054,7 +2229,7 @@ class ProductionTraderRepository(
                 commandType = "supplier_create",
                 commandId = commandId,
                 idempotencyKey = idempotencyKey,
-                canonicalPayloadBytes = payloadBytes,
+                canonicalPayloadBytes = effectivePayloadBytes,
                 isReceiptStatusChecked = true,
                 validateResponse = validateSupplier,
                 postAction = postCall
@@ -2081,6 +2256,7 @@ class ProductionTraderRepository(
                 ?: cleanCompany
             val authPhone = responseObj.properties["phone"].toNullableString() ?: cleanPhone
             val authBalanceOwed = responseObj.properties["balance_owed"].toNullableBigDecimal()
+                ?: responseObj.properties["owed"].toNullableBigDecimal()
                 ?: responseObj.properties["balance"].toNullableBigDecimal()
             val authAdvances = responseObj.properties["advances"].toNullableBigDecimal()
 
@@ -2527,6 +2703,7 @@ class ProductionTraderRepository(
         val serverSupplierObj = apiClient.getSupplier(companyId, ServerUlid.parse(supplierId)).getOrNull()
         val authoritativeBalanceExact: BigDecimal? = serverSupplierObj?.properties?.get("balance").toNullableBigDecimal()
             ?: serverSupplierObj?.properties?.get("balance_owed").toNullableBigDecimal()
+            ?: serverSupplierObj?.properties?.get("owed").toNullableBigDecimal()
             ?: snapshot.properties["balance"].toNullableBigDecimal()
         val authoritativeAdvancesExact: BigDecimal? = serverSupplierObj?.properties?.get("advances").toNullableBigDecimal()
             ?: snapshot.properties["advances"].toNullableBigDecimal()
@@ -2566,6 +2743,7 @@ class ProductionTraderRepository(
         val id = supObj.properties["id"].toNullableString() ?: return
         val balanceOwedExact = supObj.properties["balance"].toNullableBigDecimal()
             ?: supObj.properties["balance_owed"].toNullableBigDecimal()
+            ?: supObj.properties["owed"].toNullableBigDecimal()
             ?: supObj.properties["balance_owed_ils"].toNullableBigDecimal()
         val advancesExact = supObj.properties["advances"].toNullableBigDecimal()
         _suppliersFlow.update { list ->

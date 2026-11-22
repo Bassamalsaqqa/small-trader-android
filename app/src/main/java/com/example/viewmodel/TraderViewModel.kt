@@ -1079,7 +1079,13 @@ class TraderViewModel(
                 it.nameAr == currentNote || it.nameEn == currentNote
             }
             val updatedNote = if (wasPreviousCustomerName) "" else state.customerNote
+            val updatedCustomers = if (customer != null && state.customers.none { it.id == customer.id }) {
+                state.customers + customer
+            } else {
+                state.customers
+            }
             state.copy(
+                customers = updatedCustomers,
                 selectedCustomerId = customer?.id,
                 customerNote = updatedNote,
                 checkoutErrorAr = null,
@@ -1227,6 +1233,35 @@ class TraderViewModel(
         if (asCreditDebt && state.selectedCustomerId == null) {
             val ar = "البيع على الحساب يتطلب تحديد حساب زبون مسجل أولاً"
             val en = "Credit sale requires selecting a registered customer account first"
+            _uiState.update {
+                it.copy(
+                    checkoutErrorAr = ar,
+                    checkoutErrorEn = en
+                )
+            }
+            showBanner(ar = ar, en = en, isError = true)
+            return
+        }
+
+        // Safeguard 3: Credit sale blocked if customer has a configured credit limit but balance is unknown
+        if (asCreditDebt && state.selectedCustomer?.creditLimitExact != null && !state.isCustomerBalanceKnown) {
+            val ar = "البيع الآجل غير متاح لأن رصيد الزبون الحالي غير معروف للتحقق من سقف الائتمان"
+            val en = "Credit sale blocked because customer balance is unknown to verify credit limit"
+            _uiState.update {
+                it.copy(
+                    checkoutErrorAr = ar,
+                    checkoutErrorEn = en
+                )
+            }
+            showBanner(ar = ar, en = en, isError = true)
+            return
+        }
+
+        // Safeguard 4: Credit sale blocked if credit would exceed limit
+        if (asCreditDebt && state.wouldCreditExceedCustomerLimit) {
+            val excess = WesternFormatters.formatIls(state.creditCeilingExcessIls)
+            val ar = "متوقف لتجاوز سقف الدين بمقدار $excess"
+            val en = "Credit blocked: Over limit by $excess"
             _uiState.update {
                 it.copy(
                     checkoutErrorAr = ar,
@@ -1604,6 +1639,8 @@ class TraderViewModel(
                         it.copy(
                             draftCustomerCreateOperationId = nextOpId,
                             isAddCustomerDialogOpen = false,
+                            activeCustomerCreateDraft = null,
+                            isCustomerCreateRecovering = false,
                             lastCustomerPaymentMessageAr = if (created != null) "تمت إضافة الزبون «${created.nameAr}» إلى دفتر الحسابات" else null,
                             lastCustomerPaymentMessageEn = if (created != null) "Added customer \"${created.nameEn}\" to ledger" else null
                         )
@@ -1634,6 +1671,8 @@ class TraderViewModel(
                         it.copy(
                             draftCustomerCreateOperationId = nextOpId,
                             isAddCustomerDialogOpen = false,
+                            activeCustomerCreateDraft = null,
+                            isCustomerCreateRecovering = false,
                             lastCustomerPaymentMessageAr = if (created != null) "تمت إضافة الزبون «${created.nameAr}» إلى دفتر الحسابات" else null,
                             lastCustomerPaymentMessageEn = if (created != null) "Added customer \"${created.nameEn}\" to ledger" else null
                         )
@@ -1707,6 +1746,19 @@ class TraderViewModel(
                 currentScreen = TraderScreen.SUPPLIER_DETAIL,
                 screenHistory = (state.screenHistory + state.currentScreen).takeLast(8)
             )
+        }
+        viewModelScope.launch {
+            val res = repository.getSupplierDetail(supplier.id)
+            if (res.isSuccess) {
+                val detailed = res.getOrThrow()
+                _uiState.update { state ->
+                    if (state.selectedSupplierForDetail?.id == supplier.id) {
+                        state.copy(selectedSupplierForDetail = detailed)
+                    } else {
+                        state
+                    }
+                }
+            }
         }
     }
 
@@ -2892,6 +2944,8 @@ class TraderViewModel(
                         val msgEn = if (supplierId == null) "Added supplier ${saved?.nameEn}" else "Updated supplier ${saved?.nameEn}"
                         state.copy(
                             draftSupplierCreateOperationId = nextOpId,
+                            activeSupplierCreateDraft = if (supplierId == null) null else state.activeSupplierCreateDraft,
+                            isSupplierCreateRecovering = if (supplierId == null) false else state.isSupplierCreateRecovering,
                             selectedSupplierForDetail = saved ?: state.selectedSupplierForDetail,
                             lastSupplierActionMessageAr = msgAr,
                             lastSupplierActionMessageEn = msgEn,
@@ -2936,6 +2990,8 @@ class TraderViewModel(
                         val msgEn = if (supplierId == null) "Added supplier ${saved?.nameEn}" else "Updated supplier ${saved?.nameEn}"
                         state.copy(
                             draftSupplierCreateOperationId = nextOpId,
+                            activeSupplierCreateDraft = if (supplierId == null) null else state.activeSupplierCreateDraft,
+                            isSupplierCreateRecovering = if (supplierId == null) false else state.isSupplierCreateRecovering,
                             selectedSupplierForDetail = saved ?: state.selectedSupplierForDetail,
                             lastSupplierActionMessageAr = msgAr,
                             lastSupplierActionMessageEn = msgEn,

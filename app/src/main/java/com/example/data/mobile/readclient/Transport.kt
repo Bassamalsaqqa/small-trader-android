@@ -260,19 +260,19 @@ object EndpointSecurity {
         }
     }
 
-    fun validateRawQueryString(basePath: String, queryString: String) {
-        require(queryString.length <= 512) { "Query string exceeds maximum length bound" }
-        require(queryString.none { it == '\r' || it == '\n' || it.code < 32 || it.code == 127 }) {
-            "Query string contains prohibited control characters"
-        }
-        val pairs = queryString.split('&')
-        for (pair in pairs) {
-            if (pair.isBlank()) continue
-            val parts = pair.split('=', limit = 2)
-            val key = try { java.net.URLDecoder.decode(parts[0], "UTF-8") } catch (_: Exception) { parts[0] }
-            val value = if (parts.size > 1) {
-                try { java.net.URLDecoder.decode(parts[1], "UTF-8") } catch (_: Exception) { parts[1] }
-            } else ""
+    fun validateEndpointQueryParams(basePath: String, queryParams: Map<String, String>) {
+        for ((key, value) in queryParams) {
+            val isAllowed = when (key) {
+                "search" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/suppliers") || basePath.endsWith("/sales/invoices")
+                "limit" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/suppliers") || basePath.endsWith("/sales/invoices")
+                "cursor" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/sales/invoices") || basePath.endsWith("/movements")
+                "idempotency_key" -> basePath.endsWith("/receipts/status")
+                "from_date", "to_date" -> basePath.endsWith("/sales/invoices") || basePath.endsWith("/statement") || basePath.endsWith("/shift-summary")
+                else -> false
+            }
+            require(isAllowed) {
+                "Disallowed query parameter '$key' for endpoint '$basePath'"
+            }
             when (key) {
                 "search" -> validateSearchQuery(value)
                 "limit" -> validateLimit(value.toIntOrNull() ?: throw IllegalArgumentException("Invalid limit"))
@@ -280,12 +280,31 @@ object EndpointSecurity {
                 "idempotency_key" -> validateIdempotencyKey(value)
                 "from_date", "to_date" -> {
                     require(value.length <= 32) { "Date query parameter exceeds length bound" }
-                }
-                else -> {
-                    throw IllegalArgumentException("Unauthorized query parameter '$key' for endpoint '$basePath'")
+                    require(value.none { it == '\r' || it == '\n' || it.code < 32 || it.code == 127 }) {
+                        "Date query parameter contains prohibited control characters"
+                    }
                 }
             }
         }
+    }
+
+    fun validateRawQueryString(basePath: String, queryString: String) {
+        require(queryString.length <= 512) { "Query string exceeds maximum length bound" }
+        require(queryString.none { it == '\r' || it == '\n' || it.code < 32 || it.code == 127 }) {
+            "Query string contains prohibited control characters"
+        }
+        val pairs = queryString.split('&')
+        val map = mutableMapOf<String, String>()
+        for (pair in pairs) {
+            if (pair.isBlank()) continue
+            val parts = pair.split('=', limit = 2)
+            val key = try { java.net.URLDecoder.decode(parts[0], "UTF-8") } catch (_: Exception) { parts[0] }
+            val value = if (parts.size > 1) {
+                try { java.net.URLDecoder.decode(parts[1], "UTF-8") } catch (_: Exception) { parts[1] }
+            } else ""
+            map[key] = value
+        }
+        validateEndpointQueryParams(basePath, map)
     }
 
     fun validatePath(path: String) {

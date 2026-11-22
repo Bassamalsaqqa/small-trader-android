@@ -118,7 +118,8 @@ fun SuppliersScreen(
     onSaveSupplierWithResult: ((supplierId: String?, name: String, company: String, phone: String, onComplete: (Boolean) -> Unit) -> Unit)? = null,
     onSearchSuppliers: ((String) -> Unit)? = null,
     launchCreate: Boolean = false,
-    onLaunchConsumed: () -> Unit = {}
+    onLaunchConsumed: () -> Unit = {},
+    onPrepareSupplierCreateDraft: (() -> Unit)? = null
 ) {
     val createDraft = rememberSaveableStateHolder()
     val lang = state.language
@@ -129,8 +130,14 @@ fun SuppliersScreen(
 
     LaunchedEffect(launchCreate) {
         if (launchCreate && canManageSuppliers) {
+            onPrepareSupplierCreateDraft?.invoke()
             isAddSupplierOpen = true
             onLaunchConsumed()
+        }
+    }
+    LaunchedEffect(isAddSupplierOpen) {
+        if (isAddSupplierOpen) {
+            onPrepareSupplierCreateDraft?.invoke()
         }
     }
     if (!canManageSuppliers) return
@@ -139,10 +146,14 @@ fun SuppliersScreen(
     val advancesCount = remember(state.suppliers) { state.suppliers.count { (it.advancesExact != null && it.advancesExact > BigDecimal.ZERO) || (it.balanceOwedExact != null && it.balanceOwedExact < BigDecimal.ZERO) } }
     val settledCount = remember(state.suppliers) { state.suppliers.count { (it.balanceOwedExact != null && it.balanceOwedExact.compareTo(BigDecimal.ZERO) == 0) && (it.advancesExact == null || it.advancesExact.compareTo(BigDecimal.ZERO) == 0) } }
 
-    val filteredSuppliers = remember(state.suppliers, state.supplierSearchResults, searchQuery, selectedFilter) {
+    val filteredSuppliers = remember(state.suppliers, state.supplierSearchResults, state.supplierSearchQuery, searchQuery, selectedFilter) {
         val q = TraderUiState.normalizeForSearch(WesternFormatters.sanitizeWesternDigits(searchQuery.trim()))
-        val sourceList = if (searchQuery.isNotBlank() && state.supplierSearchResults != null) {
-            state.supplierSearchResults!!
+        val sourceList = if (searchQuery.isNotBlank()) {
+            if (state.supplierSearchQuery.trim().equals(searchQuery.trim(), ignoreCase = true)) {
+                state.supplierSearchResults ?: emptyList()
+            } else {
+                emptyList()
+            }
         } else {
             state.suppliers
         }
@@ -160,6 +171,7 @@ fun SuppliersScreen(
                 TraderUiState.normalizeForSearch(s.nameEn).contains(q) ||
                 TraderUiState.normalizeForSearch(s.companyAr ?: "").contains(q) ||
                 TraderUiState.normalizeForSearch(s.companyEn ?: "").contains(q) ||
+                (s.code ?: "").lowercase().contains(q) ||
                 (s.phone ?: "").replace("-", "").contains(q.replace("-", "")) ||
                 (s.phone ?: "").contains(q)
         }
@@ -241,7 +253,10 @@ fun SuppliersScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             if (onSaveSupplierWithResult != null || onSaveSupplier != null) {
                                 OutlinedButton(
-                                    onClick = { isAddSupplierOpen = true },
+                                    onClick = {
+                                        onPrepareSupplierCreateDraft?.invoke()
+                                        isAddSupplierOpen = true
+                                    },
                                     shape = RoundedCornerShape(10.dp),
                                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
@@ -370,7 +385,10 @@ fun SuppliersScreen(
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
                             IconButton(
-                                onClick = { searchQuery = "" },
+                                onClick = {
+                                    searchQuery = ""
+                                    onSearchSuppliers?.invoke("")
+                                },
                                 modifier = Modifier.size(48.dp)
                             ) {
                                 Icon(
@@ -586,7 +604,17 @@ fun SuppliersScreen(
                         onSaveSupplier?.invoke(null, name, company, phone)
                         isAddSupplierOpen = false
                     }
-                }
+                },
+                onSaveWithResult = if (onSaveSupplierWithResult != null) {
+                    { name, company, phone, onComplete ->
+                        onSaveSupplierWithResult(null, name, company, phone) { success ->
+                            if (success) {
+                                isAddSupplierOpen = false
+                            }
+                            onComplete(success)
+                        }
+                    }
+                } else null
             )
         }
     }

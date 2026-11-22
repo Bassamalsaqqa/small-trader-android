@@ -1349,6 +1349,7 @@ fun CashPaymentScreen(
                     // Consequence line for credit sale
                     val overLimit = state.wouldCreditExceedCustomerLimit
                     val isDetailLoading = selectedCustomer != null && !selectedCustomer.isDetailLoaded
+                    val isConfiguredLimitUnknownBalance = selectedCustomer != null && selectedCustomer.creditLimitExact != null && !state.isCustomerBalanceKnown
                     Text(
                         text = when {
                             selectedCustomer == null -> lang.tr(
@@ -1358,6 +1359,10 @@ fun CashPaymentScreen(
                             isDetailLoading -> lang.tr(
                                 "جاري تحميل بيانات وسقف ائتمان الزبون...",
                                 "Loading customer credit details..."
+                            )
+                            isConfiguredLimitUnknownBalance -> lang.tr(
+                                "الرصيد غير معروف لسقف الائتمان المحدد",
+                                "Customer balance unknown for configured credit limit"
                             )
                             overLimit -> lang.tr(
                                 "يتجاوز سقف الدين بمقدار ${WesternFormatters.formatIls(state.creditCeilingExcessIls)}",
@@ -1373,7 +1378,7 @@ fun CashPaymentScreen(
                             )
                         },
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
-                        color = if (selectedCustomer != null && !overLimit && !isDetailLoading) {
+                        color = if (selectedCustomer != null && !overLimit && !isConfiguredLimitUnknownBalance && !isDetailLoading) {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         } else {
                             financial.debit
@@ -1385,11 +1390,11 @@ fun CashPaymentScreen(
                     // Primary confirmation button (ST-11)
                     Button(
                         onClick = onCompleteCreditSale,
-                        enabled = selectedCustomer != null && !isDetailLoading && !overLimit && state.basket.isNotEmpty() && !state.isSubmittingSale,
+                        enabled = selectedCustomer != null && !isDetailLoading && !overLimit && !isConfiguredLimitUnknownBalance && state.basket.isNotEmpty() && !state.isSubmittingSale,
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (selectedCustomer != null && !isDetailLoading && !overLimit) financial.debit else MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = if (selectedCustomer != null && !isDetailLoading && !overLimit) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            containerColor = if (selectedCustomer != null && !isDetailLoading && !overLimit && !isConfiguredLimitUnknownBalance) financial.debit else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (selectedCustomer != null && !isDetailLoading && !overLimit && !isConfiguredLimitUnknownBalance) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1411,6 +1416,10 @@ fun CashPaymentScreen(
                                 isDetailLoading -> lang.tr(
                                     "جاري تحميل بيانات الزبون...",
                                     "Loading Customer Details..."
+                                )
+                                isConfiguredLimitUnknownBalance -> lang.tr(
+                                    "الرصيد غير معروف لسقف الائتمان",
+                                    "Credit Blocked: Balance Unknown"
                                 )
                                 overLimit -> lang.tr(
                                     "متوقف لتجاوز سقف الدين",

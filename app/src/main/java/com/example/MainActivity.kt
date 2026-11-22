@@ -185,7 +185,8 @@ fun SmallTraderApp(
                                 onSaveSupplierWithResult = { sid, name, comp, phone, onComplete ->
                                     traderViewModel.saveSupplier(sid, name, comp, phone, onComplete)
                                 },
-                                onSearchSuppliers = traderViewModel::searchSuppliers
+                                onSearchSuppliers = traderViewModel::searchSuppliers,
+                                onPrepareSupplierCreateDraft = traderViewModel::prepareSupplierCreateDraft
                             ) })
                         TraderScreen.PURCHASES -> PurchasesScreen(
                             state = state,
@@ -462,6 +463,7 @@ fun SmallTraderApp(
                                     traderViewModel.saveSupplier(sid, name, comp, phone, onComplete)
                                 },
                                 onSearchSuppliers = traderViewModel::searchSuppliers,
+                                onPrepareSupplierCreateDraft = traderViewModel::prepareSupplierCreateDraft,
                                 launchCreate = state.pendingAction == MerchantAction.SUPPLIER,
                                 onLaunchConsumed = traderViewModel::consumeAction
                             )
@@ -674,6 +676,8 @@ fun SmallTraderApp(
                     AddCustomerDialog(
                         lang = state.language,
                         onDismiss = { traderViewModel.openAddCustomerDialog(false) },
+                        initialDraft = state.activeCustomerCreateDraft,
+                        isRecovering = state.isCustomerCreateRecovering,
                         onConfirm = { name, phone, address ->
                             traderViewModel.createCustomer(name, phone, address)
                         },
@@ -698,7 +702,7 @@ fun SmallTraderApp(
                 }
 
                 // Receive Purchase Bill Dialog
-                if (state.isReceivePurchaseDialogOpen && state.suppliers.isNotEmpty()) {
+                if (state.isReceivePurchaseDialogOpen) {
                     screenStates.SaveableStateProvider("form_purchase_${state.purchaseBills.size}") {
                     ReceivePurchaseBillDialog(
                         state = state,

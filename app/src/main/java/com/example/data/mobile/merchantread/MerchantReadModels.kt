@@ -1124,7 +1124,7 @@ data class SupplierListItem(
     companion object {
         private val ALLOWED_KEYS = setOf(
             "id", "code", "name", "name_ar", "name_en", "phone",
-            "currency", "currency_minor_units", "balance_owed", "advances"
+            "currency", "currency_minor_units", "balance_owed", "owed", "advances"
         )
 
         fun fromStrictJson(obj: StrictJsonObject): SupplierListItem {
@@ -1138,8 +1138,16 @@ data class SupplierListItem(
                 phone = MerchantReadValidationUtils.requireNullableString(obj, "phone", minLength = 1, maxLength = 64),
                 currency = MerchantReadValidationUtils.requireString(obj, "currency", minLength = 3, maxLength = 3),
                 currencyMinorUnits = MerchantReadValidationUtils.requireInt(obj, "currency_minor_units", min = 0, max = 6),
-                balanceOwed = MerchantReadValidationUtils.requireNullableBigDecimal(obj, "balance_owed"),
-                advances = MerchantReadValidationUtils.requireNullableBigDecimal(obj, "advances")
+                balanceOwed = if (obj.properties.containsKey("balance_owed")) {
+                    MerchantReadValidationUtils.requireNullableBigDecimal(obj, "balance_owed")
+                } else if (obj.properties.containsKey("owed")) {
+                    MerchantReadValidationUtils.requireNullableBigDecimal(obj, "owed")
+                } else {
+                    throw CanonicalSerializationException("Missing required property 'balance_owed' (or 'owed')")
+                },
+                advances = if (obj.properties.containsKey("advances")) {
+                    MerchantReadValidationUtils.requireNullableBigDecimal(obj, "advances")
+                } else null
             )
         }
     }
@@ -1200,6 +1208,7 @@ data class SupplierDetailResponse(
     val currency: String,
     val currencyMinorUnits: Int,
     val balanceOwed: BigDecimal?,
+    val advances: BigDecimal? = null,
     val status: String
 ) {
     init {
@@ -1209,13 +1218,13 @@ data class SupplierDetailResponse(
     }
 
     override fun toString(): String =
-        "SupplierDetailResponse(id=$id, code=${if (code != null) "'$code'" else "null"}, name='[REDACTED]', phone='[REDACTED]', whatsapp='[REDACTED]', email='[REDACTED]', taxNumber='$taxNumber', address='[REDACTED]', currency='$currency', currencyMinorUnits=$currencyMinorUnits, balanceOwed=$balanceOwed, status='$status')"
+        "SupplierDetailResponse(id=$id, code=${if (code != null) "'$code'" else "null"}, name='[REDACTED]', phone='[REDACTED]', whatsapp='[REDACTED]', email='[REDACTED]', taxNumber='$taxNumber', address='[REDACTED]', currency='$currency', currencyMinorUnits=$currencyMinorUnits, balanceOwed=$balanceOwed, advances=$advances, status='$status')"
 
     companion object {
         private val ALLOWED_KEYS = setOf(
             "id", "code", "name", "name_ar", "name_en", "phone",
             "whatsapp", "email", "tax_number", "address",
-            "currency", "currency_minor_units", "balance_owed", "status"
+            "currency", "currency_minor_units", "balance_owed", "owed", "advances", "status"
         )
 
         fun fromStrictJson(obj: StrictJsonObject): SupplierDetailResponse {
@@ -1233,7 +1242,16 @@ data class SupplierDetailResponse(
                 address = MerchantReadValidationUtils.requireNullableString(obj, "address", minLength = 1, maxLength = 255),
                 currency = MerchantReadValidationUtils.requireString(obj, "currency", minLength = 3, maxLength = 3),
                 currencyMinorUnits = MerchantReadValidationUtils.requireInt(obj, "currency_minor_units", min = 0, max = 6),
-                balanceOwed = MerchantReadValidationUtils.requireNullableBigDecimal(obj, "balance_owed"),
+                balanceOwed = if (obj.properties.containsKey("balance_owed")) {
+                    MerchantReadValidationUtils.requireNullableBigDecimal(obj, "balance_owed")
+                } else if (obj.properties.containsKey("owed")) {
+                    MerchantReadValidationUtils.requireNullableBigDecimal(obj, "owed")
+                } else {
+                    throw CanonicalSerializationException("Missing required property 'balance_owed' (or 'owed')")
+                },
+                advances = if (obj.properties.containsKey("advances")) {
+                    MerchantReadValidationUtils.requireNullableBigDecimal(obj, "advances")
+                } else null,
                 status = MerchantReadValidationUtils.requireString(obj, "status", minLength = 1, maxLength = 32)
             )
         }

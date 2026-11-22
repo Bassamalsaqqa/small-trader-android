@@ -776,12 +776,41 @@ fun ReceivePurchaseBillDialog(
 ) {
     val lang = state.language
     val suppliers = state.suppliers
-    if (suppliers.isEmpty()) return
+    if (suppliers.isEmpty() && (state.supplierSearchResults == null || state.supplierSearchResults!!.isEmpty())) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            shape = RoundedCornerShape(12.dp),
+            title = {
+                Text(
+                    text = lang.tr("لا يوجد موردين", "No Suppliers"),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            },
+            text = {
+                Text(
+                    text = lang.tr(
+                        "يرجى إضافة مورد أولاً لتسجيل فاتورة شراء.",
+                        "Please add a supplier first before recording a purchase bill."
+                    ),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = onDismiss,
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(lang.tr("حسناً", "OK"))
+                }
+            }
+        )
+        return
+    }
 
     var billMode by rememberSaveable { mutableStateOf(PurchaseBillMode.STRUCTURED) }
     var submissionId by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
     var selectedSupplierId by rememberSaveable(state.selectedSupplierForDetail?.id) {
-        mutableStateOf(state.selectedSupplierForDetail?.id ?: suppliers.first().id)
+        mutableStateOf(state.selectedSupplierForDetail?.id ?: suppliers.firstOrNull()?.id ?: state.supplierSearchResults?.firstOrNull()?.id ?: "")
     }
     var purchaseDesc by rememberSaveable { mutableStateOf("") }
     var freeformTotal by rememberSaveable { mutableStateOf("") }
@@ -905,15 +934,20 @@ fun ReceivePurchaseBillDialog(
 
                 // Supplier Picker with Search
                 var supplierPickerSearch by rememberSaveable { mutableStateOf("") }
-                val displayedSuppliers = remember(suppliers, state.supplierSearchResults, supplierPickerSearch) {
+                val displayedSuppliers = remember(suppliers, state.supplierSearchResults, state.supplierSearchQuery, supplierPickerSearch) {
                     if (supplierPickerSearch.isNotBlank()) {
-                        if (state.supplierSearchResults != null && state.supplierSearchResults.isNotEmpty()) {
-                            state.supplierSearchResults
+                        if (onSearchSuppliers != null) {
+                            if (state.supplierSearchQuery.trim().equals(supplierPickerSearch.trim(), ignoreCase = true)) {
+                                state.supplierSearchResults ?: emptyList()
+                            } else {
+                                emptyList()
+                            }
                         } else {
                             val q = supplierPickerSearch.trim().lowercase()
                             suppliers.filter {
                                 it.name(lang).lowercase().contains(q) ||
                                     it.company(lang).lowercase().contains(q) ||
+                                    (it.code ?: "").lowercase().contains(q) ||
                                     (it.phone ?: "").contains(q)
                             }
                         }
@@ -1478,7 +1512,7 @@ fun SupplierEditorDialog(
     var phone by rememberSaveable(initialSupplier?.id) {
         mutableStateOf(initialSupplier?.phone ?: initialDraft?.properties?.get("phone").toNullableString() ?: "")
     }
-    val isValid = name.isNotBlank()
+    val isValid = name.isNotBlank() || isRecovering
 
     AlertDialog(
         onDismissRequest = onDismiss,

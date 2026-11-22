@@ -334,6 +334,9 @@ data class TraderUiState(
     val isCustomerBalanceKnown: Boolean
         get() = selectedCustomer?.let { it.balanceExact != null && !it.balanceIls.isNaN() } ?: false
 
+    val isCreditSaleBlockedByUnknownBalance: Boolean
+        get() = selectedCustomer?.let { it.creditLimitExact != null && !isCustomerBalanceKnown } ?: false
+
     val projectedCustomerBalanceIfCreditIls: Double?
         get() = if (!isCustomerBalanceKnown) null else selectedCustomer?.let { customer ->
             customer.balanceExact?.add(BigDecimal(basketNetTotalIls.toString()))

@@ -486,7 +486,8 @@ data class Supplier(
     val companyEn: String? = null,
     val phone: String? = null,
     val balanceOwedExact: BigDecimal? = null,
-    val advancesExact: BigDecimal? = null
+    val advancesExact: BigDecimal? = null,
+    val code: String? = null
 ) {
     constructor(
         id: String,
@@ -504,7 +505,8 @@ data class Supplier(
         companyEn = companyEn.ifBlank { null },
         phone = phone.ifBlank { null },
         balanceOwedExact = BigDecimal(balanceOwedIls.toString()).setScale(2, RoundingMode.HALF_UP),
-        advancesExact = null
+        advancesExact = null,
+        code = null
     )
 
     // Legacy presentation bridge; calculations must use nullable balanceOwedExact / advancesExact.
