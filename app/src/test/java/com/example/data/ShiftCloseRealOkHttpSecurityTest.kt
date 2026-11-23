@@ -31,6 +31,7 @@ import com.example.data.mobile.merchantread.LiveShiftSummary
 import com.example.data.mobile.merchantread.ShiftCloseResponse
 import com.example.data.mobile.merchantread.ShiftSummaryReportResponse
 import com.example.data.mobile.outbox.OutboxDatabase
+import com.example.data.mobile.outbox.CommandStatus
 import com.example.data.mobile.outbox.RoomMerchantCommandStore
 import com.example.data.mobile.readclient.ApprovedCashAccount
 import com.example.data.mobile.readclient.http.OkHttpTransport
@@ -519,8 +520,14 @@ class ShiftCloseRealOkHttpSecurityTest {
 
         val (winner, loser) = if (res1.isSuccess) Pair(res1, res2) else Pair(res2, res1)
         assertTrue("Exactly one concurrent call must succeed: res1=$res1, res2=$res2", winner.isSuccess && loser.isFailure)
-        assertTrue("Second concurrent call must fail with in-flight message: ${loser.exceptionOrNull()?.message}",
-            loser.exceptionOrNull()!!.message!!.contains("already in flight"))
+        val rejection = loser.exceptionOrNull()
+        assertTrue("Second concurrent call must fail admission: $rejection", rejection is IllegalStateException)
+        assertTrue("Second concurrent call must retain the unresolved attempt: ${rejection?.message}",
+            rejection!!.message!!.contains("already in flight") ||
+                rejection.message!!.contains("existing cash count attempt"))
+        assertEquals("Only the admitted attempt may reach the server", 1, server!!.requestCount)
+        val rejectedCommandId = if (res1.isSuccess) "cmd-conc-2" else "cmd-conc-1"
+        assertNull(store.findCommand(companyId.value, actorId.value, deviceId.value, "shiftclose-$rejectedCommandId"))
 
         db.close()
     }
@@ -577,6 +584,23 @@ class ShiftCloseRealOkHttpSecurityTest {
         val msg = result.exceptionOrNull()?.message ?: ""
         assertTrue("Must fail before POST with idempotency parameter conflict: $msg",
             msg.contains("previously committed with different parameters"))
+
+        // A new workflow must not evade the unresolved command by rotating its key.
+        for (status in listOf(CommandStatus.PENDING, CommandStatus.SUBMITTED, CommandStatus.UNKNOWN_ACK)) {
+            val record = store.findCommand(companyId.value, actorId.value, deviceId.value, key)!!
+            if (record.status != status) {
+                assertTrue(store.transitionStatus(companyId.value, record.commandId, record.status, status))
+            }
+            val viewModel = TraderViewModel(repository = repo)
+            val retainedId = viewModel.uiState.value.draftShiftCloseOperationId
+            viewModel.startNewShiftWorkflow()
+            assertEquals(retainedId, viewModel.uiState.value.draftShiftCloseOperationId)
+            assertEquals(retainedId, repo.getDraftOperationId("shift_close"))
+
+            val newAttempt = repo.closeShift(BigDecimal("100.00"), commandId = "different-command")
+            assertTrue("Unresolved $status attempt must block a new command ID", newAttempt.isFailure)
+            assertTrue(newAttempt.exceptionOrNull()!!.message!!.contains("existing cash count attempt"))
+        }
 
         // MockWebServer MUST receive zero requests
         assertEquals(0, server!!.requestCount)

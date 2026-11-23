@@ -3599,6 +3599,11 @@ class ProductionTraderRepository(
         }
 
         val activeDraft = commandStore.getActiveDraftRecord(before.companyId.value, before.actorId.value, before.deviceId.value, "shift_close")
+        if (activeDraft != null && activeDraft.commandId != effectiveCommandId) {
+            return@withContext Result.failure(
+                IllegalStateException("Resolve the existing cash count attempt before starting another")
+            )
+        }
         if (activeDraft != null && activeDraft.commandId == effectiveCommandId && activeDraft.payloadDigest != payloadDigest) {
             return@withContext Result.failure(
                 IllegalStateException("Draft command [$effectiveCommandId] has different parameters")

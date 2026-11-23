@@ -4071,6 +4071,10 @@ class TraderViewModel(
     }
 
     fun startNewShiftWorkflow() {
+        if (_uiState.value.isShiftCloseSubmitting || _uiState.value.isShiftCloseRecovering ||
+            repository.getActiveDraftPayload("shift_close") != null) {
+            return
+        }
         val nextDraftId = repository.rotateDraftOperationId("shift_close")
         _uiState.update {
             it.copy(
