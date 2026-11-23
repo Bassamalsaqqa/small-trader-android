@@ -1328,7 +1328,8 @@ data class ShiftCloseResponse(
     val countedCash: BigDecimal,
     val variance: BigDecimal,
     val varianceStatus: String,
-    val closedAt: String,
+    val closedAt: String? = null,
+    val observedAt: String? = null,
     val success: Boolean = true,
     val observationRecorded: Boolean = true,
     val isShiftClosed: Boolean = false
@@ -1340,16 +1341,25 @@ data class ShiftCloseResponse(
         require(varianceStatus in listOf("EXACT", "OVERAGE", "SHORTAGE")) {
             "variance_status must be EXACT, OVERAGE, or SHORTAGE, got $varianceStatus"
         }
+        if (closedAt != null) {
+            MerchantReadValidationUtils.validateStringBounds(closedAt, "shift_close.closed_at", minLength = 10, maxLength = 40)
+        }
+        if (observedAt != null) {
+            MerchantReadValidationUtils.validateStringBounds(observedAt, "shift_close.observed_at", minLength = 10, maxLength = 40)
+        }
     }
 
+    val effectiveTimestamp: String
+        get() = observedAt ?: closedAt ?: ""
+
     override fun toString(): String =
-        "ShiftCloseResponse(id=$id, shiftClosureId=$shiftClosureId, shiftDate='$shiftDate', currency='$currency', currencyMinorUnits=$currencyMinorUnits, expectedCash=$expectedCash, countedCash=$countedCash, variance=$variance, varianceStatus='$varianceStatus', closedAt='$closedAt')"
+        "ShiftCloseResponse(id=$id, shiftClosureId=$shiftClosureId, shiftDate='$shiftDate', currency='$currency', currencyMinorUnits=$currencyMinorUnits, expectedCash=$expectedCash, countedCash=$countedCash, variance=$variance, varianceStatus='$varianceStatus', closedAt='$closedAt', observedAt='$observedAt', observationRecorded=$observationRecorded, isShiftClosed=$isShiftClosed)"
 
     companion object {
         private val ALLOWED_KEYS = setOf(
             "id", "shift_closure_id", "shift_date", "currency", "currency_minor_units",
             "expected_cash", "counted_cash", "variance", "variance_status", "closed_at",
-            "success", "observation_recorded", "is_shift_closed"
+            "observed_at", "success", "observation_recorded", "is_shift_closed"
         )
 
         fun fromStrictJson(obj: StrictJsonObject): ShiftCloseResponse {
@@ -1360,6 +1370,8 @@ data class ShiftCloseResponse(
             } else {
                 id
             }
+            val closedAt = (obj.properties["closed_at"] as? StrictJsonString)?.value
+            val observedAt = (obj.properties["observed_at"] as? StrictJsonString)?.value ?: closedAt
             return ShiftCloseResponse(
                 id = id,
                 shiftClosureId = shiftClosureId,
@@ -1370,7 +1382,8 @@ data class ShiftCloseResponse(
                 countedCash = MerchantReadValidationUtils.requireBigDecimal(obj, "counted_cash"),
                 variance = MerchantReadValidationUtils.requireBigDecimal(obj, "variance"),
                 varianceStatus = MerchantReadValidationUtils.requireString(obj, "variance_status", minLength = 5, maxLength = 8),
-                closedAt = MerchantReadValidationUtils.requireString(obj, "closed_at", minLength = 10, maxLength = 40),
+                closedAt = closedAt,
+                observedAt = observedAt,
                 success = (obj.properties["success"] as? StrictJsonBoolean)?.value ?: true,
                 observationRecorded = (obj.properties["observation_recorded"] as? StrictJsonBoolean)?.value ?: true,
                 isShiftClosed = (obj.properties["is_shift_closed"] as? StrictJsonBoolean)?.value ?: false

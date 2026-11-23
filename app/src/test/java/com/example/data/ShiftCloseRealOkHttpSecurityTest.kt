@@ -25,6 +25,7 @@ import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.StrictJsonObject
 import com.example.data.mobile.contract.StrictJsonString
 import com.example.data.mobile.contract.StrictJsonNumber
+import com.example.data.mobile.contract.StrictJsonBoolean
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.merchantread.LiveShiftSummary
 import com.example.data.mobile.merchantread.ShiftCloseResponse
@@ -37,11 +38,13 @@ import com.example.data.mobile.session.JvmAesGcmCryptoEngine
 import com.example.model.AppLanguage
 import com.example.model.UserRole
 import com.example.model.UserSession
+import com.example.model.WesternFormatters
 import com.example.ui.screens.FinancialReportsScreen
 import com.example.ui.screens.ShiftCloseDialog
 import com.example.ui.theme.SmallTraderTheme
 import com.example.viewmodel.TraderUiState
 import com.example.viewmodel.TraderViewModel
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -51,6 +54,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -931,7 +935,7 @@ class ShiftCloseRealOkHttpSecurityTest {
 
         // Wait for coroutine to complete and UI to update
         composeTestRule.waitUntil(5000) {
-            viewModel.uiState.value.isShiftClosed
+            viewModel.uiState.value.shiftCloseSuccessSnapshot != null
         }
 
         // 5. Verify server request was dispatched with exact path and headers
@@ -940,12 +944,747 @@ class ShiftCloseRealOkHttpSecurityTest {
         assertEquals("/api/mobile/v1/companies/${companyId.value}/reports/shift-close", request!!.path)
         assertEquals("POST", request.method)
 
-        // 6. Verify UI now renders closed state
+        // 6. Verify UI renders count observation state, and shift remains open per server is_shift_closed=false
         composeTestRule.onNodeWithTag("financial_reports_screen").performScrollToNode(hasTestTag("shift_close_status_text"))
         composeTestRule.onNodeWithTag("shift_close_status_text").assertIsDisplayed()
         composeTestRule.onAllNodesWithText("EXACT", substring = true)[0].assertIsDisplayed()
         assertFalse(viewModel.uiState.value.isShiftClosedPreview)
+        assertFalse("Option A: server returned is_shift_closed=false, so shift remains active", viewModel.uiState.value.isShiftClosed)
+        assertNotNull(viewModel.uiState.value.shiftCloseSuccessSnapshot)
+        assertTrue(viewModel.uiState.value.shiftCloseSuccessSnapshot!!.observationRecorded)
+        assertFalse(viewModel.uiState.value.shiftCloseSuccessSnapshot!!.isShiftClosed)
+        // Permit new explicit observation after confirmed: button remains visible
+        composeTestRule.onNodeWithTag("open_shift_close_dialog_button").assertIsDisplayed()
+
+        db.close()
+    }
+
+    @Test
+    fun testShiftClose_realProductionVM_MainActivityDialogConfirm_lostAckRetry_sameKeyAndBodyProducesCanonicalResult() = runBlocking {
+        val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store = RoomMerchantCommandStore(db, cryptoEngine)
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val apiClient = MobileMerchantApiClient(transport, baseOrigin) { validToken }
+
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2
+        )
+
+        val initialDraftId = repo.getDraftOperationId("shift_close")
+        val viewModel = TraderViewModel(repository = repo)
+        assertEquals(initialDraftId, viewModel.uiState.value.draftShiftCloseOperationId)
+
+        // 1. First server response simulates network timeout / 503 lost ACK
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(503)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"error":"TEMPORARY_UNAVAILABLE","message":"Gateway Timeout"}""")
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                val state by viewModel.uiState.collectAsState()
+                FinancialReportsScreen(
+                    state = state,
+                    onOpenShiftCloseDialog = viewModel::openShiftCloseDialog
+                )
+                if (state.isShiftCloseDialogOpen) {
+                    ShiftCloseDialog(
+                        state = state,
+                        onDismiss = { viewModel.openShiftCloseDialog(false) },
+                        onConfirmClose = { count, notes -> viewModel.closeShift(count, notes) },
+                        onUpdateCountedCash = viewModel::updateShiftCloseCountedCash,
+                        onUpdateNotes = viewModel::updateShiftCloseNotes
+                    )
+                }
+            }
+        }
+
+        // Open dialog and enter counted cash & notes
+        composeTestRule.onNodeWithTag("financial_reports_screen").performScrollToNode(hasTestTag("open_shift_close_dialog_button"))
+        composeTestRule.onNodeWithTag("open_shift_close_dialog_button").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("shift_close_counted_cash_input").performTextInput("500.00")
+        composeTestRule.onNodeWithTag("shift_close_notes_input").performTextInput("Lost ACK retry test")
+
+        // First click (without passing manual ID) -> attempts POST and fails with 503
+        composeTestRule.onNodeWithTag("confirm_shift_close_button").performClick()
+        composeTestRule.waitForIdle()
+
+        val req1 = server!!.takeRequest(2, TimeUnit.SECONDS)
+        assertNotNull(req1)
+        val expectedKey = "shiftclose-$initialDraftId"
+        assertEquals(expectedKey, req1!!.getHeader("Idempotency-Key"))
+        val body1 = req1.body.readUtf8()
+
+        // Verify draft ID did not rotate on failure! Still in recovering state
+        assertEquals(initialDraftId, viewModel.uiState.value.draftShiftCloseOperationId)
+        assertTrue(viewModel.uiState.value.isShiftCloseRecovering)
+
+        // 2. Server now enqueues authoritative 200 OK success
+        val today = WesternFormatters.currentDate()
+        val successJson = """
+            {
+                "success": true,
+                "observation_recorded": true,
+                "is_shift_closed": true,
+                "id": "01JCV8X9M2NQW3TYZ4R5S6789W",
+                "shift_closure_id": "01JCV8X9M2NQW3TYZ4R5S6789W",
+                "shift_date": "$today",
+                "currency": "ILS",
+                "currency_minor_units": 2,
+                "expected_cash": "500.00",
+                "counted_cash": "500.00",
+                "variance": "0.00",
+                "variance_status": "EXACT",
+                "closed_at": "${today}T03:30:00Z"
+            }
+        """.trimIndent()
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(successJson)
+        )
+
+        // Retry via clicking confirm again (no manual ID injected!)
+        composeTestRule.onNodeWithTag("confirm_shift_close_button").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.waitUntil(5000) {
+            viewModel.uiState.value.isShiftClosed
+        }
+
+        val req2 = server!!.takeRequest(2, TimeUnit.SECONDS)
+        assertNotNull(req2)
+        assertEquals("Retry must reuse identical Idempotency-Key", expectedKey, req2!!.getHeader("Idempotency-Key"))
+        assertEquals("Retry must reuse identical payload body", body1, req2.body.readUtf8())
+
+        // Authoritative success rotated the draft ID AFTER persisted ACK
+        val nextDraftId = viewModel.uiState.value.draftShiftCloseOperationId
+        assertTrue("Draft ID must rotate after authoritative ACK", nextDraftId.isNotBlank() && nextDraftId != initialDraftId)
+        assertFalse(viewModel.uiState.value.isShiftCloseRecovering)
         assertTrue(viewModel.uiState.value.isShiftClosed)
+
+        db.close()
+    }
+
+    @Test
+    fun testShiftClose_processDeath_RoomCloseReopen_newVM_retainsDraftAndPayload_producesCanonicalResult() = runBlocking {
+        val db1 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store1 = RoomMerchantCommandStore(db1, cryptoEngine)
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val apiClient = MobileMerchantApiClient(transport, baseOrigin) { validToken }
+
+        val repo1 = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store1,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2
+        )
+
+        val origDraftId = repo1.getDraftOperationId("shift_close")
+        val vm1 = TraderViewModel(repository = repo1)
+
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(503)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"error":"LOST_ACK"}""")
+        )
+
+        val completion1 = CompletableDeferred<Result<ShiftCloseResponse>>()
+        vm1.openShiftCloseDialog(true)
+        vm1.updateShiftCloseCountedCash("650.00")
+        vm1.updateShiftCloseNotes("Pre-crash intent notes")
+        vm1.closeShift("650.00", "Pre-crash intent notes") { res ->
+            completion1.complete(res)
+        }
+
+        val req1 = server!!.takeRequest(2, TimeUnit.SECONDS)
+        assertNotNull(req1)
+        val body1 = req1!!.body.readUtf8()
+        completion1.await()
+
+        // Simulate process death / restart
+        db1.close()
+
+        val db2 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store2 = RoomMerchantCommandStore(db2, cryptoEngine)
+        val repo2 = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store2,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2
+        )
+
+        val vm2 = TraderViewModel(repository = repo2)
+
+        // Verify coldboot rehydrated draft ID, recovering state, and original payload fields
+        assertEquals(origDraftId, vm2.uiState.value.draftShiftCloseOperationId)
+        assertTrue(vm2.uiState.value.isShiftCloseRecovering)
+        assertEquals("650.00", vm2.uiState.value.shiftCloseCountedCashInput)
+        assertEquals("Pre-crash intent notes", vm2.uiState.value.shiftCloseNotesInput)
+
+        // Resubmit via new VM
+        val today = WesternFormatters.currentDate()
+        val successJson = """
+            {
+                "success": true,
+                "observation_recorded": true,
+                "is_shift_closed": true,
+                "id": "01JCV8X9M2NQW3TYZ4R5S6789K",
+                "shift_closure_id": "01JCV8X9M2NQW3TYZ4R5S6789K",
+                "shift_date": "$today",
+                "currency": "ILS",
+                "currency_minor_units": 2,
+                "expected_cash": "650.00",
+                "counted_cash": "650.00",
+                "variance": "0.00",
+                "variance_status": "EXACT",
+                "closed_at": "${today}T04:00:00Z"
+            }
+        """.trimIndent()
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(successJson)
+        )
+
+        val completion2 = CompletableDeferred<Result<ShiftCloseResponse>>()
+        vm2.closeShift { res ->
+            completion2.complete(res)
+        }
+
+        val req2 = server!!.takeRequest(2, TimeUnit.SECONDS)
+        assertNotNull(req2)
+        assertEquals("shiftclose-$origDraftId", req2!!.getHeader("Idempotency-Key"))
+        assertEquals(body1, req2.body.readUtf8())
+        val res2 = completion2.await()
+        assertTrue(res2.isSuccess)
+        assertTrue(vm2.uiState.value.isShiftClosed)
+
+        db2.close()
+    }
+
+    @Test
+    fun testShiftClose_concurrentTap_stillOneOutboundPost() = runBlocking {
+        val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store = RoomMerchantCommandStore(db, cryptoEngine)
+
+        val today = WesternFormatters.currentDate()
+        val successJson = """
+            {
+                "success": true,
+                "observation_recorded": true,
+                "is_shift_closed": true,
+                "id": "01JCV8X9M2NQW3TYZ4R5S6789M",
+                "shift_closure_id": "01JCV8X9M2NQW3TYZ4R5S6789M",
+                "shift_date": "$today",
+                "currency": "ILS",
+                "currency_minor_units": 2,
+                "expected_cash": "300.00",
+                "counted_cash": "300.00",
+                "variance": "0.00",
+                "variance_status": "EXACT",
+                "closed_at": "${today}T04:10:00Z"
+            }
+        """.trimIndent()
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(successJson)
+        )
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val apiClient = MobileMerchantApiClient(transport, baseOrigin) { validToken }
+
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2
+        )
+
+        val viewModel = TraderViewModel(repository = repo)
+        viewModel.openShiftCloseDialog(true)
+        viewModel.updateShiftCloseCountedCash("300.00")
+
+        // Concurrently invoke closeShift twice
+        viewModel.closeShift("300.00")
+        viewModel.closeShift("300.00")
+
+        delay(300)
+
+        assertEquals("Concurrent tap must result in exactly one outbound POST", 1, server!!.requestCount)
+
+        db.close()
+    }
+
+    @Test
+    fun testShiftClose_changedPendingCountOrNotes_blockedBeforePost_andRestoresOriginal() = runBlocking {
+        val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store = RoomMerchantCommandStore(db, cryptoEngine)
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val apiClient = MobileMerchantApiClient(transport, baseOrigin) { validToken }
+
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2
+        )
+
+        val viewModel = TraderViewModel(repository = repo)
+
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(503)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"error":"TEMP_DOWN"}""")
+        )
+
+        val completion1 = CompletableDeferred<Result<ShiftCloseResponse>>()
+        viewModel.openShiftCloseDialog(true)
+        viewModel.updateShiftCloseCountedCash("450.00")
+        viewModel.updateShiftCloseNotes("Original notes")
+        viewModel.closeShift("450.00", "Original notes") { res ->
+            completion1.complete(res)
+        }
+
+        val req1 = server!!.takeRequest(2, TimeUnit.SECONDS)
+        assertNotNull(req1)
+        assertEquals(1, server!!.requestCount)
+        completion1.await()
+        assertTrue(viewModel.uiState.value.isShiftCloseRecovering)
+
+        // Attempt to call closeShift with changed count & notes while recovering
+        var failedResult: Result<ShiftCloseResponse>? = null
+        viewModel.closeShift("999.00", "Tampered notes") { res ->
+            failedResult = res
+        }
+
+        assertNotNull(failedResult)
+        assertTrue(failedResult!!.isFailure)
+        assertTrue(failedResult!!.exceptionOrNull() is IllegalStateException)
+        // Must NOT dispatch outbound request to server
+        assertEquals("Changed parameters while pending must be blocked before POST", 1, server!!.requestCount)
+
+        // Must restore original payload values into state
+        assertEquals("450.00", viewModel.uiState.value.shiftCloseCountedCashInput)
+        assertEquals("Original notes", viewModel.uiState.value.shiftCloseNotesInput)
+
+        db.close()
+    }
+
+    @Test
+    fun testShiftClose_coldBoot_rehydratesCompletedSnapshot_sameScopeAndDate() = runBlocking {
+        val db1 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store1 = RoomMerchantCommandStore(db1, cryptoEngine)
+
+        val today = WesternFormatters.currentDate()
+        val successJson = """
+            {
+                "success": true,
+                "observation_recorded": true,
+                "is_shift_closed": true,
+                "id": "01JCV8X9M2NQW3TYZ4R5S6789S",
+                "shift_closure_id": "01JCV8X9M2NQW3TYZ4R5S6789S",
+                "shift_date": "$today",
+                "currency": "ILS",
+                "currency_minor_units": 2,
+                "expected_cash": "800.00",
+                "counted_cash": "800.00",
+                "variance": "0.00",
+                "variance_status": "EXACT",
+                "closed_at": "${today}T02:45:00Z"
+            }
+        """.trimIndent()
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(successJson)
+        )
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val apiClient = MobileMerchantApiClient(transport, baseOrigin) { validToken }
+
+        val repo1 = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store1,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2
+        )
+
+        val vm1 = TraderViewModel(repository = repo1)
+        val completion1 = CompletableDeferred<Result<ShiftCloseResponse>>()
+        vm1.openShiftCloseDialog(true)
+        vm1.closeShift("800.00") { res ->
+            completion1.complete(res)
+        }
+        val req1 = server!!.takeRequest(2, TimeUnit.SECONDS)
+        assertNotNull(req1)
+        val res1 = completion1.await()
+        assertTrue(res1.isSuccess)
+        assertTrue(vm1.uiState.value.isShiftClosed)
+
+        // Close and simulate cold boot
+        db1.close()
+
+        val db2 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store2 = RoomMerchantCommandStore(db2, cryptoEngine)
+        val repo2 = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store2,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2
+        )
+
+        val vm2 = TraderViewModel(repository = repo2)
+
+        // Verify cold boot rehydrated completed snapshot
+        val snap = vm2.uiState.value.shiftCloseSuccessSnapshot
+        assertNotNull("Must rehydrate completed snapshot on cold boot", snap)
+        assertEquals("01JCV8X9M2NQW3TYZ4R5S6789S", snap!!.shiftClosureId.value)
+        assertEquals(today, snap.shiftDate)
+        assertEquals(BigDecimal("800.00"), snap.countedCash)
+        assertEquals("EXACT", snap.varianceStatus)
+        assertEquals("${today}T02:45:00Z", snap.closedAt)
+        assertTrue(vm2.uiState.value.isShiftClosed)
+        assertEquals("${today}T02:45:00Z", vm2.uiState.value.shiftClosureTimestamp)
+
+        db2.close()
+    }
+
+    @Test
+    fun testShiftClose_coldBoot_newDayOrWrongScope_noFalseClosed() = runBlocking {
+        val db1 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store1 = RoomMerchantCommandStore(db1, cryptoEngine)
+
+        // Record a completed shift close for a past date (newday)
+        val pastDate = "2026-11-20"
+        val payloadObj = StrictJsonObject(
+            mapOf(
+                "counted_cash" to StrictJsonString("500.00"),
+                "cash_account_id" to StrictJsonString(cashAccountId.value),
+                "currency" to StrictJsonString("ILS"),
+                "currency_minor_units" to StrictJsonNumber("2", isInt = true),
+                "shift_date" to StrictJsonString(pastDate)
+            )
+        )
+        val payloadBytes = CanonicalJsonSerializer.serializeToUtf8Bytes(payloadObj)
+        val payloadDigest = "sha256:" + java.security.MessageDigest.getInstance("SHA-256")
+            .digest(payloadBytes).joinToString("") { "%02x".format(it) }
+
+        val snapObj = StrictJsonObject(
+            mapOf(
+                "success" to StrictJsonBoolean(true),
+                "observation_recorded" to StrictJsonBoolean(true),
+                "is_shift_closed" to StrictJsonBoolean(true),
+                "id" to StrictJsonString("01JCV8X9M2NQW3TYZ4R5S6789P"),
+                "shift_closure_id" to StrictJsonString("01JCV8X9M2NQW3TYZ4R5S6789P"),
+                "shift_date" to StrictJsonString(pastDate),
+                "currency" to StrictJsonString("ILS"),
+                "currency_minor_units" to StrictJsonNumber("2", isInt = true),
+                "expected_cash" to StrictJsonString("500.00"),
+                "counted_cash" to StrictJsonString("500.00"),
+                "variance" to StrictJsonString("0.00"),
+                "variance_status" to StrictJsonString("EXACT"),
+                "closed_at" to StrictJsonString("${pastDate}T20:00:00Z")
+            )
+        )
+        val snapBytes = CanonicalJsonSerializer.serialize(snapObj).toByteArray(java.nio.charset.StandardCharsets.UTF_8)
+
+        store1.recordPendingCommand(
+            companyId = companyId.value,
+            commandId = "past-cmd-001",
+            actorId = actorId.value,
+            deviceId = deviceId.value,
+            commandType = "shift.close",
+            idempotencyKey = "shiftclose-past-cmd-001",
+            payloadDigest = payloadDigest,
+            canonicalPayloadBytes = payloadBytes
+        )
+        store1.markCompleted(companyId.value, "past-cmd-001", snapBytes)
+
+        db1.close()
+
+        // Cold boot with today's date (WesternFormatters.currentDate() != "2026-11-20")
+        val db2 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store2 = RoomMerchantCommandStore(db2, cryptoEngine)
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val apiClient = MobileMerchantApiClient(transport, baseOrigin) { validToken }
+
+        val repo2 = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store2,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2
+        )
+
+        val vm2 = TraderViewModel(repository = repo2)
+
+        // Verify that past date does NOT mark today's shift as falsely closed!
+        assertNull("Past date must not mark current shift closed on cold boot", vm2.uiState.value.shiftCloseSuccessSnapshot)
+        assertFalse("Current shift must remain open on a new day", vm2.uiState.value.isShiftClosed)
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                val state by vm2.uiState.collectAsState()
+                FinancialReportsScreen(
+                    state = state,
+                    onOpenShiftCloseDialog = vm2::openShiftCloseDialog
+                )
+            }
+        }
+
+        // Truthfully displays open status
+        composeTestRule.onNodeWithTag("financial_reports_screen").performScrollToNode(hasTestTag("shift_close_status_text"))
+        composeTestRule.onNodeWithTag("shift_close_status_text").assertIsDisplayed()
+        composeTestRule.onNodeWithText("حالة الوردية: مفتوحة وتستقبل العمليات").assertIsDisplayed()
+
+        db2.close()
+    }
+
+    @Test
+    fun testShiftClose_productionUI_serverObservationTrueClosedFalse_staysNotClosed_withAuthoritativeVarianceAndObservedTimestamp() = runBlocking {
+        val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store = RoomMerchantCommandStore(db, cryptoEngine)
+
+        val today = WesternFormatters.currentDate()
+        val observationJson = """
+            {
+                "success": true,
+                "observation_recorded": true,
+                "is_shift_closed": false,
+                "id": "01JCV8X9M2NQW3TYZ4R5S67899",
+                "shift_closure_id": "01JCV8X9M2NQW3TYZ4R5S67899",
+                "shift_date": "$today",
+                "currency": "ILS",
+                "currency_minor_units": 2,
+                "expected_cash": "700.00",
+                "counted_cash": "715.00",
+                "variance": "15.00",
+                "variance_status": "OVERAGE",
+                "observed_at": "${today}T04:15:00Z"
+            }
+        """.trimIndent()
+
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(observationJson)
+        )
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val apiClient = MobileMerchantApiClient(transport, baseOrigin) { validToken }
+
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2,
+            permissions = setOf("reports.financial.view")
+        )
+
+        val viewModel = TraderViewModel(repository = repo)
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                val state by viewModel.uiState.collectAsState()
+                FinancialReportsScreen(
+                    state = state,
+                    onOpenShiftCloseDialog = viewModel::openShiftCloseDialog
+                )
+                if (state.isShiftCloseDialogOpen) {
+                    ShiftCloseDialog(
+                        state = state,
+                        onDismiss = { viewModel.openShiftCloseDialog(false) },
+                        onConfirmClose = { count, notes -> viewModel.closeShift(count, notes) },
+                        onUpdateCountedCash = viewModel::updateShiftCloseCountedCash,
+                        onUpdateNotes = viewModel::updateShiftCloseNotes
+                    )
+                }
+            }
+        }
+
+        // Open dialog and submit counted cash
+        composeTestRule.onNodeWithTag("financial_reports_screen").performScrollToNode(hasTestTag("open_shift_close_dialog_button"))
+        composeTestRule.onNodeWithTag("open_shift_close_dialog_button").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("shift_close_counted_cash_input").performTextInput("715.00")
+        composeTestRule.onNodeWithTag("confirm_shift_close_button").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.waitUntil(5000) {
+            viewModel.uiState.value.shiftCloseSuccessSnapshot != null
+        }
+
+        val request = server!!.takeRequest(2, TimeUnit.SECONDS)
+        assertNotNull(request)
+
+        val state = viewModel.uiState.value
+        assertFalse("Option A: server returned is_shift_closed=false, so shift must stay NOT closed", state.isShiftClosed)
+        val snap = state.shiftCloseSuccessSnapshot
+        assertNotNull(snap)
+        assertTrue(snap!!.observationRecorded)
+        assertFalse(snap.isShiftClosed)
+        assertEquals(BigDecimal("15.00"), snap.variance)
+        assertEquals("OVERAGE", snap.varianceStatus)
+        assertEquals("${today}T04:15:00Z", state.shiftObservationTimestamp)
+
+        // UI displays count observation banner and leaves open_shift_close_dialog_button visible
+        composeTestRule.onNodeWithTag("financial_reports_screen").performScrollToNode(hasTestTag("shift_close_status_text"))
+        composeTestRule.onNodeWithTag("shift_close_status_text").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("open_shift_close_dialog_button").assertIsDisplayed()
+
+        db.close()
+    }
+
+    @Test
+    fun testShiftClose_permissions_leastPrivilegeReportsFinancialViewOnly_rejectsCashOnlyAndNeither() = runBlocking {
+        val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store = RoomMerchantCommandStore(db, cryptoEngine)
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val apiClient = MobileMerchantApiClient(transport, baseOrigin) { validToken }
+
+        // Case 1: reports-only permission -> permitted
+        val repoReports = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2,
+            permissions = setOf("reports.financial.view")
+        )
+        val today = WesternFormatters.currentDate()
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                    {
+                        "success": true,
+                        "observation_recorded": true,
+                        "is_shift_closed": false,
+                        "id": "01JCV8X9M2NQW3TYZ4R5S6789A",
+                        "shift_closure_id": "01JCV8X9M2NQW3TYZ4R5S6789A",
+                        "shift_date": "$today",
+                        "currency": "ILS",
+                        "currency_minor_units": 2,
+                        "expected_cash": "100.00",
+                        "counted_cash": "100.00",
+                        "variance": "0.00",
+                        "variance_status": "EXACT",
+                        "closed_at": "${today}T01:00:00Z"
+                    }
+                """.trimIndent())
+        )
+        val resReports = repoReports.closeShift(BigDecimal("100.00"), commandId = "cmd-reports-ok")
+        assertTrue("reports.financial.view must be permitted", resReports.isSuccess)
+        assertEquals(1, server!!.requestCount)
+
+        // Case 2: cash-only permission (money.cash.view) -> 403 Forbidden without network POST
+        val repoCashOnly = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2,
+            permissions = setOf("money.cash.view")
+        )
+        val resCashOnly = repoCashOnly.closeShift(BigDecimal("100.00"), commandId = "cmd-cash-deny")
+        assertTrue("money.cash.view only must fail with SecurityException", resCashOnly.isFailure)
+        assertTrue(resCashOnly.exceptionOrNull() is SecurityException)
+        assertTrue(resCashOnly.exceptionOrNull()!!.message!!.contains("Missing required reports permission"))
+        assertEquals("Cash-only must not make network call", 1, server!!.requestCount)
+
+        // Verify UI with cash-only user hides submit UI and shows Access Restricted
+        val cashOnlySession = UserSession(
+            id = "usr_cashier_1",
+            name = "كاشير الصندوق",
+            username = "cashier",
+            role = UserRole.CASHIER,
+            permissions = setOf("money.cash.view"),
+            branchNameAr = "الفرع",
+            branchNameEn = "Branch",
+            isDemoSession = false
+        )
+        assertFalse("cash-only user cannot view reports", cashOnlySession.canViewReports())
+
+        // Case 3: neither permission -> 403 Forbidden without network POST
+        val repoNeither = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2,
+            permissions = setOf("pos.sale")
+        )
+        val resNeither = repoNeither.closeShift(BigDecimal("100.00"), commandId = "cmd-neither-deny")
+        assertTrue(resNeither.isFailure)
+        assertTrue(resNeither.exceptionOrNull() is SecurityException)
+        assertEquals("Neither must not make network call", 1, server!!.requestCount)
 
         db.close()
     }

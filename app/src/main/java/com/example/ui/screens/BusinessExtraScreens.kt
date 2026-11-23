@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -1058,6 +1059,8 @@ fun ShiftCloseDialog(
     val lang = state.language
     val financial = TraderTheme.financial
     val isSubmitting = state.isShiftCloseSubmitting
+    val isRecovering = state.isShiftCloseRecovering
+    val isReadOnly = isSubmitting || isRecovering
     val serverError = state.shiftCloseError
     val isDemo = state.currentSession.isDemoSession
 
@@ -1074,6 +1077,17 @@ fun ShiftCloseDialog(
     var localNotes by rememberSaveable { mutableStateOf(state.shiftCloseNotesInput) }
     var localValidationError by rememberSaveable { mutableStateOf<String?>(null) }
 
+    LaunchedEffect(state.shiftCloseCountedCashInput) {
+        if (state.shiftCloseCountedCashInput.isNotBlank()) {
+            localInput = state.shiftCloseCountedCashInput
+        }
+    }
+    LaunchedEffect(state.shiftCloseNotesInput) {
+        if (state.shiftCloseNotesInput.isNotBlank()) {
+            localNotes = state.shiftCloseNotesInput
+        }
+    }
+
     AlertDialog(
         onDismissRequest = { if (!isSubmitting) onDismiss() },
         shape = RoundedCornerShape(16.dp),
@@ -1085,7 +1099,7 @@ fun ShiftCloseDialog(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = lang.tr("إغلاق الوردية وجرد النقد", "Close Shift & Cash Count"),
+                    text = lang.tr("تسجيل جرد النقد ومطابقة الوردية", "Record Cash Count & Shift Reconciliation"),
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -1102,6 +1116,38 @@ fun ShiftCloseDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                // Recovering in-flight banner
+                if (isRecovering) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("shift_close_recovering_banner")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = lang.tr(
+                                    "جاري استعادة عملية إغلاق سابقة قيد الإرسال. لا يمكن تعديل القيم حتى اكتمال التحقق.",
+                                    "Recovering in-flight shift close from local store. Values are read-only until confirmed."
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                        }
+                    }
+                }
+
                 // Expected Cash Reference Card
                 Surface(
                     shape = RoundedCornerShape(10.dp),
@@ -1140,7 +1186,7 @@ fun ShiftCloseDialog(
                                 localValidationError = null
                             },
                             shape = RoundedCornerShape(8.dp),
-                            enabled = !isSubmitting,
+                            enabled = !isReadOnly,
                             modifier = Modifier
                                 .heightIn(min = 40.dp)
                                 .testTag("shift_close_match_book_button")
@@ -1173,7 +1219,7 @@ fun ShiftCloseDialog(
                     placeholder = { Text("0.00") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
-                    enabled = !isSubmitting,
+                    enabled = !isReadOnly,
                     isError = localValidationError != null || serverError != null,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
@@ -1191,7 +1237,7 @@ fun ShiftCloseDialog(
                     label = { Text(lang.tr("ملاحظات الإغلاق (اختياري)", "Closure Notes (Optional)")) },
                     placeholder = { Text(lang.tr("أي ملاحظات بخصوص الجرد أو الفروقات...", "Notes on count or variance...")) },
                     maxLines = 3,
-                    enabled = !isSubmitting,
+                    enabled = !isReadOnly,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1285,7 +1331,7 @@ fun ShiftCloseDialog(
                     text = if (isSubmitting) {
                         lang.tr("جاري الحفظ...", "Saving...")
                     } else {
-                        lang.tr("تأكيد إغلاق الوردية", "Confirm Shift Close")
+                        lang.tr("تسجيل جرد النقد", "Record Cash Count")
                     },
                     style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                 )
@@ -1881,9 +1927,10 @@ fun FinancialReportsScreen(
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
                         if (closeSnap != null) {
+                            val timeLabel = closeSnap.observedAt ?: closeSnap.closedAt ?: ""
                             ReportMetricRow(
                                 label = lang.tr("وقت التسجيل:", "Recorded At:"),
-                                value = closeSnap.closedAt,
+                                value = timeLabel,
                                 valueColor = MaterialTheme.colorScheme.onSurface
                             )
                             ReportMetricRow(
@@ -1905,15 +1952,65 @@ fun FinancialReportsScreen(
                                     else -> financial.debit
                                 }
                             )
-                            Text(
-                                text = lang.tr(
-                                    "حالة الوردية: مغلقة (${closeSnap.closedAt})",
-                                    "Shift Status: Closed (${closeSnap.closedAt})"
-                                ),
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = financial.income,
-                                modifier = Modifier.testTag("shift_close_status_text")
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (closeSnap.isShiftClosed) {
+                                        lang.tr(
+                                            "حالة الوردية: مغلقة ($timeLabel)",
+                                            "Shift Status: Closed ($timeLabel)"
+                                        )
+                                    } else {
+                                        lang.tr(
+                                            "حالة الوردية: مفتوحة (تم تسجيل الجرد: $timeLabel)",
+                                            "Shift Status: Open (Count recorded: $timeLabel)"
+                                        )
+                                    },
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = financial.income,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("shift_close_status_text")
+                                )
+                                if (!closeSnap.isShiftClosed) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Button(
+                                        onClick = { onOpenShiftCloseDialog(true) },
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        ),
+                                        modifier = Modifier
+                                            .heightIn(min = 44.dp)
+                                            .testTag("open_shift_close_dialog_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Lock,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = lang.tr("تسجيل جرد النقد", "Record Cash Count"),
+                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                                        )
+                                    }
+                                }
+                            }
+                            if (!closeSnap.isShiftClosed) {
+                                Text(
+                                    text = lang.tr(
+                                        "ملاحظة: تم تسجيل الجرد (${closeSnap.varianceStatus}) بنجاح. الخادم لا يفرض إغلاقاً حصرياً للوردية.",
+                                        "Note: Count observation (${closeSnap.varianceStatus}) recorded. Server leaves shift active."
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                             Text(
                                 text = "${closeSnap.varianceStatus}: ${WesternFormatters.formatNumber(closeSnap.variance)} ${closeSnap.currency}",
                                 style = MaterialTheme.typography.labelSmall,
@@ -1952,7 +2049,7 @@ fun FinancialReportsScreen(
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = lang.tr("إغلاق الوردية وجرد النقد", "Close Shift & Count"),
+                                        text = lang.tr("تسجيل جرد النقد", "Record Cash Count"),
                                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
                                     )
                                 }

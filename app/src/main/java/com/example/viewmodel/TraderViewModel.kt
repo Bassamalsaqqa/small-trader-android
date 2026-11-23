@@ -82,6 +82,13 @@ class TraderViewModel(
             draftCustomerCreateOperationId = repository.getDraftOperationId("customer_create"),
             draftSupplierCreateOperationId = repository.getDraftOperationId("supplier_create"),
             draftGrnOperationId = repository.getDraftOperationId("goods_receipt_note"),
+            draftShiftCloseOperationId = repository.getDraftOperationId("shift_close"),
+            activeShiftCloseDraft = repository.getActiveDraftPayload("shift_close"),
+            isShiftCloseRecovering = repository.isDraftRecovering("shift_close"),
+            shiftCloseCountedCashInput = repository.getActiveDraftPayload("shift_close")?.properties?.get("counted_cash")?.asString() ?: "",
+            shiftCloseNotesInput = repository.getActiveDraftPayload("shift_close")?.properties?.get("notes")?.asString() ?: "",
+            shiftCloseSuccessSnapshot = repository.getLatestCompletedShiftClose(),
+            shiftClosedTimestamp = repository.getLatestCompletedShiftClose()?.closedAt,
             productsHasMore = repository.productsHasMoreFlow.value,
             customersHasMore = repository.customersHasMoreFlow.value,
             suppliersHasMore = repository.suppliersHasMoreFlow.value
@@ -498,13 +505,11 @@ class TraderViewModel(
         }
         viewModelScope.launch {
             repository.shiftCloseSuccessFlow.collect { closeSnap ->
-                if (closeSnap != null) {
-                    _uiState.update { current ->
-                        current.copy(
-                            shiftCloseSuccessSnapshot = closeSnap,
-                            shiftClosedTimestamp = closeSnap.closedAt
-                        )
-                    }
+                _uiState.update { current ->
+                    current.copy(
+                        shiftCloseSuccessSnapshot = closeSnap,
+                        shiftClosedTimestamp = closeSnap?.closedAt ?: current.shiftClosedTimestamp
+                    )
                 }
             }
         }
@@ -3873,21 +3878,47 @@ class TraderViewModel(
     }
 
     fun openShiftCloseDialog(open: Boolean) {
-        _uiState.update { current ->
-            val defaultCount = if (open && current.shiftCloseCountedCashInput.isBlank()) {
-                current.countedPhysicalCashText
-            } else {
-                current.shiftCloseCountedCashInput
+        if (open) {
+            val draftId = repository.getDraftOperationId("shift_close")
+            val payload = repository.getActiveDraftPayload("shift_close")
+            val isRecovering = repository.isDraftRecovering("shift_close")
+            val recCount = payload?.properties?.get("counted_cash")?.asString()
+            val recNotes = payload?.properties?.get("notes")?.asString()
+            _uiState.update { current ->
+                val countInput = when {
+                    isRecovering && recCount != null -> recCount
+                    current.shiftCloseCountedCashInput.isNotBlank() -> current.shiftCloseCountedCashInput
+                    recCount != null -> recCount
+                    else -> current.countedPhysicalCashText
+                }
+                val notesInput = when {
+                    isRecovering && recNotes != null -> recNotes
+                    current.shiftCloseNotesInput.isNotBlank() -> current.shiftCloseNotesInput
+                    recNotes != null -> recNotes
+                    else -> ""
+                }
+                current.copy(
+                    isShiftCloseDialogOpen = true,
+                    draftShiftCloseOperationId = draftId,
+                    activeShiftCloseDraft = payload,
+                    isShiftCloseRecovering = isRecovering,
+                    shiftCloseCountedCashInput = countInput,
+                    shiftCloseNotesInput = notesInput,
+                    shiftCloseError = null
+                )
             }
-            current.copy(
-                isShiftCloseDialogOpen = open,
-                shiftCloseCountedCashInput = defaultCount,
-                shiftCloseError = if (!open) null else current.shiftCloseError
-            )
+        } else {
+            _uiState.update { current ->
+                current.copy(
+                    isShiftCloseDialogOpen = false,
+                    shiftCloseError = null
+                )
+            }
         }
     }
 
     fun updateShiftCloseCountedCash(text: String) {
+        if (_uiState.value.isShiftCloseRecovering) return
         val sanitized = WesternFormatters.sanitizeWesternDigits(text)
         _uiState.update {
             it.copy(shiftCloseCountedCashInput = sanitized, shiftCloseError = null)
@@ -3895,6 +3926,7 @@ class TraderViewModel(
     }
 
     fun updateShiftCloseNotes(text: String) {
+        if (_uiState.value.isShiftCloseRecovering) return
         _uiState.update {
             it.copy(shiftCloseNotesInput = text)
         }
@@ -3903,12 +3935,40 @@ class TraderViewModel(
     fun closeShift(
         countedCashText: String? = null,
         notesText: String? = null,
-        commandId: String = java.util.UUID.randomUUID().toString(),
+        commandId: String? = null,
         onComplete: ((Result<com.example.data.mobile.merchantread.ShiftCloseResponse>) -> Unit)? = null
     ) {
         val current = _uiState.value
+        val effectiveCommandId = when {
+            !commandId.isNullOrBlank() -> commandId
+            current.draftShiftCloseOperationId.isNotBlank() -> current.draftShiftCloseOperationId
+            else -> repository.getDraftOperationId("shift_close")
+        }
+
         val rawCount = (countedCashText ?: current.shiftCloseCountedCashInput).trim()
         val effectiveNotes = notesText ?: current.shiftCloseNotesInput.ifBlank { null }
+
+        val activePayload = repository.getActiveDraftPayload("shift_close")
+        val isRecovering = repository.isDraftRecovering("shift_close")
+        if (isRecovering && activePayload != null) {
+            val origCount = activePayload.properties["counted_cash"]?.asString() ?: ""
+            val origNotes = activePayload.properties["notes"]?.asString() ?: ""
+            if (rawCount != origCount || (effectiveNotes ?: "") != origNotes) {
+                val err = current.language.tr(
+                    "لا يمكن تعديل بيانات جرد معلق قيد الإرسال. جاري استعادة القيم الأصلية",
+                    "Cannot modify parameters of a pending in-flight shift close. Restoring original values"
+                )
+                _uiState.update {
+                    it.copy(
+                        shiftCloseCountedCashInput = origCount,
+                        shiftCloseNotesInput = origNotes,
+                        shiftCloseError = err
+                    )
+                }
+                onComplete?.invoke(Result.failure(IllegalStateException(err)))
+                return
+            }
+        }
 
         if (rawCount.isEmpty()) {
             val err = current.language.tr("يرجى إدخال المبلغ الفعلي بالدرج", "Please enter counted cash in drawer")
@@ -3944,53 +4004,86 @@ class TraderViewModel(
             return
         }
 
+        if (current.isShiftCloseSubmitting) {
+            return
+        }
+
         _uiState.update {
             it.copy(
                 isShiftCloseSubmitting = true,
                 shiftCloseError = null,
+                draftShiftCloseOperationId = effectiveCommandId,
                 shiftCloseCountedCashInput = rawCount,
                 shiftCloseNotesInput = effectiveNotes ?: ""
             )
         }
 
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val result = repository.closeShift(
                 countedCash = parsed,
                 notes = effectiveNotes,
-                commandId = commandId
+                commandId = effectiveCommandId
             )
             if (result.isSuccess) {
                 val snapshot = result.getOrThrow()
+                val nextDraftId = repository.getDraftOperationId("shift_close")
                 _uiState.update {
                     it.copy(
                         isShiftCloseSubmitting = false,
                         isShiftCloseDialogOpen = false,
+                        isShiftCloseRecovering = false,
+                        activeShiftCloseDraft = null,
+                        draftShiftCloseOperationId = nextDraftId,
                         shiftCloseSuccessSnapshot = snapshot,
-                        shiftClosedTimestamp = snapshot.closedAt,
+                        shiftClosedTimestamp = if (snapshot.isShiftClosed) (snapshot.closedAt ?: snapshot.observedAt) else null,
+                        shiftObservedTimestamp = snapshot.observedAt ?: snapshot.closedAt,
+                        shiftCloseCountedCashInput = "",
+                        shiftCloseNotesInput = "",
                         shiftCloseError = null
                     )
                 }
                 showBanner(
-                    ar = "تم تسجيل جرد الصندوق والوردية بنجاح (${snapshot.varianceStatus})",
-                    en = "Shift cash count recorded successfully (${snapshot.varianceStatus})"
+                    ar = if (snapshot.isShiftClosed) "تم إغلاق الوردية بنجاح (${snapshot.varianceStatus})" else "تم تسجيل جرد الصندوق ومطابقة الوردية بنجاح (${snapshot.varianceStatus})",
+                    en = if (snapshot.isShiftClosed) "Shift closed successfully (${snapshot.varianceStatus})" else "Cash count and shift reconciliation recorded successfully (${snapshot.varianceStatus})"
                 )
                 onComplete?.invoke(Result.success(snapshot))
             } else {
-                val ex = result.exceptionOrNull() ?: RuntimeException("Failed to close shift")
-                val errMsg = ex.message ?: "Failed to close shift"
+                val ex = result.exceptionOrNull() ?: RuntimeException("Failed to record shift count")
+                val errMsg = ex.message ?: "Failed to record shift count"
+                val isStillRecovering = repository.isDraftRecovering("shift_close")
+                val activeDraft = repository.getActiveDraftPayload("shift_close")
                 _uiState.update {
                     it.copy(
                         isShiftCloseSubmitting = false,
+                        isShiftCloseRecovering = isStillRecovering,
+                        activeShiftCloseDraft = activeDraft,
                         shiftCloseError = errMsg
                     )
                 }
                 showBanner(
-                    ar = "فشل تسجيل إغلاق الوردية: $errMsg",
-                    en = "Shift close failed: $errMsg",
+                    ar = "فشل تسجيل جرد الوردية: $errMsg",
+                    en = "Shift count failed: $errMsg",
                     isError = true
                 )
                 onComplete?.invoke(Result.failure(ex))
             }
+        }
+    }
+
+    fun startNewShiftWorkflow() {
+        val nextDraftId = repository.rotateDraftOperationId("shift_close")
+        _uiState.update {
+            it.copy(
+                draftShiftCloseOperationId = nextDraftId,
+                isShiftCloseRecovering = false,
+                activeShiftCloseDraft = null,
+                shiftCloseCountedCashInput = "",
+                shiftCloseNotesInput = "",
+                shiftCloseSuccessSnapshot = null,
+                shiftClosedTimestamp = null,
+                isShiftClosedPreview = false,
+                shiftCloseError = null
+            )
         }
     }
 

@@ -115,6 +115,9 @@ data class TraderUiState(
     val draftGrnOperationId: String = java.util.UUID.randomUUID().toString(),
     val draftCustomerCreateOperationId: String = "",
     val draftSupplierCreateOperationId: String = "",
+    val draftShiftCloseOperationId: String = "",
+    val isShiftCloseRecovering: Boolean = false,
+    val activeShiftCloseDraft: com.example.data.mobile.contract.StrictJsonObject? = null,
     val checkoutErrorAr: String? = null,
     val checkoutErrorEn: String? = null,
 
@@ -129,6 +132,7 @@ data class TraderUiState(
     val countedPhysicalCashText: String = "",
     val isShiftClosedPreview: Boolean = false,
     val shiftClosedTimestamp: String? = null,
+    val shiftObservedTimestamp: String? = null,
     val isShiftCloseDialogOpen: Boolean = false,
     val isShiftCloseSubmitting: Boolean = false,
     val shiftCloseError: String? = null,
@@ -506,8 +510,41 @@ data class TraderUiState(
                 .toDouble()
         }
 
-    val isShiftClosed: Boolean get() = shiftCloseSuccessSnapshot != null || isShiftClosedPreview
-    val shiftClosureTimestamp: String? get() = shiftCloseSuccessSnapshot?.closedAt ?: shiftClosedTimestamp
+    val isShiftClosed: Boolean
+        get() {
+            val snap = shiftCloseSuccessSnapshot
+            if (snap != null) {
+                val expectedDate = liveShiftSummary?.shiftDate ?: todayDate
+                if (snap.shiftDate == expectedDate && snap.isShiftClosed) {
+                    return true
+                }
+            }
+            return isShiftClosedPreview
+        }
+
+    val shiftClosureTimestamp: String?
+        get() {
+            val snap = shiftCloseSuccessSnapshot
+            if (snap != null) {
+                val expectedDate = liveShiftSummary?.shiftDate ?: todayDate
+                if (snap.shiftDate == expectedDate && snap.isShiftClosed) {
+                    return snap.closedAt ?: snap.observedAt
+                }
+            }
+            return shiftClosedTimestamp
+        }
+
+    val shiftObservationTimestamp: String?
+        get() {
+            val snap = shiftCloseSuccessSnapshot
+            if (snap != null) {
+                val expectedDate = liveShiftSummary?.shiftDate ?: todayDate
+                if (snap.shiftDate == expectedDate) {
+                    return snap.observedAt ?: snap.closedAt
+                }
+            }
+            return shiftObservedTimestamp
+        }
 
     val drawerCashSalesIls: Double get() = shiftCashSalesIls
     val totalCustomerCollectionsIls: Double get() = shiftCustomerCollectionsIls

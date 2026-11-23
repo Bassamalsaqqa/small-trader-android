@@ -30,6 +30,7 @@ import com.example.data.mobile.contract.v2.PaymentDecimalConsistency
 import com.example.data.mobile.outbox.CaptureResult
 import com.example.data.mobile.outbox.CommandStatus
 import com.example.data.mobile.outbox.InMemoryMerchantCommandStore
+import com.example.data.mobile.outbox.MerchantCommandRecord
 import com.example.data.mobile.outbox.MerchantCommandStore
 import com.example.data.mobile.outbox.OutboxRepository
 import com.example.data.mobile.merchantread.CustomerStatementResponse
@@ -552,7 +553,15 @@ class ProductionTraderRepository(
     private var activeInvoicesCompanyId: ServerUlid = companyId
 
     init {
+        rehydrateCompletedShiftClose()
         if (autoRefresh) refreshFromBackend()
+    }
+
+    private fun rehydrateCompletedShiftClose() {
+        try {
+            val completed = getLatestCompletedShiftClose()
+            _shiftCloseSuccessFlow.value = completed
+        } catch (_: Exception) {}
     }
 
     fun refreshFromBackend() {
@@ -3383,6 +3392,54 @@ class ProductionTraderRepository(
         return commandStore.getActiveDraftPayload(scope.companyId.value, scope.actorId.value, scope.deviceId.value, formType)
     }
 
+    override fun getActiveDraftRecord(formType: String): MerchantCommandRecord? {
+        val scope = authScopeProvider?.invoke() ?: return null
+        return commandStore.getActiveDraftRecord(scope.companyId.value, scope.actorId.value, scope.deviceId.value, formType)
+    }
+
+    override fun getLatestCompletedShiftClose(): ShiftCloseResponse? {
+        val scope = authScopeProvider?.invoke() ?: return null
+        val record = commandStore.getLatestCompletedCommand(
+            companyId = scope.companyId.value,
+            actorId = scope.actorId.value,
+            deviceId = scope.deviceId.value,
+            commandType = "shift.close"
+        ) ?: return null
+
+        val snapBytes = commandStore.decryptSnapshot(record) ?: return null
+        val jsonStr = String(snapBytes, StandardCharsets.UTF_8)
+        val obj = try {
+            StrictJsonParser.parse(jsonStr).asObject()
+        } catch (_: Exception) {
+            return null
+        }
+        val response = try {
+            ShiftCloseResponse.fromStrictJson(obj)
+        } catch (_: Exception) {
+            return null
+        }
+
+        // Account relevance check:
+        val payloadObj = try {
+            val payloadBytes = commandStore.decryptPayload(record)
+            StrictJsonParser.parse(String(payloadBytes, StandardCharsets.UTF_8)).asObject()
+        } catch (_: Exception) { null }
+
+        val payloadAccountId = payloadObj?.properties?.get("cash_account_id")?.asString()
+        if (payloadAccountId != null && payloadAccountId != approvedCashAccount.id.value) {
+            return null
+        }
+
+        // Business date / session relevance check:
+        val effectiveShiftDate = _shiftSummaryFlow.value?.shiftDate ?: WesternFormatters.currentDate()
+        if (response.shiftDate != effectiveShiftDate) {
+            // Belongs to a different / previous date -> do not mark current shift closed ("newday no falseclosed")
+            return null
+        }
+
+        return response
+    }
+
     override fun isDraftRecovering(formType: String): Boolean {
         val scope = authScopeProvider?.invoke() ?: return false
         val record = commandStore.getActiveDraftRecord(scope.companyId.value, scope.actorId.value, scope.deviceId.value, formType) ?: return false
@@ -3432,6 +3489,7 @@ class ProductionTraderRepository(
             when (res) {
                 is MerchantReadResult.Success -> {
                     _shiftSummaryFlow.value = res.value
+                    rehydrateCompletedShiftClose()
                     Result.success(res.value)
                 }
                 is MerchantReadResult.Forbidden -> {
@@ -3470,11 +3528,8 @@ class ProductionTraderRepository(
             return@withContext Result.failure(e)
         }
 
-        // 1. Permission check (reports.financial.view or money.cash.view)
-        if (permissions.isNotEmpty() &&
-            !permissions.contains("reports.financial.view") &&
-            !permissions.contains("money.cash.view")
-        ) {
+        // 1. Permission check (reports.financial.view ONLY - least privilege)
+        if (permissions.isNotEmpty() && !permissions.contains("reports.financial.view")) {
             return@withContext Result.failure(
                 SecurityException("Action is unauthorized. Missing required reports permission.")
             )
@@ -3504,7 +3559,7 @@ class ProductionTraderRepository(
             approvedCashAccount.id
         }
 
-        val effectiveCommandId = if (commandId.isNotBlank()) commandId else java.util.UUID.randomUUID().toString()
+        val effectiveCommandId = if (commandId.isNotBlank()) commandId else getDraftOperationId("shift_close")
         val idempotencyKey = "shiftclose-$effectiveCommandId"
         if (idempotencyKey.length > 128) {
             return@withContext Result.failure(
@@ -3540,6 +3595,13 @@ class ProductionTraderRepository(
         if (existingCmd != null && existingCmd.payloadDigest != payloadDigest) {
             return@withContext Result.failure(
                 IllegalStateException("Idempotency key [$idempotencyKey] was previously committed with different parameters")
+            )
+        }
+
+        val activeDraft = commandStore.getActiveDraftRecord(before.companyId.value, before.actorId.value, before.deviceId.value, "shift_close")
+        if (activeDraft != null && activeDraft.commandId == effectiveCommandId && activeDraft.payloadDigest != payloadDigest) {
+            return@withContext Result.failure(
+                IllegalStateException("Draft command [$effectiveCommandId] has different parameters")
             )
         }
 
@@ -3590,6 +3652,8 @@ class ProductionTraderRepository(
                 val snapshotObj = durableRes.getOrThrow()
                 val response = ShiftCloseResponse.fromStrictJson(snapshotObj)
                 _shiftCloseSuccessFlow.value = response
+                // Authoritative validated success: rotate draft only after persisted ACK!
+                rotateDraftOperationId("shift_close")
                 try {
                     refreshShiftSummary()
                 } catch (_: Exception) {}
@@ -3781,7 +3845,7 @@ class ProductionTraderRepository(
             merchantReadClient: MerchantReadClient? = null,
             baseCurrency: String = "ILS",
             currencyMinorUnits: Int = 2,
-            permissions: Set<String> = setOf("pos.sale", "purchases.manage", "expenses.manage", "reports.financial.view", "money.cash.view"),
+            permissions: Set<String> = setOf("pos.sale", "purchases.manage", "expenses.manage", "reports.financial.view"),
             ioDispatcher: CoroutineDispatcher = Dispatchers.IO
         ): ProductionTraderRepository {
             val readTokenProvider = MerchantReadTokenProvider { reqCompanyId, retainedGen ->

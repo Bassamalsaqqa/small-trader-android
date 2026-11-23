@@ -260,6 +260,8 @@ interface TraderRepository {
     fun rotateDraftOperationId(formType: String): String = java.util.UUID.randomUUID().toString()
     fun cancelDraftOperation(formType: String) {}
     fun getActiveDraftPayload(formType: String): com.example.data.mobile.contract.StrictJsonObject? = null
+    fun getActiveDraftRecord(formType: String): com.example.data.mobile.outbox.MerchantCommandRecord? = null
+    fun getLatestCompletedShiftClose(): com.example.data.mobile.merchantread.ShiftCloseResponse? = null
     fun isDraftRecovering(formType: String): Boolean = false
     suspend fun loadCustomerDetail(customerId: String): Result<Customer> = getCustomerDetail(customerId)
 

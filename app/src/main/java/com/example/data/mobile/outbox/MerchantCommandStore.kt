@@ -151,6 +151,13 @@ interface MerchantCommandStore {
         formType: String
     ): com.example.data.mobile.contract.StrictJsonObject?
 
+    fun getLatestCompletedCommand(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        commandType: String
+    ): MerchantCommandRecord?
+
     fun decryptPayload(record: MerchantCommandRecord): ByteArray
     fun decryptSnapshot(record: MerchantCommandRecord): ByteArray?
 }
@@ -332,6 +339,21 @@ internal class MerchantCommandCipher internal constructor(private val engine: Se
             cipher.updateAAD(computeAad(companyId, actorId, deviceId, commandId, idempotencyKey, payloadDigest))
             return cipher.doFinal(encrypted)
         }
+    }
+}
+
+internal fun candidateCommandTypes(formType: String): List<String> {
+    return when (formType) {
+        "shift_close", "shift.close" -> listOf("shift.close", "shift_close")
+        "expense", "expense.create" -> listOf("expense.create", "expense")
+        "supplier_payment", "supplier.payment" -> listOf("supplier.payment", "supplier_payment")
+        "customer_payment", "customer.payment" -> listOf("customer.payment", "customer_payment")
+        "purchase", "purchase.bill" -> listOf("purchase.bill", "purchase")
+        "goods_receipt_note", "purchase.grn" -> listOf("purchase.grn", "goods_receipt_note")
+        "customer_create", "customer.create" -> listOf("customer_create", "customer.create")
+        "supplier_create", "supplier.create" -> listOf("supplier_create", "supplier.create")
+        "inventory.adjustment" -> listOf("inventory.adjustment")
+        else -> listOf(formType)
     }
 }
 
@@ -678,12 +700,15 @@ class RoomMerchantCommandStore internal constructor(
     ): String {
         val db = dbProvider()
         // 1. Check if an active uncompleted command exists for this form type
+        val cmdTypes = candidateCommandTypes(formType)
+        val placeholders = cmdTypes.joinToString(",") { "?" }
+        val queryArgs = arrayOf(companyId, actorId, deviceId) + cmdTypes.toTypedArray()
         val c = db.query(
             "SELECT command_id FROM merchant_commands " +
-                "WHERE company_id = ? AND actor_id = ? AND device_id = ? AND command_type = ? " +
+                "WHERE company_id = ? AND actor_id = ? AND device_id = ? AND command_type IN ($placeholders) " +
                 "AND status IN ('PENDING', 'SUBMITTED', 'UNKNOWN_ACK') " +
                 "ORDER BY updated_at DESC LIMIT 1",
-            arrayOf(companyId, actorId, deviceId, formType)
+            queryArgs
         )
         c.use {
             if (it.moveToFirst()) {
@@ -761,12 +786,15 @@ class RoomMerchantCommandStore internal constructor(
         formType: String
     ): MerchantCommandRecord? {
         val db = dbProvider()
+        val cmdTypes = candidateCommandTypes(formType)
+        val placeholders = cmdTypes.joinToString(",") { "?" }
+        val queryArgs = arrayOf(companyId, actorId, deviceId) + cmdTypes.toTypedArray()
         val c = db.query(
             "SELECT company_id, command_id, actor_id, device_id, command_type, idempotency_key, " +
                 "payload_digest, payload_bytes, status, response_snapshot, error_message, created_at, updated_at " +
-                "FROM merchant_commands WHERE company_id = ? AND actor_id = ? AND device_id = ? AND command_type = ? " +
+                "FROM merchant_commands WHERE company_id = ? AND actor_id = ? AND device_id = ? AND command_type IN ($placeholders) " +
                 "AND status IN ('PENDING', 'SUBMITTED', 'UNKNOWN_ACK') ORDER BY updated_at DESC LIMIT 1",
-            arrayOf(companyId, actorId, deviceId, formType)
+            queryArgs
         )
         return c.use {
             if (it.moveToFirst()) {
@@ -802,6 +830,44 @@ class RoomMerchantCommandStore internal constructor(
             com.example.data.mobile.contract.StrictJsonParser.parse(jsonStr).asObject()
         } catch (_: Exception) {
             null
+        }
+    }
+
+    override fun getLatestCompletedCommand(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        commandType: String
+    ): MerchantCommandRecord? {
+        val db = dbProvider()
+        val cmdTypes = candidateCommandTypes(commandType)
+        val placeholders = cmdTypes.joinToString(",") { "?" }
+        val queryArgs = arrayOf(companyId, actorId, deviceId) + cmdTypes.toTypedArray()
+        val c = db.query(
+            "SELECT company_id, command_id, actor_id, device_id, command_type, idempotency_key, " +
+                "payload_digest, payload_bytes, status, response_snapshot, error_message, created_at, updated_at " +
+                "FROM merchant_commands WHERE company_id = ? AND actor_id = ? AND device_id = ? AND command_type IN ($placeholders) " +
+                "AND status = 'COMPLETED' AND response_snapshot IS NOT NULL ORDER BY updated_at DESC LIMIT 1",
+            queryArgs
+        )
+        return c.use {
+            if (it.moveToFirst()) {
+                MerchantCommandRecord(
+                    companyId = it.getString(0),
+                    commandId = it.getString(1),
+                    actorId = it.getString(2),
+                    deviceId = it.getString(3),
+                    commandType = it.getString(4),
+                    idempotencyKey = it.getString(5),
+                    payloadDigest = it.getString(6),
+                    payloadBytes = it.getBlob(7),
+                    status = CommandStatus.valueOf(it.getString(8)),
+                    responseSnapshot = if (it.isNull(9)) null else it.getBlob(9),
+                    errorMessage = if (it.isNull(10)) null else it.getString(10),
+                    createdAt = it.getLong(11),
+                    updatedAt = it.getLong(12)
+                )
+            } else null
         }
     }
 
@@ -1021,9 +1087,10 @@ class InMemoryMerchantCommandStore : MerchantCommandStore {
         deviceId: String,
         formType: String
     ): String = synchronized(lock) {
+        val cmdTypes = candidateCommandTypes(formType)
         val active = records.values.firstOrNull {
             it.companyId == companyId && it.actorId == actorId && it.deviceId == deviceId &&
-                it.commandType == formType &&
+                it.commandType in cmdTypes &&
                 (it.status == CommandStatus.PENDING || it.status == CommandStatus.SUBMITTED || it.status == CommandStatus.UNKNOWN_ACK)
         }
         if (active != null) return active.commandId
@@ -1060,9 +1127,10 @@ class InMemoryMerchantCommandStore : MerchantCommandStore {
         deviceId: String,
         formType: String
     ): MerchantCommandRecord? = synchronized(lock) {
+        val cmdTypes = candidateCommandTypes(formType)
         return records.values.firstOrNull {
             it.companyId == companyId && it.actorId == actorId && it.deviceId == deviceId &&
-                it.commandType == formType &&
+                it.commandType in cmdTypes &&
                 (it.status == CommandStatus.PENDING || it.status == CommandStatus.SUBMITTED || it.status == CommandStatus.UNKNOWN_ACK)
         }
     }
@@ -1081,6 +1149,22 @@ class InMemoryMerchantCommandStore : MerchantCommandStore {
         } catch (_: Exception) {
             null
         }
+    }
+
+    override fun getLatestCompletedCommand(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        commandType: String
+    ): MerchantCommandRecord? = synchronized(lock) {
+        val cmdTypes = candidateCommandTypes(commandType)
+        return records.values
+            .filter {
+                it.companyId == companyId && it.actorId == actorId && it.deviceId == deviceId &&
+                    it.commandType in cmdTypes && it.status == CommandStatus.COMPLETED &&
+                    it.responseSnapshot != null
+            }
+            .maxByOrNull { it.updatedAt }
     }
 
     override fun decryptPayload(record: MerchantCommandRecord): ByteArray = record.payloadBytes
