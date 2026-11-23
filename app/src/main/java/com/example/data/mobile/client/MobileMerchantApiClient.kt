@@ -1,5 +1,6 @@
 package com.example.data.mobile.client
 
+import com.example.data.mobile.contract.CanonicalJsonSerializer
 import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.MoneyAmount
 import com.example.data.mobile.contract.NonnegativeDecimalQuantity
@@ -89,8 +90,15 @@ class MobileMerchantApiClient(
     private fun parseErrorMessage(body: String, statusCode: Int): String {
         return try {
             val obj = StrictJsonParser.parseObject(body)
-            obj.properties["message"]?.asString()
-                ?: obj.properties["error"]?.asString()
+            val errProp = obj.properties["error"]
+            val msgFromErr = when (errProp) {
+                is StrictJsonObject -> (errProp.properties["message"] as? StrictJsonString)?.value
+                    ?: (errProp.properties["code"] as? StrictJsonString)?.value
+                is StrictJsonString -> errProp.value
+                else -> null
+            }
+            (obj.properties["message"] as? StrictJsonString)?.value
+                ?: msgFromErr
                 ?: "HTTP $statusCode"
         } catch (_: Exception) {
             "HTTP $statusCode"
@@ -706,10 +714,32 @@ class MobileMerchantApiClient(
         return execute(HttpMethod.GET, path)
     }
 
-    fun closeShift(companyId: ServerUlid, countedPhysicalCash: BigDecimal): Result<StrictJsonObject> {
+    fun closeShift(
+        companyId: ServerUlid,
+        countedCash: BigDecimal,
+        idempotencyKey: String = UUID.randomUUID().toString(),
+        cashAccountId: ServerUlid? = null,
+        notes: String? = null,
+        currencyMinorUnits: Int = 2
+    ): Result<StrictJsonObject> {
         val path = "/api/mobile/v1/companies/${companyId.value}/reports/shift-close"
-        val payload = "{\"counted_physical_cash\":\"${countedPhysicalCash.setScale(2, RoundingMode.HALF_UP).toPlainString()}\"}"
-        return execute(HttpMethod.POST, path, body = payload, idempotencyKey = UUID.randomUUID().toString())
+        if (countedCash.signum() < 0) {
+            return Result.failure(IllegalArgumentException("Counted physical cash must be non-negative"))
+        }
+        if (countedCash.scale() > currencyMinorUnits) {
+            return Result.failure(IllegalArgumentException("Counted physical cash precision (${countedCash.scale()}) exceeds currency minor units ($currencyMinorUnits)"))
+        }
+        val jsonMap = mutableMapOf<String, StrictJsonElement>(
+            "counted_cash" to StrictJsonString(countedCash.toPlainString())
+        )
+        if (cashAccountId != null) {
+            jsonMap["cash_account_id"] = StrictJsonString(cashAccountId.value)
+        }
+        if (!notes.isNullOrBlank()) {
+            jsonMap["notes"] = StrictJsonString(notes.trim())
+        }
+        val payload = CanonicalJsonSerializer.serialize(StrictJsonObject(jsonMap))
+        return execute(HttpMethod.POST, path, body = payload, idempotencyKey = idempotencyKey)
     }
 
     fun getBusinessSettings(companyId: ServerUlid): Result<StrictJsonObject> {

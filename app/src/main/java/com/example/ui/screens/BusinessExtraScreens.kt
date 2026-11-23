@@ -64,6 +64,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -1043,6 +1044,268 @@ fun AddExpenseDialog(
 }
 
 // ============================================================================
+// 2a. SHIFT CLOSE COUNT & RECONCILIATION DIALOG
+// ============================================================================
+
+@Composable
+fun ShiftCloseDialog(
+    state: TraderUiState,
+    onDismiss: () -> Unit,
+    onConfirmClose: (countedCashText: String, notes: String?) -> Unit,
+    onUpdateCountedCash: (String) -> Unit = {},
+    onUpdateNotes: (String) -> Unit = {}
+) {
+    val lang = state.language
+    val financial = TraderTheme.financial
+    val isSubmitting = state.isShiftCloseSubmitting
+    val serverError = state.shiftCloseError
+    val isDemo = state.currentSession.isDemoSession
+
+    val liveShift = state.liveShiftSummary
+    val currency = liveShift?.currency ?: "ILS"
+    val minorUnits = liveShift?.currencyMinorUnits ?: 2
+
+    val expectedCashDisplay = when {
+        !isDemo -> liveShift?.expectedCash?.let { "${WesternFormatters.formatNumber(it)} $currency" } ?: "—"
+        else -> StitchBidiUtils.formatIls(state.expectedBookCashIls)
+    }
+
+    var localInput by rememberSaveable { mutableStateOf(state.shiftCloseCountedCashInput) }
+    var localNotes by rememberSaveable { mutableStateOf(state.shiftCloseNotesInput) }
+    var localValidationError by rememberSaveable { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
+        shape = RoundedCornerShape(16.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = lang.tr("إغلاق الوردية وجرد النقد", "Close Shift & Cash Count"),
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                StitchBadge(
+                    text = currency,
+                    tone = StitchBadgeTone.PRIMARY
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Expected Cash Reference Card
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = financial.incomeContainer.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, financial.income.copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = lang.tr("النقد المتوقع دفترياً بالدرج", "Expected Book Cash"),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = expectedCashDisplay,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = financial.income,
+                                modifier = Modifier.testTag("shift_close_dialog_expected_cash")
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val bookCashStr = when {
+                                    !isDemo && liveShift?.expectedCash != null -> liveShift.expectedCash.toPlainString()
+                                    else -> WesternFormatters.formatNumber(state.expectedBookCashIls).removeSuffix(".00")
+                                }
+                                localInput = bookCashStr
+                                onUpdateCountedCash(bookCashStr)
+                                localValidationError = null
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            enabled = !isSubmitting,
+                            modifier = Modifier
+                                .heightIn(min = 40.dp)
+                                .testTag("shift_close_match_book_button")
+                        ) {
+                            Text(
+                                text = lang.tr("مطابقة الدفتري", "Match Book"),
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium)
+                            )
+                        }
+                    }
+                }
+
+                // Counted Cash Input Field
+                OutlinedTextField(
+                    value = localInput,
+                    onValueChange = { raw ->
+                        val sanitized = WesternFormatters.sanitizeWesternDigits(raw)
+                        localInput = sanitized
+                        onUpdateCountedCash(sanitized)
+                        localValidationError = null
+                    },
+                    label = {
+                        Text(
+                            lang.tr(
+                                "النقد الفعلي المعدود بالدرج ($currency) *",
+                                "Actual Counted Cash ($currency) *"
+                            )
+                        )
+                    },
+                    placeholder = { Text("0.00") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    enabled = !isSubmitting,
+                    isError = localValidationError != null || serverError != null,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("shift_close_counted_cash_input")
+                )
+
+                // Notes Input Field
+                OutlinedTextField(
+                    value = localNotes,
+                    onValueChange = {
+                        localNotes = it
+                        onUpdateNotes(it)
+                    },
+                    label = { Text(lang.tr("ملاحظات الإغلاق (اختياري)", "Closure Notes (Optional)")) },
+                    placeholder = { Text(lang.tr("أي ملاحظات بخصوص الجرد أو الفروقات...", "Notes on count or variance...")) },
+                    maxLines = 3,
+                    enabled = !isSubmitting,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("shift_close_notes_input")
+                )
+
+                // Error Message Banner (truthful server error or local validation)
+                val displayedError = localValidationError ?: serverError
+                if (!displayedError.isNullOrBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("shift_close_dialog_error")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.WarningAmber,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = displayedError,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val raw = localInput.trim()
+                    if (raw.isEmpty()) {
+                        localValidationError = lang.tr("يرجى إدخال المبلغ الفعلي بالدرج", "Please enter counted cash in drawer")
+                        return@Button
+                    }
+                    val parsed = try {
+                        java.math.BigDecimal(raw)
+                    } catch (_: Exception) {
+                        localValidationError = lang.tr("المبلغ المدخل غير صالح", "Invalid cash amount")
+                        return@Button
+                    }
+                    if (parsed.signum() < 0) {
+                        localValidationError = lang.tr("لا يمكن أن يكون المبلغ سالباً", "Counted cash cannot be negative")
+                        return@Button
+                    }
+                    if (parsed.scale() > minorUnits) {
+                        localValidationError = lang.tr(
+                            "دقة المبلغ تتجاوز الحد المسموح ($minorUnits خانات)",
+                            "Counted cash precision exceeds $minorUnits decimal places"
+                        )
+                        return@Button
+                    }
+                    if (localNotes.length > 1000) {
+                        localValidationError = lang.tr("الملاحظات تتجاوز 1000 حرف", "Notes exceed 1000 characters")
+                        return@Button
+                    }
+                    onConfirmClose(raw, localNotes.ifBlank { null })
+                },
+                enabled = !isSubmitting,
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("confirm_shift_close_button")
+            ) {
+                if (isSubmitting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .testTag("shift_close_progress"),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Text(
+                    text = if (isSubmitting) {
+                        lang.tr("جاري الحفظ...", "Saving...")
+                    } else {
+                        lang.tr("تأكيد إغلاق الوردية", "Confirm Shift Close")
+                    },
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !isSubmitting,
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("cancel_shift_close_button")
+            ) {
+                Text(lang.tr("إلغاء", "Cancel"))
+            }
+        }
+    )
+}
+
+// ============================================================================
 // 2. FINANCIAL REPORTS & RECONCILIATION HUB (ST-41, ST-42, ST-43 v02)
 // ============================================================================
 
@@ -1051,7 +1314,8 @@ fun FinancialReportsScreen(
     state: TraderUiState,
     onUpdateOpeningCash: (Double) -> Unit = {},
     onUpdateCountedCashText: (String) -> Unit = {},
-    onToggleShiftClose: (Boolean) -> Unit = {}
+    onToggleShiftClose: (Boolean) -> Unit = {},
+    onOpenShiftCloseDialog: (Boolean) -> Unit = {}
 ) {
     val lang = state.language
     val session = state.currentSession
@@ -1550,6 +1814,146 @@ fun FinancialReportsScreen(
                                         label = label,
                                         value = "${WesternFormatters.formatNumber(acc.balanceBase)} ${acc.baseCurrencyCode}",
                                         valueColor = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                val closeSnap = state.shiftCloseSuccessSnapshot
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("live_shift_close_card")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = lang.tr(
+                                        "جرد الصندوق وإغلاق الوردية",
+                                        "Cash Count & Shift Close"
+                                    ),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Text(
+                                    text = if (closeSnap != null) {
+                                        lang.tr(
+                                            "تم تسجيل الجرد الفعلي وإغلاق الوردية على الخادم",
+                                            "Count observation and shift close recorded on server"
+                                        )
+                                    } else {
+                                        lang.tr(
+                                            "تسجيل الجرد الفعلي ومطابقته بالرصيد الدفتري للوردية",
+                                            "Record physical cash count and reconcile with book drawer"
+                                        )
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (closeSnap != null) {
+                                val badgeTone = when (closeSnap.varianceStatus) {
+                                    "EXACT" -> StitchBadgeTone.SUCCESS
+                                    "OVERAGE" -> StitchBadgeTone.WARNING
+                                    else -> StitchBadgeTone.DANGER
+                                }
+                                StitchBadge(
+                                    text = closeSnap.varianceStatus,
+                                    tone = badgeTone
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                        if (closeSnap != null) {
+                            ReportMetricRow(
+                                label = lang.tr("وقت التسجيل:", "Recorded At:"),
+                                value = closeSnap.closedAt,
+                                valueColor = MaterialTheme.colorScheme.onSurface
+                            )
+                            ReportMetricRow(
+                                label = lang.tr("المبلغ المتوقع دفترياً:", "Expected Book Cash:"),
+                                value = "${WesternFormatters.formatNumber(closeSnap.expectedCash)} ${closeSnap.currency}",
+                                valueColor = financial.income
+                            )
+                            ReportMetricRow(
+                                label = lang.tr("المبلغ الفعلي المعدود:", "Actual Counted Cash:"),
+                                value = "${WesternFormatters.formatNumber(closeSnap.countedCash)} ${closeSnap.currency}",
+                                valueColor = MaterialTheme.colorScheme.primary
+                            )
+                            ReportMetricRow(
+                                label = lang.tr("الفارق (الفعلي - الدفتري):", "Variance:"),
+                                value = "${if (closeSnap.variance > java.math.BigDecimal.ZERO) "+ " else ""}${WesternFormatters.formatNumber(closeSnap.variance)} ${closeSnap.currency}",
+                                valueColor = when (closeSnap.varianceStatus) {
+                                    "EXACT" -> financial.income
+                                    "OVERAGE" -> financial.warning
+                                    else -> financial.debit
+                                }
+                            )
+                            Text(
+                                text = lang.tr(
+                                    "حالة الوردية: مغلقة (${closeSnap.closedAt})",
+                                    "Shift Status: Closed (${closeSnap.closedAt})"
+                                ),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = financial.income,
+                                modifier = Modifier.testTag("shift_close_status_text")
+                            )
+                            Text(
+                                text = "${closeSnap.varianceStatus}: ${WesternFormatters.formatNumber(closeSnap.variance)} ${closeSnap.currency}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.testTag("shift_cash_variance_text")
+                            )
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = lang.tr("حالة الوردية: مفتوحة وتستقبل العمليات", "Shift Status: Open and active"),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = financial.income,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("shift_close_status_text")
+                                )
+                                Button(
+                                    onClick = { onOpenShiftCloseDialog(true) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
+                                    modifier = Modifier
+                                        .heightIn(min = 44.dp)
+                                        .testTag("open_shift_close_dialog_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Lock,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = lang.tr("إغلاق الوردية وجرد النقد", "Close Shift & Count"),
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
                                     )
                                 }
                             }

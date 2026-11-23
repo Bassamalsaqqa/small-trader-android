@@ -14,6 +14,7 @@ import com.example.data.mobile.contract.v2.OnlineSaleContext
 import com.example.data.mobile.contract.v2.OnlineSaleIntentLine
 import com.example.data.mobile.contract.StrictJsonArray
 import com.example.data.mobile.contract.StrictJsonBoolean
+import com.example.data.mobile.contract.StrictJsonElement
 import com.example.data.mobile.contract.StrictJsonNumber
 import com.example.data.mobile.contract.StrictJsonObject
 import com.example.data.mobile.contract.StrictJsonParser
@@ -41,6 +42,7 @@ import com.example.data.mobile.merchantread.ProductHistoryResponse
 import com.example.data.mobile.merchantread.SalesInvoiceDetailResponse
 import com.example.data.mobile.merchantread.SalesInvoiceListItem
 import com.example.data.mobile.merchantread.SalesInvoicesQuery
+import com.example.data.mobile.merchantread.ShiftCloseResponse
 import com.example.data.mobile.merchantread.ShiftSummaryReportResponse
 import com.example.data.mobile.merchantread.TreasuryReportResponse
 import com.example.data.mobile.readclient.ApprovedCashAccount
@@ -506,6 +508,10 @@ class ProductionTraderRepository(
 
     private val _shiftSummaryFlow = MutableStateFlow<ShiftSummaryReportResponse?>(null)
     override val shiftSummaryFlow: StateFlow<ShiftSummaryReportResponse?> = _shiftSummaryFlow.asStateFlow()
+
+    private val _shiftCloseSuccessFlow = MutableStateFlow<ShiftCloseResponse?>(null)
+    override val shiftCloseSuccessFlow: StateFlow<ShiftCloseResponse?> = _shiftCloseSuccessFlow.asStateFlow()
+    private val shiftCloseAdmissionLock = java.util.concurrent.atomic.AtomicBoolean(false)
 
     private val _treasuryReportFlow = MutableStateFlow<TreasuryReportResponse?>(null)
     override val treasuryReportFlow: StateFlow<TreasuryReportResponse?> = _treasuryReportFlow.asStateFlow()
@@ -3452,6 +3458,151 @@ class ProductionTraderRepository(
         }
     }
 
+    override suspend fun closeShift(
+        countedCash: BigDecimal,
+        notes: String?,
+        cashAccountId: String?,
+        commandId: String
+    ): Result<ShiftCloseResponse> = withContext(ioDispatcher) {
+        val before = try {
+            requireActiveScope()
+        } catch (e: SecurityException) {
+            return@withContext Result.failure(e)
+        }
+
+        // 1. Permission check (reports.financial.view or money.cash.view)
+        if (permissions.isNotEmpty() &&
+            !permissions.contains("reports.financial.view") &&
+            !permissions.contains("money.cash.view")
+        ) {
+            return@withContext Result.failure(
+                SecurityException("Action is unauthorized. Missing required reports permission.")
+            )
+        }
+
+        // 2. Exact decimal validation (no negative, scale <= minor units, exact arithmetic)
+        if (countedCash.signum() < 0) {
+            return@withContext Result.failure(
+                IllegalArgumentException("Counted physical cash must be non-negative")
+            )
+        }
+        if (countedCash.scale() > currencyMinorUnits) {
+            return@withContext Result.failure(
+                IllegalArgumentException("Counted physical cash precision (${countedCash.scale()}) exceeds currency minor units ($currencyMinorUnits)")
+            )
+        }
+
+        // 3. Resolve cash account ID
+        val effectiveCashAccount = if (cashAccountId != null) {
+            if (!cashAccountId.matches(Regex("""^[0-7][0-9A-HJKMNP-TV-Z]{25}$"""))) {
+                return@withContext Result.failure(
+                    IllegalArgumentException("The specified cash account ID must be a canonical 26-character ULID string.")
+                )
+            }
+            ServerUlid.parse(cashAccountId)
+        } else {
+            approvedCashAccount.id
+        }
+
+        val effectiveCommandId = if (commandId.isNotBlank()) commandId else java.util.UUID.randomUUID().toString()
+        val idempotencyKey = "shiftclose-$effectiveCommandId"
+        if (idempotencyKey.length > 128) {
+            return@withContext Result.failure(
+                IllegalArgumentException("Idempotency key exceeds 128 characters: $idempotencyKey")
+            )
+        }
+
+        val effectiveDate = _shiftSummaryFlow.value?.shiftDate ?: WesternFormatters.currentDate()
+
+        // 4. Construct canonical payload JSON
+        val payloadMap = mutableMapOf<String, StrictJsonElement>(
+            "counted_cash" to StrictJsonString(countedCash.toPlainString()),
+            "cash_account_id" to StrictJsonString(effectiveCashAccount.value),
+            "currency" to StrictJsonString(baseCurrency),
+            "currency_minor_units" to StrictJsonNumber(currencyMinorUnits.toString(), isInt = true),
+            "shift_date" to StrictJsonString(effectiveDate)
+        )
+        if (!notes.isNullOrBlank()) {
+            payloadMap["notes"] = StrictJsonString(notes.trim())
+        }
+        val payloadObj = StrictJsonObject(payloadMap)
+        val payloadBytes = CanonicalJsonSerializer.serializeToUtf8Bytes(payloadObj)
+        val payloadDigest = "sha256:" + java.security.MessageDigest.getInstance("SHA-256")
+            .digest(payloadBytes).joinToString("") { "%02x".format(it) }
+
+        // 5. Pre-POST conflict check: existing command with same key but different payload
+        val existingCmd = commandStore.findCommand(
+            before.companyId.value,
+            before.actorId.value,
+            before.deviceId.value,
+            idempotencyKey
+        )
+        if (existingCmd != null && existingCmd.payloadDigest != payloadDigest) {
+            return@withContext Result.failure(
+                IllegalStateException("Idempotency key [$idempotencyKey] was previously committed with different parameters")
+            )
+        }
+
+        // 6. Concurrent admission lock: prevents duplicate closures concurrently
+        if (!shiftCloseAdmissionLock.compareAndSet(false, true)) {
+            return@withContext Result.failure(
+                IllegalStateException("Shift close is already in flight")
+            )
+        }
+
+        try {
+            val postCall: suspend (String) -> Result<StrictJsonObject> = { key ->
+                apiClient.closeShift(
+                    companyId = before.companyId,
+                    countedCash = countedCash,
+                    idempotencyKey = key,
+                    cashAccountId = effectiveCashAccount,
+                    notes = notes?.trim(),
+                    currencyMinorUnits = currencyMinorUnits
+                )
+            }
+
+            val validateShiftCloseResponse: (StrictJsonObject) -> Result<StrictJsonObject> = { snap ->
+                val closureId = snap.properties["shift_closure_id"]?.asString() ?: snap.properties["id"]?.asString()
+                if (closureId.isNullOrBlank()) {
+                    Result.failure(IllegalStateException("Server response missing shift closure id"))
+                } else {
+                    val varianceStatus = snap.properties["variance_status"]?.asString()
+                    if (varianceStatus !in listOf("EXACT", "OVERAGE", "SHORTAGE")) {
+                        Result.failure(IllegalStateException("Server returned invalid variance status: $varianceStatus"))
+                    } else {
+                        Result.success(snap)
+                    }
+                }
+            }
+
+            val durableRes = executeDurableCommand(
+                commandType = "shift.close",
+                commandId = effectiveCommandId,
+                idempotencyKey = idempotencyKey,
+                canonicalPayloadBytes = payloadBytes,
+                isReceiptStatusChecked = false,
+                validateResponse = validateShiftCloseResponse,
+                postAction = postCall
+            )
+
+            if (durableRes.isSuccess) {
+                val snapshotObj = durableRes.getOrThrow()
+                val response = ShiftCloseResponse.fromStrictJson(snapshotObj)
+                _shiftCloseSuccessFlow.value = response
+                try {
+                    refreshShiftSummary()
+                } catch (_: Exception) {}
+                Result.success(response)
+            } else {
+                val err = durableRes.exceptionOrNull() ?: RuntimeException("Shift close execution failed")
+                Result.failure(err)
+            }
+        } finally {
+            shiftCloseAdmissionLock.set(false)
+        }
+    }
+
     override suspend fun refreshTreasuryReport(): Result<TreasuryReportResponse?> = withContext(ioDispatcher) {
         val client = merchantReadClient ?: return@withContext Result.failure(IllegalStateException("MerchantReadClient not configured"))
         try {
@@ -3630,6 +3781,7 @@ class ProductionTraderRepository(
             merchantReadClient: MerchantReadClient? = null,
             baseCurrency: String = "ILS",
             currencyMinorUnits: Int = 2,
+            permissions: Set<String> = setOf("pos.sale", "purchases.manage", "expenses.manage", "reports.financial.view", "money.cash.view"),
             ioDispatcher: CoroutineDispatcher = Dispatchers.IO
         ): ProductionTraderRepository {
             val readTokenProvider = MerchantReadTokenProvider { reqCompanyId, retainedGen ->
@@ -3660,7 +3812,7 @@ class ProductionTraderRepository(
                 actorId = actorId,
                 actorName = "Test Actor",
                 role = UserRole.OWNER,
-                permissions = setOf("pos.sale", "purchases.manage", "expenses.manage"),
+                permissions = permissions,
                 deviceId = deviceId,
                 baseCurrency = baseCurrency,
                 currencyMinorUnits = currencyMinorUnits,

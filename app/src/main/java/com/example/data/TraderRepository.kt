@@ -19,6 +19,8 @@ import com.example.model.Supplier
 import com.example.model.SupplierPayment
 import com.example.model.UserSession
 import com.example.model.WesternFormatters
+import com.example.data.mobile.merchantread.ShiftCloseResponse
+import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.merchantread.CustomerStatementResponse
 import com.example.data.mobile.merchantread.HomeResponse
 import com.example.data.mobile.merchantread.ProductHistoryResponse
@@ -268,6 +270,7 @@ interface TraderRepository {
     // -------------------------------------------------------------------------
     val homeMetricsFlow: StateFlow<HomeResponse?> get() = MutableStateFlow(null)
     val shiftSummaryFlow: StateFlow<ShiftSummaryReportResponse?> get() = MutableStateFlow(null)
+    val shiftCloseSuccessFlow: StateFlow<ShiftCloseResponse?> get() = MutableStateFlow(null)
     val treasuryReportFlow: StateFlow<TreasuryReportResponse?> get() = MutableStateFlow(null)
     val serverInvoicesFlow: StateFlow<List<SalesInvoiceListItem>> get() = MutableStateFlow(emptyList())
     val invoicesHasMoreFlow: StateFlow<Boolean> get() = MutableStateFlow(false)
@@ -281,6 +284,14 @@ interface TraderRepository {
     suspend fun refreshTreasuryReport(): Result<TreasuryReportResponse?> = Result.success(null)
     suspend fun refreshInvoices(query: SalesInvoicesQuery = SalesInvoicesQuery()): Result<List<InvoiceRecord>> = Result.success(emptyList())
     suspend fun loadMoreInvoices(): Result<List<InvoiceRecord>> = Result.success(emptyList())
+
+    suspend fun closeShift(
+        countedCash: BigDecimal,
+        notes: String? = null,
+        cashAccountId: String? = null,
+        commandId: String = java.util.UUID.randomUUID().toString()
+    ): Result<ShiftCloseResponse> =
+        Result.failure(UnsupportedOperationException("Shift close not supported in this repository mode"))
 
     suspend fun getSalesInvoiceDetail(invoicePublicId: String): Result<SalesInvoiceDetailResponse> =
         Result.failure(UnsupportedOperationException("Invoice detail read not supported in this repository mode"))
@@ -1652,5 +1663,45 @@ class OfflineDemoTraderRepository(
 
     override fun cancelDraftOperation(formType: String) {
         draftIntents[formType] = java.util.UUID.randomUUID().toString()
+    }
+
+    private val _shiftCloseSuccessFlow = MutableStateFlow<ShiftCloseResponse?>(null)
+    override val shiftCloseSuccessFlow: StateFlow<ShiftCloseResponse?> = _shiftCloseSuccessFlow.asStateFlow()
+
+    override suspend fun closeShift(
+        countedCash: BigDecimal,
+        notes: String?,
+        cashAccountId: String?,
+        commandId: String
+    ): Result<ShiftCloseResponse> {
+        if (countedCash.signum() < 0) {
+            return Result.failure(IllegalArgumentException("Counted physical cash must be non-negative"))
+        }
+        val expected = BigDecimal("536.00")
+        val variance = countedCash.subtract(expected)
+        val status = when {
+            variance.signum() == 0 -> "EXACT"
+            variance.signum() > 0 -> "OVERAGE"
+            else -> "SHORTAGE"
+        }
+        val closureId = ServerUlid.parse("01JMB000000000000000000009")
+        val nowIso = WesternFormatters.currentTimestamp()
+        val res = ShiftCloseResponse(
+            id = closureId,
+            shiftClosureId = closureId,
+            shiftDate = WesternFormatters.currentDate(),
+            currency = "ILS",
+            currencyMinorUnits = 2,
+            expectedCash = expected,
+            countedCash = countedCash,
+            variance = variance,
+            varianceStatus = status,
+            closedAt = nowIso,
+            success = true,
+            observationRecorded = true,
+            isShiftClosed = false
+        )
+        _shiftCloseSuccessFlow.value = res
+        return Result.success(res)
     }
 }

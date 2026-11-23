@@ -396,6 +396,10 @@ class TraderViewModel(
             _uiState.update { it.copy(isReceivePurchaseDialogOpen = false) }
             return true
         }
+        if (current.isShiftCloseDialogOpen) {
+            _uiState.update { it.copy(isShiftCloseDialogOpen = false) }
+            return true
+        }
         if (current.currentScreen == TraderScreen.HOME) return false
         val previous = current.screenHistory.lastOrNull() ?: TraderScreen.HOME
         _uiState.update { state ->
@@ -489,6 +493,18 @@ class TraderViewModel(
                     current.copy(
                         liveShiftSummary = shift?.let { com.example.data.mobile.merchantread.MerchantReadAdapter.toLiveShiftSummary(it) }
                     )
+                }
+            }
+        }
+        viewModelScope.launch {
+            repository.shiftCloseSuccessFlow.collect { closeSnap ->
+                if (closeSnap != null) {
+                    _uiState.update { current ->
+                        current.copy(
+                            shiftCloseSuccessSnapshot = closeSnap,
+                            shiftClosedTimestamp = closeSnap.closedAt
+                        )
+                    }
                 }
             }
         }
@@ -3844,11 +3860,137 @@ class TraderViewModel(
     }
 
     fun toggleShiftClosePreview(closed: Boolean) {
+        if (!_uiState.value.currentSession.isDemoSession) {
+            openShiftCloseDialog(closed)
+            return
+        }
         _uiState.update {
             it.copy(
                 isShiftClosedPreview = closed,
                 shiftClosedTimestamp = if (closed) WesternFormatters.currentTimestamp() else null
             )
+        }
+    }
+
+    fun openShiftCloseDialog(open: Boolean) {
+        _uiState.update { current ->
+            val defaultCount = if (open && current.shiftCloseCountedCashInput.isBlank()) {
+                current.countedPhysicalCashText
+            } else {
+                current.shiftCloseCountedCashInput
+            }
+            current.copy(
+                isShiftCloseDialogOpen = open,
+                shiftCloseCountedCashInput = defaultCount,
+                shiftCloseError = if (!open) null else current.shiftCloseError
+            )
+        }
+    }
+
+    fun updateShiftCloseCountedCash(text: String) {
+        val sanitized = WesternFormatters.sanitizeWesternDigits(text)
+        _uiState.update {
+            it.copy(shiftCloseCountedCashInput = sanitized, shiftCloseError = null)
+        }
+    }
+
+    fun updateShiftCloseNotes(text: String) {
+        _uiState.update {
+            it.copy(shiftCloseNotesInput = text)
+        }
+    }
+
+    fun closeShift(
+        countedCashText: String? = null,
+        notesText: String? = null,
+        commandId: String = java.util.UUID.randomUUID().toString(),
+        onComplete: ((Result<com.example.data.mobile.merchantread.ShiftCloseResponse>) -> Unit)? = null
+    ) {
+        val current = _uiState.value
+        val rawCount = (countedCashText ?: current.shiftCloseCountedCashInput).trim()
+        val effectiveNotes = notesText ?: current.shiftCloseNotesInput.ifBlank { null }
+
+        if (rawCount.isEmpty()) {
+            val err = current.language.tr("يرجى إدخال المبلغ الفعلي بالدرج", "Please enter counted cash in drawer")
+            _uiState.update { it.copy(shiftCloseError = err) }
+            onComplete?.invoke(Result.failure(IllegalArgumentException(err)))
+            return
+        }
+
+        val parsed = try {
+            BigDecimal(rawCount)
+        } catch (_: Exception) {
+            val err = current.language.tr("المبلغ المدخل غير صالح", "Invalid cash amount")
+            _uiState.update { it.copy(shiftCloseError = err) }
+            onComplete?.invoke(Result.failure(IllegalArgumentException(err)))
+            return
+        }
+
+        if (parsed.signum() < 0) {
+            val err = current.language.tr("لا يمكن أن يكون المبلغ سالباً", "Counted cash cannot be negative")
+            _uiState.update { it.copy(shiftCloseError = err) }
+            onComplete?.invoke(Result.failure(IllegalArgumentException(err)))
+            return
+        }
+
+        val minorUnits = current.liveShiftSummary?.currencyMinorUnits ?: 2
+        if (parsed.scale() > minorUnits) {
+            val err = current.language.tr(
+                "دقة المبلغ تتجاوز الحد المسموح ($minorUnits خانات)",
+                "Counted cash precision exceeds $minorUnits decimal places"
+            )
+            _uiState.update { it.copy(shiftCloseError = err) }
+            onComplete?.invoke(Result.failure(IllegalArgumentException(err)))
+            return
+        }
+
+        _uiState.update {
+            it.copy(
+                isShiftCloseSubmitting = true,
+                shiftCloseError = null,
+                shiftCloseCountedCashInput = rawCount,
+                shiftCloseNotesInput = effectiveNotes ?: ""
+            )
+        }
+
+        viewModelScope.launch {
+            val result = repository.closeShift(
+                countedCash = parsed,
+                notes = effectiveNotes,
+                commandId = commandId
+            )
+            if (result.isSuccess) {
+                val snapshot = result.getOrThrow()
+                _uiState.update {
+                    it.copy(
+                        isShiftCloseSubmitting = false,
+                        isShiftCloseDialogOpen = false,
+                        shiftCloseSuccessSnapshot = snapshot,
+                        shiftClosedTimestamp = snapshot.closedAt,
+                        shiftCloseError = null
+                    )
+                }
+                showBanner(
+                    ar = "تم تسجيل جرد الصندوق والوردية بنجاح (${snapshot.varianceStatus})",
+                    en = "Shift cash count recorded successfully (${snapshot.varianceStatus})"
+                )
+                onComplete?.invoke(Result.success(snapshot))
+            } else {
+                val ex = result.exceptionOrNull() ?: RuntimeException("Failed to close shift")
+                val errMsg = ex.message ?: "Failed to close shift"
+                _uiState.update {
+                    it.copy(
+                        isShiftCloseSubmitting = false,
+                        shiftCloseError = errMsg
+                    )
+                }
+                showBanner(
+                    ar = "فشل تسجيل إغلاق الوردية: $errMsg",
+                    en = "Shift close failed: $errMsg",
+                    isError = true
+                )
+                onComplete?.invoke(Result.failure(ex))
+            }
         }
     }
 

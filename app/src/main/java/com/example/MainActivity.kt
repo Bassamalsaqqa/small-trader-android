@@ -43,6 +43,7 @@ import com.example.ui.screens.CustomerPaymentCollectionDialog
 import com.example.ui.screens.CustomersScreen
 import com.example.ui.screens.ExpensesScreen
 import com.example.ui.screens.FinancialReportsScreen
+import com.example.ui.screens.ShiftCloseDialog
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.InvoiceReviewScreen
 import com.example.ui.screens.InvoicesHistoryScreen
@@ -119,7 +120,8 @@ fun SmallTraderApp(
         state.isPaymentCollectionDialogOpen ||
         state.isAddCustomerDialogOpen ||
         state.isAddExpenseDialogOpen ||
-        state.isReceivePurchaseDialogOpen
+        state.isReceivePurchaseDialogOpen ||
+        state.isShiftCloseDialogOpen
 
     BackHandler(enabled = canNavigateBack) {
         traderViewModel.navigateBack()
@@ -530,7 +532,8 @@ fun SmallTraderApp(
                                 state = state,
                                 onUpdateOpeningCash = traderViewModel::updateStartingDrawerCash,
                                 onUpdateCountedCashText = traderViewModel::updateCountedPhysicalCashText,
-                                onToggleShiftClose = traderViewModel::toggleShiftClosePreview
+                                onToggleShiftClose = traderViewModel::toggleShiftClosePreview,
+                                onOpenShiftCloseDialog = traderViewModel::openShiftCloseDialog
                             )
                         }
 
@@ -791,6 +794,21 @@ fun SmallTraderApp(
                             )
                         }
                     )
+                    }
+                }
+
+                // Shift Close Dialog
+                if (state.isShiftCloseDialogOpen) {
+                    screenStates.SaveableStateProvider("form_shift_close") {
+                        ShiftCloseDialog(
+                            state = state,
+                            onDismiss = { traderViewModel.openShiftCloseDialog(false) },
+                            onConfirmClose = { countedText, notes ->
+                                traderViewModel.closeShift(countedText, notes)
+                            },
+                            onUpdateCountedCash = traderViewModel::updateShiftCloseCountedCash,
+                            onUpdateNotes = traderViewModel::updateShiftCloseNotes
+                        )
                     }
                 }
             }

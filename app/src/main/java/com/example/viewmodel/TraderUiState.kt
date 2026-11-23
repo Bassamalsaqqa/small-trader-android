@@ -29,6 +29,7 @@ import com.example.model.SettlementTarget
 import com.example.model.StockMovement
 import com.example.model.Supplier
 import com.example.model.SupplierPayment
+import com.example.data.mobile.merchantread.ShiftCloseResponse
 import com.example.model.TraderScreen
 import com.example.model.UserRole
 import com.example.model.UserSession
@@ -128,6 +129,12 @@ data class TraderUiState(
     val countedPhysicalCashText: String = "",
     val isShiftClosedPreview: Boolean = false,
     val shiftClosedTimestamp: String? = null,
+    val isShiftCloseDialogOpen: Boolean = false,
+    val isShiftCloseSubmitting: Boolean = false,
+    val shiftCloseError: String? = null,
+    val shiftCloseSuccessSnapshot: ShiftCloseResponse? = null,
+    val shiftCloseCountedCashInput: String = "",
+    val shiftCloseNotesInput: String = "",
 
     // Customers & Balances
     val customers: List<Customer> = emptyList(),
@@ -498,6 +505,9 @@ data class TraderUiState(
                 .setScale(2, RoundingMode.HALF_UP)
                 .toDouble()
         }
+
+    val isShiftClosed: Boolean get() = shiftCloseSuccessSnapshot != null || isShiftClosedPreview
+    val shiftClosureTimestamp: String? get() = shiftCloseSuccessSnapshot?.closedAt ?: shiftClosedTimestamp
 
     val drawerCashSalesIls: Double get() = shiftCashSalesIls
     val totalCustomerCollectionsIls: Double get() = shiftCustomerCollectionsIls
