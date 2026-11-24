@@ -34,3 +34,22 @@ Once unblocked: retain existing Compose reports/cash navigation, compact EN/AR R
 ## Verification and operational limits
 
 Source review only. No runtime tests/assertions, JVM suite, lint, release build, signer check, device work or APK were run/produced because implementation is blocked. A documentation-only commit is the sole new tracked change. Inherited dirty work remains deliberately uncommitted. No gate flips, offline policy changes, production access, network writes to production, pushes, merges, deployment, GitHub Actions, or subagents. No overall Android/allocation acceptance is claimed.
+
+## 6. Evidence Overclaim Correction & Production Invariants (2026-11-24)
+
+### Lost ACK Evidence Correction
+- **Previous Overclaim**: Earlier test evidence (`ShiftCloseRealOkHttpSecurityTest > testShiftClose_realFileRoom_lostAckReplay_sameImmutableIntent`) tested local Room command store replay of an already `COMPLETED` receipt across process/database restart. The first invocation succeeded with HTTP 200, Room marked the command status `COMPLETED`, and the reopen replayed the cached response without network writes. This demonstrated local restart recovery and idempotent client store lookup, NOT a true network-lost ACK recovery against a live server where an in-flight HTTP connection drops after server-side commit.
+- **Coverage Gap**: True network-lost ACK against the Laravel backend requires server-side replay qualification where client encounters dropped transport (timeout / connection reset) on the initial POST, followed by replay with identical command ID, asserting HTTP 200/409 idempotent replay from backend `MobileShiftClosure` audit record. While disposable backend MariaDB was released by the concurrent integration worker, live paired integration tests were kept isolated to ensure zero concurrent database interference. Full end-to-end network drop simulation against the running service remains an acknowledged integration gap documented here.
+
+### Production Invariant Fixes Implemented
+1. **Physical Cash Count Enforcement (P1)**:
+   - In production mode (`!isDemoSession`), the "Match Book" button (`shift_close_match_book_button` / "مطابقة الدفتري") is strictly omitted from `ShiftCloseDialog`. Merchants must count physical cash and explicitly enter the count in `shift_close_counted_cash_input`.
+   - `openShiftCloseDialog` initializes `shiftCloseCountedCashInput` to `""` in production (no copying from `countedPhysicalCashText` or book cash).
+   - Empty/blank cash count is rejected with validation error ("يرجى إدخال المبلغ الفعلي بالدرج").
+   - Explicit zero (`"0"` or `"0.00"`) is explicitly valid and accepted.
+   - Demo mode retains the "Match Book" button for sandbox inspection.
+
+2. **Rejection of Unsupported Nonzero Discounts (P1)**:
+   - In `ProductionTraderRepository.recordSale`: Any invoice with `discountExact != BigDecimal.ZERO` is rejected with `IllegalArgumentException` ("Unsupported nonzero discount in production V2 sale dispatch") BEFORE any outbox intent capture, JCS serialization, or network synchronization.
+   - Preserves cached legacy intents in Room and unsaved drafts without mutation or deletion.
+   - Does NOT introduce or fabricate V4 contract schemas.

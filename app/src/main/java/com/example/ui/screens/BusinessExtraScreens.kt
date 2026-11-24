@@ -1175,26 +1175,25 @@ fun ShiftCloseDialog(
                                 modifier = Modifier.testTag("shift_close_dialog_expected_cash")
                             )
                         }
-                        OutlinedButton(
-                            onClick = {
-                                val bookCashStr = when {
-                                    !isDemo && liveShift?.expectedCash != null -> liveShift.expectedCash.toPlainString()
-                                    else -> WesternFormatters.formatNumber(state.expectedBookCashIls).removeSuffix(".00")
-                                }
-                                localInput = bookCashStr
-                                onUpdateCountedCash(bookCashStr)
-                                localValidationError = null
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            enabled = !isReadOnly,
-                            modifier = Modifier
-                                .heightIn(min = 40.dp)
-                                .testTag("shift_close_match_book_button")
-                        ) {
-                            Text(
-                                text = lang.tr("مطابقة الدفتري", "Match Book"),
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium)
-                            )
+                        if (isDemo) {
+                            OutlinedButton(
+                                onClick = {
+                                    val bookCashStr = WesternFormatters.formatNumber(state.expectedBookCashIls).removeSuffix(".00")
+                                    localInput = bookCashStr
+                                    onUpdateCountedCash(bookCashStr)
+                                    localValidationError = null
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                enabled = !isReadOnly,
+                                modifier = Modifier
+                                    .heightIn(min = 40.dp)
+                                    .testTag("shift_close_match_book_button")
+                            ) {
+                                Text(
+                                    text = lang.tr("مطابقة الدفتري", "Match Book"),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium)
+                                )
+                            }
                         }
                     }
                 }

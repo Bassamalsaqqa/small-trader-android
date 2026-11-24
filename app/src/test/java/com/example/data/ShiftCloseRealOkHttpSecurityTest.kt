@@ -33,10 +33,15 @@ import com.example.data.mobile.merchantread.ShiftSummaryReportResponse
 import com.example.data.mobile.outbox.OutboxDatabase
 import com.example.data.mobile.outbox.CommandStatus
 import com.example.data.mobile.outbox.RoomMerchantCommandStore
+import com.example.data.mobile.outbox.OutboxRepositoryImpl
 import com.example.data.mobile.readclient.ApprovedCashAccount
 import com.example.data.mobile.readclient.http.OkHttpTransport
 import com.example.data.mobile.session.JvmAesGcmCryptoEngine
 import com.example.model.AppLanguage
+import com.example.model.BasketItem
+import com.example.model.InvoiceRecord
+import com.example.model.Product
+import com.example.model.ProductCategory
 import com.example.model.UserRole
 import com.example.model.UserSession
 import com.example.model.WesternFormatters
@@ -371,8 +376,14 @@ class ShiftCloseRealOkHttpSecurityTest {
     }
 
     // -------------------------------------------------------------------------
-    // 5. Real-File Room Close & Reopen: Lost ACK Recovery (Same Immutable Intent)
+    // 5. Real-File Room Close & Reopen: Completed Command Replay from Disk (Local Idempotency on Restart)
     // -------------------------------------------------------------------------
+    // Note on lost-ACK evidence scope: This test verifies local Room persistence and command replay of
+    // an already COMPLETED command across process restart without duplicate network requests.
+    // A true network-lost ACK (where HTTP response drops in transit after server-side commit, leaving client
+    // with an unknown outcome) requires server-side replay against a live backend endpoint.
+    // Live paired qualification against a shared disposable backend DB is isolated and not run concurrently
+    // while leased by integration workers.
 
     @Test
     fun testShiftClose_realFileRoom_lostAckReplay_sameImmutableIntent() = runBlocking {
@@ -787,8 +798,11 @@ class ShiftCloseRealOkHttpSecurityTest {
         composeTestRule.onNodeWithTag("shift_close_dialog_expected_cash").assertIsDisplayed()
         composeTestRule.onNodeWithText("850.00 ILS", substring = true).assertIsDisplayed()
 
-        // Match book button populates input
-        composeTestRule.onNodeWithTag("shift_close_match_book_button").performClick()
+        // Production mode: Match Book button must NOT exist (merchants must physically count and enter cash)
+        composeTestRule.onNodeWithTag("shift_close_match_book_button").assertDoesNotExist()
+
+        // Explicitly enter physical count
+        composeTestRule.onNodeWithTag("shift_close_counted_cash_input").performTextInput("850.00")
 
         // Enter notes
         composeTestRule.onNodeWithTag("shift_close_notes_input").performTextInput("مطابقة تامة للجرد")
@@ -1709,6 +1723,303 @@ class ShiftCloseRealOkHttpSecurityTest {
         assertTrue(resNeither.isFailure)
         assertTrue(resNeither.exceptionOrNull() is SecurityException)
         assertEquals("Neither must not make network call", 1, server!!.requestCount)
+
+        db.close()
+    }
+
+    // -------------------------------------------------------------------------
+    // 21. Production vs Demo: Explicit Count Required, Zero Valid, Blank Rejected
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun testShiftClose_productionRequiresExplicitCount_validatesZeroAndRejectsBlank() {
+        val session = UserSession(
+            id = "usr_owner_prod",
+            name = "مالك المتجر",
+            username = "owner",
+            role = UserRole.OWNER,
+            permissions = setOf("pos.sale", "purchases.manage", "expenses.manage", "reports.financial.view"),
+            branchNameAr = "الفرع الرئيسي",
+            branchNameEn = "Main Branch",
+            isDemoSession = false // Production session
+        )
+
+        val liveShift = LiveShiftSummary(
+            shiftDate = "2026-11-23",
+            currency = "ILS",
+            currencyMinorUnits = 2,
+            openingFloat = BigDecimal("100.00"),
+            cashSales = BigDecimal("200.00"),
+            cashCollections = BigDecimal.ZERO,
+            cashDisbursements = BigDecimal.ZERO,
+            operatingExpenses = BigDecimal.ZERO,
+            expectedCash = BigDecimal("300.00"),
+            salesCount = 3
+        )
+
+        var dialogConfirmedCount: String? = null
+        var dialogConfirmedNotes: String? = null
+
+        val testUiState = mutableStateOf(
+            TraderUiState(
+                currentSession = session,
+                liveShiftSummary = liveShift,
+                isShiftCloseDialogOpen = true,
+                language = AppLanguage.AR
+            )
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                val currentState = testUiState.value
+                if (currentState.isShiftCloseDialogOpen) {
+                    ShiftCloseDialog(
+                        state = currentState,
+                        onDismiss = {},
+                        onConfirmClose = { count, notes ->
+                            dialogConfirmedCount = count
+                            dialogConfirmedNotes = notes
+                        }
+                    )
+                }
+            }
+        }
+
+        // Production: Match book button does NOT exist
+        composeTestRule.onNodeWithTag("shift_close_match_book_button").assertDoesNotExist()
+
+        // Clicking confirm with empty input triggers validation error
+        composeTestRule.onNodeWithTag("confirm_shift_close_button").performClick()
+        assertNull("Empty count must not confirm", dialogConfirmedCount)
+        composeTestRule.onNodeWithTag("shift_close_dialog_error").assertExists()
+        composeTestRule.onNodeWithText("يرجى إدخال المبلغ الفعلي بالدرج", substring = true).assertExists()
+
+        // Explicit zero is valid
+        composeTestRule.onNodeWithTag("shift_close_counted_cash_input").performTextInput("0.00")
+        composeTestRule.onNodeWithTag("confirm_shift_close_button").performClick()
+
+        assertEquals("0.00", dialogConfirmedCount)
+    }
+
+    // -------------------------------------------------------------------------
+    // 22. Demo Mode: Match Book Button Populates Book Cash
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun testShiftClose_demoModeAllowsMatchBookButton() {
+        val demoSession = UserSession(
+            id = "usr_demo",
+            name = "مستخدم تجريبي",
+            username = "demo",
+            role = UserRole.OWNER,
+            permissions = setOf("pos.sale", "reports.financial.view"),
+            branchNameAr = "الفرع التجريبي",
+            branchNameEn = "Demo Branch",
+            isDemoSession = true // Demo session
+        )
+
+        var dialogConfirmedCount: String? = null
+
+        val testUiState = mutableStateOf(
+            TraderUiState(
+                currentSession = demoSession,
+                startingDrawerCashIls = 450.00,
+                isShiftCloseDialogOpen = true,
+                language = AppLanguage.AR
+            )
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = true) {
+                val currentState = testUiState.value
+                if (currentState.isShiftCloseDialogOpen) {
+                    ShiftCloseDialog(
+                        state = currentState,
+                        onDismiss = {},
+                        onConfirmClose = { count, _ ->
+                            dialogConfirmedCount = count
+                        }
+                    )
+                }
+            }
+        }
+
+        // Demo mode: Match book button IS displayed
+        composeTestRule.onNodeWithTag("shift_close_match_book_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("shift_close_match_book_button").performClick()
+
+        // Confirm populated count
+        composeTestRule.onNodeWithTag("confirm_shift_close_button").performClick()
+        assertEquals("450", dialogConfirmedCount)
+    }
+
+    // -------------------------------------------------------------------------
+    // 23. Production V2 Sale Dispatch: Reject Unsupported Nonzero Discounts
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun testRecordSale_productionRejectsUnsupportedNonzeroDiscount_beforeOutboxCapture() = runBlocking {
+        val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store = RoomMerchantCommandStore(db, cryptoEngine)
+        val outboxRepo = OutboxRepositoryImpl(db)
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val apiClient = MobileMerchantApiClient(transport, baseOrigin) { validToken }
+
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2,
+            outboxRepository = outboxRepo
+        )
+
+        val testProduct = Product(
+            id = "01JMB000000000000000000010",
+            nameAr = "زيت زيتون",
+            nameEn = "Olive Oil",
+            category = ProductCategory.PANTRY,
+            barcode = "7290001234567",
+            priceExact = BigDecimal("10.00"),
+            costExact = BigDecimal("7.00"),
+            unitAr = "كغم",
+            unitEn = "kg",
+            stockCount = 100,
+            accentHex = 0xFF2E7D32L,
+            productUnitId = "01JMB000000000000000000020"
+        )
+
+        val discountedInvoice = InvoiceRecord(
+            id = "inv-disc-fail-001",
+            invoiceNumber = 5001,
+            timestamp = "2026-11-24 12:00:00",
+            items = listOf(BasketItem(product = testProduct, quantity = BigDecimal("2"))),
+            subtotalExact = BigDecimal("20.00"),
+            discountExact = BigDecimal("5.00"),
+            netTotalExact = BigDecimal("15.00"),
+            cashReceivedExact = BigDecimal("15.00"),
+            changeReturnedExact = BigDecimal.ZERO,
+            customerNote = "Discount rejection test",
+            cashierNameAr = "كاشير",
+            cashierNameEn = "Cashier",
+            isPaidInFull = true,
+            clientEventId = "550e8400-e29b-41d4-a716-446655440099"
+        )
+
+        val result = repo.recordSale(discountedInvoice)
+
+        assertTrue("Nonzero discount must fail before outbox/network effects", result.isFailure)
+        val ex = result.exceptionOrNull()
+        assertTrue("Must be IllegalArgumentException", ex is IllegalArgumentException)
+        assertTrue(
+            "Exception message must identify unsupported nonzero discount: ${ex?.message}",
+            ex?.message?.contains("Unsupported nonzero discount in production V2 sale dispatch") == true
+        )
+
+        // Verify NO outbox events were captured
+        assertEquals("No outbox event should be captured on discount rejection", 0, db.outboxDao().eventCount())
+        // Verify NO network request was made
+        assertEquals("No HTTP request should be made to server", 0, server!!.requestCount)
+
+        db.close()
+    }
+
+    // -------------------------------------------------------------------------
+    // 24. Production V2 Sale Dispatch: Accept Zero Discount
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun testRecordSale_productionAcceptsZeroDiscount() = runBlocking {
+        val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store = RoomMerchantCommandStore(db, cryptoEngine)
+
+        // Mock server response for sale sync
+        val saleSyncResponseJson = """
+            {
+                "success": true,
+                "invoices": [
+                    {
+                        "client_event_id": "550e8400-e29b-41d4-a716-446655440098",
+                        "server_invoice_ulid": "01JCV8X9M2NQW3TYZ4R5S6789S",
+                        "server_invoice_number": "INV-2026-0001",
+                        "server_payment_ulid": "01JCV8X9M2NQW3TYZ4R5S6789P",
+                        "server_payment_receipt_number": "REC-2026-0001",
+                        "server_posted_at": "2026-11-24T12:00:00Z"
+                    }
+                ]
+            }
+        """.trimIndent()
+        server!!.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(saleSyncResponseJson)
+        )
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val apiClient = MobileMerchantApiClient(transport, baseOrigin) { validToken }
+
+        val outboxRepo = OutboxRepositoryImpl(db)
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2,
+            outboxRepository = outboxRepo
+        )
+
+        val testProduct = Product(
+            id = "01JMB000000000000000000010",
+            nameAr = "زيت زيتون",
+            nameEn = "Olive Oil",
+            category = ProductCategory.PANTRY,
+            barcode = "7290001234567",
+            priceExact = BigDecimal("10.00"),
+            costExact = BigDecimal("7.00"),
+            unitAr = "كغم",
+            unitEn = "kg",
+            stockCount = 100,
+            accentHex = 0xFF2E7D32L,
+            productUnitId = "01JMB000000000000000000020"
+        )
+
+        val zeroDiscountInvoice = InvoiceRecord(
+            id = "inv-zero-disc-001",
+            invoiceNumber = 5002,
+            timestamp = "2026-11-24 12:00:00",
+            items = listOf(BasketItem(product = testProduct, quantity = BigDecimal("2"))),
+            subtotalExact = BigDecimal("20.00"),
+            discountExact = BigDecimal.ZERO,
+            netTotalExact = BigDecimal("20.00"),
+            cashReceivedExact = BigDecimal("20.00"),
+            changeReturnedExact = BigDecimal.ZERO,
+            customerNote = "Zero discount acceptance test",
+            cashierNameAr = "كاشير",
+            cashierNameEn = "Cashier",
+            isPaidInFull = true,
+            clientEventId = "550e8400-e29b-41d4-a716-446655440098"
+        )
+
+        val result = repo.recordSale(zeroDiscountInvoice)
+        // Verify discount validation did NOT reject the zero-discount sale:
+        val ex = result.exceptionOrNull()
+        assertFalse(
+            "Zero discount must not be rejected by discount validation",
+            ex is IllegalArgumentException && ex.message?.contains("Unsupported nonzero discount") == true
+        )
+        // Verify that the sale proceeded past Step 2b discount validation gate to Step 5:
+        assertTrue(
+            "Zero discount sale must pass discount validation: ${ex?.message}",
+            ex is IllegalStateException && ex.message?.contains("SaleSyncGateway not configured") == true
+        )
 
         db.close()
     }

@@ -1310,6 +1310,15 @@ class ProductionTraderRepository(
             }
         }
 
+        // 2b. Rejection of unsupported nonzero discounts for production V2 sale dispatch
+        if (invoice.discountExact.compareTo(BigDecimal.ZERO) != 0) {
+            return@withContext Result.failure(
+                IllegalArgumentException(
+                    "الخصومات غير مدعومة في إرسال المبيعات الحالي | Unsupported nonzero discount in production V2 sale dispatch: ${invoice.discountExact.toPlainString()}"
+                )
+            )
+        }
+
         // 3. Construct OnlineSaleIntentProfile
         // Maintain existing clientEventId across retry of same UI sale; never generate a new UUID on retry!
         val clientEventId = if (!invoice.clientEventId.isNullOrBlank() && ClientUuid.isValid(invoice.clientEventId)) {
@@ -3851,7 +3860,8 @@ class ProductionTraderRepository(
             baseCurrency: String = "ILS",
             currencyMinorUnits: Int = 2,
             permissions: Set<String> = setOf("pos.sale", "purchases.manage", "expenses.manage", "reports.financial.view"),
-            ioDispatcher: CoroutineDispatcher = Dispatchers.IO
+            ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+            outboxRepository: OutboxRepository? = null
         ): ProductionTraderRepository {
             val readTokenProvider = MerchantReadTokenProvider { reqCompanyId, retainedGen ->
                 val current = (authScopeProvider ?: { CurrentAuthScope(companyId = companyId, actorId = actorId, deviceId = deviceId, token = "test-token", generation = 1L) }).invoke()
@@ -3891,6 +3901,7 @@ class ProductionTraderRepository(
                 bootstrapUnits = emptyList(),
                 bootstrapTaxes = emptyList(),
                 apiClient = apiClient,
+                outboxRepository = outboxRepository,
                 ioDispatcher = ioDispatcher,
                 authScopeProvider = authScopeProvider ?: { CurrentAuthScope(companyId = companyId, actorId = actorId, deviceId = deviceId, token = "test-token", generation = 1L) },
                 commandStore = commandStore,

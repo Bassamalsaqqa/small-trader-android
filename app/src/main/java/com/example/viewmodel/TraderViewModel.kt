@@ -3885,10 +3885,12 @@ class TraderViewModel(
             val recCount = payload?.properties?.get("counted_cash")?.asString()
             val recNotes = payload?.properties?.get("notes")?.asString()
             _uiState.update { current ->
+                val isDemo = current.currentSession.isDemoSession
                 val countInput = when {
                     isRecovering && recCount != null -> recCount
                     current.shiftCloseCountedCashInput.isNotBlank() -> current.shiftCloseCountedCashInput
                     recCount != null -> recCount
+                    !isDemo -> "" // Production requires explicitly entered actual count: no book/demo copy or defaults
                     else -> current.countedPhysicalCashText
                 }
                 val notesInput = when {
