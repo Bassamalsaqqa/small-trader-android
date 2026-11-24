@@ -182,6 +182,36 @@ class ReadClientSecurityAndTransportTest {
         assertThrows(IllegalArgumentException::class.java) {
             PaginationQuery(cursor = "a".repeat(256))
         }
+
+        // Settlement/outstanding endpoints accept cursors up to 512 characters, rejecting >512
+        EndpointSecurity.validateCursor("a".repeat(255))
+        assertThrows(IllegalArgumentException::class.java) {
+            EndpointSecurity.validateCursor("a".repeat(256))
+        }
+        EndpointSecurity.validateCursor("a".repeat(512), maxLimit = 512)
+        assertThrows(IllegalArgumentException::class.java) {
+            EndpointSecurity.validateCursor("a".repeat(513), maxLimit = 512)
+        }
+
+        // Endpoint query params: 512 allowed on settlement and outstanding, 255 on general
+        val settlementPath = "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S67899/customers/01JCV8X9M2NQW3TYZ4R5S6789A/settlement-targets"
+        val outstandingPath = "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S67899/suppliers/01JCV8X9M2NQW3TYZ4R5S6789B/outstanding"
+        val generalPath = "/api/mobile/v1/companies/01JCV8X9M2NQW3TYZ4R5S67899/products"
+
+        EndpointSecurity.validateEndpointQueryParams(settlementPath, mapOf("cursor" to "a".repeat(512)))
+        EndpointSecurity.validateEndpointQueryParams(outstandingPath, mapOf("cursor" to "a".repeat(512)))
+        assertThrows(IllegalArgumentException::class.java) {
+            EndpointSecurity.validateEndpointQueryParams(settlementPath, mapOf("cursor" to "a".repeat(513)))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            EndpointSecurity.validateEndpointQueryParams(generalPath, mapOf("cursor" to "a".repeat(256)))
+        }
+
+        // Raw query string: up to 1024 allowed on settlement/outstanding, up to 512 on general
+        EndpointSecurity.validateRawQueryString(settlementPath, "cursor=" + "a".repeat(512) + "&limit=1")
+        assertThrows(IllegalArgumentException::class.java) {
+            EndpointSecurity.validateRawQueryString(generalPath, "cursor=" + "a".repeat(256))
+        }
     }
 
     @Test

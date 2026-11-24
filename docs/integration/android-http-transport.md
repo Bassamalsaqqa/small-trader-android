@@ -105,7 +105,7 @@ OkHttpClient.Builder()
 ### 4.4 Opaque Query Parameter Percent-Encoding
 - All query parameters (`limit`, `cursor`, `search`) are UTF-8 URL-encoded (`URLEncoder.encode(..., "UTF-8")`).
 - Any CRLF characters remain safely percent-encoded query characters (`%0D%0A`), preventing header injection.
-- Cursors are validated as bounded opaque tokens (`EndpointSecurity.validateCursor`) up to 255 characters. Valid contract characters (`/`, `=`, `+`, `-`, `_`, `.`) are safely percent-encoded and never parsed or followed as URLs.
+- Cursors are validated as bounded opaque tokens (`EndpointSecurity.validateCursor`) up to 255 characters for standard catalog/customer read endpoints, and up to 512 characters for settlement targets and outstanding endpoints. Valid contract characters (`/`, `=`, `+`, `-`, `_`, `.`) are safely percent-encoded and never parsed or followed as URLs.
 
 ### 4.5 Prohibition of Automatic Wire Retries & Follow-Ups (503 Retry-After: 0, 408, 421, 401, 407, 3xx)
 The transport enforces an authoritative guarantee: **No automatic retries or follow-up requests are transmitted over the wire within a single `execute()` call**. This guarantee is crucial for authentication and challenge flows (preventing duplicate submission of nonce tokens or credentials) as well as operational determinism (surfacing the server's authoritative response rather than concealing transient load shed).

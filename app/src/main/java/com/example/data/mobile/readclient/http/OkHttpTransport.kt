@@ -262,7 +262,9 @@ class OkHttpTransport(
         val cursor = request.queryParams["cursor"]
         if (cursor != null) {
             try {
-                EndpointSecurity.validateCursor(cursor)
+                val isSettlementOrOutstanding = request.path.endsWith("/settlement-targets") || request.path.endsWith("/outstanding")
+                val maxLimit = if (isSettlementOrOutstanding) 512 else 255
+                EndpointSecurity.validateCursor(cursor, maxLimit = maxLimit)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 if (e is VirtualMachineError) throw e

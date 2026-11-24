@@ -293,7 +293,11 @@ object EndpointSecurity {
                     val max = if (basePath.endsWith("/settlement-targets") || basePath.endsWith("/outstanding")) 250 else 100
                     validateLimit(value.toIntOrNull() ?: throw IllegalArgumentException("Invalid limit"), maxLimit = max)
                 }
-                "cursor" -> validateCursor(value)
+                "cursor" -> {
+                    val isSettlementOrOutstanding = basePath.endsWith("/settlement-targets") || basePath.endsWith("/outstanding")
+                    val maxLimit = if (isSettlementOrOutstanding) 512 else 255
+                    validateCursor(value, maxLimit = maxLimit)
+                }
                 "currency" -> validateCurrency(value)
                 "idempotency_key" -> validateIdempotencyKey(value)
                 "status" -> {
@@ -322,7 +326,9 @@ object EndpointSecurity {
     }
 
     fun validateRawQueryString(basePath: String, queryString: String) {
-        require(queryString.length <= 512) { "Query string exceeds maximum length bound" }
+        val isSettlementOrOutstanding = basePath.endsWith("/settlement-targets") || basePath.endsWith("/outstanding")
+        val maxLen = if (isSettlementOrOutstanding) 1024 else 512
+        require(queryString.length <= maxLen) { "Query string exceeds maximum length bound" }
         require(queryString.none { it == '\r' || it == '\n' || it.code < 32 || it.code == 127 }) {
             "Query string contains prohibited control characters"
         }
@@ -423,9 +429,9 @@ object EndpointSecurity {
         }
     }
 
-    fun validateCursor(cursor: String?) {
+    fun validateCursor(cursor: String?, maxLimit: Int = 255) {
         if (cursor == null) return
-        require(cursor.length <= 255) {
+        require(cursor.length <= maxLimit) {
             "Pagination cursor exceeds contract length bound"
         }
         // Opaque data only: the transport must encode this query value, never follow it.

@@ -350,7 +350,7 @@ class MobileMerchantApiClient(
             qParams["limit"] = limit.toString()
         }
         if (!cursor.isNullOrBlank()) {
-            com.example.data.mobile.readclient.EndpointSecurity.validateCursor(cursor)
+            com.example.data.mobile.readclient.EndpointSecurity.validateCursor(cursor, maxLimit = 512)
             qParams["cursor"] = cursor
         }
         val path = "/api/mobile/v1/companies/${companyId.value}/customers/${customerId.value}/settlement-targets"
@@ -375,7 +375,7 @@ class MobileMerchantApiClient(
             qParams["limit"] = limit.toString()
         }
         if (!cursor.isNullOrBlank()) {
-            com.example.data.mobile.readclient.EndpointSecurity.validateCursor(cursor)
+            com.example.data.mobile.readclient.EndpointSecurity.validateCursor(cursor, maxLimit = 512)
             qParams["cursor"] = cursor
         }
         val path = "/api/mobile/v1/companies/${companyId.value}/customers/${customerId.value}/outstanding"
@@ -488,7 +488,7 @@ class MobileMerchantApiClient(
             qParams["limit"] = limit.toString()
         }
         if (!cursor.isNullOrBlank()) {
-            com.example.data.mobile.readclient.EndpointSecurity.validateCursor(cursor)
+            com.example.data.mobile.readclient.EndpointSecurity.validateCursor(cursor, maxLimit = 512)
             qParams["cursor"] = cursor
         }
         val path = "/api/mobile/v1/companies/${companyId.value}/suppliers/${supplierId.value}/settlement-targets"
@@ -513,7 +513,7 @@ class MobileMerchantApiClient(
             qParams["limit"] = limit.toString()
         }
         if (!cursor.isNullOrBlank()) {
-            com.example.data.mobile.readclient.EndpointSecurity.validateCursor(cursor)
+            com.example.data.mobile.readclient.EndpointSecurity.validateCursor(cursor, maxLimit = 512)
             qParams["cursor"] = cursor
         }
         val path = "/api/mobile/v1/companies/${companyId.value}/suppliers/${supplierId.value}/outstanding"
