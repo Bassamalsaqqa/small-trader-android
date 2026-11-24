@@ -28,6 +28,15 @@ fun escapeJavaStringLiteral(value: String): String {
   return sb.toString()
 }
 
+val releaseKeystore = file(
+  System.getenv("KEYSTORE_PATH") ?: System.getenv("MYAPP_UPLOAD_STORE_FILE") ?: "${rootDir}/my-upload-key.jks"
+)
+val allowLocalDebugReleaseSigning = providers.gradleProperty("smalltrader.allowInsecureDebugSigningForRelease")
+  .map(String::toBoolean)
+  .orElse(false)
+val hasReleaseSigning = releaseKeystore.isFile &&
+  !System.getenv("STORE_PASSWORD").isNullOrBlank() && !System.getenv("KEY_PASSWORD").isNullOrBlank()
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -58,10 +67,7 @@ android {
   // and updating Android apps in AI Studio.
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH")
-        ?: System.getenv("MYAPP_UPLOAD_STORE_FILE")
-        ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
+      storeFile = releaseKeystore
       storePassword = System.getenv("STORE_PASSWORD")
       keyAlias = "upload"
       keyPassword = System.getenv("KEY_PASSWORD")
@@ -80,15 +86,8 @@ android {
       isMinifyEnabled = true
       isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
-      // AI Studio.
-      val allowInsecureDebugSign = project.findProperty("smalltrader.allowInsecureDebugSigningForRelease")?.toString()?.toBoolean() ?: true
-      val releaseKeystoreExists = signingConfigs.getByName("release").storeFile?.exists() == true
-      signingConfig = if (allowInsecureDebugSign || !releaseKeystoreExists) {
-        signingConfigs.getByName("debugConfig")
-      } else {
-        signingConfigs.getByName("release")
-      }
+      // Only an explicit local-development override can select debug signing.
+      signingConfig = signingConfigs.getByName(if (allowLocalDebugReleaseSigning.get()) "debugConfig" else "release")
       buildConfigField("boolean", "STAFF_ALLOW_HTTP_LOOPBACK", "false")
     }
     create("benchmark") {
@@ -249,4 +248,33 @@ tasks.matching {
   it.name == "preReleaseBuild"
 }.configureEach {
   dependsOn(validateReleaseOrigin)
+}
+
+abstract class RequireReleaseSigningTask : DefaultTask() {
+  @get:Input
+  abstract val signingConfigured: Property<Boolean>
+
+  @TaskAction
+  fun validate() {
+    if (!signingConfigured.get()) {
+      throw GradleException("Release packaging requires an existing release keystore and signing passwords. Use the debug build for local testing.")
+    }
+  }
+}
+
+val requireReleaseSigning = tasks.register<RequireReleaseSigningTask>("requireReleaseSigning") {
+  signingConfigured.set(allowLocalDebugReleaseSigning.map { it || hasReleaseSigning })
+}
+
+tasks.matching {
+  it.name.startsWith("packageRelease") ||
+  it.name.startsWith("assembleRelease") ||
+  it.name.startsWith("bundleRelease") ||
+  it.name == "signReleaseBundle"
+}.configureEach {
+  dependsOn(requireReleaseSigning)
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+  mustRunAfter(requireReleaseSigning)
 }
