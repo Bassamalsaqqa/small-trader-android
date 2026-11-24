@@ -1448,6 +1448,8 @@ class NativeMerchantWritesQualificationTest {
             assertArrayEquals("Payload must decrypt cleanly after restart", payload, decrypted)
 
             // Rotation after completion yields a fresh distinct UUID
+            store2.markSubmitted(companyId.value, expenseDraft1)
+            store2.markCompleted(companyId.value, expenseDraft1, """{"status":"ok"}""".toByteArray())
             val rotatedExpense = store2.rotateDraftOperationId(companyId.value, actorId.value, deviceId.value, "expense")
             assertTrue("Rotated draft intent must be distinct from prior intent", rotatedExpense != expenseDraft1)
             assertEquals(rotatedExpense, store2.getDraftOperationId(companyId.value, actorId.value, deviceId.value, "expense"))

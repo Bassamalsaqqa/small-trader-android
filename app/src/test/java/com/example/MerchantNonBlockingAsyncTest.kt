@@ -71,10 +71,13 @@ class MerchantNonBlockingAsyncTest {
 
         override suspend fun recordSupplierPayment(
             supplierId: String,
-            amountIls: Double,
+            amount: java.math.BigDecimal,
             note: String,
             operator: UserSession,
-            paymentId: String
+            paymentId: String,
+            cashAccountId: String?,
+            paymentDate: String?,
+            allocations: List<com.example.model.PaymentAllocationInput>
         ): Result<SupplierPayment> {
             executedCount.incrementAndGet()
             enterLatch.countDown()
@@ -82,8 +85,34 @@ class MerchantNonBlockingAsyncTest {
             if (simulateFailure) {
                 return Result.failure(IllegalStateException(failureMessage))
             }
-            return delegate.recordSupplierPayment(supplierId, amountIls, note, operator, paymentId)
+            return delegate.recordSupplierPayment(
+                supplierId = supplierId,
+                amount = amount,
+                note = note,
+                operator = operator,
+                paymentId = paymentId,
+                cashAccountId = cashAccountId,
+                paymentDate = paymentDate,
+                allocations = allocations
+            )
         }
+
+        override suspend fun recordSupplierPayment(
+            supplierId: String,
+            amountIls: Double,
+            note: String,
+            operator: UserSession,
+            paymentId: String
+        ): Result<SupplierPayment> = recordSupplierPayment(
+            supplierId = supplierId,
+            amount = java.math.BigDecimal(amountIls.toString()),
+            note = note,
+            operator = operator,
+            paymentId = paymentId,
+            cashAccountId = null,
+            paymentDate = null,
+            allocations = emptyList()
+        )
 
         override suspend fun confirmPhysicalGoodsReceipt(
             billId: String,
