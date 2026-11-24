@@ -34,6 +34,14 @@ import com.example.data.mobile.outbox.OutboxDatabase
 import com.example.data.mobile.outbox.CommandStatus
 import com.example.data.mobile.outbox.RoomMerchantCommandStore
 import com.example.data.mobile.outbox.OutboxRepositoryImpl
+import com.example.data.mobile.outbox.OutboxPayloadCipher
+import com.example.data.mobile.outbox.OutboxStatus
+import com.example.data.mobile.sync.SaleSyncGateway
+import com.example.data.mobile.sync.SyncStatusOutcome
+import com.example.data.mobile.sync.SyncSubmitOutcome
+import com.example.data.mobile.sync.ServerSaleAck
+import com.example.data.mobile.contract.PayloadDigest
+import com.example.data.mobile.contract.v2.OnlineSaleIntentProfile
 import com.example.data.mobile.readclient.ApprovedCashAccount
 import com.example.data.mobile.readclient.http.OkHttpTransport
 import com.example.data.mobile.session.JvmAesGcmCryptoEngine
@@ -1861,7 +1869,8 @@ class ShiftCloseRealOkHttpSecurityTest {
     fun testRecordSale_productionRejectsUnsupportedNonzeroDiscount_beforeOutboxCapture() = runBlocking {
         val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
         val store = RoomMerchantCommandStore(db, cryptoEngine)
-        val outboxRepo = OutboxRepositoryImpl(db)
+        val cipher = OutboxPayloadCipher(cryptoEngine)
+        val outboxRepo = OutboxRepositoryImpl(db, payloadCipher = cipher)
 
         val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
         val apiClient = MobileMerchantApiClient(transport, baseOrigin) { validToken }
@@ -1929,11 +1938,11 @@ class ShiftCloseRealOkHttpSecurityTest {
     }
 
     // -------------------------------------------------------------------------
-    // 24. Production V2 Sale Dispatch: Accept Zero Discount
+    // 24. Production V2 Sale Dispatch: Zero Discount Validation & Positive Path
     // -------------------------------------------------------------------------
 
     @Test
-    fun testRecordSale_productionAcceptsZeroDiscount() = runBlocking {
+    fun testRecordSale_productionZeroDiscount_passesDiscountValidationGate() = runBlocking {
         val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
         val store = RoomMerchantCommandStore(db, cryptoEngine)
 
@@ -2020,6 +2029,109 @@ class ShiftCloseRealOkHttpSecurityTest {
             "Zero discount sale must pass discount validation: ${ex?.message}",
             ex is IllegalStateException && ex.message?.contains("SaleSyncGateway not configured") == true
         )
+
+        db.close()
+    }
+
+    @Test
+    fun testRecordSale_productionZeroDiscount_succeedsWithOutboxConfirmationAndGatewayResponse() = runBlocking {
+        val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store = RoomMerchantCommandStore(db, cryptoEngine)
+        val cipher = OutboxPayloadCipher(cryptoEngine)
+        val outboxRepo = OutboxRepositoryImpl(db, payloadCipher = cipher)
+
+        val testGateway = object : SaleSyncGateway {
+            override fun checkStatus(
+                companyId: ServerUlid,
+                actorId: ServerUlid,
+                deviceId: ClientUuid,
+                clientEventId: ClientUuid,
+                payloadDigest: PayloadDigest,
+                expectedIntent: OnlineSaleIntentProfile?
+            ): SyncStatusOutcome = SyncStatusOutcome.NotFound
+
+            override fun submitSale(
+                companyId: ServerUlid,
+                actorId: ServerUlid,
+                deviceId: ClientUuid,
+                clientEventId: ClientUuid,
+                payloadDigest: PayloadDigest,
+                canonicalEventUtf8: ByteArray
+            ): SyncSubmitOutcome {
+                return SyncSubmitOutcome.Posted(
+                    ServerSaleAck(
+                        companyId = companyId,
+                        clientEventId = clientEventId,
+                        payloadDigest = payloadDigest,
+                        invoiceUlid = ServerUlid.parse("01JMB000000000000000000099"),
+                        paymentUlid = ServerUlid.parse("01JMB000000000000000000098"),
+                        serverAcknowledgedAt = "2026-11-24T12:00:00Z",
+                        invoiceNumber = "INV-2026-5002",
+                        paymentReceiptNumber = "REC-2026-5002"
+                    )
+                )
+            }
+        }
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val apiClient = MobileMerchantApiClient(transport, baseOrigin) { validToken }
+
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2,
+            outboxRepository = outboxRepo,
+            saleSyncGateway = testGateway
+        )
+
+        val testProduct = Product(
+            id = "01JMB000000000000000000010",
+            nameAr = "زيت زيتون",
+            nameEn = "Olive Oil",
+            category = ProductCategory.PANTRY,
+            barcode = "7290001234567",
+            priceExact = BigDecimal("10.00"),
+            costExact = BigDecimal("7.00"),
+            unitAr = "كغم",
+            unitEn = "kg",
+            stockCount = 100,
+            accentHex = 0xFF2E7D32L,
+            productUnitId = "01JMB000000000000000000020"
+        )
+
+        val zeroDiscountInvoice = InvoiceRecord(
+            id = "inv-zero-disc-002",
+            invoiceNumber = 5003,
+            timestamp = "2026-11-24 12:00:00",
+            items = listOf(BasketItem(product = testProduct, quantity = BigDecimal("2"))),
+            subtotalExact = BigDecimal("20.00"),
+            discountExact = BigDecimal.ZERO,
+            netTotalExact = BigDecimal("20.00"),
+            cashReceivedExact = BigDecimal("20.00"),
+            changeReturnedExact = BigDecimal.ZERO,
+            customerNote = "Zero discount full positive path",
+            cashierNameAr = "كاشير",
+            cashierNameEn = "Cashier",
+            isPaidInFull = true,
+            clientEventId = "550e8400-e29b-41d4-a716-446655440097"
+        )
+
+        val result = repo.recordSale(zeroDiscountInvoice)
+        assertTrue("Zero discount sale must succeed with configured gateway: ${result.exceptionOrNull()?.message}", result.isSuccess)
+        val confirmed = result.getOrThrow()
+        assertEquals("01JMB000000000000000000099", confirmed.serverInvoiceUlid)
+        assertEquals("01JMB000000000000000000098", confirmed.serverPaymentUlid)
+
+        // Verify that Outbox event is persisted and marked CONFIRMED
+        val outboxRecord = outboxRepo.getRecord(companyId, actorId, deviceId, ClientUuid.parse("550e8400-e29b-41d4-a716-446655440097"))
+        assertNotNull("Outbox record must exist", outboxRecord)
+        assertEquals(OutboxStatus.CONFIRMED.wireValue, outboxRecord!!.deliveryState.status)
+        assertEquals("01JMB000000000000000000099", outboxRecord.deliveryState.invoiceUlid)
 
         db.close()
     }

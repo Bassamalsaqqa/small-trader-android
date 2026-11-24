@@ -199,13 +199,27 @@ fun InvoiceReviewScreen(
                 }
 
                 // 3. Permitted Discount & Rounding Section (ST-09 Section 4)
-                if (state.currentSession.canApplyDiscounts()) {
+                // In demo mode, show interactive discount/rounding presets and custom input.
+                // In authenticated production V2, hide unsupported controls; if a restored draft contains a nonzero discount,
+                // display an actionable bilingual recovery card with draft intact.
+                if (state.currentSession.isDemoSession && state.currentSession.canApplyDiscounts()) {
                     item {
                         DiscountAndRoundingCard(
                             state = state,
                             lang = lang,
                             onSelectDiscountPreset = onSelectDiscountPreset,
                             onUpdateCustomDiscount = onUpdateCustomDiscount
+                        )
+                    }
+                } else if (!state.currentSession.isDemoSession && state.calculatedDiscountIls > 0.005) {
+                    item {
+                        RestoredUnsupportedDiscountCard(
+                            state = state,
+                            lang = lang,
+                            onClearDiscount = {
+                                onUpdateCustomDiscount("")
+                                onSelectDiscountPreset(DiscountPreset.NONE)
+                            }
                         )
                     }
                 }
@@ -868,6 +882,89 @@ private fun EditableInvoiceLinesSection(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * RestoredUnsupportedDiscountCard:
+ * Actionable recovery banner displayed in authenticated production V2 when a restored draft
+ * contains an unsupported nonzero discount. Informs merchant and offers explicit removal while
+ * preserving draft items, customer, and notes intact. Adheres to Stitch / BoardUI design.
+ */
+@Composable
+private fun RestoredUnsupportedDiscountCard(
+    state: TraderUiState,
+    lang: AppLanguage,
+    onClearDiscount: () -> Unit
+) {
+    val financial = TraderTheme.financial
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = financial.warningContainer,
+        border = BorderStroke(1.dp, financial.warning),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("unsupported_discount_recovery_card")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.WarningAmber,
+                    contentDescription = null,
+                    tint = financial.warning,
+                    modifier = Modifier.size(20.dp)
+                )
+                Text(
+                    text = lang.tr(
+                        "خصم غير مدعوم في هذا الإصدار",
+                        "Unsupported Discount in Current Version"
+                    ),
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = financial.warning
+                )
+            }
+
+            Text(
+                text = lang.tr(
+                    "تحتوي هذه المسودة على خصم مسجل بقيمة (${WesternFormatters.formatIls(state.calculatedDiscountIls)}) غير مدعوم في إصدار نقطة البيع السحابية الحالي. لإتمام عملية الدفع، يرجى إزالة الخصم. ستبقى جميع عناصر الفاتورة والكميات والزبون والبيانات محفوظة بالكامل.",
+                    "This restored draft contains a recorded discount of (${WesternFormatters.formatIls(state.calculatedDiscountIls)}) which is not supported in this cloud POS version. To proceed to checkout, please remove the discount. All draft items, quantities, and customer details remain fully intact."
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Button(
+                onClick = onClearDiscount,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = financial.warning,
+                    contentColor = MaterialTheme.colorScheme.surface
+                ),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 44.dp)
+                    .testTag("remove_unsupported_discount_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.DeleteOutline,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = lang.tr("إزالة الخصم والمتابعة للدفع", "Remove Discount & Proceed"),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
             }
         }
     }
@@ -1553,6 +1650,19 @@ private fun ReviewCheckoutDock(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
+            val hasUnsupportedDiscount = !state.currentSession.isDemoSession && state.calculatedDiscountIls > 0.005
+            if (hasUnsupportedDiscount) {
+                Text(
+                    text = lang.tr(
+                        "يرجى إزالة الخصم أولاً لإتمام الدفع في هذا الإصدار",
+                        "Please remove discount first to proceed to payment"
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TraderTheme.financial.debit,
+                    modifier = Modifier.testTag("dock_unsupported_discount_warning")
+                )
+            }
+
             // Single Authoritative Net Total Due + Primary Continue Action
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1576,8 +1686,12 @@ private fun ReviewCheckoutDock(
                 }
 
                 Button(
-                    onClick = onProceedToCashPayment,
-                    enabled = state.basket.isNotEmpty(),
+                    onClick = {
+                        if (!hasUnsupportedDiscount) {
+                            onProceedToCashPayment()
+                        }
+                    },
+                    enabled = state.basket.isNotEmpty() && !hasUnsupportedDiscount,
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,

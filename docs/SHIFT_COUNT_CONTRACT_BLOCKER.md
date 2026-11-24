@@ -53,3 +53,36 @@ Source review only. No runtime tests/assertions, JVM suite, lint, release build,
    - In `ProductionTraderRepository.recordSale`: Any invoice with `discountExact != BigDecimal.ZERO` is rejected with `IllegalArgumentException` ("Unsupported nonzero discount in production V2 sale dispatch") BEFORE any outbox intent capture, JCS serialization, or network synchronization.
    - Preserves cached legacy intents in Room and unsaved drafts without mutation or deletion.
    - Does NOT introduce or fabricate V4 contract schemas.
+
+## 7. Review Mitigation & True Lost-ACK Qualification Resolution (2026-11-24)
+
+### Production Discount & Rounding UI/ViewModel Mitigation
+1. **Hide Unsupported Production Controls**:
+   - In `InvoiceReviewScreen.kt`, interactive discount presets (`DiscountAndRoundingCard`) and custom discount inputs are completely hidden in authenticated production sessions (`!state.currentSession.isDemoSession`).
+   - Sandbox demo mode (`state.currentSession.isDemoSession`) strictly retains interactive presets (5%, 10%, 15%, 20%, Custom ILS) and rounding controls.
+2. **Actionable Restored Draft Recovery**:
+   - Restored drafts or legacy baskets containing nonzero discounts display `RestoredUnsupportedDiscountCard` (`unsupported_discount_recovery_card`) on `InvoiceReviewScreen.kt`.
+   - The card features a clear bilingual warning ("خصم غير مدعوم في هذا الإصدار" / "Unsupported Discount in Current Version") and a prominent 44dp touch target action `remove_unsupported_discount_button` ("إزالة الخصم والمتابعة" / "Remove Discount & Proceed").
+   - Clicking `remove_unsupported_discount_button` resets `discountPreset` to `NONE` and clears `customDiscountText`, resetting calculated discount to zero and instantly unblocking checkout while preserving basket items, quantities, and customer details intact.
+   - The review checkout dock disables `proceed_to_cash_payment_button` and presents `dock_unsupported_discount_warning` until the discount is cleared.
+3. **Multi-Layer ViewModel Guard**:
+   - `TraderViewModel.navigateTo(TraderScreen.CASH_PAYMENT)` intercepts navigation attempts for production sessions with `calculatedDiscountIls > 0.005`, emitting bilingual error banner and rejecting screen transition.
+   - `TraderViewModel.completeCashSale(asCreditDebt)` enforces Safeguard 0: rejects sale submission if `!state.currentSession.isDemoSession && state.calculatedDiscountIls > 0.005`.
+   - `ProductionTraderRepository.recordSale` retains fail-closed `require(discountExact == BigDecimal.ZERO)` validation prior to outbox intent capture, JCS canonical serialization, or network dispatch.
+4. **Honest Zero-Discount Positive Path Verification**:
+   - Renamed test in `ShiftCloseRealOkHttpSecurityTest.kt` to `testRecordSale_productionZeroDiscount_passesDiscountValidationGate`.
+   - Added positive end-to-end verification `testRecordSale_productionZeroDiscount_succeedsWithOutboxConfirmationAndGatewayResponse`: validates that a zero-discount sale with configured `SaleSyncGateway` and encrypted `OutboxRepositoryImpl` succeeds (`Result.isSuccess`), yields server invoice ULID & payment ULID, and confirms the event in Room outbox.
+
+### Cross-Runtime Paired Write Contract Qualification (True Network-Lost Cash-Count ACK)
+1. **Harness Execution**:
+   - Upgraded Scenario 9 in `/tmp/paired_harness/harness_artifacts/PairedWriteContractSmokeTest.kt` to qualify a true network-lost ACK for shift cash count observation (`shift-count-lost-ack-001`).
+   - Sourced disposable MariaDB environment on port `3342` (`/home/t3dev/.t3/userdata/attachments/disposable-mariadb-20261120/connection.env`), pointing to combined backend worktree `/home/t3dev/.t3/worktrees/account/t3-b5bdc8fe-f4f0327d3b7ad078` (`72ef1a532c3fa6136006a54c0cfb89a2c732dcd4`).
+   - Sourced disposable schema `accounting_p8_tmp_fb3f864f20a9`, migrated, and booted web server on `127.0.0.1:8089`.
+2. **Verified Invariants**:
+   - **Post-Commit Transport Drop**: First OkHttp POST reaches Laravel and commits `MobileShiftClosure` in MariaDB. `droppingTransport` simulates dropped network response by throwing `IOException` on reading HTTP response.
+   - **Room SQLite Process Restart Persistence**: Room database `db1.close()` is called and reopened via `db2 = OutboxDatabase.buildDatabase(...)`. Room command row is verified persistent in `SUBMITTED` state across restart.
+   - **Idempotent Network Replay**: Retry dispatch with identical command ID & idempotency key hits real Laravel backend. Backend returns cached snapshot (HTTP 200).
+   - **Room Completion**: Command transitions to `COMPLETED` in Room outbox.
+   - **Database Row Count Truth**: Direct MariaDB query confirms exactly 1 row in `mobile_shift_closures` for `shift-count-lost-ack-001` (and 1 row for `shift-count-obs-001`).
+   - **Native Command Receipts**: Exactly 1 row for `lost-ack-payment-001` and 1 row for `idem-key-replay-001`.
+   - **Canonical Reconciliations**: All 6 canonical domain reconciliations (Accounting, Inventory, Sales, Payables, Money, Phase 7) PASS for both Company 1 (ILS) and Company 2 (JOD).

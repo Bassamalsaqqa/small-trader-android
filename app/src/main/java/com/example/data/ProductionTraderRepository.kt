@@ -3861,7 +3861,8 @@ class ProductionTraderRepository(
             currencyMinorUnits: Int = 2,
             permissions: Set<String> = setOf("pos.sale", "purchases.manage", "expenses.manage", "reports.financial.view"),
             ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-            outboxRepository: OutboxRepository? = null
+            outboxRepository: OutboxRepository? = null,
+            saleSyncGateway: SaleSyncGateway? = null
         ): ProductionTraderRepository {
             val readTokenProvider = MerchantReadTokenProvider { reqCompanyId, retainedGen ->
                 val current = (authScopeProvider ?: { CurrentAuthScope(companyId = companyId, actorId = actorId, deviceId = deviceId, token = "test-token", generation = 1L) }).invoke()
@@ -3902,6 +3903,7 @@ class ProductionTraderRepository(
                 bootstrapTaxes = emptyList(),
                 apiClient = apiClient,
                 outboxRepository = outboxRepository,
+                saleSyncGateway = saleSyncGateway,
                 ioDispatcher = ioDispatcher,
                 authScopeProvider = authScopeProvider ?: { CurrentAuthScope(companyId = companyId, actorId = actorId, deviceId = deviceId, token = "test-token", generation = 1L) },
                 commandStore = commandStore,

@@ -334,6 +334,19 @@ class TraderViewModel(
 
     fun navigateTo(target: TraderScreen) {
         if (!TraderNavigationPolicy.allows(_uiState.value.currentSession, target)) return
+        val currentNavState = _uiState.value
+        if (target == TraderScreen.CASH_PAYMENT && !currentNavState.currentSession.isDemoSession && currentNavState.calculatedDiscountIls > 0.005) {
+            val ar = "لا يمكن المتابعة للدفع مع وجود خصم في الإصدار السحابي الحالي — يرجى إزالة الخصم مع الاحتفاظ بالمسودة"
+            val en = "Cannot proceed to payment with a discount in current cloud version — please remove the discount to proceed"
+            _uiState.update {
+                it.copy(
+                    checkoutErrorAr = ar,
+                    checkoutErrorEn = en
+                )
+            }
+            showBanner(ar = ar, en = en, isError = true)
+            return
+        }
         _uiState.update { state ->
             if (state.currentScreen == target) {
                 state
@@ -1090,6 +1103,7 @@ class TraderViewModel(
         _uiState.update { state ->
             state.copy(
                 discountPreset = preset,
+                customDiscountText = if (preset != DiscountPreset.CUSTOM_ILS) "" else state.customDiscountText,
                 cashInputText = "",
                 checkoutErrorAr = null,
                 checkoutErrorEn = null
@@ -1252,6 +1266,20 @@ class TraderViewModel(
     fun completeCashSale(asCreditDebt: Boolean = false) {
         val state = _uiState.value
         if (state.basket.isEmpty() || state.isSubmittingSale || state.isActionBusy) return
+
+        // Safeguard 0: Rejection of unsupported nonzero discounts in authenticated production V2
+        if (!state.currentSession.isDemoSession && state.calculatedDiscountIls > 0.005) {
+            val ar = "الخصومات غير مدعومة في إصدار نقطة البيع الحالي — يرجى إزالة الخصم للمتابعة"
+            val en = "Discounts are not supported in the current POS version — please remove the discount to proceed"
+            _uiState.update {
+                it.copy(
+                    checkoutErrorAr = ar,
+                    checkoutErrorEn = en
+                )
+            }
+            showBanner(ar = ar, en = en, isError = true)
+            return
+        }
 
         val netTotal = state.basketNetTotalIls
 
