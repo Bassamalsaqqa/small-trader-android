@@ -307,40 +307,66 @@ data class TraderUiState(
     val basketItemCountExact: BigDecimal
         get() = basket.fold(BigDecimal.ZERO) { acc, item -> acc + item.quantity }
 
-    val basketSubtotalIls: Double
+    val basketSubtotalExact: BigDecimal
         get() = basket.fold(BigDecimal.ZERO) { acc, item ->
-            acc.add(BigDecimal(item.lineTotal.toString()))
-        }.setScale(2, RoundingMode.HALF_UP).toDouble()
+            acc.add(item.lineTotalDecimal)
+        }.setScale(2, RoundingMode.HALF_UP)
 
-    // Exact, explicitly rounded money values for discounts
-    val calculatedDiscountIls: Double
+    val basketSubtotalIls: Double
+        get() = basketSubtotalExact.toDouble()
+
+    // Authoritative exact decimal discount input
+    val calculatedDiscountExact: BigDecimal
         get() {
-            val sub = basketSubtotalIls
-            if (sub <= 0.0) return 0.0
-            val subBd = BigDecimal(sub.toString()).setScale(2, RoundingMode.HALF_UP)
+            val sub = basketSubtotalExact
+            if (sub <= BigDecimal.ZERO) return BigDecimal.ZERO
             val rawDiscount = when (discountPreset) {
                 DiscountPreset.NONE -> BigDecimal.ZERO
-                DiscountPreset.PERCENT_5 -> subBd.multiply(BigDecimal("0.05")).setScale(2, RoundingMode.HALF_UP)
-                DiscountPreset.PERCENT_10 -> subBd.multiply(BigDecimal("0.10")).setScale(2, RoundingMode.HALF_UP)
+                DiscountPreset.PERCENT_5 -> sub.multiply(BigDecimal("0.05"))
+                DiscountPreset.PERCENT_10 -> sub.multiply(BigDecimal("0.10"))
                 DiscountPreset.ROUND_DOWN -> {
-                    val rounded5 = floor(sub / 5.0) * 5.0
-                    val diff = if (sub > 5.0 && sub - rounded5 > 0.0) sub - rounded5 else sub - floor(sub)
+                    val subDouble = sub.toDouble()
+                    val rounded5 = floor(subDouble / 5.0) * 5.0
+                    val diff = if (subDouble > 5.0 && subDouble - rounded5 > 0.0) subDouble - rounded5 else subDouble - floor(subDouble)
                     BigDecimal(diff.toString()).setScale(2, RoundingMode.HALF_UP)
                 }
                 DiscountPreset.CUSTOM_ILS -> {
-                    val parsed = WesternFormatters.sanitizeWesternDigits(customDiscountText).toDoubleOrNull() ?: 0.0
-                    BigDecimal(parsed.toString()).setScale(2, RoundingMode.HALF_UP)
+                    val sanitized = WesternFormatters.sanitizeWesternDigits(customDiscountText).trim()
+                    try {
+                        if (sanitized.isNotEmpty()) BigDecimal(sanitized) else BigDecimal.ZERO
+                    } catch (_: NumberFormatException) {
+                        BigDecimal.ZERO
+                    }
                 }
             }
-            return rawDiscount.toDouble().coerceIn(0.0, sub)
+            val discount = if (currentSession.isDemoSession) {
+                rawDiscount.setScale(2, RoundingMode.HALF_UP)
+            } else {
+                rawDiscount
+            }
+            return discount.coerceIn(BigDecimal.ZERO, sub)
+        }
+
+    // Exact money value for discounts (Double projection of authoritative calculatedDiscountExact)
+    val calculatedDiscountIls: Double
+        get() = calculatedDiscountExact.toDouble()
+
+    // Single exact nonzero check derived from authoritative decimal discount input
+    val hasDiscount: Boolean
+        get() = calculatedDiscountExact.compareTo(BigDecimal.ZERO) != 0
+
+    val hasUnsupportedProductionDiscount: Boolean
+        get() = !currentSession.isDemoSession && hasDiscount
+
+    val basketNetTotalExact: BigDecimal
+        get() {
+            val sub = basketSubtotalExact
+            val disc = calculatedDiscountExact
+            return sub.subtract(disc).coerceAtLeast(BigDecimal.ZERO)
         }
 
     val basketNetTotalIls: Double
-        get() {
-            val sub = BigDecimal(basketSubtotalIls.toString()).setScale(2, RoundingMode.HALF_UP)
-            val disc = BigDecimal(calculatedDiscountIls.toString()).setScale(2, RoundingMode.HALF_UP)
-            return sub.subtract(disc).setScale(2, RoundingMode.HALF_UP).toDouble().coerceAtLeast(0.0)
-        }
+        get() = basketNetTotalExact.setScale(2, RoundingMode.HALF_UP).toDouble()
 
     val cashTenderedIls: Double
         get() = WesternFormatters.sanitizeWesternDigits(cashInputText).toDoubleOrNull() ?: 0.0

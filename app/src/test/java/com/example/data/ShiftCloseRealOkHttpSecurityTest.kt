@@ -1937,6 +1937,77 @@ class ShiftCloseRealOkHttpSecurityTest {
         db.close()
     }
 
+    @Test
+    fun testRecordSale_productionRejectsFractionalNonzeroDiscount_beforeOutboxCapture() = runBlocking {
+        val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store = RoomMerchantCommandStore(db, cryptoEngine)
+        val cipher = OutboxPayloadCipher(cryptoEngine)
+        val outboxRepo = OutboxRepositoryImpl(db, payloadCipher = cipher)
+
+        val transport = OkHttpTransport(baseOrigin, allowHttpLoopback = true)
+        val apiClient = MobileMerchantApiClient(transport, baseOrigin) { validToken }
+
+        val repo = ProductionTraderRepository.forTesting(
+            apiClient = apiClient,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store,
+            authScopeProvider = { validScope },
+            baseCurrency = "ILS",
+            currencyMinorUnits = 2,
+            outboxRepository = outboxRepo
+        )
+
+        val testProduct = Product(
+            id = "01JMB000000000000000000010",
+            nameAr = "زيت زيتون",
+            nameEn = "Olive Oil",
+            category = ProductCategory.PANTRY,
+            barcode = "7290001234567",
+            priceExact = BigDecimal("10.00"),
+            costExact = BigDecimal("7.00"),
+            unitAr = "كغم",
+            unitEn = "kg",
+            stockCount = 100,
+            accentHex = 0xFF2E7D32L,
+            productUnitId = "01JMB000000000000000000020"
+        )
+
+        val fractionalDiscountInvoice = InvoiceRecord(
+            id = "inv-disc-fail-fractional",
+            invoiceNumber = 5002,
+            timestamp = "2026-11-24 12:00:00",
+            items = listOf(BasketItem(product = testProduct, quantity = BigDecimal("2"))),
+            subtotalExact = BigDecimal("20.00"),
+            discountExact = BigDecimal("0.001"),
+            netTotalExact = BigDecimal("19.999"),
+            cashReceivedExact = BigDecimal("19.999"),
+            changeReturnedExact = BigDecimal.ZERO,
+            customerNote = "Fractional discount rejection test",
+            cashierNameAr = "كاشير",
+            cashierNameEn = "Cashier",
+            isPaidInFull = true,
+            clientEventId = "550e8400-e29b-41d4-a716-446655440098"
+        )
+
+        val result = repo.recordSale(fractionalDiscountInvoice)
+
+        assertTrue("Fractional nonzero discount (0.001) must fail before outbox/network effects", result.isFailure)
+        val ex = result.exceptionOrNull()
+        assertTrue("Must be IllegalArgumentException", ex is IllegalArgumentException)
+        assertTrue(
+            "Exception message must identify unsupported nonzero discount 0.001: ${ex?.message}",
+            ex?.message?.contains("0.001") == true
+        )
+
+        // Verify NO outbox events were captured
+        assertEquals("No outbox event should be captured on fractional discount rejection", 0, db.outboxDao().eventCount())
+        assertEquals("No HTTP request should be made to server", 0, server!!.requestCount)
+
+        db.close()
+    }
+
     // -------------------------------------------------------------------------
     // 24. Production V2 Sale Dispatch: Zero Discount Validation & Positive Path
     // -------------------------------------------------------------------------

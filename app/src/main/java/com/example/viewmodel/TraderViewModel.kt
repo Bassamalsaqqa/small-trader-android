@@ -335,7 +335,7 @@ class TraderViewModel(
     fun navigateTo(target: TraderScreen) {
         if (!TraderNavigationPolicy.allows(_uiState.value.currentSession, target)) return
         val currentNavState = _uiState.value
-        if (target == TraderScreen.CASH_PAYMENT && !currentNavState.currentSession.isDemoSession && currentNavState.calculatedDiscountIls > 0.005) {
+        if (target == TraderScreen.CASH_PAYMENT && currentNavState.hasUnsupportedProductionDiscount) {
             val ar = "لا يمكن المتابعة للدفع مع وجود خصم في الإصدار السحابي الحالي — يرجى إزالة الخصم مع الاحتفاظ بالمسودة"
             val en = "Cannot proceed to payment with a discount in current cloud version — please remove the discount to proceed"
             _uiState.update {
@@ -1268,7 +1268,7 @@ class TraderViewModel(
         if (state.basket.isEmpty() || state.isSubmittingSale || state.isActionBusy) return
 
         // Safeguard 0: Rejection of unsupported nonzero discounts in authenticated production V2
-        if (!state.currentSession.isDemoSession && state.calculatedDiscountIls > 0.005) {
+        if (state.hasUnsupportedProductionDiscount) {
             val ar = "الخصومات غير مدعومة في إصدار نقطة البيع الحالي — يرجى إزالة الخصم للمتابعة"
             val en = "Discounts are not supported in the current POS version — please remove the discount to proceed"
             _uiState.update {
@@ -1382,17 +1382,17 @@ class TraderViewModel(
             invoiceNumber = nextNumber,
             timestamp = timestamp,
             items = state.basket,
-            subtotalIls = state.basketSubtotalIls,
-            discountIls = state.calculatedDiscountIls,
-            netTotalIls = netTotal,
-            cashReceivedIls = tendered,
-            changeReturnedIls = change,
+            subtotalExact = state.basketSubtotalExact,
+            discountExact = state.calculatedDiscountExact,
+            netTotalExact = state.basketNetTotalExact,
+            cashReceivedExact = BigDecimal(tendered.toString()).setScale(2, RoundingMode.HALF_UP),
+            changeReturnedExact = BigDecimal(change.toString()).setScale(2, RoundingMode.HALF_UP),
             customerId = state.selectedCustomerId,
             customerNote = customerName,
             cashierNameAr = state.currentSession.name,
             cashierNameEn = state.currentSession.name,
             isPaidInFull = isPaidInFull,
-            remainingDebitIls = remainingDebt,
+            remainingDebitExact = BigDecimal(remainingDebt.toString()).setScale(2, RoundingMode.HALF_UP),
             printCount = 0,
             clientEventId = state.currentSaleClientEventId
         )
@@ -2745,11 +2745,11 @@ class TraderViewModel(
             )
         }
         sb.appendLine("--------------------------------")
-        if (target.discountIls > 0.005) {
-            sb.appendLine("${lang.tr("المجموع الفرعي", "Subtotal")}: ${WesternFormatters.formatIls(target.subtotalIls)}")
-            sb.appendLine("${lang.tr("الخصم", "Discount")}: -${WesternFormatters.formatIls(target.discountIls)}")
+        if (target.discountExact.compareTo(BigDecimal.ZERO) != 0) {
+            sb.appendLine("${lang.tr("المجموع الفرعي", "Subtotal")}: ${WesternFormatters.formatIls(target.subtotalExact)}")
+            sb.appendLine("${lang.tr("الخصم", "Discount")}: -${WesternFormatters.formatIls(target.discountExact)}")
         }
-        sb.appendLine("${lang.tr("الصافي المطلوب", "Net Total")}: ${WesternFormatters.formatIls(target.netTotalIls)}")
+        sb.appendLine("${lang.tr("الصافي المطلوب", "Net Total")}: ${WesternFormatters.formatIls(target.netTotalExact)}")
         if (target.isPaidInFull) {
             sb.appendLine("${lang.tr("الحالة", "Status")}: ${lang.tr("مدفوع نقداً بالكامل", "Paid in Full (Cash)")}")
             sb.appendLine("${lang.tr("المقبوض نقداً", "Cash Received")}: ${WesternFormatters.formatIls(target.cashReceivedIls)}")
@@ -3004,6 +3004,17 @@ class TraderViewModel(
             )
             return false
         }
+        // Preserve original draft discount intent without mutating persisted record
+        val implicitDiscount = BigDecimal(draft.subtotalIls.toString()).subtract(BigDecimal(draft.netTotalIls.toString()))
+        val (effectivePreset, effectiveCustomText) = if (draft.discountPreset == DiscountPreset.NONE &&
+            draft.customDiscountText.isBlank() &&
+            implicitDiscount > BigDecimal.ZERO
+        ) {
+            DiscountPreset.CUSTOM_ILS to implicitDiscount.stripTrailingZeros().toPlainString()
+        } else {
+            draft.discountPreset to draft.customDiscountText
+        }
+
         _uiState.update { current ->
             current.copy(
                 basket = restoredItems,
@@ -3011,8 +3022,8 @@ class TraderViewModel(
                 savedDrafts = current.savedDrafts.filterNot { it.id == draftId },
                 selectedCustomerId = draft.customerId,
                 customerNote = draft.customerNote,
-                discountPreset = draft.discountPreset,
-                customDiscountText = draft.customDiscountText,
+                discountPreset = effectivePreset,
+                customDiscountText = effectiveCustomText,
                 cashInputText = "",
                 checkoutErrorAr = null,
                 checkoutErrorEn = null
@@ -3054,11 +3065,11 @@ class TraderViewModel(
             )
         }
         sb.appendLine("--------------------------------")
-        if (state.calculatedDiscountIls > 0.005) {
-            sb.appendLine("${lang.tr("المجموع الفرعي", "Subtotal")}: ${WesternFormatters.formatIls(state.basketSubtotalIls)}")
-            sb.appendLine("${lang.tr("الخصم المقترح", "Proposed Discount")}: -${WesternFormatters.formatIls(state.calculatedDiscountIls)}")
+        if (state.hasDiscount) {
+            sb.appendLine("${lang.tr("المجموع الفرعي", "Subtotal")}: ${WesternFormatters.formatIls(state.basketSubtotalExact)}")
+            sb.appendLine("${lang.tr("الخصم المقترح", "Proposed Discount")}: -${WesternFormatters.formatIls(state.calculatedDiscountExact)}")
         }
-        sb.appendLine("${lang.tr("الصافي الإجمالي لعرض السعر", "Quoted Net Total")}: ${WesternFormatters.formatIls(state.basketNetTotalIls)}")
+        sb.appendLine("${lang.tr("الصافي الإجمالي لعرض السعر", "Quoted Net Total")}: ${WesternFormatters.formatIls(state.basketNetTotalExact)}")
         sb.appendLine(lang.tr("* ملاحظة: عرض السعر لا يخصم من المخزون ولا يقيد ذمة مالية حتى اعتماد البيع.", "* Note: This quotation does not deduct stock or post financial debt until confirmed as a sale."))
         return sb.toString().trim()
     }

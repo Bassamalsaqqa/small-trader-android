@@ -1217,7 +1217,7 @@ private fun BasketStickyBottomSheet(
     val lang = state.language
     val financial = TraderTheme.financial
     val hasItems = state.basket.isNotEmpty()
-    val hasDiscount = state.calculatedDiscountIls > 0.005
+    val hasDiscount = state.hasDiscount
     val linkedCustomer = state.selectedCustomer
 
     if (!hasItems) {
@@ -1833,7 +1833,7 @@ private fun WidePersistentCartPane(
     val lang = state.language
     val financial = TraderTheme.financial
     val hasItems = state.basket.isNotEmpty()
-    val hasDiscount = state.calculatedDiscountIls > 0.005
+    val hasDiscount = state.hasDiscount
     val linkedCustomer = state.selectedCustomer
 
     Column(

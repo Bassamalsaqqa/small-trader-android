@@ -18,6 +18,7 @@ import com.example.model.DiscountPreset
 import com.example.model.TraderScreen
 import com.example.model.UserRole
 import com.example.model.UserSession
+import java.math.BigDecimal
 import com.example.ui.screens.CashPaymentScreen
 import com.example.ui.screens.InvoiceReviewScreen
 import com.example.ui.screens.NewSaleScreen
@@ -554,5 +555,131 @@ class MerchantCheckoutTest {
         val initialInvoices = viewModel.uiState.value.invoices.size
         viewModel.completeCashSale()
         assertEquals("No sale should be posted", initialInvoices, viewModel.uiState.value.invoices.size)
+    }
+
+    @Test
+    fun invoiceReviewScreen_productionSession_restoredDraftWithFractionalCentDiscount_showsActionableRecoveryAndBlocksPayment() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        val product = viewModel.uiState.value.products.first { it.id == "p_olive_oil" }
+        viewModel.addProductToBasket(product, 1)
+
+        // The demo keeps cent rounding while the draft preserves the original input.
+        viewModel.updateCustomDiscountText("0.001")
+        assertEquals(0, viewModel.uiState.value.calculatedDiscountExact.signum())
+        assertEquals("0.001", viewModel.uiState.value.customDiscountText)
+
+        val saved = viewModel.saveCurrentBasketAsDraft()
+        assertTrue("Draft must be saved", saved)
+        val draftId = viewModel.uiState.value.savedDrafts.first().id
+
+        // Switch to authenticated production session
+        val prodSession = UserSession(
+            id = "user_prod_cashier",
+            name = "كاشير مؤهل",
+            username = "cashier",
+            role = UserRole.CASHIER,
+            branchNameAr = "الفرع",
+            branchNameEn = "Branch",
+            isDemoSession = false,
+            permissions = setOf("pos.sale")
+        )
+        viewModel.switchUserSession(prodSession)
+        assertFalse("Must be production session", viewModel.uiState.value.currentSession.isDemoSession)
+
+        // Resume saved draft in production session
+        val resumed = viewModel.resumeSaleDraft(draftId)
+        assertTrue("Draft must resume successfully", resumed)
+
+        // Verify draft was restored intact with its original fractional discount
+        assertEquals(BigDecimal("0.001"), viewModel.uiState.value.calculatedDiscountExact)
+        assertTrue(
+            "hasUnsupportedProductionDiscount must be true for 0.001 in production",
+            viewModel.uiState.value.hasUnsupportedProductionDiscount
+        )
+
+        composeTestRule.setContent {
+            val state by viewModel.uiState.collectAsState()
+            SmallTraderTheme(darkTheme = state.isDarkTheme, isRtl = state.language.isRtl) {
+                InvoiceReviewScreen(
+                    state = state,
+                    onAddMoreItems = { viewModel.navigateTo(TraderScreen.NEW_SALE) },
+                    onIncrementProduct = { p -> viewModel.addProductToBasket(p, 1) },
+                    onDecrementProduct = viewModel::decrementProductInBasket,
+                    onRemoveProduct = viewModel::removeProductFromBasket,
+                    onSelectDiscountPreset = viewModel::selectDiscountPreset,
+                    onUpdateCustomDiscount = viewModel::updateCustomDiscountText,
+                    onUpdateCustomerNote = viewModel::updateCustomerNote,
+                    onAssignCustomer = viewModel::assignCustomerToSale,
+                    onProceedToCashPayment = { viewModel.navigateTo(TraderScreen.CASH_PAYMENT) }
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+
+        // 1. Verify actionable recovery card is displayed with bilingual explanation
+        composeTestRule.onNode(hasScrollToNodeAction()).performScrollToNode(hasTestTag("unsupported_discount_recovery_card"))
+        composeTestRule.onNodeWithTag("unsupported_discount_recovery_card").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("dock_unsupported_discount_warning").assertIsDisplayed()
+
+        // 2. Verify Proceed to Payment button is disabled while unsupported 0.001 discount is present
+        composeTestRule.onNodeWithTag("proceed_to_cash_payment_button").assertIsNotEnabled()
+
+        // 3. Guards prevent navigation and dispatch
+        val initialInvoices = viewModel.uiState.value.invoices.size
+        viewModel.navigateTo(TraderScreen.INVOICE_REVIEW)
+        assertEquals(TraderScreen.INVOICE_REVIEW, viewModel.uiState.value.currentScreen)
+        viewModel.navigateTo(TraderScreen.CASH_PAYMENT)
+        assertEquals("Must remain on review", TraderScreen.INVOICE_REVIEW, viewModel.uiState.value.currentScreen)
+        viewModel.completeCashSale()
+        assertEquals("No sale should be posted", initialInvoices, viewModel.uiState.value.invoices.size)
+
+        // 4. Click actionable "Remove Discount & Proceed" button
+        composeTestRule.onNode(hasScrollToNodeAction()).performScrollToNode(hasTestTag("remove_unsupported_discount_button"))
+        composeTestRule.onNodeWithTag("remove_unsupported_discount_button")
+            .assertIsDisplayed()
+            .performClick()
+        composeTestRule.waitForIdle()
+
+        // 5. Verify discount is cleared while basket items remain intact
+        assertEquals(BigDecimal.ZERO, viewModel.uiState.value.calculatedDiscountExact)
+        assertEquals(DiscountPreset.NONE, viewModel.uiState.value.discountPreset)
+        assertEquals(1, viewModel.uiState.value.basket.size)
+        assertEquals(product.id, viewModel.uiState.value.basket.first().product.id)
+        assertFalse(viewModel.uiState.value.hasUnsupportedProductionDiscount)
+
+        // 6. Recovery card disappears and payment is unblocked
+        composeTestRule.onNodeWithTag("unsupported_discount_recovery_card").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("proceed_to_cash_payment_button").assertIsEnabled()
+    }
+
+    @Test
+    fun demoSession_fractionalDiscount_isPermittedAndCompletesCashSale() {
+        val repo = OfflineDemoTraderRepository()
+        val viewModel = TraderViewModel(repo)
+        val product = viewModel.uiState.value.products.first { it.id == "p_olive_oil" }
+        viewModel.addProductToBasket(product, 1)
+
+        // Demo session with fractional discount
+        viewModel.updateCustomDiscountText("0.001")
+        assertTrue("Session must be demo", viewModel.uiState.value.currentSession.isDemoSession)
+        assertEquals(0, viewModel.uiState.value.calculatedDiscountExact.signum())
+        assertFalse(
+            "hasUnsupportedProductionDiscount must be false for demo session",
+            viewModel.uiState.value.hasUnsupportedProductionDiscount
+        )
+
+        // Navigation to payment is allowed in demo
+        viewModel.navigateTo(TraderScreen.INVOICE_REVIEW)
+        viewModel.navigateTo(TraderScreen.CASH_PAYMENT)
+        assertEquals(TraderScreen.CASH_PAYMENT, viewModel.uiState.value.currentScreen)
+
+        // Complete cash sale succeeds in demo
+        val initialInvoices = viewModel.uiState.value.invoices.size
+        viewModel.setCashExactAmount()
+        viewModel.completeCashSale(asCreditDebt = false)
+        assertEquals(initialInvoices + 1, viewModel.uiState.value.invoices.size)
+        assertEquals(TraderScreen.RECEIPT, viewModel.uiState.value.currentScreen)
     }
 }

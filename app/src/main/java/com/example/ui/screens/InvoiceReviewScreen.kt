@@ -211,7 +211,7 @@ fun InvoiceReviewScreen(
                             onUpdateCustomDiscount = onUpdateCustomDiscount
                         )
                     }
-                } else if (!state.currentSession.isDemoSession && state.calculatedDiscountIls > 0.005) {
+                } else if (state.hasUnsupportedProductionDiscount) {
                     item {
                         RestoredUnsupportedDiscountCard(
                             state = state,
@@ -934,10 +934,11 @@ private fun RestoredUnsupportedDiscountCard(
                 )
             }
 
+            val discountFormatted = WesternFormatters.formatExactOrPlain(state.calculatedDiscountExact)
             Text(
                 text = lang.tr(
-                    "تحتوي هذه المسودة على خصم مسجل بقيمة (${WesternFormatters.formatIls(state.calculatedDiscountIls)}) غير مدعوم في إصدار نقطة البيع السحابية الحالي. لإتمام عملية الدفع، يرجى إزالة الخصم. ستبقى جميع عناصر الفاتورة والكميات والزبون والبيانات محفوظة بالكامل.",
-                    "This restored draft contains a recorded discount of (${WesternFormatters.formatIls(state.calculatedDiscountIls)}) which is not supported in this cloud POS version. To proceed to checkout, please remove the discount. All draft items, quantities, and customer details remain fully intact."
+                    "أزل الخصم ($discountFormatted) للمتابعة. ستبقى الأصناف والكميات والزبون.",
+                    "Remove the discount ($discountFormatted) to continue. Items, quantities, and the customer stay in the draft."
                 ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface
@@ -984,7 +985,7 @@ private fun DiscountAndRoundingCard(
     onUpdateCustomDiscount: (String) -> Unit
 ) {
     val financial = TraderTheme.financial
-    val hasDiscount = state.calculatedDiscountIls > 0.005
+    val hasDiscount = state.hasDiscount
     var isExpanded by rememberSaveable(hasDiscount) { mutableStateOf(hasDiscount) }
     val isCustomCapped = state.discountPreset == DiscountPreset.CUSTOM_ILS &&
         state.calculatedDiscountIls >= state.basketSubtotalIls &&
@@ -1546,7 +1547,7 @@ private fun ReviewCheckoutDock(
     onProceedToCashPayment: () -> Unit
 ) {
     val financial = TraderTheme.financial
-    val hasDiscount = state.calculatedDiscountIls > 0.005
+    val hasDiscount = state.hasDiscount
     val linkedCustomer = state.selectedCustomer
 
     Surface(
@@ -1650,7 +1651,7 @@ private fun ReviewCheckoutDock(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            val hasUnsupportedDiscount = !state.currentSession.isDemoSession && state.calculatedDiscountIls > 0.005
+            val hasUnsupportedDiscount = state.hasUnsupportedProductionDiscount
             if (hasUnsupportedDiscount) {
                 Text(
                     text = lang.tr(
