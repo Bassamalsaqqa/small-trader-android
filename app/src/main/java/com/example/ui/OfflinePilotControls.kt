@@ -27,11 +27,15 @@ internal fun OfflinePilotControls(repository: ProductionTraderRepository, viewMo
     val configured = BuildConfig.OFFLINE_OWNER_PILOT && maxPages != null && maxProducts != null
     DisposableEffect(repository, configured) {
         val manager = context.getSystemService(ConnectivityManager::class.java)
+        var disposed = false
         fun update() {
             val online = manager.getNetworkCapabilities(manager.activeNetwork)
                 ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
-            offline = !online
-            viewModel.setNetworkOffline(!online)
+            scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                if (disposed) return@launch
+                offline = !online
+                viewModel.setNetworkOffline(!online)
+            }
         }
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) = update()
@@ -42,6 +46,7 @@ internal fun OfflinePilotControls(repository: ProductionTraderRepository, viewMo
         update()
         viewModel.setOfflineSalesCapabilityEnabled(configured)
         onDispose {
+            disposed = true
             manager.unregisterNetworkCallback(callback)
             repository.isOfflineSalesCapabilityEnabled = false
         }
@@ -56,7 +61,9 @@ internal fun OfflinePilotControls(repository: ProductionTraderRepository, viewMo
             scope.launch {
                 try {
                     val prepared = repository.prepareOfflineCatalog(requireNotNull(maxPages), requireNotNull(maxProducts)) {
-                        status = "Prepared / تم تجهيز: $it"
+                        scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                            status = "Prepared / تم تجهيز: $it"
+                        }
                     }
                     val acquired = prepared.fold(
                         onSuccess = { repository.acquireOfflineSaleLease().mapCatching { lease ->

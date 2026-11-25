@@ -125,6 +125,9 @@ class SaleSyncCoordinatorImpl(
                     )
                 ) return SyncStatusOutcome.TransientUnknown(SyncDiagnostics.INVALID_SERVER_ACK)
             }
+            is SyncStatusOutcome.MembershipDenied -> if (outcome.membershipRevoked) outboxRepository.lockQueueOnAuthDenied(
+                intent.companyId, intent.actorId, intent.deviceId, SyncDiagnostics.MEMBERSHIP_DENIED
+            ) else Unit
             is SyncStatusOutcome.AuthDenied -> outboxRepository.lockQueueOnAuthDenied(
                 intent.companyId, intent.actorId, intent.deviceId, SyncDiagnostics.AUTH_DENIED
             )
@@ -527,6 +530,13 @@ class SaleSyncCoordinatorImpl(
                         }
 
                         is SyncSubmitOutcome.MembershipDenied -> {
+                            if (submitOutcome.membershipRevoked) {
+                                outboxRepository.lockQueueOnAuthDenied(companyId, actorId, deviceId, SyncDiagnostics.MEMBERSHIP_DENIED)
+                                authBlocked = true
+                                membershipDenied = true
+                                stoppedEarly = true
+                                break
+                            }
                             // 403 Membership denial: fail closed, mark conflict, no retry loops
                             val updated = outboxRepository.markClaimConflict(
                                 companyId = companyId,
@@ -585,6 +595,13 @@ class SaleSyncCoordinatorImpl(
                 }
 
                 is SyncStatusOutcome.MembershipDenied -> {
+                    if (statusOutcome.membershipRevoked) {
+                        outboxRepository.lockQueueOnAuthDenied(companyId, actorId, deviceId, SyncDiagnostics.MEMBERSHIP_DENIED)
+                        authBlocked = true
+                        membershipDenied = true
+                        stoppedEarly = true
+                        break
+                    }
                     val updated = outboxRepository.markClaimConflict(
                         companyId = companyId,
                         actorId = actorId,

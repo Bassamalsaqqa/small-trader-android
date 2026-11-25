@@ -42,6 +42,11 @@ class HttpSaleSyncGateway(
     private val tokenProvider: () -> String
 ) : SaleSyncGateway {
 
+    private fun membershipRevoked(body: String): Boolean = runCatching {
+        com.example.data.mobile.readclient.ReadClientErrorResponse.fromStrictJson(
+            StrictJsonParser.parseObject(body)).code == "FORBIDDEN_TENANT_MISMATCH"
+    }.getOrDefault(false)
+
     override fun checkStatus(
         companyId: ServerUlid,
         actorId: ServerUlid,
@@ -208,7 +213,7 @@ class HttpSaleSyncGateway(
                     }
                 }
                 401 -> SyncStatusOutcome.AuthDenied("Authentication required or token expired")
-                403 -> SyncStatusOutcome.MembershipDenied("Tenant membership or action permission denied")
+                403 -> SyncStatusOutcome.MembershipDenied("Tenant membership or action permission denied", membershipRevoked = membershipRevoked(response.body))
                 404 -> SyncStatusOutcome.NotFound
                 409 -> SyncStatusOutcome.BusinessConflict("Resource conflict on server")
                 else -> SyncStatusOutcome.TransientUnknown("Server returned HTTP ${response.statusCode}")
@@ -296,13 +301,13 @@ class HttpSaleSyncGateway(
                     when (val status = checkStatus(companyId, actorId, deviceId, clientEventId, payloadDigest, expectedIntent = expectedIntent)) {
                         is SyncStatusOutcome.Posted -> SyncSubmitOutcome.Posted(status.ack)
                         is SyncStatusOutcome.AuthDenied -> SyncSubmitOutcome.AuthDenied()
-                        is SyncStatusOutcome.MembershipDenied -> SyncSubmitOutcome.MembershipDenied()
+                        is SyncStatusOutcome.MembershipDenied -> SyncSubmitOutcome.MembershipDenied(membershipRevoked = status.membershipRevoked)
                         is SyncStatusOutcome.BusinessConflict -> SyncSubmitOutcome.BusinessConflict()
                         else -> SyncSubmitOutcome.TransientUnknown("Commit requires authoritative status confirmation")
                     }
                 }
                 401 -> SyncSubmitOutcome.AuthDenied("Authentication required or token expired")
-                403 -> SyncSubmitOutcome.MembershipDenied("Tenant membership or action permission denied")
+                403 -> SyncSubmitOutcome.MembershipDenied("Tenant membership or action permission denied", membershipRevoked = membershipRevoked(response.body))
                 409 -> SyncSubmitOutcome.BusinessConflict("Duplicate payload or ledger conflict")
                 else -> SyncSubmitOutcome.TransientUnknown("Server returned HTTP ${response.statusCode}")
             }

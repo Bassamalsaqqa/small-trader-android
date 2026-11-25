@@ -78,11 +78,7 @@ internal fun RestrictedOfflineScreen(baseOrigin: String, onRetry: () -> Unit, on
                             basket = basket.map { if (it.product.id == line.product.id) it.copy(quantity = amount) else it }
                         } }
                     }, label = { Text("Quantity / الكمية") })
-                    OutlinedTextField(value = prices[line.product.id].orEmpty(), enabled = !busy, onValueChange = { text ->
-                        if (text.length <= 32) { prices[line.product.id] = text; text.takeIf { it.matches(Regex("[0-9]+(\\.[0-9]+)?")) }?.toBigDecimalOrNull()?.takeIf { it >= BigDecimal.ZERO }?.let { amount ->
-                            basket = basket.map { if (it.product.id == line.product.id) it.copy(unitPriceExact = amount) else it }
-                        } }
-                    }, label = { Text("Unit price / سعر الوحدة") })
+                    Text("Unit price / سعر الوحدة: \u2066${line.unitPriceExact.toPlainString()}\u2069")
                     TextButton(enabled = !busy, onClick = { basket = basket.filter { it.product.id != line.product.id } }) { Text("Remove / حذف") }
                 }
             }

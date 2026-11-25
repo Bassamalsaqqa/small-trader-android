@@ -26,8 +26,14 @@ internal fun OfflineLeaseStore.authorizesCapture(lease: OfflineSaleLease, event:
     require(event.lines.isNotEmpty())
     event.lines.forEach { line ->
         val product = requireNotNull(products[line.productId])
-        require(product.defaultUnit.productUnitId == line.productUnitId)
-        require(product.defaultUnit.conversionToBase.value.compareTo(line.conversionToBase.value) == 0)
+        val packaging = product.units.firstOrNull { it.productUnitId == line.productUnitId }
+        require(packaging != null || product.defaultUnit.productUnitId == line.productUnitId)
+        val conversion = packaging?.conversionToBase?.value ?: product.defaultUnit.conversionToBase.value
+        require(conversion.compareTo(line.conversionToBase.value) == 0)
+        val approvedPrice = (if (packaging != null) packaging.salePrice?.value else product.defaultUnit.salePrice?.value)
+            ?: product.unitPrice?.value?.multiply(conversion)
+        requireNotNull(approvedPrice)
+        require(approvedPrice.compareTo(line.unitPrice.value) == 0)
         require(line.taxRateId == lease.taxRateId)
         if (lease.taxRateId == null) require(line.taxRate.value.signum() == 0 && !line.taxInclusive)
         else require(line.taxRate.value.compareTo(requireNotNull(lease.taxRate).value) == 0 &&

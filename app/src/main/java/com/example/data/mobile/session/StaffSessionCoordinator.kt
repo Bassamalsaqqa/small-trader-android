@@ -1063,6 +1063,10 @@ class DefaultStaffSessionCoordinator(
         if (result is ReadClientResult.Auth401) {
             return handleTokenDenied(opGen, companyId, actorUlid)
         }
+        if (result is ReadClientResult.Forbidden403 && result.error.code == "FORBIDDEN_TENANT_MISMATCH") {
+            handleTokenDenied(opGen, companyId, actorUlid)
+            return CoordinatorResult.Forbidden()
+        }
 
         synchronized(stateLock) {
             if (opGen != generation.get()) {
@@ -1090,10 +1094,7 @@ class DefaultStaffSessionCoordinator(
                     CoordinatorResult.AuthDenied()
                 }
 
-                is ReadClientResult.Forbidden403 -> {
-                    _authState = StaffAuthState.Locked(LockReason.MembershipDenied())
-                    CoordinatorResult.Forbidden()
-                }
+                is ReadClientResult.Forbidden403 -> CoordinatorResult.Forbidden()
 
                 else -> CoordinatorResult.Error("Failed to fetch $queryName")
             }

@@ -700,7 +700,7 @@ class ProductionTraderRepository(
             val mapped = page.products.map { item -> mapProductFromCatalog(item) }
             _productsFlow.value = mapped
             _productsHasMoreFlow.value = page.hasMore
-            if (!page.hasMore) offlineLeaseStore.saveCatalogPages(companyId, actorId, deviceId,
+            if (!page.hasMore && offlineLeaseStore.getLease(companyId, actorId, deviceId) == null) offlineLeaseStore.saveCatalogPages(companyId, actorId, deviceId,
                 page.catalogSnapshotVersion, listOf(requireNotNull(verifiedPage)))
             Result.success(Unit)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -994,7 +994,8 @@ class ProductionTraderRepository(
 
     private fun mapProductFromCatalog(item: ProductCatalogItem): Product {
         val defaultPackaging = item.units.firstOrNull { it.isDefaultSale } ?: item.units.firstOrNull()
-        val priceExact = item.unitPrice?.value ?: defaultPackaging?.salePrice?.value ?: item.defaultUnit.salePrice?.value
+        val priceExact = (if (defaultPackaging != null) defaultPackaging.salePrice?.value else item.defaultUnit.salePrice?.value)
+            ?: item.unitPrice?.value?.multiply(defaultPackaging?.conversionToBase?.value ?: item.defaultUnit.conversionToBase.value)
         val stockCountExact = item.availableQuantity.value
         val conversionExact = defaultPackaging?.conversionToBase?.value ?: item.defaultUnit.conversionToBase.value
         val productUnitUlid = defaultPackaging?.productUnitId?.value ?: item.defaultUnit.productUnitId.value
@@ -1858,7 +1859,7 @@ class ProductionTraderRepository(
 
     data class OfflineQueueSummary(val count: Int, val total: BigDecimal, val rejected: List<InvoiceRecord>)
 
-    private var offlineQueueSummaryCache: Pair<List<OutboxRecord>, OfflineQueueSummary>? = null
+    @Volatile private var offlineQueueSummaryCache: Pair<List<OutboxRecord>, OfflineQueueSummary>? = null
 
     suspend fun offlineQueueSummary(): OfflineQueueSummary = withContext(ioDispatcher) {
         requireOfflineScope()
@@ -1877,27 +1878,27 @@ class ProductionTraderRepository(
 
     fun getPendingOfflineSales(): List<InvoiceRecord> {
         val outbox = outboxRepository ?: return emptyList()
-        val records = outbox.getRecordsByScope(companyId, actorId, deviceId)
+        val records = outbox.getOfflineQueueRecords(companyId, actorId, deviceId)
         return records.filter { it.event.deviceLeaseId != null && it.status != OutboxStatus.CONFIRMED }
             .map { heldInvoice(it).withOutboxState(it) }
     }
 
     fun getRejectedCashSales(): List<InvoiceRecord> {
         val outbox = outboxRepository ?: return emptyList()
-        val records = outbox.getRecordsByScope(companyId, actorId, deviceId)
+        val records = outbox.getOfflineQueueRecords(companyId, actorId, deviceId)
         return records.filter { it.event.deviceLeaseId != null && it.status == OutboxStatus.CONFLICT }
             .map { heldInvoice(it).withOutboxState(it) }
     }
 
     fun getPendingOfflineSalesCount(): Int {
         val outbox = outboxRepository ?: return 0
-        val records = outbox.getRecordsByScope(companyId, actorId, deviceId)
+        val records = outbox.getOfflineQueueRecords(companyId, actorId, deviceId)
         return records.count { it.event.deviceLeaseId != null && it.status != OutboxStatus.CONFIRMED }
     }
 
     fun getPendingOfflineSalesTotal(): BigDecimal {
         val outbox = outboxRepository ?: return BigDecimal.ZERO
-        val records = outbox.getRecordsByScope(companyId, actorId, deviceId)
+        val records = outbox.getOfflineQueueRecords(companyId, actorId, deviceId)
         val raw = records.filter { it.event.deviceLeaseId != null && it.status != OutboxStatus.CONFIRMED }
             .fold(BigDecimal.ZERO) { acc, record ->
                 try {

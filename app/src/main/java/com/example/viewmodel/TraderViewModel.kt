@@ -354,6 +354,12 @@ class TraderViewModel(
             _uiState.update { it.copy(currentScreen = TraderScreen.CASH_PAYMENT) }
             return
         }
+        if (target == TraderScreen.CASH_PAYMENT && currentNavState.isNetworkOffline &&
+            currentNavState.selectedCustomerId != null &&
+            currentNavState.selectedCustomerId != currentNavState.activeOfflineSaleLease?.walkInCustomerId?.value) {
+            showBanner("البيع دون اتصال متاح للزبون النقدي فقط؛ اختيارك محفوظ", "Offline capture supports walk-in sales only; your customer selection is retained", isError = true)
+            return
+        }
         if (target == TraderScreen.CASH_PAYMENT && currentNavState.hasUnresolvedSaleTax) {
             showBanner("اختر ضريبة كل صنف", "Select a tax treatment for each item", isError = true)
             return

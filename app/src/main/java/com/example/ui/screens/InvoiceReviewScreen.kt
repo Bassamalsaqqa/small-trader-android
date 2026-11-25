@@ -1696,6 +1696,11 @@ private fun ReviewCheckoutDock(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
+            val offlineCustomerUnsupported = state.isNetworkOffline && state.selectedCustomerId != null &&
+                state.selectedCustomerId != state.activeOfflineSaleLease?.walkInCustomerId?.value
+            if (offlineCustomerUnsupported) Text(lang.tr(
+                "البيع دون اتصال متاح للزبون النقدي فقط. اختيارك محفوظ؛ اتصل للمتابعة أو اختر الزبون النقدي.",
+                "Offline capture supports walk-in sales only. Your customer is retained; reconnect or choose walk-in to continue."))
             val hasUnsupportedDiscount = state.hasUnsupportedProductionDiscount
             if (hasUnsupportedDiscount) {
                 Text(
@@ -1748,7 +1753,7 @@ private fun ReviewCheckoutDock(
                             onProceedToCashPayment()
                         }
                     },
-                    enabled = state.basket.isNotEmpty() && !hasUnsupportedDiscount && !state.hasUnresolvedSaleTax,
+                    enabled = state.basket.isNotEmpty() && !offlineCustomerUnsupported && !hasUnsupportedDiscount && !state.hasUnresolvedSaleTax,
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,

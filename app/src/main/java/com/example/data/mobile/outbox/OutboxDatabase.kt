@@ -121,7 +121,17 @@ abstract class OutboxDatabase : RoomDatabase() {
                 ensureMerchantCommandsTable(db)
             }
             override fun onOpen(db: SupportSQLiteDatabase) {
-                ensureMerchantCommandsTable(db)
+                db.beginTransaction()
+                try {
+                    ensureMerchantCommandsTable(db)
+                    db.execSQL("CREATE TABLE IF NOT EXISTS offline_queue_revision (company_id TEXT NOT NULL, actor_id TEXT NOT NULL, device_id TEXT NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(company_id,actor_id,device_id))")
+                    for (operation in listOf("INSERT", "UPDATE", "DELETE")) {
+                        val row = if (operation == "DELETE") "OLD" else "NEW"
+                        db.execSQL("DROP TRIGGER IF EXISTS offline_queue_revision_${operation.lowercase()}")
+                        db.execSQL("CREATE TRIGGER offline_queue_revision_${operation.lowercase()} AFTER $operation ON outbox_delivery_states BEGIN UPDATE offline_queue_revision SET revision=revision+1 WHERE company_id=$row.company_id AND actor_id=$row.actor_id AND device_id=$row.device_id; INSERT INTO offline_queue_revision SELECT $row.company_id,$row.actor_id,$row.device_id,1 WHERE NOT EXISTS (SELECT 1 FROM offline_queue_revision WHERE company_id=$row.company_id AND actor_id=$row.actor_id AND device_id=$row.device_id); END")
+                    }
+                    db.setTransactionSuccessful()
+                } finally { db.endTransaction() }
             }
         }
 

@@ -389,6 +389,7 @@ class OutboxRepositoryImpl(
         event: OfflineSaleEvent,
         rawUtf8Json: ByteArray?
     ): CaptureResult {
+        require(!requireLeaseAuthorization) { "Production offline capture requires the atomic lease policy boundary" }
         // Defensive copy at entry BEFORE validation (TOCTOU defensive copy)
         val clonedRaw = rawUtf8Json?.clone()
 
@@ -1378,16 +1379,11 @@ class OutboxRepositoryImpl(
         }
 
     private data class QueueCache(val revision: Long, val records: List<OutboxRecord>)
-    private val queueCache = HashMap<String, QueueCache>()
+    private val queueCache = java.util.concurrent.ConcurrentHashMap<String, QueueCache>()
 
     override fun getOfflineQueueRecords(companyId: ServerUlid, actorId: ServerUlid, deviceId: ClientUuid): List<OutboxRecord> =
         database.runInTransaction<List<OutboxRecord>> {
             val db = database.openHelper.writableDatabase
-            db.execSQL("CREATE TABLE IF NOT EXISTS offline_queue_revision (company_id TEXT NOT NULL, actor_id TEXT NOT NULL, device_id TEXT NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(company_id,actor_id,device_id))")
-            for (operation in listOf("INSERT", "UPDATE", "DELETE")) {
-                val row = if (operation == "DELETE") "OLD" else "NEW"
-                db.execSQL("CREATE TRIGGER IF NOT EXISTS offline_queue_revision_${operation.lowercase()} AFTER $operation ON outbox_delivery_states BEGIN INSERT OR IGNORE INTO offline_queue_revision VALUES ($row.company_id,$row.actor_id,$row.device_id,0); UPDATE offline_queue_revision SET revision=revision+1 WHERE company_id=$row.company_id AND actor_id=$row.actor_id AND device_id=$row.device_id; END")
-            }
             val args = arrayOf(companyId.value, actorId.value, deviceId.value)
             val revision = db.query("SELECT revision FROM offline_queue_revision WHERE company_id=? AND actor_id=? AND device_id=?", args)
                 .use { if (it.moveToFirst()) it.getLong(0) else 0L }
@@ -1413,11 +1409,15 @@ class OutboxRepositoryImpl(
         leaseCaptureDepth.set((leaseCaptureDepth.get() ?: 0) + 1)
         try { return database.runInTransaction<CaptureResult> {
         validateScope()
+        require(!database.outboxDao().isScopeLocked(event.companyId.value, event.actorId.value, event.deviceId.value)) {
+            "Offline capture locked; live authorization recovery required"
+        }
         require(!requireLeaseAuthorization || leaseAuthority?.invoke(lease, event) == true) { "No current durable offline lease authority" }
         require(event.companyId == lease.companyId && event.actorId == lease.actorId &&
             event.deviceId == lease.deviceId && event.deviceLeaseId == lease.leaseId)
         val existing = getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId)
         if (existing != null) {
+            require(existing.event.deviceLeaseId != null) { "Client event UUID conflicts with an online sale profile" }
             val saved = OfflineSaleEventV2.fromStrictJson(StrictJsonParser.parseObject(String(existing.payloadBytes, StandardCharsets.UTF_8)))
             val duplicate = captureSaleV2(event.companyId, event.actorId, event.deviceId,
                 lease.currencyMinorUnits, event.copy(capturedAt = saved.capturedAt, localReceiptNumber = saved.localReceiptNumber))

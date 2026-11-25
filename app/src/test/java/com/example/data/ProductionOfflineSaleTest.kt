@@ -989,6 +989,83 @@ class ProductionOfflineSaleTest {
         }
     }
 
+    @Test
+    fun reviewPackagingPriceAndBrowsePreserveLeasedCapture() = withFixture { server, file ->
+        withDatabase(file) { db ->
+            val store = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
+            val storage = outbox(db)
+            val repo = repository(server, storage, leaseStore = store)
+            repo.clock = { fixedClockMillis }
+            try {
+                repo.isOfflineSalesCapabilityEnabled = true
+                val packaged = catalog(null).replace("\"conversion_to_base\":\"1.000000\",\"sale_price\":\"10.00\"",
+                    "\"conversion_to_base\":\"6.000000\",\"sale_price\":\"60.00\"")
+                server.enqueue(json(packaged))
+                runBlocking { repo.prepareOfflineCatalog(1, 1) {}.getOrThrow() }
+                take(server)
+                assertEquals(0, repo.getProducts().single().priceExact!!.compareTo(BigDecimal("60")))
+                val productV1 = repo.getProducts().single()
+                server.enqueue(json(leaseResponse()))
+                val lease = runBlocking { repo.acquireOfflineSaleLease().getOrThrow() }
+                take(server)
+                server.enqueue(json(catalog(null, "20.00").replace("\"catalog_snapshot_version\":\"1\"", "\"catalog_snapshot_version\":\"2\"")))
+                runBlocking { repo.refreshProducts().getOrThrow() }
+                take(server)
+                assertEquals(lease, store.getLease(companyA, actor, device))
+                assertEquals("1", store.getVerifiedCatalogSnapshotVersion(companyA, actor, device))
+                repo.isNetworkOffline = true
+                fun sale(price: String) = InvoiceRecord(id = ClientUuid.random().value, invoiceNumber = 0,
+                    timestamp = "2026-11-25T10:00:00Z", items = listOf(testBasketItem(productV1, unitPrice = BigDecimal(price))),
+                    subtotalExact = BigDecimal(price), discountExact = BigDecimal.ZERO, netTotalExact = BigDecimal(price),
+                    cashReceivedExact = BigDecimal(price), changeReturnedExact = BigDecimal.ZERO,
+                    customerNote = "", cashierNameAr = "User", cashierNameEn = "User")
+                assertTrue(runBlocking { repo.recordOfflineSale(sale("61.00")) }.isFailure)
+                assertTrue(storage.getOfflineQueueRecords(companyA, actor, device).isEmpty())
+                val workers = java.util.concurrent.Executors.newFixedThreadPool(2)
+                try {
+                    val reads = (1..8).map { workers.submit<List<com.example.data.mobile.outbox.OutboxRecord>> {
+                        storage.getOfflineQueueRecords(companyA, actor, device)
+                    } }
+                    reads.forEach { assertTrue(it.get(5, TimeUnit.SECONDS).isEmpty()) }
+                } finally { workers.shutdownNow() }
+                val captured = runBlocking { repo.recordOfflineSale(sale("60.00")).getOrThrow() }
+                assertEquals(1, storage.getOfflineQueueRecords(companyA, actor, device).size)
+                server.enqueue(json(status(requireNotNull(captured.clientEventId))))
+                server.enqueue(json("""{"error":{"code":"FORBIDDEN_TENANT_MISMATCH","message":"Membership revoked"}}""").setResponseCode(403))
+                repo.isNetworkOffline = false
+                runBlocking { repo.syncOfflineSales().getOrThrow() }
+                repo.isNetworkOffline = true
+                val reopened = outbox(db)
+                assertTrue(reopened.isQueueLocked(companyA, actor, device))
+                assertEquals(1, reopened.getOfflineQueueRecords(companyA, actor, device).size)
+                assertTrue(runBlocking { repo.recordOfflineSale(sale("60.00")) }.isFailure)
+            } finally { repo.close() }
+        }
+        withDatabase(file) { reopenedDb ->
+            val reopened = outbox(reopenedDb)
+            assertTrue(reopened.isQueueLocked(companyA, actor, device))
+            assertEquals(1, reopened.getOfflineQueueRecords(companyA, actor, device).size)
+        }
+    }
+
+    @Test
+    fun reviewRegisteredCustomerIsRetainedAndGatedBeforeCash() = withFixture { server, file ->
+        withDatabase(file) { db ->
+            val store = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
+            val repo = repository(server, outbox(db), leaseStore = store)
+            val vm = TraderViewModel(repo)
+            try {
+                await(vm) { !it.isPaymentUnverifiedHold }
+                vm.setNetworkOffline(true)
+                vm.assignCustomerToSale(com.example.model.Customer(id = companyB.value, nameAr = "زبون", nameEn = "Customer", isDetailLoaded = true))
+                vm.navigateTo(com.example.model.TraderScreen.INVOICE_REVIEW)
+                vm.navigateTo(com.example.model.TraderScreen.CASH_PAYMENT)
+                assertEquals(companyB.value, vm.uiState.value.selectedCustomerId)
+                assertTrue(vm.uiState.value.currentScreen != com.example.model.TraderScreen.CASH_PAYMENT)
+            } finally { repo.close() }
+        }
+    }
+
     private fun outbox(db: OutboxDatabase) = OutboxRepositoryImpl(db, payloadCipher = OutboxPayloadCipher(crypto),
         requireLeaseAuthorization = true, leaseAuthority = { lease, event ->
             SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }

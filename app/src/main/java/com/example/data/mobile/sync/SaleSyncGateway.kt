@@ -93,7 +93,8 @@ sealed interface SyncStatusOutcome {
      */
     data class MembershipDenied(
         val reason: String = "",
-        val category: GatewayDiagnosticCategory = GatewayDiagnosticCategory.MEMBERSHIP_DENIED
+        val category: GatewayDiagnosticCategory = GatewayDiagnosticCategory.MEMBERSHIP_DENIED,
+        val membershipRevoked: Boolean = false
     ) : SyncStatusOutcome {
         override fun toString(): String = "SyncStatusOutcome.MembershipDenied(category=$category)"
     }
@@ -148,7 +149,8 @@ sealed interface SyncSubmitOutcome {
      */
     data class MembershipDenied(
         val reason: String = "",
-        val category: GatewayDiagnosticCategory = GatewayDiagnosticCategory.MEMBERSHIP_DENIED
+        val category: GatewayDiagnosticCategory = GatewayDiagnosticCategory.MEMBERSHIP_DENIED,
+        val membershipRevoked: Boolean = false
     ) : SyncSubmitOutcome {
         override fun toString(): String = "SyncSubmitOutcome.MembershipDenied(category=$category)"
     }

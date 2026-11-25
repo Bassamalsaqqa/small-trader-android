@@ -833,7 +833,7 @@ class StaffSessionCoordinatorTest {
     }
 
     @Test
-    fun testGetProductsOnHttp403LocksLifecycleWithMembershipDeniedWithoutRetry() {
+    fun testGetProductsOnPermission403RetainsSessionWithoutRetry() {
         coordinator.requestChallenge(appVersion)
         coordinator.login(
             email = "cashier@smalltrader.example",
@@ -851,9 +851,34 @@ class StaffSessionCoordinatorTest {
         val res = coordinator.getProducts()
         assertTrue(res is CoordinatorResult.Forbidden)
         assertEquals(1, callCount.get()) // Proves zero busy retry loops
+        assertTrue(coordinator.authState is StaffAuthState.ReadReady)
+        assertTrue(denialCapture.scopes.isEmpty())
+    }
+
+    @Test
+    fun testGetProductsOnMembership403PersistsScopedDenialWithoutRetry() {
+        coordinator.requestChallenge(appVersion)
+        coordinator.login(
+            email = "cashier@smalltrader.example",
+            password = "CorrectHorseBatteryStaple123!",
+            deviceName = "Samsung Galaxy Tab A8"
+        )
+        assertTrue(coordinator.authState is StaffAuthState.ReadReady)
+
+        val callCount = java.util.concurrent.atomic.AtomicInteger(0)
+        transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/products")] = {
+            callCount.incrementAndGet()
+            TransportResponse(statusCode = 403, body = """{"error":{"code":"FORBIDDEN_TENANT_MISMATCH","message":"Tenant access forbidden"}}""")
+        }
+
+        val res = coordinator.getProducts()
+        assertTrue(res is CoordinatorResult.Forbidden)
+        assertEquals(1, callCount.get()) // Proves zero busy retry loops
         assertTrue(coordinator.authState is StaffAuthState.Locked)
         val locked = coordinator.authState as StaffAuthState.Locked
-        assertTrue(locked.reason is LockReason.MembershipDenied)
+        assertTrue(locked.reason is LockReason.AuthDenied)
+        assertEquals(1, denialCapture.scopes.size)
+        assertEquals(testCompanyUlid, denialCapture.scopes.single().companyId)
     }
 
     @Test
