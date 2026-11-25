@@ -2964,8 +2964,11 @@ class TraderViewModel(
         sb.appendLine("${lang.tr("الصافي المطلوب", "Net Total")}: ${WesternFormatters.formatIls(target.netTotalExact)}")
         if (target.isPaidInFull) {
             sb.appendLine("${lang.tr("الحالة", "Status")}: ${lang.tr("مدفوع نقداً بالكامل", "Paid in Full (Cash)")}")
-            sb.appendLine("${lang.tr("المقبوض نقداً", "Cash Received")}: ${WesternFormatters.formatIls(target.cashReceivedIls)}")
-            sb.appendLine("${lang.tr("الباقي للزبون", "Change Returned")}: ${WesternFormatters.formatIls(target.changeReturnedIls)}")
+            val cashLabel = if (target.hasLocalTenderDetails) lang.tr("المقبوض نقداً", "Cash Received") else lang.tr("المدفوع نقداً", "Cash Paid")
+            sb.appendLine("$cashLabel: ${WesternFormatters.formatIls(target.cashReceivedExact)}")
+            if (target.hasLocalTenderDetails) {
+                sb.appendLine("${lang.tr("الباقي للزبون", "Change Returned")}: ${WesternFormatters.formatIls(target.changeReturnedExact)}")
+            }
         } else {
             sb.appendLine("${lang.tr("الحالة", "Status")}: ${lang.tr("ذمة آجلة على حساب الزبون", "Unpaid — On Customer Account")}")
             sb.appendLine("${lang.tr("المدفوع عند الإصدار", "Cash Paid at Issue")}: ${WesternFormatters.formatIls(target.cashReceivedIls)}")
