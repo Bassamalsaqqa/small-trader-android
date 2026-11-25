@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.SmallTraderApp
+import com.example.data.mobile.offline.authorizesCapture
 import com.example.data.CurrentAuthScope
 import com.example.data.ProductionTraderRepository
 import com.example.data.mobile.integration.OutboxAuthDenialBridge
@@ -71,6 +72,7 @@ fun AuthenticatedTraderApp(
     )
 
     val uiState by staffViewModel.uiState.collectAsStateWithLifecycle()
+    var enterRestrictedOffline by remember(uiState.phase) { androidx.compose.runtime.mutableStateOf(false) }
 
     SmallTraderTheme(
         darkTheme = uiState.isDarkTheme,
@@ -102,6 +104,14 @@ fun AuthenticatedTraderApp(
                     )
                 }
                 StaffWorkspacePhase.SIGN_IN -> {
+                    if (enterRestrictedOffline) RestrictedOfflineScreen(configuredOrigin,
+                        onRetry = { enterRestrictedOffline = false; staffViewModel.restoreSession() },
+                        onLogout = { enterRestrictedOffline = false; staffViewModel.logout() })
+                    else androidx.compose.foundation.layout.Column {
+                        if (com.example.BuildConfig.OFFLINE_OWNER_PILOT) androidx.compose.material3.TextButton(
+                            onClick = { enterRestrictedOffline = true }) {
+                            androidx.compose.material3.Text("Restricted offline capture / البيع دون اتصال بصلاحية محدودة")
+                        }
                     StaffSignInScreen(
                         uiState = uiState,
                         onSignIn = { email, password, rememberSession ->
@@ -110,6 +120,7 @@ fun AuthenticatedTraderApp(
                         onToggleLanguage = { staffViewModel.toggleLanguage() },
                         onToggleTheme = { staffViewModel.toggleTheme() }
                     )
+                    }
                 }
                 StaffWorkspacePhase.MFA_REQUIRED -> {
                     StaffMfaScreen(
@@ -149,7 +160,7 @@ fun AuthenticatedTraderApp(
                                 try {
                                     val loaded = kotlinx.coroutines.withContext(Dispatchers.IO) {
                                         val db = OutboxDatabase.buildDatabase(context.applicationContext)
-                                        val outboxRepo = OutboxRepositoryImpl(database = db)
+                                        val leaseStore = com.example.data.mobile.offline.SqliteOfflineLeaseStore(context.applicationContext) { db.openHelper.writableDatabase }
                                         val cryptoEngine = AndroidKeyStoreCryptoEngine()
                                         val commandStore = RoomMerchantCommandStore(db, cryptoEngine)
                                         val authScopeProvider: () -> CurrentAuthScope? = {
@@ -167,13 +178,20 @@ fun AuthenticatedTraderApp(
                                                 null
                                             }
                                         }
+                                        val captureScope = requireNotNull(authScopeProvider())
+                                        val outboxRepo = OutboxRepositoryImpl(database = db, requireLeaseAuthorization = true,
+                                            leaseAuthority = { lease, event ->
+                                                authScopeProvider() == captureScope && captureScope.companyId == lease.companyId &&
+                                                    captureScope.actorId == lease.actorId && captureScope.deviceId == lease.deviceId &&
+                                                leaseStore.authorizesCapture(lease, event)
+                                            })
                                         try { ProductionTraderRepository.fromReadReady(
                                             readReady = readyState,
                                             outboxRepository = outboxRepo,
                                             transport = transport,
                                             baseOrigin = configuredOrigin,
                                             commandStore = commandStore,
-                                            offlineLeaseStore = com.example.data.mobile.offline.SqliteOfflineLeaseStore { db.openHelper.writableDatabase },
+                                            offlineLeaseStore = leaseStore,
                                             authScopeProvider = authScopeProvider,
                                             onClose = { db.close() }
                                         ).also { created = it } } catch (error: Exception) { db.close(); throw error }
@@ -216,7 +234,12 @@ fun AuthenticatedTraderApp(
                             key = "trader_${companyId}_${actorId}_${deviceId}_gen_${generation}",
                             factory = TraderViewModelFactory(repository)
                         )
-                        SmallTraderApp(traderViewModel = traderViewModel)
+                        androidx.compose.foundation.layout.Column {
+                            if (com.example.BuildConfig.OFFLINE_OWNER_PILOT) {
+                                OfflinePilotControls(repository, traderViewModel)
+                            }
+                            SmallTraderApp(traderViewModel = traderViewModel)
+                        }
                     } else {
                         Box(
                             modifier = Modifier.fillMaxSize(),
@@ -242,7 +265,10 @@ fun AuthenticatedTraderApp(
                     )
                 }
                 StaffWorkspacePhase.OFFLINE_ERROR -> {
-                    StaffOfflineScreen(
+                    if (com.example.BuildConfig.OFFLINE_OWNER_PILOT) {
+                        RestrictedOfflineScreen(configuredOrigin,
+                            onRetry = { staffViewModel.restoreSession() }, onLogout = { staffViewModel.logout() })
+                    } else StaffOfflineScreen(
                         category = uiState.offlineErrorMessage,
                         lang = uiState.language,
                         onRetry = { staffViewModel.restoreSession() }

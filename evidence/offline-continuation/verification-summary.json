@@ -1,0 +1,38 @@
+{
+  "baseline": "2b9bffa8742a6c92ddca75574f14b9ee5efea384",
+  "final_source_manifest_verified": true,
+  "junit_suites": [
+    {
+      "name": "com.example.data.mobile.session.StaffSessionCoordinatorTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.example.data.ProductionOfflineSaleTest",
+      "tests": "16",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    }
+  ],
+  "lint": {
+    "task": "lintDebug",
+    "result": "passed",
+    "severities": {
+      "Warning": 63
+    }
+  },
+  "earlier_necessary_storage_regressions": {
+    "OutboxV2DurableStorageTest": 23,
+    "OutboxMigrationTest": 1,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0
+  },
+  "assertion_count": "not measured",
+  "activation": "OFF",
+  "physical_device_proof": false,
+  "external_actions": false
+}

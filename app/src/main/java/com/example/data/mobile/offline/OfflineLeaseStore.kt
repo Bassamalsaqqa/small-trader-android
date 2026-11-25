@@ -29,12 +29,19 @@ interface OfflineLeaseStore {
     fun clearLease(companyId: ServerUlid, actorId: ServerUlid, deviceId: ClientUuid)
 }
 
+internal fun androidBootIdentity(context: android.content.Context): String? = try {
+    android.provider.Settings.Global.getInt(context.applicationContext.contentResolver,
+        android.provider.Settings.Global.BOOT_COUNT).takeIf { it >= 0 }?.toString()
+} catch (_: Exception) { null }
+
 class SqliteOfflineLeaseStore internal constructor(
     private val crypto: com.example.data.mobile.session.SessionCryptoEngine,
+    private val bootIdentity: () -> String? = { null },
     private val dbProvider: () -> SupportSQLiteDatabase
 ) : OfflineLeaseStore {
-    constructor(dbProvider: () -> SupportSQLiteDatabase) : this(
-        com.example.data.mobile.session.AndroidKeyStoreCryptoEngine("small_trader_offline_lease_v1"), dbProvider)
+    constructor(context: android.content.Context, dbProvider: () -> SupportSQLiteDatabase) : this(
+        com.example.data.mobile.session.AndroidKeyStoreCryptoEngine("small_trader_offline_lease_v1"),
+        { androidBootIdentity(context) }, dbProvider)
 
     private fun aad(c: String, a: String, d: String, lease: String, version: String, complete: Boolean): ByteArray =
         CanonicalJsonSerializer.serialize(listOf("offline-lease:1", c, a, d, lease, version, complete)).toByteArray(Charsets.UTF_8)
@@ -53,14 +60,11 @@ class SqliteOfflineLeaseStore internal constructor(
         return crypto.decrypt(bytes.copyOfRange(0, 12), bytes.copyOfRange(12, bytes.size), aad)
     }
 
-    companion object {
-        // Process continuity is deliberately narrower than boot continuity. A restart needs online authority.
-        private val processContinuity = java.util.UUID.randomUUID().toString()
-    }
     private val trustedTimes = ConcurrentHashMap<String, Long>()
+    private fun timeKey(lease: OfflineSaleLease) = "${lease.companyId.value}:${lease.actorId.value}:${lease.deviceId.value}:${lease.leaseId.value}"
     override fun trustedTime(lease: OfflineSaleLease): Long? {
         getLease(lease.companyId, lease.actorId, lease.deviceId) ?: return null
-        return trustedTimes[lease.leaseId.value]
+        return trustedTimes[timeKey(lease)]
     }
     init {
         ensureTable()
@@ -68,6 +72,7 @@ class SqliteOfflineLeaseStore internal constructor(
 
     private fun ensureTable() {
         val db = dbProvider()
+        db.execSQL("CREATE TABLE IF NOT EXISTS offline_lease_baselines (company_id TEXT NOT NULL, actor_id TEXT NOT NULL, device_id TEXT NOT NULL, lease_id TEXT NOT NULL, version TEXT NOT NULL, payload BLOB NOT NULL, PRIMARY KEY(company_id,actor_id,device_id,lease_id))")
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS `offline_sale_leases` (
                 `company_id` TEXT NOT NULL,
@@ -99,15 +104,16 @@ class SqliteOfflineLeaseStore internal constructor(
                     try {
                         val bytes = open(blob, aad(companyId.value, actorId.value, deviceId.value, c.getString(1), c.getString(2), c.getInt(3) == 1))
                         val envelope = StrictJsonParser.parseObject(String(bytes, StandardCharsets.UTF_8))
-                        require(envelope.require("continuity").asString() == processContinuity)
+                        require(envelope.require("continuity").asString() == requireNotNull(bootIdentity()))
                         val elapsed = envelope.require("elapsed").asString().toLong()
                         val delta = android.os.SystemClock.elapsedRealtime() - elapsed
                         require(delta >= 0)
                         val lease = OfflineSaleLease.fromStrictJson(envelope.require("lease").asObject())
+                        require(delta < Math.multiplyExact(lease.maxOfflineHours, 3_600_000L))
                         val issued = requireNotNull(OfflineSaleLease.parseRfc3339Millis(lease.issuedAt))
                         val trusted = Math.addExact(issued, delta)
                         require(lease.isTimeValid(trusted))
-                        trustedTimes[lease.leaseId.value] = trusted
+                        trustedTimes[timeKey(lease)] = trusted
                         require(lease.companyId == companyId && lease.actorId == actorId && lease.deviceId == deviceId && lease.leaseId.value == c.getString(1))
                         require(lease.catalogSnapshotVersion == c.getString(2))
                         lease
@@ -122,13 +128,58 @@ class SqliteOfflineLeaseStore internal constructor(
     override fun saveLease(lease: OfflineSaleLease, isCatalogComplete: Boolean, requestElapsed: Long?) {
         val db = dbProvider()
         ensureTable()
+        db.beginTransaction()
+        try {
         val retained = getLease(lease.companyId, lease.actorId, lease.deviceId)
-        if (retained?.leaseId == lease.leaseId) return // preserve original lifetime baseline and clock anchor
+        if (retained?.leaseId == lease.leaseId) {
+            require(retained.copy(postedSalesCount = lease.postedSalesCount, postedTotalAmount = lease.postedTotalAmount) == lease) {
+                "Same lease policy changed; a new server lease is required"
+            }
+            db.setTransactionSuccessful()
+            return // preserve original lifetime baseline and clock anchor
+        }
         val anchor = requestElapsed ?: android.os.SystemClock.elapsedRealtime()
         require(anchor in 0..android.os.SystemClock.elapsedRealtime())
+        // Reacquisition preserves the first authenticated boot, clock anchor and budget.
+        // Local immutable history includes confirmations.
+        var originalAnchor: Long? = null
+        val baseline = db.query(
+            "SELECT payload, version FROM offline_lease_baselines WHERE company_id=? AND actor_id=? AND device_id=? AND lease_id=?",
+            arrayOf(lease.companyId.value, lease.actorId.value, lease.deviceId.value, lease.leaseId.value)
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) null else {
+                val envelope = StrictJsonParser.parseObject(String(open(cursor.getBlob(0), aad(lease.companyId.value,
+                    lease.actorId.value, lease.deviceId.value, lease.leaseId.value, cursor.getString(1), true)), StandardCharsets.UTF_8))
+                require(envelope.require("continuity").asString() == requireNotNull(bootIdentity())) {
+                    "Boot changed; a new server lease ID is required"
+                }
+                originalAnchor = envelope.require("elapsed").asString().toLong()
+                OfflineSaleLease.fromStrictJson(envelope.require("lease").asObject())
+            }
+        }
+        val original = baseline ?: db.query(
+            "SELECT lease_payload_bytes, catalog_snapshot_version, is_catalog_complete FROM offline_sale_leases WHERE company_id=? AND actor_id=? AND device_id=? AND lease_id=?",
+            arrayOf(lease.companyId.value, lease.actorId.value, lease.deviceId.value, lease.leaseId.value)
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) null else {
+                val bytes = open(cursor.getBlob(0), aad(lease.companyId.value, lease.actorId.value,
+                    lease.deviceId.value, lease.leaseId.value, cursor.getString(1), cursor.getInt(2) == 1))
+                val envelope = StrictJsonParser.parseObject(String(bytes, StandardCharsets.UTF_8))
+                require(envelope.require("continuity").asString() == requireNotNull(bootIdentity())) { "Boot changed; a new server lease ID is required" }
+                originalAnchor = envelope.require("elapsed").asString().toLong()
+                OfflineSaleLease.fromStrictJson(envelope.require("lease").asObject())
+            }
+        }
+        val effectiveLease = if (original == null) lease else {
+            require(original.companyId == lease.companyId && original.actorId == lease.actorId && original.deviceId == lease.deviceId)
+            require(original.copy(postedSalesCount = lease.postedSalesCount, postedTotalAmount = lease.postedTotalAmount) == lease) {
+                "Same lease policy changed; a new server lease is required"
+            }
+            lease.copy(postedSalesCount = original.postedSalesCount, postedTotalAmount = original.postedTotalAmount)
+        }
         val canonicalBytes = CanonicalJsonSerializer.serialize(mapOf(
-            "lease" to lease, "continuity" to processContinuity,
-            "elapsed" to anchor.toString()
+            "lease" to effectiveLease, "continuity" to requireNotNull(bootIdentity()) { "Boot continuity unavailable" },
+            "elapsed" to (originalAnchor ?: anchor).toString()
         )).toByteArray(StandardCharsets.UTF_8)
         val now = System.currentTimeMillis()
         db.execSQL(
@@ -149,6 +200,12 @@ class SqliteOfflineLeaseStore internal constructor(
                 now
             )
         )
+        db.execSQL("INSERT OR IGNORE INTO offline_lease_baselines VALUES (?,?,?,?,?,?)", arrayOf(
+            lease.companyId.value, lease.actorId.value, lease.deviceId.value, lease.leaseId.value,
+            effectiveLease.catalogSnapshotVersion, seal(canonicalBytes,
+                aad(lease.companyId.value, lease.actorId.value, lease.deviceId.value, lease.leaseId.value, effectiveLease.catalogSnapshotVersion, true))))
+        db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
     }
 
     override fun getVerifiedCatalogSnapshotVersion(companyId: ServerUlid, actorId: ServerUlid, deviceId: ClientUuid): String? {
@@ -212,7 +269,20 @@ class SqliteOfflineLeaseStore internal constructor(
                 arrayOf(companyId.value, actorId.value, deviceId.value, version)).use {
                 if (!it.moveToFirst()) emptyList() else {
                     val bytes = open(it.getBlob(0), aad(companyId.value, actorId.value, deviceId.value, "catalog", version, true))
-                    StrictJsonParser.parse(String(bytes, Charsets.UTF_8)).asArray().elements.map { page -> page.asString().toByteArray(Charsets.UTF_8) }
+                    val pages = StrictJsonParser.parse(String(bytes, Charsets.UTF_8)).asArray().elements.map { page -> page.asString().toByteArray(Charsets.UTF_8) }
+                    require(pages.isNotEmpty())
+                    val cursors = HashSet<String>()
+                    val productIds = HashSet<String>()
+                    pages.forEachIndexed { index, pageBytes ->
+                        val page = com.example.data.mobile.readclient.ProductCatalogResponse.fromStrictJson(
+                            StrictJsonParser.parseObject(String(pageBytes, Charsets.UTF_8)))
+                        require(page.companyId == companyId && page.catalogSnapshotVersion == version)
+                        require(page.products.all { productIds.add(it.id.value) })
+                        require(page.hasMore == (index < pages.lastIndex))
+                        if (page.hasMore) require(cursors.add(requireNotNull(page.nextCursor)))
+                        else require(page.nextCursor == null)
+                    }
+                    pages
                 }
             }
         } catch (_: Exception) { emptyList() }

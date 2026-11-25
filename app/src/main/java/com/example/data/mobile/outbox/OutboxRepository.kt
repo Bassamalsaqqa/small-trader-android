@@ -306,6 +306,13 @@ interface OutboxRepository {
         validateScope: () -> Unit
     ): CaptureResult
 
+    fun reconcileOfflineLease(lease: com.example.data.mobile.contract.v2.OfflineSaleLease,
+        store: com.example.data.mobile.offline.OfflineLeaseStore, requestElapsed: Long): com.example.data.mobile.contract.v2.OfflineSaleLease =
+        throw UnsupportedOperationException("Durable lease reconciliation is required")
+
+    fun getOfflineQueueRecords(companyId: ServerUlid, actorId: ServerUlid, deviceId: ClientUuid): List<OutboxRecord> =
+        getRecordsByScope(companyId, actorId, deviceId).filter { it.event.deviceLeaseId != null && it.status != OutboxStatus.CONFIRMED }
+
     fun getPendingOfflineSalesBudget(
         companyId: ServerUlid,
         actorId: ServerUlid,
@@ -317,8 +324,12 @@ interface OutboxRepository {
 class OutboxRepositoryImpl(
     private val database: OutboxDatabase,
     private val clock: () -> Long = { System.currentTimeMillis() },
-    private val payloadCipher: OutboxPayloadCipher = OutboxPayloadCipher()
+    private val payloadCipher: OutboxPayloadCipher = OutboxPayloadCipher(),
+    private val requireLeaseAuthorization: Boolean = false,
+    private val leaseAuthority: ((com.example.data.mobile.contract.v2.OfflineSaleLease, OfflineSaleEventV2) -> Boolean)? = null
 ) : OutboxRepository {
+
+    private val leaseCaptureDepth = ThreadLocal.withInitial { 0 }
 
     private fun decryptRecord(record: OutboxRecord) =
         OutboxRecord(payloadCipher.decrypt(record.event), record.deliveryState)
@@ -573,6 +584,9 @@ class OutboxRepositoryImpl(
         }
 
         val event = intakeRequest.event
+        require(!requireLeaseAuthorization || (leaseCaptureDepth.get() ?: 0) > 0) {
+            "Offline capture requires the atomic lease policy boundary"
+        }
 
         // Guard 1: Scope parameters MUST match captured identity BEFORE disclosing existing row
         require(companyId == event.companyId) {
@@ -1335,19 +1349,81 @@ class OutboxRepositoryImpl(
         ).map { decryptRecord(it) }
     }
 
+    override fun reconcileOfflineLease(lease: com.example.data.mobile.contract.v2.OfflineSaleLease,
+        store: com.example.data.mobile.offline.OfflineLeaseStore, requestElapsed: Long): com.example.data.mobile.contract.v2.OfflineSaleLease =
+        database.runInTransaction<com.example.data.mobile.contract.v2.OfflineSaleLease> {
+            store.saveLease(lease, true, requestElapsed)
+            val durable = requireNotNull(store.getLease(lease.companyId, lease.actorId, lease.deviceId))
+            var confirmedCount = 0
+            var confirmedTotal = BigDecimal.ZERO
+            var after = ""
+            do {
+                val ids = database.openHelper.writableDatabase.query(
+                    "SELECT e.client_event_id FROM outbox_events e INNER JOIN outbox_delivery_states s ON e.company_id=s.company_id AND e.client_event_id=s.client_event_id WHERE e.company_id=? AND e.actor_id=? AND e.device_id=? AND e.device_lease_id=? AND s.actor_id=e.actor_id AND s.device_id=e.device_id AND s.status='confirmed' AND e.client_event_id>? ORDER BY e.client_event_id LIMIT 100",
+                    arrayOf(lease.companyId.value, lease.actorId.value, lease.deviceId.value, lease.leaseId.value, after)
+                ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getString(0)) } }
+                ids.forEach { id ->
+                    val record = requireNotNull(getRecord(lease.companyId, lease.actorId, lease.deviceId, ClientUuid.parse(id)))
+                    val event = OfflineSaleEventV2.fromStrictJson(StrictJsonParser.parseObject(String(record.payloadBytes, StandardCharsets.UTF_8)))
+                    confirmedCount = Math.addExact(confirmedCount, 1)
+                    confirmedTotal = confirmedTotal.add(event.payment.amountSettled.value)
+                }
+                if (ids.isNotEmpty()) after = ids.last()
+            } while (ids.size == 100)
+            require(lease.postedSalesCount.toLong() == durable.postedSalesCount.toLong() + confirmedCount &&
+                lease.postedTotalAmount.compareTo(durable.postedTotalAmount.add(confirmedTotal)) == 0) {
+                "Server/local lease counters disagree; recover canonical acknowledgements online before reacquiring"
+            }
+            durable
+        }
+
+    private data class QueueCache(val revision: Long, val records: List<OutboxRecord>)
+    private val queueCache = HashMap<String, QueueCache>()
+
+    override fun getOfflineQueueRecords(companyId: ServerUlid, actorId: ServerUlid, deviceId: ClientUuid): List<OutboxRecord> =
+        database.runInTransaction<List<OutboxRecord>> {
+            val db = database.openHelper.writableDatabase
+            db.execSQL("CREATE TABLE IF NOT EXISTS offline_queue_revision (company_id TEXT NOT NULL, actor_id TEXT NOT NULL, device_id TEXT NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(company_id,actor_id,device_id))")
+            for (operation in listOf("INSERT", "UPDATE", "DELETE")) {
+                val row = if (operation == "DELETE") "OLD" else "NEW"
+                db.execSQL("CREATE TRIGGER IF NOT EXISTS offline_queue_revision_${operation.lowercase()} AFTER $operation ON outbox_delivery_states BEGIN INSERT OR IGNORE INTO offline_queue_revision VALUES ($row.company_id,$row.actor_id,$row.device_id,0); UPDATE offline_queue_revision SET revision=revision+1 WHERE company_id=$row.company_id AND actor_id=$row.actor_id AND device_id=$row.device_id; END")
+            }
+            val args = arrayOf(companyId.value, actorId.value, deviceId.value)
+            val revision = db.query("SELECT revision FROM offline_queue_revision WHERE company_id=? AND actor_id=? AND device_id=?", args)
+                .use { if (it.moveToFirst()) it.getLong(0) else 0L }
+            val key = args.joinToString(":")
+            queueCache[key]?.takeIf { it.revision == revision }?.let { return@runInTransaction it.records }
+            val records = ArrayList<OutboxRecord>()
+            var after = ""
+            do {
+                val ids = db.query("SELECT e.client_event_id FROM outbox_events e INNER JOIN outbox_delivery_states s ON e.company_id=s.company_id AND e.client_event_id=s.client_event_id WHERE e.company_id=? AND e.actor_id=? AND e.device_id=? AND s.actor_id=e.actor_id AND s.device_id=e.device_id AND e.device_lease_id IS NOT NULL AND s.status!='confirmed' AND e.client_event_id>? ORDER BY e.client_event_id LIMIT 100", args + after).use { cursor ->
+                    buildList { while (cursor.moveToNext()) add(cursor.getString(0)) }
+                }
+                ids.forEach { id -> records.add(requireNotNull(getRecord(companyId, actorId, deviceId, ClientUuid.parse(id)))) }
+                if (ids.isNotEmpty()) after = ids.last()
+            } while (ids.size == 100)
+            records.toList().also { queueCache[key] = QueueCache(revision, it) }
+        }
+
     override fun captureLeaseSale(
         lease: com.example.data.mobile.contract.v2.OfflineSaleLease,
         event: OfflineSaleEventV2,
         validateScope: () -> Unit
-    ): CaptureResult = database.runInTransaction<CaptureResult> {
+    ): CaptureResult {
+        leaseCaptureDepth.set((leaseCaptureDepth.get() ?: 0) + 1)
+        try { return database.runInTransaction<CaptureResult> {
         validateScope()
+        require(!requireLeaseAuthorization || leaseAuthority?.invoke(lease, event) == true) { "No current durable offline lease authority" }
         require(event.companyId == lease.companyId && event.actorId == lease.actorId &&
             event.deviceId == lease.deviceId && event.deviceLeaseId == lease.leaseId)
         val existing = getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId)
         if (existing != null) {
             val saved = OfflineSaleEventV2.fromStrictJson(StrictJsonParser.parseObject(String(existing.payloadBytes, StandardCharsets.UTF_8)))
-            return@runInTransaction captureSaleV2(event.companyId, event.actorId, event.deviceId,
-                lease.currencyMinorUnits, event.copy(localReceiptNumber = saved.localReceiptNumber))
+            val duplicate = captureSaleV2(event.companyId, event.actorId, event.deviceId,
+                lease.currencyMinorUnits, event.copy(capturedAt = saved.capturedAt, localReceiptNumber = saved.localReceiptNumber))
+            validateScope()
+            require(!requireLeaseAuthorization || leaseAuthority?.invoke(lease, event) == true) { "Offline lease authority changed during capture" }
+            return@runInTransaction duplicate
         }
         val (count, total) = getPendingOfflineSalesBudget(lease.companyId, lease.actorId, lease.deviceId, lease.leaseId)
         // Local immutable history includes confirmed and rejected cash. Sync never replenishes it.
@@ -1356,7 +1432,9 @@ class OutboxRepositoryImpl(
         val numbered = event.copy(localReceiptNumber = "LOCAL-${lease.leaseId.value}-${count + 1}")
         val result = captureSaleV2(numbered.companyId, numbered.actorId, numbered.deviceId, lease.currencyMinorUnits, numbered)
         validateScope()
+        require(!requireLeaseAuthorization || leaseAuthority?.invoke(lease, event) == true) { "Offline lease authority changed during capture" }
         result
+        } } finally { leaseCaptureDepth.set((leaseCaptureDepth.get() ?: 0) - 1) }
     }
 
     override fun getPendingOfflineSalesBudget(
@@ -1365,17 +1443,24 @@ class OutboxRepositoryImpl(
         deviceId: ClientUuid,
         deviceLeaseId: ClientUuid
     ): Pair<Int, BigDecimal> {
-        val records = getRecordsByScope(companyId, actorId, deviceId)
-        var pendingCount = 0
-        var pendingTotal = BigDecimal.ZERO
-        for (record in records) {
-            if (record.event.deviceLeaseId == deviceLeaseId.value) {
-                pendingCount++
-                val json = StrictJsonParser.parseObject(String(record.event.payloadBytes, StandardCharsets.UTF_8))
-                val event = OfflineSaleEventV2.fromStrictJson(json)
-                pendingTotal = pendingTotal.add(event.payment.amountSettled.value)
-            }
+        return database.runInTransaction<Pair<Int, BigDecimal>> {
+            var count = 0
+            var total = BigDecimal.ZERO
+            var after = ""
+            do {
+                val ids = database.openHelper.writableDatabase.query(
+                    "SELECT client_event_id FROM outbox_events WHERE company_id=? AND actor_id=? AND device_id=? AND device_lease_id=? AND client_event_id>? ORDER BY client_event_id LIMIT 100",
+                    arrayOf(companyId.value, actorId.value, deviceId.value, deviceLeaseId.value, after)
+                ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getString(0)) } }
+                ids.forEach { id ->
+                    val record = requireNotNull(getRecord(companyId, actorId, deviceId, ClientUuid.parse(id)))
+                    val event = OfflineSaleEventV2.fromStrictJson(StrictJsonParser.parseObject(String(record.payloadBytes, StandardCharsets.UTF_8)))
+                    count = Math.addExact(count, 1)
+                    total = total.add(event.payment.amountSettled.value)
+                }
+                if (ids.isNotEmpty()) after = ids.last()
+            } while (ids.size == 100)
+            count to total
         }
-        return Pair(pendingCount, pendingTotal)
     }
 }

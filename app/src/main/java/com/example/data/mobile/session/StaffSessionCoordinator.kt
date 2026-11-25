@@ -140,7 +140,8 @@ interface StaffSessionCoordinator {
                 readClient = readClient,
                 sessionStore = sessionStore,
                 authDenialListener = authDenialListener,
-                clock = clock
+                clock = clock,
+                invalidateOfflineBootstrap = { com.example.data.mobile.offline.RestrictedOfflineBootstrapStore(context).invalidate() }
             )
         }
     }
@@ -164,7 +165,8 @@ class DefaultStaffSessionCoordinator(
     val readClient: SmallTraderReadClient,
     private val sessionStore: SecureStaffSessionStore,
     private val authDenialListener: AuthDenialListener? = null,
-    private val clock: CoordinatorClock = SystemCoordinatorClock
+    private val clock: CoordinatorClock = SystemCoordinatorClock,
+    private val invalidateOfflineBootstrap: () -> Unit = {}
 ) : StaffSessionCoordinator {
 
     override val transport: com.example.data.mobile.readclient.ReadClientTransport
@@ -331,6 +333,7 @@ class DefaultStaffSessionCoordinator(
                     }
                     _authState = StaffAuthState.Locked(LockReason.MembershipDenied())
                 }
+                invalidateOfflineBootstrap()
                 CoordinatorResult.Forbidden()
             }
 
@@ -379,7 +382,7 @@ class DefaultStaffSessionCoordinator(
         // Deliver the immutable scope of the accepted denial outside the state monitor.
         // A later login cannot change this event's actor/company/device identity.
         try {
-            authDenialListener?.onAuthDenied(scope)
+            try { invalidateOfflineBootstrap() } finally { authDenialListener?.onAuthDenied(scope) }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -698,6 +701,7 @@ class DefaultStaffSessionCoordinator(
             }
         }
 
+        invalidateOfflineBootstrap()
         val request = AuthLoginRequest(
             challengeId = challenge.challengeId,
             nonce = challenge.nonce,
@@ -901,6 +905,7 @@ class DefaultStaffSessionCoordinator(
             opGen = generation.incrementAndGet()
         }
 
+        invalidateOfflineBootstrap()
         val bootstrapResult = try {
             readClient.getBootstrap(token = currentSession.token, companyId = newCompanyId, includeCurrencyMinorUnits = true)
         } catch (e: CancellationException) {
@@ -984,6 +989,7 @@ class DefaultStaffSessionCoordinator(
 
         }
 
+        invalidateOfflineBootstrap()
         var remoteStatus = RemoteRevocationStatus.NotAttempted
         if (tokenToRevoke != null && deviceId != null) {
             remoteStatus = try {

@@ -1,0 +1,17 @@
+{
+  "app/build.gradle.kts": "3b58466a8caf24d0e2f1bc553adb6c272f70afde63385a022ce152c0184ddd9a",
+  "app/src/main/AndroidManifest.xml": "a368e5a0cf0e1f435c5f8972c47ca11ef2a82ad640fa3deb8f9b71bbdea6faa3",
+  "app/src/main/java/com/example/data/ProductionTraderRepository.kt": "2bcb6fd664448ecefa45e499a16a048a9a831e231805506f092204efe46149d5",
+  "app/src/main/java/com/example/data/mobile/offline/OfflineLeaseStore.kt": "949225db8c8757366f32fc5564ef2eefa09f58b7d38632bdcf1d79e2b503946d",
+  "app/src/main/java/com/example/data/mobile/outbox/OutboxRepository.kt": "4211fc3df3d0829250b2c24e557a274117f038250f8a8b3c6a2d7f3563d9fbc2",
+  "app/src/main/java/com/example/data/mobile/readclient/Transport.kt": "c4369cb9c749d0b69a0f832d9a58afe37c5e54e56306195b4ceccb2f6fcf3b55",
+  "app/src/main/java/com/example/data/mobile/session/StaffSessionCoordinator.kt": "074d82490f618ddf59421e33696ef15b1f7e5b715575c60288fa44fcf1e16bd5",
+  "app/src/main/java/com/example/ui/AuthenticatedTraderApp.kt": "a0818d655bf588d4e19b5ee084c2a6c0aa0903b20491ce7c9fc5bed6d481b6c2",
+  "app/src/test/java/com/example/data/ProductionOfflineSaleTest.kt": "87a0136df9cf6c175a51d11ef05574de8faee7a27382d85083111748bfca4190",
+  "app/src/test/java/com/example/data/mobile/session/StaffSessionCoordinatorTest.kt": "5a1f0d6f41f3e05f501f535cc98419d0355d1f58ef65aa798e192af723779b06",
+  "app/src/main/java/com/example/data/mobile/offline/RestrictedOfflineBootstrapStore.kt": "3c92b49f7a67f7e63cdddf5625028d428adedca2553fbf5fa529027a19b4a731",
+  "app/src/main/java/com/example/data/mobile/offline/RestrictedOfflineWorkspace.kt": "2b118c16c38f384bf6ab1c828c6a3505b4990bda0b0280ebc3accf9edf36b93c",
+  "app/src/main/java/com/example/ui/OfflinePilotControls.kt": "21553c5b73a989c2771536cce028139624f713d1d38c58f252d486e89dcb67cc",
+  "app/src/main/java/com/example/ui/RestrictedOfflineScreen.kt": "19d6ae7220083a7e8f18b8dca79d877ea6d7233b0bc0816779b1e612e77905ab",
+  "app/src/main/java/com/example/data/mobile/offline/OfflineCaptureAuthority.kt": "cdb61392729456fa614ba010e20d5e0132f14d9de9bdef9cab16932dc8be3500"
+}

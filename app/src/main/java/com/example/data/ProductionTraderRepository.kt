@@ -163,14 +163,15 @@ class ProductionTraderRepository(
     val commandStore: MerchantCommandStore,
     private val merchantReadClient: MerchantReadClient? = null,
     private val autoRefresh: Boolean = true,
-    val offlineLeaseStore: OfflineLeaseStore
+    val offlineLeaseStore: OfflineLeaseStore,
+    private val offlineScopeValidator: (() -> Unit)? = null
 ) : TraderRepository {
 
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
     private val retainedGeneration = authScopeProvider?.invoke()?.generation
 
-    var isOfflineSalesCapabilityEnabled: Boolean = false
-    var isNetworkOffline: Boolean = false
+    @Volatile var isOfflineSalesCapabilityEnabled: Boolean = false
+    @Volatile var isNetworkOffline: Boolean = false
     var clock: () -> Long = { System.currentTimeMillis() }
 
     private val _activeOfflineLeaseFlow = kotlinx.coroutines.flow.MutableStateFlow<OfflineSaleLease?>(null)
@@ -180,6 +181,16 @@ class ProductionTraderRepository(
         require(currencyMinorUnits in 0..6) { "Missing or invalid business currency precision" }
         require(ContractConstants.CURRENCY_CODE_REGEX.matches(baseCurrency)) { "Missing or invalid business currency" }
         scope.launch { _activeOfflineLeaseFlow.value = offlineLeaseStore.getLease(companyId, actorId, deviceId) }
+    }
+
+    internal fun verifyOfflineBootstrapSource(lease: OfflineSaleLease) {
+        requireActiveScope()
+        require(isOfflineSalesCapabilityEnabled && lease.companyId == companyId && lease.actorId == actorId && lease.deviceId == deviceId)
+        require(getActiveOfflineSaleLease() == lease)
+    }
+
+    private fun requireOfflineScope() {
+        if (offlineScopeValidator != null) offlineScopeValidator.invoke() else requireActiveScope()
     }
 
     private fun requireActiveScope(): CurrentAuthScope {
@@ -582,12 +593,15 @@ class ProductionTraderRepository(
     init {
         rehydrateCompletedShiftClose()
         scope.launch {
-            val pages = offlineLeaseStore.getCatalogPages(companyId, actorId, deviceId)
-            if (pages.isNotEmpty()) {
-                val products = pages.flatMap { bytes -> com.example.data.mobile.readclient.ProductCatalogResponse.fromStrictJson(StrictJsonParser.parseObject(String(bytes, Charsets.UTF_8))).products }
-                requireActiveScope()
-                _productsFlow.value = products.map { mapProductFromCatalog(it) }
-            }
+            try {
+                val pages = offlineLeaseStore.getCatalogPages(companyId, actorId, deviceId)
+                if (pages.isNotEmpty()) {
+                    val products = pages.flatMap { bytes -> com.example.data.mobile.readclient.ProductCatalogResponse.fromStrictJson(StrictJsonParser.parseObject(String(bytes, Charsets.UTF_8))).products }
+                    requireOfflineScope()
+                    _productsFlow.value = products.map { mapProductFromCatalog(it) }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { _productsFlow.value = emptyList() }
         }
         if (autoRefresh) refreshFromBackend()
     }
@@ -651,6 +665,7 @@ class ProductionTraderRepository(
             val pages = ArrayList<ByteArray>()
             val products = ArrayList<Product>()
             val cursors = HashSet<String>()
+            val productIds = HashSet<String>()
             var cursor: String? = null
             var version: String? = null
             do {
@@ -661,6 +676,7 @@ class ProductionTraderRepository(
                 require(page.companyId == companyId)
                 if (version == null) version = page.catalogSnapshotVersion
                 require(page.catalogSnapshotVersion == version)
+                require(page.products.all { productIds.add(it.id.value) }) { "Catalog contains duplicate product IDs" }
                 products.addAll(page.products.map { mapProductFromCatalog(it) })
                 require(products.size <= maxProducts) { "Offline preparation product limit reached" }
                 progress(products.size)
@@ -1424,7 +1440,7 @@ class ProductionTraderRepository(
 
     fun getActiveOfflineSaleLease(): OfflineSaleLease? {
         val lease = offlineLeaseStore.getLease(companyId, actorId, deviceId) ?: return null
-        if (!lease.isTimeValid(clock())) {
+        if (!lease.isTimeValid(offlineLeaseStore.trustedTime(lease) ?: clock())) {
             offlineLeaseStore.clearLease(companyId, actorId, deviceId)
             return null
         }
@@ -1458,9 +1474,11 @@ class ProductionTraderRepository(
             require(lease.currency == baseCurrency && lease.currencyMinorUnits == currencyMinorUnits) {
                 "Acquired lease currency mismatch"
             }
-            offlineLeaseStore.saveLease(lease, isCatalogComplete = true, requestElapsed = requestElapsed)
-            _activeOfflineLeaseFlow.value = lease
-            Result.success(lease)
+            require(offlineLeaseStore.getVerifiedCatalogSnapshotVersion(companyId, actorId, deviceId) == snapshotVersion &&
+                offlineLeaseStore.isCatalogComplete(companyId, actorId, deviceId)) { "Catalog changed during lease acquisition" }
+            val durableLease = requireNotNull(outboxRepository).reconcileOfflineLease(lease, offlineLeaseStore, requestElapsed)
+            _activeOfflineLeaseFlow.value = durableLease
+            Result.success(durableLease)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1538,8 +1556,8 @@ class ProductionTraderRepository(
         )
     }
 
-    private fun publishSale(invoice: InvoiceRecord): InvoiceRecord {
-        requireActiveScope()
+    private fun publishSale(invoice: InvoiceRecord, offline: Boolean = false): InvoiceRecord {
+        if (offline) requireOfflineScope() else requireActiveScope()
         _invoicesFlow.update { invoices ->
             listOf(invoice) + invoices.filterNot {
                 it.clientEventId == invoice.clientEventId || it.id == invoice.id
@@ -1602,7 +1620,7 @@ class ProductionTraderRepository(
     }
 
     private suspend fun recordOfflineSaleLocked(invoice: InvoiceRecord): Result<InvoiceRecord> = withContext(ioDispatcher) {
-        try { requireActiveScope() } catch (denied: SecurityException) { return@withContext Result.failure(denied) }
+        try { requireOfflineScope() } catch (denied: SecurityException) { return@withContext Result.failure(denied) }
 
         if (!isOfflineSalesCapabilityEnabled) {
             return@withContext Result.failure(IllegalStateException("إمكانية المبيعات غير المتصلة معطلة | Offline sales capability is disabled"))
@@ -1680,8 +1698,21 @@ class ProductionTraderRepository(
             lease.walkInCustomerId
         }
 
+        val leasedProducts = try {
+            offlineLeaseStore.getCatalogPages(companyId, actorId, deviceId).flatMap { bytes ->
+                val page = com.example.data.mobile.readclient.ProductCatalogResponse.fromStrictJson(StrictJsonParser.parseObject(String(bytes, Charsets.UTF_8)))
+                require(page.companyId == companyId && page.catalogSnapshotVersion == lease.catalogSnapshotVersion)
+                page.products.map { mapProductFromCatalog(it) }
+            }.associateBy { it.id }
+        } catch (error: Exception) { return@withContext Result.failure(error) }
         val lines = ArrayList<OfflineSaleLineV2>(invoice.items.size)
         for (basketItem in invoice.items) {
+            val verifiedProduct = leasedProducts[basketItem.product.id]
+                ?: return@withContext Result.failure(IllegalArgumentException("Product missing from leased catalog"))
+            if (verifiedProduct.productUnitId != basketItem.product.productUnitId ||
+                verifiedProduct.conversionToBaseExact.compareTo(basketItem.product.conversionToBaseExact) != 0) {
+                return@withContext Result.failure(IllegalArgumentException("Product unit differs from leased catalog"))
+            }
             val prodUlid = if (ServerUlid.isValid(basketItem.product.id)) {
                 ServerUlid.parse(basketItem.product.id)
             } else {
@@ -1699,14 +1730,15 @@ class ProductionTraderRepository(
             val lineTaxInclusive: Boolean
 
             if (lease.taxRateId == null) {
-                if (basketItem.hasResolvedTax && basketItem.taxRateId != null) {
+                if (basketItem.taxRateId != null || basketItem.taxRateExact?.signum()?.let { it != 0 } == true || basketItem.isTaxInclusive) {
                     return@withContext Result.failure(IllegalArgumentException("Tax selected but offline lease configured for no tax"))
                 }
                 lineTaxRateId = null
                 lineTaxRate = TaxPercentage("0.000000")
                 lineTaxInclusive = false
             } else {
-                if (!basketItem.hasResolvedTax || basketItem.taxRateId != lease.taxRateId.value) {
+                if (!basketItem.hasResolvedTax || basketItem.taxRateId != lease.taxRateId.value ||
+                    basketItem.taxRateExact?.compareTo(requireNotNull(lease.taxRate).value) != 0) {
                     return@withContext Result.failure(IllegalArgumentException("Item tax does not match active lease tax rate"))
                 }
                 val leaseTaxCalc = lease.taxCalculation ?: "exclusive"
@@ -1741,9 +1773,10 @@ class ProductionTraderRepository(
             return@withContext Result.failure(IllegalArgumentException("Sale amounts do not match the calculated line total"))
         }
 
-        if (listOf(tenderedExact, netTotalExact, changeReturnedExact).any {
-            !PaymentDecimalConsistency.fitsCashEntry(it, lease.currencyMinorUnits)
-        }) {
+        if (!PaymentDecimalConsistency.fitsCashEntry(tenderedExact, lease.currencyMinorUnits) ||
+            listOf(netTotalExact, changeReturnedExact).any {
+                it < BigDecimal.ZERO || it.stripTrailingZeros().scale() > lease.currencyMinorUnits
+            }) {
             return@withContext Result.failure(IllegalArgumentException("Cash amounts do not conform to currency minor units (${lease.currencyMinorUnits})"))
         }
 
@@ -1792,7 +1825,7 @@ class ProductionTraderRepository(
 
         val captureResult = try {
             outbox.captureLeaseSale(lease, event) {
-                requireActiveScope()
+                requireOfflineScope()
                 require(getActiveOfflineSaleLease()?.leaseId == lease.leaseId) { "Offline lease expired" }
             }
         } catch (error: Exception) { return@withContext Result.failure(error) }
@@ -1806,6 +1839,7 @@ class ProductionTraderRepository(
             is CaptureResult.Created, is CaptureResult.Duplicate -> {
                 val record = checkNotNull(outbox.getRecord(companyId, actorId, deviceId, clientEventId))
                 val offlineInvoice = invoice.copy(
+                    timestamp = record.event.capturedAt,
                     id = clientEventId.value,
                     clientEventId = clientEventId.value,
                     localReceiptNumber = OfflineSaleEventV2.fromStrictJson(StrictJsonParser.parseObject(String(record.payloadBytes, StandardCharsets.UTF_8))).localReceiptNumber,
@@ -1817,17 +1851,19 @@ class ProductionTraderRepository(
                     salePayloadDigest = record.payloadDigest,
                     hasLocalTenderDetails = true
                 )
-                Result.success(publishSale(offlineInvoice))
+                Result.success(publishSale(offlineInvoice, offline = true))
             }
         }
     }
 
     data class OfflineQueueSummary(val count: Int, val total: BigDecimal, val rejected: List<InvoiceRecord>)
 
+    private var offlineQueueSummaryCache: Pair<List<OutboxRecord>, OfflineQueueSummary>? = null
+
     suspend fun offlineQueueSummary(): OfflineQueueSummary = withContext(ioDispatcher) {
-        requireActiveScope()
-        val records = outboxRepository?.getRecordsByScope(companyId, actorId, deviceId).orEmpty()
-            .filter { it.event.deviceLeaseId != null && it.status != OutboxStatus.CONFIRMED }
+        requireOfflineScope()
+        val records = outboxRepository?.getOfflineQueueRecords(companyId, actorId, deviceId).orEmpty()
+        offlineQueueSummaryCache?.takeIf { it.first === records }?.let { return@withContext it.second }
         var total = BigDecimal.ZERO
         val rejected = ArrayList<InvoiceRecord>()
         for (record in records) {
@@ -1835,8 +1871,8 @@ class ProductionTraderRepository(
             total = total.add(event.payment.amountSettled.value)
             if (record.status == OutboxStatus.CONFLICT) rejected.add(heldInvoice(record).withOutboxState(record))
         }
-        requireActiveScope()
-        OfflineQueueSummary(records.size, total, rejected)
+        requireOfflineScope()
+        OfflineQueueSummary(records.size, total, rejected).also { offlineQueueSummaryCache = records to it }
     }
 
     fun getPendingOfflineSales(): List<InvoiceRecord> {

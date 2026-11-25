@@ -12,6 +12,7 @@ import com.example.data.mobile.contract.v2.OfflineSaleEventV2
 import com.example.data.mobile.contract.v2.OfflineSaleLease
 import com.example.data.mobile.merchantread.MerchantReadClient
 import com.example.data.mobile.merchantread.MerchantReadTokenProvider
+import com.example.data.mobile.offline.authorizesCapture
 import com.example.data.mobile.offline.SqliteOfflineLeaseStore
 import com.example.data.mobile.outbox.OutboxDatabase
 import com.example.data.mobile.outbox.OutboxPayloadCipher
@@ -70,7 +71,7 @@ class ProductionOfflineSaleTest {
     fun test1_airplaneEquivalentNetworkOffCapture() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
             val repo = repository(server, outbox, leaseStore = leaseStore)
             repo.clock = { fixedClockMillis }
             val vm = TraderViewModel(repo)
@@ -134,7 +135,7 @@ class ProductionOfflineSaleTest {
     fun test2_severalQueuedOfflineSales() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
             val repo = repository(server, outbox, leaseStore = leaseStore)
             repo.clock = { fixedClockMillis }
             val vm = TraderViewModel(repo)
@@ -199,7 +200,7 @@ class ProductionOfflineSaleTest {
         // Step 1: Capture 2 sales in process 1
         withDatabase(file) { db1 ->
             val outbox1 = outbox(db1)
-            val leaseStore1 = SqliteOfflineLeaseStore(crypto) { db1.openHelper.writableDatabase }
+            val leaseStore1 = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db1.openHelper.writableDatabase }
             val repo1 = repository(server, outbox1, leaseStore = leaseStore1)
             repo1.clock = { fixedClockMillis }
 
@@ -240,7 +241,7 @@ class ProductionOfflineSaleTest {
         // Step 2: Open fresh database and fresh repository instance from the same disk file
         withDatabase(file) { db2 ->
             val outbox2 = outbox(db2)
-            val leaseStore2 = SqliteOfflineLeaseStore(crypto) { db2.openHelper.writableDatabase }
+            val leaseStore2 = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db2.openHelper.writableDatabase }
             val repo2 = repository(server, outbox2, leaseStore = leaseStore2)
             repo2.clock = { fixedClockMillis }
             repo2.isOfflineSalesCapabilityEnabled = true
@@ -269,7 +270,7 @@ class ProductionOfflineSaleTest {
     fun test4_statusLostAckRecovery() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
             val repo = repository(server, outbox, leaseStore = leaseStore)
             repo.clock = { fixedClockMillis }
 
@@ -335,7 +336,7 @@ class ProductionOfflineSaleTest {
     fun test5_leaseExpiryFailClosedClockUncertainty() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
             val repo = repository(server, outbox, leaseStore = leaseStore)
             repo.clock = { fixedClockMillis }
 
@@ -363,9 +364,10 @@ class ProductionOfflineSaleTest {
                     customerNote = "", cashierNameAr = "User", cashierNameEn = "User"
                 )
 
-                // 1. Clock advanced past expiresAt (e.g. 17:00 UTC)
-                val expiredMillis = 1795626000000L
-                repo.clock = { expiredMillis }
+                // Wall time cannot expire or extend the authenticated monotonic anchor.
+                repo.clock = { 1795626000000L }
+                assertNotNull(repo.getActiveOfflineSaleLease())
+                org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofHours(9))
                 assertNull(repo.getActiveOfflineSaleLease())
                 val resultExpired = runBlocking { repo.recordSale(inv) }
                 assertTrue(resultExpired.isFailure)
@@ -388,7 +390,7 @@ class ProductionOfflineSaleTest {
     fun test6_leaseRevocationConflict() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
             val repo = repository(server, outbox, leaseStore = leaseStore)
             repo.clock = { fixedClockMillis }
 
@@ -453,7 +455,7 @@ class ProductionOfflineSaleTest {
     fun test7_stockConflict() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
             val repo = repository(server, outbox, leaseStore = leaseStore)
             repo.clock = { fixedClockMillis }
 
@@ -510,7 +512,7 @@ class ProductionOfflineSaleTest {
     fun test8_budgetLimitsEnforcedFailClosed() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
             val repo = repository(server, outbox, leaseStore = leaseStore)
             repo.clock = { fixedClockMillis }
 
@@ -548,6 +550,24 @@ class ProductionOfflineSaleTest {
                 val firstRecord = outbox.getRecord(companyA, actor, device, ClientUuid.parse(first.clientEventId!!))!!
                 val template = OfflineSaleEventV2.fromStrictJson(StrictJsonParser.parseObject(String(firstRecord.payloadBytes, Charsets.UTF_8)))
                 val activeLease = leaseStore.getLease(companyA, actor, device)!!
+                assertTrue(runCatching {
+                    outbox.captureSaleV2(companyA, actor, device, 2, template.copy(clientEventId = ClientUuid.random()))
+                }.isFailure)
+                assertTrue(runCatching { outbox.captureLeaseSale(activeLease,
+                    template.copy(clientEventId = ClientUuid.random(), warehouseId = id('K'))) {} }.isFailure)
+                assertTrue(runCatching { outbox.captureLeaseSale(activeLease,
+                    template.copy(clientEventId = ClientUuid.random(), lines = listOf(template.lines.single().copy(
+                        taxAmount = com.example.data.mobile.contract.MoneyAmount("1.000000"))))) {} }.isFailure)
+                val replay = outbox.captureLeaseSale(activeLease, template.copy(capturedAt = "2026-11-25T08:00:02Z")) {}
+                assertTrue(replay is com.example.data.mobile.outbox.CaptureResult.Duplicate)
+                var scopeChecks = 0
+                assertTrue(runCatching {
+                    outbox.captureLeaseSale(activeLease, template.copy(clientEventId = ClientUuid.random())) {
+                        scopeChecks++
+                        if (scopeChecks > 1) throw SecurityException("Simulated in-flight logout/company switch")
+                    }
+                }.isFailure)
+                assertEquals(1, outbox.getPendingOfflineSalesBudget(companyA, actor, device, leaseId).first)
                 withDatabase(file) { secondDb ->
                     val secondOutbox = outbox(secondDb)
                     val executor = java.util.concurrent.Executors.newFixedThreadPool(2)
@@ -561,7 +581,24 @@ class ProductionOfflineSaleTest {
                     } finally { executor.shutdownNow() }
                 }
                 // Delivery acknowledgement must never replenish the two consumed slots.
+                assertEquals(2, runBlocking { repo.offlineQueueSummary() }.count)
+                var payloadDecryptions = 0
+                val countingCrypto = object : com.example.data.mobile.session.SessionCryptoEngine by crypto {
+                    override fun decrypt(iv: ByteArray, ciphertextWithTag: ByteArray, aad: ByteArray): ByteArray {
+                        payloadDecryptions++
+                        return crypto.decrypt(iv, ciphertextWithTag, aad)
+                    }
+                }
+                val queueReader = OutboxRepositoryImpl(db, payloadCipher = OutboxPayloadCipher(countingCrypto))
+                assertEquals(2, queueReader.getOfflineQueueRecords(companyA, actor, device).size)
+                assertEquals(2, payloadDecryptions)
+                assertEquals(2, queueReader.getOfflineQueueRecords(companyA, actor, device).size)
+                assertTrue(queueReader.getOfflineQueueRecords(companyB, actor, device).isEmpty())
+                assertEquals(2, payloadDecryptions)
                 db.openHelper.writableDatabase.execSQL("UPDATE outbox_delivery_states SET status='confirmed'")
+                assertTrue(queueReader.getOfflineQueueRecords(companyA, actor, device).isEmpty())
+                assertEquals(2, payloadDecryptions)
+                assertEquals(0, runBlocking { repo.offlineQueueSummary() }.count)
 
                 // Sale 3: Count would become 3 > 2 -> FAILS CLOSED
                 val inv3 = InvoiceRecord(
@@ -589,7 +626,7 @@ class ProductionOfflineSaleTest {
     fun test9_tenantSwitchIsolation() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
 
             // Company A setup and offline sale capture
             val repoA = repository(server, outbox, scope = authA, leaseStore = leaseStore)
@@ -645,6 +682,7 @@ class ProductionOfflineSaleTest {
         server: MockWebServer,
         outbox: OutboxRepositoryImpl,
         precision: Int = 2,
+        currency: String = "JOD",
         scope: CurrentAuthScope = authA,
         leaseStore: SqliteOfflineLeaseStore
     ): ProductionTraderRepository {
@@ -658,7 +696,7 @@ class ProductionOfflineSaleTest {
             authScopeProvider = { scope },
             merchantReadClient = MerchantReadClient(transport, origin, allowHttpLoopback = true,
                 tokenProvider = MerchantReadTokenProvider { _, _ -> scope.token }),
-            baseCurrency = "JOD",
+            baseCurrency = currency,
             currencyMinorUnits = precision,
             outboxRepository = outbox,
             saleSyncGateway = HttpSaleSyncGateway(transport, origin) { scope.token },
@@ -670,7 +708,7 @@ class ProductionOfflineSaleTest {
     @Test
     fun encryptedLeaseRejectsMetadataAndScopeTampering() = withFixture { _, file ->
         withDatabase(file) { db ->
-            val store = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
+            val store = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
             val lease = OfflineSaleLease.fromStrictJson(StrictJsonParser.parseObject(leaseResponse()))
             store.saveLease(lease, true)
             assertNotNull(store.getLease(companyA, actor, device))
@@ -682,6 +720,241 @@ class ProductionOfflineSaleTest {
             assertNull(store.getLease(companyB, actor, device))
             assertNull(store.getLease(companyA, actor, device))
         }
+    }
+
+    @Test
+    fun durableBootAnchorSurvivesRecreationAndRebootFailsClosed() = withFixture { _, file ->
+        android.provider.Settings.Global.putInt(context.contentResolver, android.provider.Settings.Global.BOOT_COUNT, 7)
+        fun currentBoot() = com.example.data.mobile.offline.androidBootIdentity(context)
+        assertEquals("7", currentBoot())
+        val lease = OfflineSaleLease.fromStrictJson(StrictJsonParser.parseObject(leaseResponse()))
+        withDatabase(file) { db ->
+            SqliteOfflineLeaseStore(crypto, bootIdentity = { currentBoot() }) { db.openHelper.writableDatabase }
+                .saveLease(lease, true)
+        }
+        withDatabase(file) { db ->
+            val store = SqliteOfflineLeaseStore(crypto, bootIdentity = { currentBoot() }) { db.openHelper.writableDatabase }
+            assertEquals(lease, store.getLease(companyA, actor, device))
+            assertNotNull(store.trustedTime(lease))
+            // Same-boot online reacquisition keeps the first authenticated budget baseline.
+            store.saveLease(lease.copy(postedSalesCount = lease.postedSalesCount + 1), true)
+            assertEquals(lease.postedSalesCount, store.getLease(companyA, actor, device)?.postedSalesCount)
+            android.provider.Settings.Global.putInt(context.contentResolver, android.provider.Settings.Global.BOOT_COUNT, 8)
+            assertNull(store.getLease(companyA, actor, device))
+            assertTrue(runCatching { store.saveLease(lease, true) }.isFailure)
+            android.provider.Settings.Global.putString(context.contentResolver, android.provider.Settings.Global.BOOT_COUNT, null)
+            assertNull(store.getLease(companyA, actor, device))
+        }
+    }
+
+    @Test
+    fun completeLastPageAndCorruptionSurviveDiskRecreation() = withFixture { server, file ->
+        val one = catalog(null)
+        val productJson = one.substringAfter("\"products\":[").substringBeforeLast("]}")
+        val first = one.substringBefore("\"products\":[") + "\"products\":[" +
+            (1..50).joinToString(",") { index -> productJson.replace(product.value,
+                product.value.dropLast(4) + index.toString().padStart(4, '0')) } + "]}"
+        val pageOne = first.replace("\"has_more\":false,\"next_cursor\":null", "\"has_more\":true,\"next_cursor\":\"last-page\"")
+        withDatabase(file) { db ->
+            val store = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
+            val repo = repository(server, outbox(db), leaseStore = store)
+            try {
+                repo.isOfflineSalesCapabilityEnabled = true
+                server.enqueue(json(pageOne))
+                server.enqueue(json(one))
+                runBlocking { repo.prepareOfflineCatalog(2, 51) {}.getOrThrow() }
+                assertEquals(51, repo.getProducts().size)
+                take(server)
+                assertTrue(take(server).path!!.contains("last-page"))
+                server.enqueue(json(one.replace(productJson, "$productJson,$productJson")))
+                assertTrue(runBlocking { repo.prepareOfflineCatalog(1, 2) {} }.isFailure)
+                take(server)
+                assertEquals(2, store.getCatalogPages(companyA, actor, device).size)
+                assertEquals(51, repo.getProducts().size)
+            } finally { repo.close() }
+        }
+        withDatabase(file) { db ->
+            val store = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
+            assertTrue(store.isCatalogComplete(companyA, actor, device))
+            assertEquals(2, store.getCatalogPages(companyA, actor, device).size)
+            val repo = repository(server, outbox(db), leaseStore = store)
+            try {
+                runBlocking { kotlinx.coroutines.withTimeout(5000) {
+                    while (repo.getProducts().size != 51) kotlinx.coroutines.delay(10)
+                } }
+                assertTrue(repo.getProducts().any { it.id == product.value })
+                db.openHelper.writableDatabase.execSQL("UPDATE offline_catalog SET payload=zeroblob(1048605)")
+                assertFalse(store.isCatalogComplete(companyA, actor, device))
+                assertTrue(store.getCatalogPages(companyA, actor, device).isEmpty())
+            } finally { repo.close() }
+        }
+    }
+
+    @Test
+    fun maxOneBudgetRemainsConsumedAfterConfirmationAndSameLeaseReacquisition() = withFixture { server, file ->
+        withDatabase(file) { db ->
+            val store = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
+            val storage = outbox(db)
+            val repo = repository(server, storage, leaseStore = store)
+            try {
+                repo.isOfflineSalesCapabilityEnabled = true
+                server.enqueue(json(catalog(null)))
+                runBlocking { repo.prepareOfflineCatalog(1, 1) {}.getOrThrow() }
+                take(server)
+                server.enqueue(json(leaseResponse(maxCount = 1)))
+                runBlocking { repo.acquireOfflineSaleLease().getOrThrow() }
+                take(server)
+                repo.isNetworkOffline = true
+                val line = testBasketItem(repo.getProducts().single())
+                val invoice = InvoiceRecord(id = "one", invoiceNumber = 0, timestamp = "2026-11-25T10:00:00Z",
+                    items = listOf(line), subtotalExact = BigDecimal("10.00"), discountExact = BigDecimal.ZERO,
+                    netTotalExact = BigDecimal("10.00"), cashReceivedExact = BigDecimal("10.00"), changeReturnedExact = BigDecimal.ZERO,
+                    customerNote = "", cashierNameAr = "User", cashierNameEn = "User")
+                runBlocking { repo.recordOfflineSale(invoice).getOrThrow() }
+                // A server-only acknowledgement cannot be invented locally during acquisition.
+                server.enqueue(json(leaseResponse(maxCount = 1, postedCount = 1, postedAmount = "10.000000")))
+                assertTrue(runBlocking { repo.acquireOfflineSaleLease() }.isFailure)
+                take(server)
+                assertEquals(0, store.getLease(companyA, actor, device)!!.postedSalesCount)
+                assertEquals(1, storage.getRecordsByScope(companyA, actor, device).size)
+                db.openHelper.writableDatabase.execSQL("UPDATE outbox_delivery_states SET status='confirmed'")
+                server.enqueue(json(leaseResponse(maxCount = 1, postedCount = 1, postedAmount = "10.000000")))
+                runBlocking { repo.acquireOfflineSaleLease().getOrThrow() }
+                take(server)
+                assertEquals(0, store.getLease(companyA, actor, device)!!.postedSalesCount)
+                assertTrue(runBlocking { repo.recordOfflineSale(invoice) }.isFailure)
+                val replacement = OfflineSaleLease.fromStrictJson(StrictJsonParser.parseObject(
+                    leaseResponse(lId = ClientUuid.random(), maxCount = 1, postedCount = 1, postedAmount = "10.000000")))
+                store.saveLease(replacement, true)
+                assertTrue(runBlocking { repo.recordOfflineSale(invoice) }.isFailure)
+                assertEquals(1, storage.getRecordsByScope(companyA, actor, device).size)
+            } finally { repo.close() }
+        }
+    }
+
+    @Test
+    fun fractionalQuantityInclusiveTaxPersistsExactIlsAndJod() {
+        for ((currency, precision) in listOf("ILS" to 2, "JOD" to 3)) withFixture { server, file ->
+            withDatabase(file) { db ->
+                val store = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
+                val storage = outbox(db)
+                val repo = repository(server, storage, precision = precision, currency = currency, leaseStore = store)
+                try {
+                    repo.isOfflineSalesCapabilityEnabled = true
+                    server.enqueue(json(catalog(inclusiveTax, "1.16")))
+                    runBlocking { repo.prepareOfflineCatalog(1, 1) {}.getOrThrow() }
+                    take(server)
+                    server.enqueue(json(leaseResponse(currency = currency, precision = precision,
+                        taxId = inclusiveTax.id.value, taxRate = "16.000000", taxCalc = "inclusive")))
+                    runBlocking { repo.acquireOfflineSaleLease().getOrThrow() }
+                    take(server)
+                    val line = BasketItem(product = repo.getProducts().single(), quantity = BigDecimal("0.125"),
+                        unitPriceExact = BigDecimal("1.16"), taxRateId = inclusiveTax.id.value,
+                        taxRateExact = BigDecimal("16"), isTaxInclusive = true)
+                    val total = line.calculateLine(precision).lineTotal.value
+                    val invoice = InvoiceRecord(id = "fraction", invoiceNumber = 0, timestamp = "2026-11-25T10:00:00Z",
+                        items = listOf(line), subtotalExact = total, discountExact = BigDecimal.ZERO,
+                        netTotalExact = total, cashReceivedExact = BigDecimal("0.15"), changeReturnedExact = BigDecimal("0.15").subtract(total),
+                        customerNote = "", cashierNameAr = "User", cashierNameEn = "User")
+                    assertTrue(runBlocking { repo.recordOfflineSale(invoice.copy(items = listOf(line.copy(taxRateExact = BigDecimal("15"))))) }.isFailure)
+                    assertEquals(0, storage.getRecordsByScope(companyA, actor, device).size)
+                    runBlocking { repo.recordOfflineSale(invoice).getOrThrow() }
+                    val record = storage.getRecordsByScope(companyA, actor, device).single()
+                    val event = OfflineSaleEventV2.fromStrictJson(StrictJsonParser.parseObject(String(record.payloadBytes, Charsets.UTF_8)))
+                    assertEquals(BigDecimal("0.125000"), event.lines.single().quantity.value)
+                    assertEquals(BigDecimal(if (precision == 2) "0.150000" else "0.145000"), event.lines.single().lineTotal.value)
+                    assertEquals(BigDecimal("0.020000"), event.lines.single().taxAmount.value)
+                } finally { repo.close() }
+            }
+        }
+    }
+
+    @Test
+    fun restrictedProductionCompositionRestartsWithoutOnlineAuthAndFailsClosed() = withFixture { server, file ->
+        var backendKey = requireNotNull(crypto.secretKey)
+        var availableKey: javax.crypto.SecretKey? = backendKey
+        var generatedKeys = 0
+        val diskCrypto = com.example.data.mobile.session.AndroidKeyStoreCryptoEngine("restricted-composition", backend =
+            object : com.example.data.mobile.session.KeyStoreBackend {
+                override fun getKey(alias: String) = availableKey
+                override fun generateKey(alias: String): javax.crypto.SecretKey { generatedKeys++; return backendKey.also { availableKey = it } }
+            })
+        val directory = File(context.filesDir, "restricted-${ClientUuid.random().value}").apply { mkdirs() }
+        val identity = File(directory, "identity.json").apply { writeText("{\"device_id\":\"${device.value}\"}") }
+        val sessionFile = File(directory, "session.bin")
+        val bootstrapFile = File(directory, "bootstrap.bin")
+        var boot = "same-boot"
+        fun sessions() = com.example.data.mobile.session.DefaultSecureStaffSessionStore(sessionFile,
+            com.example.data.mobile.session.InstallationIdentityStore(identity), diskCrypto, context.packageName)
+        fun bootstrap() = com.example.data.mobile.offline.RestrictedOfflineBootstrapStore(android.util.AtomicFile(bootstrapFile), diskCrypto, sessions())
+        val record = com.example.data.mobile.session.StaffSessionRecord(token, actor, device, "epoch", "2026-11-26T00:00:00Z",
+            companyA, createdAt = "2026-11-25T08:00:00Z")
+        try {
+            sessions().saveSession(record)
+            withDatabase(file) { db ->
+                val leases = SqliteOfflineLeaseStore(diskCrypto, bootIdentity = { boot }) { db.openHelper.writableDatabase }
+                val repo = repository(server, outbox(db), leaseStore = leases)
+                try {
+                    repo.isOfflineSalesCapabilityEnabled = true
+                    server.enqueue(json(catalog(null)))
+                    runBlocking { repo.prepareOfflineCatalog(1, 1) {}.getOrThrow() }
+                    take(server)
+                    server.enqueue(json(leaseResponse()))
+                    val lease = runBlocking { repo.acquireOfflineSaleLease().getOrThrow() }
+                    take(server)
+                    bootstrap().save(repo, lease, leases)
+                    assertFalse(String(bootstrapFile.readBytes(), Charsets.UTF_8).contains(token))
+                } finally { repo.close() }
+            }
+            withDatabase(file) { db ->
+                val leases = SqliteOfflineLeaseStore(diskCrypto, bootIdentity = { boot }) { db.openHelper.writableDatabase }
+                val cache = bootstrap()
+                val workspace = runBlocking { com.example.data.mobile.offline.RestrictedOfflineWorkspace.compose(
+                    db, leases, cache, "https://account.example.test", true, OutboxPayloadCipher(diskCrypto),
+                    com.example.data.mobile.outbox.RoomMerchantCommandStore(db, diskCrypto)) }!!
+                try {
+                    runBlocking { kotlinx.coroutines.withTimeout(5000) {
+                        while (workspace.products.value.isEmpty()) kotlinx.coroutines.delay(10)
+                    } }
+                    val line = testBasketItem(workspace.products.value.single())
+                    val invoice = InvoiceRecord(id = "restricted", invoiceNumber = 0, timestamp = record.createdAt,
+                        items = listOf(line), subtotalExact = BigDecimal("10.00"), discountExact = BigDecimal.ZERO,
+                        netTotalExact = BigDecimal("10.00"), cashReceivedExact = BigDecimal("10.00"), changeReturnedExact = BigDecimal.ZERO,
+                        customerNote = "", cashierNameAr = "", cashierNameEn = "")
+                    runBlocking { workspace.capture(invoice).getOrThrow() }
+                    assertEquals(1, runBlocking { workspace.pending() }.count)
+                    assertEquals(2, server.requestCount)
+                    sessions().clearSession()
+                    assertTrue(runBlocking { workspace.capture(invoice) }.isFailure)
+                    assertNull(cache.read(leases))
+                    sessions().saveSession(record.copy(selectedCompanyId = companyB))
+                    assertNull(cache.read(leases))
+                    sessions().saveSession(record)
+                    assertNotNull(cache.read(leases))
+                    boot = "different-boot"
+                    assertNull(cache.read(leases))
+                    boot = "same-boot"
+                    val wrongKey = com.example.data.mobile.offline.RestrictedOfflineBootstrapStore(android.util.AtomicFile(bootstrapFile), JvmAesGcmCryptoEngine(javax.crypto.spec.SecretKeySpec(ByteArray(32) { 88.toByte() }, "AES")), sessions())
+                    assertNull(wrongKey.read(leases))
+                    availableKey = null
+                    assertNull(cache.read(leases))
+                    assertEquals(0, generatedKeys)
+                    availableKey = backendKey
+                    assertNotNull(cache.read(leases))
+                    bootstrapFile.writeBytes(ByteArray(com.example.data.mobile.contract.ContractConstants.MAX_PAYLOAD_BYTES + 29))
+                    assertNull(cache.read(leases))
+                    assertEquals(1, db.outboxDao().scopedEventCount(companyA.value, actor.value, device.value))
+                    cache.invalidate()
+                    assertNull(cache.read(leases))
+                } finally { workspace.close() }
+            }
+        } finally { directory.deleteRecursively() }
+    }
+
+    @Test
+    fun productionRestrictedEntryDefaultsOffWithoutOpeningNativeStorage() {
+        assertFalse(com.example.BuildConfig.OFFLINE_OWNER_PILOT)
+        assertNull(runBlocking { com.example.data.mobile.offline.RestrictedOfflineWorkspace.open(context, "https://account.example.test") })
     }
 
     private fun withFixture(body: (MockWebServer, File) -> Unit) {
@@ -716,7 +989,11 @@ class ProductionOfflineSaleTest {
         }
     }
 
-    private fun outbox(db: OutboxDatabase) = OutboxRepositoryImpl(db, payloadCipher = OutboxPayloadCipher(crypto))
+    private fun outbox(db: OutboxDatabase) = OutboxRepositoryImpl(db, payloadCipher = OutboxPayloadCipher(crypto),
+        requireLeaseAuthorization = true, leaseAuthority = { lease, event ->
+            SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
+                .authorizesCapture(lease, event)
+        })
     private fun id(suffix: Char) = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789$suffix")
     private fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
     private fun take(server: MockWebServer) = checkNotNull(server.takeRequest(4, TimeUnit.SECONDS))
@@ -781,7 +1058,9 @@ class ProductionOfflineSaleTest {
         expiresAt: String = "2026-11-25T16:00:00Z",
         taxId: String? = null,
         taxRate: String? = null,
-        taxCalc: String? = null
+        taxCalc: String? = null,
+        currency: String = "JOD",
+        precision: Int = 2
     ): String = """
         {
           "lease_id": "${lId.value}",
@@ -793,8 +1072,8 @@ class ProductionOfflineSaleTest {
           "expires_at": "$expiresAt",
           "posted_sales_count": $postedCount,
           "posted_total_amount": "$postedAmount",
-          "currency": "JOD",
-          "currency_minor_units": 2,
+          "currency": "$currency",
+          "currency_minor_units": $precision,
           "warehouse_id": "01JMB000000000000000000003",
           "cash_account_id": "01JMB000000000000000000004",
           "walk_in_customer_id": "01JMB000000000000000000005",

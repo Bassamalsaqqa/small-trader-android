@@ -883,6 +883,29 @@ class StaffSessionCoordinatorTest {
     }
 
     @Test
+    fun testRestrictedBootstrapInvalidationFollowsGenerationBarrier() {
+        var invalidations = 0
+        var previousGeneration: Long? = null
+        coordinator = DefaultStaffSessionCoordinator(readClient, sessionStore, denialCapture, testClock,
+            invalidateOfflineBootstrap = {
+                invalidations++
+                previousGeneration?.let { assertFalse(coordinator.isScopeActive(it, testCompanyUlid)) }
+            })
+        coordinator.requestChallenge(appVersion, rememberSession = true)
+        coordinator.login("cashier@smalltrader.example", "CorrectHorseBatteryStaple123!", "Samsung Galaxy Tab A8")
+        assertTrue(coordinator.authState is StaffAuthState.ReadReady)
+        previousGeneration = coordinator.currentGeneration
+        transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testSecondCompanyUlid/bootstrap")] = {
+            TransportResponse(statusCode = 200, body = loadBootstrapJson().replace(testCompanyUlid.value, testSecondCompanyUlid.value))
+        }
+        assertTrue(coordinator.switchCompany(testSecondCompanyUlid) is CoordinatorResult.Success)
+        previousGeneration = coordinator.currentGeneration
+        coordinator.logout()
+        assertEquals(3, invalidations)
+        assertFalse(sessionStore.hasSessionFile())
+    }
+
+    @Test
     fun testSwitchCompanyAdvancesGenerationAndSavesUpdatedSession() {
         coordinator.requestChallenge(appVersion, rememberSession = true)
         coordinator.login(

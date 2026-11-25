@@ -276,6 +276,7 @@ object EndpointSecurity {
     fun validateEndpointQueryParams(basePath: String, queryParams: Map<String, String>) {
         for ((key, value) in queryParams) {
             val isAllowed = when (key) {
+                "catalog_snapshot_version" -> basePath.endsWith("/products")
                 "search" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/suppliers") || basePath.endsWith("/sales/invoices")
                 "limit" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/suppliers") || basePath.endsWith("/sales/invoices") || basePath.endsWith("/movements") || basePath.endsWith("/statement") || basePath.endsWith("/settlement-targets") || basePath.endsWith("/outstanding")
                 "cursor" -> basePath.endsWith("/products") || basePath.endsWith("/customers") || basePath.endsWith("/sales/invoices") || basePath.endsWith("/movements") || basePath.endsWith("/statement") || basePath.endsWith("/settlement-targets") || basePath.endsWith("/outstanding")
@@ -290,6 +291,7 @@ object EndpointSecurity {
                 "Disallowed query parameter '$key' for endpoint '$basePath'"
             }
             when (key) {
+                "catalog_snapshot_version" -> require(value.length in 1..64 && value.none { it.isISOControl() }) { "Invalid catalog snapshot version" }
                 "search" -> validateSearchQuery(value)
                 "limit" -> {
                     val max = if (basePath.endsWith("/settlement-targets") || basePath.endsWith("/outstanding")) 250 else 100

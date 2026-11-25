@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.data.ProductionOfflineSaleTest" tests="16" skipped="0" failures="0" errors="0" timestamp="2026-11-25T12:42:49.518Z" hostname="pasta-hp-worker" time="9.487">
+  <properties/>
+  <testcase name="maxOneBudgetRemainsConsumedAfterConfirmationAndSameLeaseReacquisition" classname="com.example.data.ProductionOfflineSaleTest" time="5.252"/>
+  <testcase name="test2_severalQueuedOfflineSales" classname="com.example.data.ProductionOfflineSaleTest" time="0.582"/>
+  <testcase name="restrictedProductionCompositionRestartsWithoutOnlineAuthAndFailsClosed" classname="com.example.data.ProductionOfflineSaleTest" time="0.592"/>
+  <testcase name="test5_leaseExpiryFailClosedClockUncertainty" classname="com.example.data.ProductionOfflineSaleTest" time="0.203"/>
+  <testcase name="fractionalQuantityInclusiveTaxPersistsExactIlsAndJod" classname="com.example.data.ProductionOfflineSaleTest" time="0.452"/>
+  <testcase name="test6_leaseRevocationConflict" classname="com.example.data.ProductionOfflineSaleTest" time="0.258"/>
+  <testcase name="test7_stockConflict" classname="com.example.data.ProductionOfflineSaleTest" time="0.229"/>
+  <testcase name="test3_restoreAndProcessKillSurvival" classname="com.example.data.ProductionOfflineSaleTest" time="0.27"/>
+  <testcase name="completeLastPageAndCorruptionSurviveDiskRecreation" classname="com.example.data.ProductionOfflineSaleTest" time="0.216"/>
+  <testcase name="test1_airplaneEquivalentNetworkOffCapture" classname="com.example.data.ProductionOfflineSaleTest" time="0.193"/>
+  <testcase name="durableBootAnchorSurvivesRecreationAndRebootFailsClosed" classname="com.example.data.ProductionOfflineSaleTest" time="0.086"/>
+  <testcase name="productionRestrictedEntryDefaultsOffWithoutOpeningNativeStorage" classname="com.example.data.ProductionOfflineSaleTest" time="0.036"/>
+  <testcase name="test8_budgetLimitsEnforcedFailClosed" classname="com.example.data.ProductionOfflineSaleTest" time="0.295"/>
+  <testcase name="encryptedLeaseRejectsMetadataAndScopeTampering" classname="com.example.data.ProductionOfflineSaleTest" time="0.064"/>
+  <testcase name="test4_statusLostAckRecovery" classname="com.example.data.ProductionOfflineSaleTest" time="0.182"/>
+  <testcase name="test9_tenantSwitchIsolation" classname="com.example.data.ProductionOfflineSaleTest" time="0.176"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

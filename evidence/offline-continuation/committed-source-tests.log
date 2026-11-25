@@ -1,0 +1,58 @@
+Reusing configuration cache.
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:processDebugGoogleServices UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:kspDebugKotlin
+> Task :app:compileDebugKotlin
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-android-searchable-s-df59c72ac6a0c1c0/app/src/main/java/com/example/ui/screens/HomeScreen.kt:646:77 'val Icons.Filled.MenuBook: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.MenuBook.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-android-searchable-s-df59c72ac6a0c1c0/app/src/main/java/com/example/ui/screens/HomeScreen.kt:934:61 'val Icons.Filled.ReceiptLong: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.ReceiptLong.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-android-searchable-s-df59c72ac6a0c1c0/app/src/main/java/com/example/ui/screens/PurchaseDialogs.kt:1114:59 Condition is always 'true'.
+
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:kspDebugUnitTestKotlin
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:compileDebugUnitTestKotlin
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-android-searchable-s-df59c72ac6a0c1c0/app/src/test/java/com/example/MerchantNonBlockingAsyncTest.kt:120:13 The corresponding parameter in the supertype 'TraderRepository' is named 'receivedQty'. This may cause problems when calling this function with named arguments.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-android-searchable-s-df59c72ac6a0c1c0/app/src/test/java/com/example/data/NativeMerchantWritesQualificationTest.kt:1323:54 This declaration needs opt-in. Its usage should be marked with '@kotlinx.coroutines.ExperimentalCoroutinesApi' or '@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)'
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-android-searchable-s-df59c72ac6a0c1c0/app/src/test/java/com/example/data/NativeMerchantWritesQualificationTest.kt:1324:21 This declaration needs opt-in. Its usage should be marked with '@kotlinx.coroutines.ExperimentalCoroutinesApi' or '@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)'
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-android-searchable-s-df59c72ac6a0c1c0/app/src/test/java/com/example/data/NativeMerchantWritesQualificationTest.kt:1396:25 This declaration needs opt-in. Its usage should be marked with '@kotlinx.coroutines.ExperimentalCoroutinesApi' or '@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)'
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-android-searchable-s-df59c72ac6a0c1c0/app/src/test/java/com/example/data/ReviewFindingsResolutionTest.kt:354:45 This is a delicate API and its use requires care. Make sure you fully read and understand documentation of the declaration that is marked as a delicate API.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-android-searchable-s-df59c72ac6a0c1c0/app/src/test/java/com/example/data/ReviewFindingsResolutionTest.kt:364:41 This is a delicate API and its use requires care. Make sure you fully read and understand documentation of the declaration that is marked as a delicate API.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-android-searchable-s-df59c72ac6a0c1c0/app/src/test/java/com/example/data/ReviewFindingsResolutionTest.kt:1162:45 This is a delicate API and its use requires care. Make sure you fully read and understand documentation of the declaration that is marked as a delicate API.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-android-searchable-s-df59c72ac6a0c1c0/app/src/test/java/com/example/data/ReviewFindingsResolutionTest.kt:1173:41 This is a delicate API and its use requires care. Make sure you fully read and understand documentation of the declaration that is marked as a delicate API.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-android-searchable-s-df59c72ac6a0c1c0/app/src/test/java/com/example/data/mobile/outbox/EncryptedOutboxTest.kt:1558:50 'val id: Long' is deprecated. Deprecated in Java.
+w: file:///home/t3dev/.t3/worktrees/small-trader-android/t3-android-searchable-s-df59c72ac6a0c1c0/app/src/test/java/com/example/data/mobile/outbox/EncryptedOutboxTest.kt:1560:44 'val id: Long' is deprecated. Deprecated in Java.
+
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:packageDebugUnitTestForUnitTest UP-TO-DATE
+> Task :app:processDebugUnitTestManifest UP-TO-DATE
+> Task :app:generateDebugUnitTestConfig UP-TO-DATE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :app:testDebugUnitTest
+
+BUILD SUCCESSFUL in 3m 24s
+33 actionable tasks: 7 executed, 26 up-to-date
+Configuration cache entry reused.

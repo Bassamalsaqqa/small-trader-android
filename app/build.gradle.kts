@@ -58,6 +58,9 @@ android {
       "https://account.palsync.net"
     }
 
+    buildConfigField("boolean", "OFFLINE_OWNER_PILOT", (project.findProperty("smalltrader.offlineOwnerPilot")?.toString()?.toBooleanStrictOrNull() ?: false).toString())
+    buildConfigField("String", "OFFLINE_CATALOG_MAX_PAGES", escapeJavaStringLiteral(project.findProperty("smalltrader.offlineCatalogMaxPages")?.toString() ?: ""))
+    buildConfigField("String", "OFFLINE_CATALOG_MAX_PRODUCTS", escapeJavaStringLiteral(project.findProperty("smalltrader.offlineCatalogMaxProducts")?.toString() ?: ""))
     buildConfigField("boolean", "STAFF_READ_WORKSPACE", staffReadWorkspace.toString())
     buildConfigField("String", "STAFF_WORKSPACE_ORIGIN", escapeJavaStringLiteral(staffWorkspaceOrigin))
     buildConfigField("boolean", "STAFF_ALLOW_HTTP_LOOPBACK", "false")
