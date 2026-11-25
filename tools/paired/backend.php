@@ -25,7 +25,7 @@ $succeeded = false;
 try {
     putenv('APP_ENV=testing');
     $dbSettings = DisposableMariaDbSchema::testSettings();
-    if (!in_array($dbSettings['HOST'], ['127.0.0.1', 'localhost'], true) || $dbSettings['PORT'] !== '3342') {
+    if ($dbSettings['HOST'] !== '127.0.0.1' || $dbSettings['PORT'] !== '3342') {
         throw new RuntimeException('Paired slot requires explicit local MariaDB host and port 3342.');
     }
     $probe = @stream_socket_server('tcp://127.0.0.1:18400', $errno, $error);
@@ -41,7 +41,6 @@ try {
         'MOBILE_V2_OFFLINE_SALES_ENABLED' => 'true',
         'PAIRED_HTTP_NONCE' => bin2hex(random_bytes(24)), 'PAIRED_PRIVATE_DIR' => $dir, 'PAIRED_BACKEND_ROOT' => $root,
     ];
-    file_put_contents($dir.'/environment.json', json_encode($env, JSON_THROW_ON_ERROR));
     $fixture = new Process([PHP_BINARY, __DIR__.'/fixture.php'], $root, $env);
     $fixture->setTimeout(120)->mustRun();
     $router = __DIR__.'/router.php';

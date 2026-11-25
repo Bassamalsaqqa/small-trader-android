@@ -32,3 +32,7 @@ php tools/paired/backend.php
 - By default, `backend.php` drops the disposable MariaDB schema (`$schema->drop()`), stops the loopback HTTP server (`127.0.0.1:18400`), and prints `Private owned artifacts: <dir>` so private diagnostics (`gradle.log`) can be inspected without leaking secrets.
 - Set `PAIRED_CLEANUP_PRIVATE=1` to automatically delete `<dir>` after a passing run (`PAIRED_CLEANUP_PRIVATE=always` deletes `<dir>` even on failure).
 - If retaining artifacts for inspection, remove them afterwards with `rm -rf <dir>`.
+
+## Qualification boundary
+
+The injected JVM KeyStore backend, boot identity and synthetic identity file are test seams. This harness does not prove hardware AndroidKeyStore, on-device BOOT_COUNT, physical process death or device acceptance. Passing row counts and reconciliations must be accompanied by exact stock, tax and invoice-value checks before full paired acceptance.
