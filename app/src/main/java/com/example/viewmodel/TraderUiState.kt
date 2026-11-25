@@ -1,5 +1,7 @@
 package com.example.viewmodel
 
+import com.example.data.mobile.contract.v2.PaymentDecimalConsistency
+import com.example.data.mobile.readclient.BootstrapTax
 import com.example.ui.navigation.TraderNavigationPolicy
 import com.example.ui.navigation.MerchantAction
 import com.example.ui.navigation.allowed
@@ -36,7 +38,6 @@ import com.example.model.UserSession
 import com.example.model.WesternFormatters
 import java.math.BigDecimal
 import java.math.RoundingMode
-import kotlin.math.floor
 import kotlin.math.max
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -80,6 +81,7 @@ data class TraderUiState(
     val currentSession: UserSession = SampleCatalog.demoStaff.first(),
     val availableUsers: List<UserSession> = SampleCatalog.demoStaff,
     val businessInfo: BusinessInfo = SampleCatalog.defaultBusiness,
+    val saleTaxOptions: List<BootstrapTax> = emptyList(),
 
     // Products & Inventory
     val products: List<Product> = emptyList(),
@@ -326,10 +328,12 @@ data class TraderUiState(
                 DiscountPreset.PERCENT_5 -> sub.multiply(BigDecimal("0.05"))
                 DiscountPreset.PERCENT_10 -> sub.multiply(BigDecimal("0.10"))
                 DiscountPreset.ROUND_DOWN -> {
-                    val subDouble = sub.toDouble()
-                    val rounded5 = floor(subDouble / 5.0) * 5.0
-                    val diff = if (subDouble > 5.0 && subDouble - rounded5 > 0.0) subDouble - rounded5 else subDouble - floor(subDouble)
-                    BigDecimal(diff.toString()).setScale(2, RoundingMode.HALF_UP)
+                    val multipleRemainder = sub.remainder(BigDecimal("5"))
+                    if (sub > BigDecimal("5") && multipleRemainder.signum() > 0) {
+                        multipleRemainder
+                    } else {
+                        sub.remainder(BigDecimal.ONE)
+                    }
                 }
                 DiscountPreset.CUSTOM_ILS -> {
                     val sanitized = WesternFormatters.sanitizeWesternDigits(customDiscountText).trim()
@@ -407,13 +411,14 @@ data class TraderUiState(
      * Fails safe when cash collection cannot represent the required amount with 2-decimal money entry.
      * Prevents arbitrary rounding (e.g. JOD 9.833 to 9.83 payment) before cash collection.
      */
+    val hasUnresolvedSaleTax: Boolean
+        get() = basket.any { it.product.saleCurrencyMinorUnits != null && !it.hasResolvedTax }
+
     val isCashCollectionUnrepresentable: Boolean
-        get() {
-            if (basket.isEmpty()) return false
-            if (basketNetTotalExact.stripTrailingZeros().scale() > 2) return true
-            if (cashTenderedExact.stripTrailingZeros().scale() > 2) return true
-            return false
-        }
+        get() = basket.isNotEmpty() && (
+            !PaymentDecimalConsistency.fitsCashEntry(basketNetTotalExact, businessInfo.defaultCurrencyMinorUnits) ||
+            !PaymentDecimalConsistency.fitsCashEntry(cashTenderedExact, businessInfo.defaultCurrencyMinorUnits)
+        )
 
     val isCashSufficient: Boolean
         get() = basket.isNotEmpty() && !isCashCollectionUnrepresentable && cashTenderedExact >= basketNetTotalExact

@@ -8,6 +8,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.OfflineDemoTraderRepository
 import com.example.data.SampleCatalog
 import com.example.data.TraderRepository
+import com.example.data.ProductionTraderRepository
+import com.example.data.mobile.contract.v2.PaymentDecimalConsistency
 import com.example.model.AppLanguage
 import com.example.model.BasketItem
 import com.example.model.BluetoothPrinterDevice
@@ -61,6 +63,9 @@ class TraderViewModel(
     private val repository: TraderRepository = OfflineDemoTraderRepository()
 ) : ViewModel() {
 
+    private val productionRepository = repository as? ProductionTraderRepository
+    private val recoverSales = productionRepository?.takeIf { it.supportsSaleRecovery }
+
     private val _uiState = MutableStateFlow(
         TraderUiState(
             products = repository.getProducts(),
@@ -74,6 +79,7 @@ class TraderViewModel(
             expenses = repository.getExpenses(),
             currentSession = repository.getCurrentSession(),
             businessInfo = repository.getBusinessInfo(),
+            saleTaxOptions = productionRepository?.bootstrapTaxes.orEmpty(),
             draftExpenseOperationId = repository.getDraftOperationId("expense"),
             draftStockAdjustOperationId = repository.getDraftOperationId("inventory.adjustment"),
             draftPurchaseOperationId = repository.getDraftOperationId("purchase"),
@@ -89,6 +95,8 @@ class TraderViewModel(
             shiftCloseNotesInput = repository.getActiveDraftPayload("shift_close")?.properties?.get("notes")?.asString() ?: "",
             shiftCloseSuccessSnapshot = repository.getLatestCompletedShiftClose(),
             shiftClosedTimestamp = repository.getLatestCompletedShiftClose()?.closedAt,
+            isPaymentUnverifiedHold = recoverSales != null,
+            isSubmittingSale = recoverSales != null,
             productsHasMore = repository.productsHasMoreFlow.value,
             customersHasMore = repository.customersHasMoreFlow.value,
             suppliersHasMore = repository.suppliersHasMoreFlow.value
@@ -97,23 +105,12 @@ class TraderViewModel(
     val uiState: StateFlow<TraderUiState> = _uiState.asStateFlow()
 
     init {
-        val initialPendingHeld = repository.getInvoices().firstOrNull {
-            it.clientEventId != null && !isInvoiceCanonicallyConfirmed(it, it.clientEventId)
-        }
-        if (initialPendingHeld != null) {
-            _uiState.update { current ->
-                current.copy(
-                    activeReceipt = initialPendingHeld,
-                    isPaymentUnverifiedHold = true,
-                    isNewlyCompletedSale = false,
-                    basket = initialPendingHeld.items,
-                    currentSaleClientEventId = initialPendingHeld.clientEventId ?: current.currentSaleClientEventId,
-                    selectedCustomerId = initialPendingHeld.customerId,
-                    currentScreen = TraderScreen.CASH_PAYMENT,
-                    checkoutErrorAr = "العملية قيد التحقق — يرجى الانتظار لتأكيد الدفع",
-                    checkoutErrorEn = "Payment pending verification — awaiting confirmation"
-                )
-            }
+        if (recoverSales != null) {
+            viewModelScope.launch { restoreSaleHold(recoverSales) }
+        } else {
+            repository.getInvoices().firstOrNull {
+                it.clientEventId != null && !isInvoiceCanonicallyConfirmed(it, it.clientEventId)
+            }?.let(::showHeldSale)
         }
         viewModelScope.launch {
             repository.productsFlow.collect { list ->
@@ -354,9 +351,11 @@ class TraderViewModel(
         if (!TraderNavigationPolicy.allows(_uiState.value.currentSession, target)) return
         val currentNavState = _uiState.value
         if (currentNavState.isPaymentUnverifiedHold && (target == TraderScreen.INVOICE_REVIEW || target == TraderScreen.NEW_SALE)) {
-            val ar = "لا يمكن تعديل السلة أثناء وجود عملية قيد التحقق"
-            val en = "Cannot edit basket while a sale is pending verification"
-            showBanner(ar = ar, en = en, isError = true)
+            _uiState.update { it.copy(currentScreen = TraderScreen.CASH_PAYMENT) }
+            return
+        }
+        if (target == TraderScreen.CASH_PAYMENT && currentNavState.hasUnresolvedSaleTax) {
+            showBanner("اختر ضريبة كل صنف", "Select a tax treatment for each item", isError = true)
             return
         }
         if (target == TraderScreen.CASH_PAYMENT && currentNavState.hasUnsupportedProductionDiscount) {
@@ -388,7 +387,7 @@ class TraderViewModel(
                     }
                 }
                 val defaultCashText = if (target == TraderScreen.CASH_PAYMENT && state.cashInputText.isBlank()) {
-                    WesternFormatters.formatNumber(state.basketNetTotalIls)
+                    exactCashEntry(state).orEmpty()
                 } else {
                     state.cashInputText
                 }
@@ -909,12 +908,12 @@ class TraderViewModel(
 
     // POS Basket with Overselling Prevention Safeguard
     fun addProductToBasket(product: Product, count: Int = 1) {
-        if (_uiState.value.isPaymentUnverifiedHold) return
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         addProductToBasket(product, BigDecimal(count))
     }
 
     fun addProductToBasket(product: Product, count: BigDecimal) {
-        if (_uiState.value.isPaymentUnverifiedHold) return
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         if (count <= BigDecimal.ZERO) return
         _uiState.update { state ->
             val productInCatalog = state.products.firstOrNull { it.id == product.id } ?: product
@@ -963,7 +962,7 @@ class TraderViewModel(
     }
 
     fun decrementProductInBasket(productId: String) {
-        if (_uiState.value.isPaymentUnverifiedHold) return
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         _uiState.update { state ->
             val updatedBasket = state.basket.mapNotNull { item ->
                 if (item.product.id == productId) {
@@ -977,14 +976,14 @@ class TraderViewModel(
     }
 
     fun removeProductFromBasket(productId: String) {
-        if (_uiState.value.isPaymentUnverifiedHold) return
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         _uiState.update { state ->
             state.copy(basket = state.basket.filterNot { it.product.id == productId })
         }
     }
 
     fun clearBasket() {
-        if (_uiState.value.isPaymentUnverifiedHold) return
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         _uiState.update { state ->
             state.copy(
                 basket = emptyList(),
@@ -1007,7 +1006,7 @@ class TraderViewModel(
     }
 
     fun addCustomQuickItem(nameInput: String, priceInput: String) {
-        if (_uiState.value.isPaymentUnverifiedHold) return
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         val sanitized = WesternFormatters.sanitizeWesternDigits(priceInput)
         val priceExact = try { BigDecimal(sanitized) } catch (_: Exception) { null } ?: return
         if (priceExact <= BigDecimal.ZERO) return
@@ -1128,8 +1127,27 @@ class TraderViewModel(
         }
     }
 
+    fun selectSaleLineTax(productId: String, taxId: String?) {
+        val production = productionRepository ?: return
+        val tax = taxId?.let { id -> production.bootstrapTaxes.singleOrNull { it.id.value == id } ?: return }
+        _uiState.update { state ->
+            if (state.isPaymentUnverifiedHold || state.isSubmittingSale) return@update state
+            state.copy(
+                basket = state.basket.map { item ->
+                    if (item.product.id != productId) item else item.copy(
+                        taxRateId = tax?.id?.value,
+                        taxRateExact = tax?.rate?.value ?: BigDecimal.ZERO,
+                        isTaxInclusive = tax?.calculation == "inclusive"
+                    )
+                },
+                cashInputText = ""
+            )
+        }
+    }
+
     // Discounts & Customer Notes
     fun selectDiscountPreset(preset: DiscountPreset) {
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         _uiState.update { state ->
             state.copy(
                 discountPreset = preset,
@@ -1142,6 +1160,7 @@ class TraderViewModel(
     }
 
     fun updateCustomDiscountText(text: String) {
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         val sanitized = WesternFormatters.sanitizeWesternDigits(text)
         _uiState.update {
             it.copy(
@@ -1155,10 +1174,12 @@ class TraderViewModel(
     }
 
     fun updateCustomerNote(note: String) {
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         _uiState.update { it.copy(customerNote = note) }
     }
 
     fun assignCustomerToSale(customer: Customer?) {
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         _uiState.update { state ->
             val currentNote = state.customerNote.trim()
             val wasPreviousCustomerName = state.customers.any {
@@ -1197,19 +1218,26 @@ class TraderViewModel(
     }
 
     // Cash Payment & Native / Quick Tender Entry
+    private fun exactCashEntry(state: TraderUiState): String? =
+        PaymentDecimalConsistency.cashEntryText(
+            state.basketNetTotalExact, state.businessInfo.defaultCurrencyMinorUnits
+        )
+
     fun setCashExactAmount() {
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         _uiState.update { state ->
-            if (state.isCashCollectionUnrepresentable) {
+            val entry = exactCashEntry(state)
+            if (entry == null) {
                 val exactTotal = state.basketNetTotalExact.toPlainString()
-                val ar = "المبلغ المطلوب ($exactTotal) يحتوي على كسور لا يمكن تحصيلها نقداً بدقة خانتين — اختر البيع الآجل أو عدّل السلة"
-                val en = "Amount ($exactTotal) has fractions unpayable in 2-decimal cash — select credit sale or adjust basket"
+                val ar = "المبلغ ($exactTotal) يحتوي على كسور تتجاوز دقة النقد بهذه العملة — اختر البيع الآجل أو عدّل السلة"
+                val en = "Amount ($exactTotal) exceeds the cash decimal limit for this currency — select credit sale or adjust the basket"
                 state.copy(
                     checkoutErrorAr = ar,
                     checkoutErrorEn = en
                 )
             } else {
                 state.copy(
-                    cashInputText = state.basketNetTotalExact.setScale(2, RoundingMode.UNNECESSARY).toPlainString(),
+                    cashInputText = entry,
                     checkoutErrorAr = null,
                     checkoutErrorEn = null
                 )
@@ -1218,6 +1246,7 @@ class TraderViewModel(
     }
 
     fun setCashQuickDenomination(amountIls: Int) {
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         _uiState.update { state ->
             state.copy(
                 cashInputText = amountIls.toString(),
@@ -1228,11 +1257,11 @@ class TraderViewModel(
     }
 
     fun addCashIncrement(deltaIls: Int) {
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         _uiState.update { state ->
-            val current = state.cashTenderedIls
-            val next = current + deltaIls
+            val next = state.cashTenderedExact + BigDecimal.valueOf(deltaIls.toLong())
             state.copy(
-                cashInputText = WesternFormatters.formatNumber(next).removeSuffix(".00"),
+                cashInputText = next.stripTrailingZeros().toPlainString(),
                 checkoutErrorAr = null,
                 checkoutErrorEn = null
             )
@@ -1240,27 +1269,9 @@ class TraderViewModel(
     }
 
     fun updateCashInputText(rawInput: String) {
-        val western = WesternFormatters.sanitizeWesternDigits(rawInput)
-        val filtered = buildString {
-            var hasDot = false
-            var decimals = 0
-            for (ch in western) {
-                if (ch.isDigit()) {
-                    if (hasDot) {
-                        if (decimals < 2) {
-                            append(ch)
-                            decimals++
-                        }
-                    } else if (length < 6) {
-                        append(ch)
-                    }
-                } else if (ch == '.' && !hasDot) {
-                    if (isEmpty()) append('0')
-                    append('.')
-                    hasDot = true
-                }
-            }
-        }
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
+        val filtered = WesternFormatters.sanitizeWesternDigits(rawInput)
+        if (!Regex("[0-9]{0,14}(\\.[0-9]{0,6})?").matches(filtered)) return
         _uiState.update { state ->
             state.copy(
                 cashInputText = filtered,
@@ -1271,6 +1282,7 @@ class TraderViewModel(
     }
 
     fun onCashKeypadPress(key: String) {
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         _uiState.update { state ->
             val current = state.cashInputText
             val updated = when (key) {
@@ -1282,7 +1294,7 @@ class TraderViewModel(
                     else "$current."
                 }
                 else -> {
-                    val base = if (current == "0" || current == WesternFormatters.formatNumber(state.basketNetTotalIls)) {
+                    val base = if (current == "0" || current == exactCashEntry(state)) {
                         ""
                     } else {
                         current
@@ -1339,6 +1351,11 @@ class TraderViewModel(
             return
         }
 
+        if (state.hasUnresolvedSaleTax) {
+            showBanner("اختر ضريبة كل صنف", "Select a tax treatment for each item", isError = true)
+            return
+        }
+
         // Safeguard 0: Rejection of unsupported nonzero discounts in authenticated production V2
         if (state.hasUnsupportedProductionDiscount) {
             val ar = "الخصومات غير مدعومة في إصدار نقطة البيع الحالي — يرجى إزالة الخصم للمتابعة"
@@ -1356,8 +1373,8 @@ class TraderViewModel(
         // Safeguard 0b: Block unrepresentable collection before tender with clear message
         if (!asCreditDebt && state.isCashCollectionUnrepresentable) {
             val exactTotal = state.basketNetTotalExact.toPlainString()
-            val ar = "المبلغ المطلوب ($exactTotal) يحتوي على كسور لا يمكن تحصيلها نقداً بدقة خانتين — اختر البيع الآجل أو عدّل السلة"
-            val en = "Amount ($exactTotal) has fractions unpayable in 2-decimal cash — select credit sale or adjust basket"
+            val ar = "المبلغ ($exactTotal) يحتوي على كسور تتجاوز دقة النقد بهذه العملة — اختر البيع الآجل أو عدّل السلة"
+            val en = "Amount ($exactTotal) exceeds the cash decimal limit for this currency — select credit sale or adjust the basket"
             _uiState.update {
                 it.copy(
                     checkoutErrorAr = ar,
@@ -1482,66 +1499,16 @@ class TraderViewModel(
         )
 
         if (!_uiState.compareAndSet(state, state.copy(isSubmittingSale = true, isActionBusy = true))) return
-        val complete: suspend () -> Unit = {
+        val complete: suspend () -> Unit = complete@{
             try {
                 // Authoritative posting through the repository contract
                 val result = repository.recordSale(newInvoice)
                 if (result.isSuccess) {
                     val recorded = result.getOrNull()
                     if (recorded != null && isInvoiceCanonicallyConfirmed(recorded, state.currentSaleClientEventId)) {
-                        syncFromRepository()
-                        _uiState.update { current ->
-                            val printer = current.connectedPrinter
-                            val ready = printer != null && printer.isPaired
-                            current.copy(
-                                activeReceipt = recorded,
-                                isNewlyCompletedSale = true,
-                                isPaymentUnverifiedHold = false,
-                                receiptShareCount = 0,
-                                receiptCopyCount = 0,
-                                lastSharedReceiptText = null,
-                                basket = emptyList(),
-                                currentSaleClientEventId = java.util.UUID.randomUUID().toString(),
-                                saleSessionId = current.saleSessionId + 1,
-                                discountPreset = DiscountPreset.NONE,
-                                customDiscountText = "",
-                                customerNote = "",
-                                selectedCustomerId = null,
-                                cashInputText = "",
-                                isSubmittingSale = false,
-                                isActionBusy = false,
-                                checkoutErrorAr = null,
-                                checkoutErrorEn = null,
-                                currentScreen = TraderScreen.RECEIPT,
-                                screenHistory = listOf(TraderScreen.HOME),
-                                printerStatus = if (ready) PrinterStatus.READY else PrinterStatus.DISCONNECTED,
-                                printProgressFraction = 0f,
-                                printProgressStepAr = if (ready) {
-                                    "وضع المحاكاة: جاهز لمعاينة الطباعة عبر ${printer!!.name} (${current.receiptPaperWidthMm}mm)"
-                                } else {
-                                    "وضع المحاكاة: لا توجد طابعة متصلة — اختر طابعة أو شارك النص"
-                                },
-                                printProgressStepEn = if (ready) {
-                                    "Simulation mode: Ready for print preview via ${printer!!.name} (${current.receiptPaperWidthMm}mm)"
-                                } else {
-                                    "Simulation mode: No printer connected — select a printer or share text"
-                                }
-                            )
-                        }
+                        showConfirmedSale(recorded)
                     } else {
-                        // Any pending, unknown, unconfirmed, or ID-missing record remains on hold
-                        val holdInvoice = recorded ?: newInvoice.copy(outboxStatus = "PENDING_SYNC")
-                        _uiState.update { current ->
-                            current.copy(
-                                activeReceipt = holdInvoice,
-                                isNewlyCompletedSale = false,
-                                isPaymentUnverifiedHold = true,
-                                isSubmittingSale = false,
-                                isActionBusy = false,
-                                checkoutErrorAr = "العملية قيد التحقق — يرجى الانتظار لتأكيد الدفع",
-                                checkoutErrorEn = "Payment pending verification — awaiting confirmation"
-                            )
-                        }
+                        showHeldSale(recorded ?: newInvoice.copy(outboxStatus = "PENDING_SYNC"))
                         showBanner(
                             ar = "العملية قيد التحقق — يرجى الانتظار لتأكيد الدفع",
                             en = "Payment pending verification — awaiting confirmation",
@@ -1549,6 +1516,7 @@ class TraderViewModel(
                         )
                     }
                 } else {
+                    if (recoverSales != null && restoreSaleHold(recoverSales, keepDraftWhenEmpty = true)) return@complete
                     val rawErr = result.exceptionOrNull()?.message ?: "Sale rejected by domain engine"
                     val parts = rawErr.split(" | ", limit = 2)
                     val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
@@ -1563,7 +1531,10 @@ class TraderViewModel(
                     }
                     showBanner(ar = errAr, en = errEn, isError = true)
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
+                if (recoverSales != null && restoreSaleHold(recoverSales, keepDraftWhenEmpty = true)) return@complete
                 val msg = e.message ?: "Sale failed"
                 _uiState.update {
                     it.copy(
@@ -1580,42 +1551,115 @@ class TraderViewModel(
         else viewModelScope.launch { complete() }
     }
 
+    private fun showHeldSale(invoice: InvoiceRecord?) {
+        _uiState.update { current ->
+            current.copy(
+                activeReceipt = invoice,
+                isPaymentUnverifiedHold = true,
+                isNewlyCompletedSale = false,
+                basket = invoice?.items ?: current.basket,
+                currentSaleClientEventId = invoice?.clientEventId ?: current.currentSaleClientEventId,
+                selectedCustomerId = invoice?.customerId,
+                currentScreen = TraderScreen.CASH_PAYMENT,
+                isSubmittingSale = false,
+                isActionBusy = false,
+                checkoutErrorAr = "تعذر تأكيد حالة البيع. تحقق من حالة الدفع.",
+                checkoutErrorEn = "Sale confirmation is unavailable. Check payment status."
+            )
+        }
+    }
+
+    private suspend fun restoreSaleHold(
+        production: ProductionTraderRepository,
+        keepDraftWhenEmpty: Boolean = false
+    ): Boolean {
+        val restored = production.restoreHeldSale()
+        val invoice = restored.getOrNull()
+        if (invoice != null || restored.isFailure) {
+            showHeldSale(invoice)
+            return true
+        }
+        _uiState.update {
+            it.copy(
+                isPaymentUnverifiedHold = false,
+                isSubmittingSale = if (keepDraftWhenEmpty) it.isSubmittingSale else false,
+                isActionBusy = if (keepDraftWhenEmpty) it.isActionBusy else false,
+                checkoutErrorAr = null,
+                checkoutErrorEn = null
+            )
+        }
+        return false
+    }
+
     fun checkHeldSaleStatus() {
-        val receipt = _uiState.value.activeReceipt
-        if (receipt != null && _uiState.value.isPaymentUnverifiedHold) {
-            val clientEventId = receipt.clientEventId ?: _uiState.value.currentSaleClientEventId
-            val invoices = repository.getInvoices()
-            val confirmed = invoices.firstOrNull { isInvoiceCanonicallyConfirmed(it, clientEventId) }
-            if (confirmed != null) {
-                _uiState.update { current ->
-                    val printer = current.connectedPrinter
-                    val ready = printer != null && printer.isPaired
-                    current.copy(
-                        activeReceipt = confirmed,
-                        isNewlyCompletedSale = true,
-                        isPaymentUnverifiedHold = false,
-                        basket = emptyList(),
-                        currentSaleClientEventId = java.util.UUID.randomUUID().toString(),
-                        saleSessionId = current.saleSessionId + 1,
-                        discountPreset = DiscountPreset.NONE,
-                        customDiscountText = "",
-                        customerNote = "",
-                        selectedCustomerId = null,
-                        cashInputText = "",
-                        isSubmittingSale = false,
-                        isActionBusy = false,
-                        checkoutErrorAr = null,
-                        checkoutErrorEn = null,
-                        currentScreen = TraderScreen.RECEIPT,
-                        screenHistory = listOf(TraderScreen.HOME),
-                        printerStatus = if (ready) PrinterStatus.READY else PrinterStatus.DISCONNECTED
-                    )
-                }
+        val state = _uiState.value
+        if (!state.isPaymentUnverifiedHold || state.isSubmittingSale) return
+        val receipt = state.activeReceipt
+        if (!_uiState.compareAndSet(state, state.copy(isSubmittingSale = true))) return
+        viewModelScope.launch {
+            if (receipt == null) {
+                if (recoverSales != null) restoreSaleHold(recoverSales)
+                else _uiState.update { it.copy(isSubmittingSale = false) }
+                return@launch
             }
+            val eventId = receipt.clientEventId
+            val checked = if (recoverSales != null) {
+                eventId?.let { recoverSales.checkHeldSaleStatus(it).getOrNull() }
+            } else repository.getInvoices().firstOrNull { isInvoiceCanonicallyConfirmed(it, eventId) }
+            if (checked == null || !isInvoiceCanonicallyConfirmed(checked, eventId)) {
+                showHeldSale(checked ?: receipt)
+                return@launch
+            }
+
+            showConfirmedSale(checked)
+        }
+    }
+
+    private fun showConfirmedSale(receipt: InvoiceRecord) {
+        syncFromRepository()
+        _uiState.update { current ->
+            val printer = current.connectedPrinter
+            val ready = printer != null && printer.isPaired
+            current.copy(
+                activeReceipt = receipt,
+                selectedInvoiceDetail = null,
+                isNewlyCompletedSale = true,
+                isPaymentUnverifiedHold = false,
+                receiptShareCount = 0,
+                receiptCopyCount = 0,
+                lastSharedReceiptText = null,
+                basket = emptyList(),
+                currentSaleClientEventId = java.util.UUID.randomUUID().toString(),
+                saleSessionId = current.saleSessionId + 1,
+                discountPreset = DiscountPreset.NONE,
+                customDiscountText = "",
+                customerNote = "",
+                selectedCustomerId = null,
+                cashInputText = "",
+                isSubmittingSale = false,
+                isActionBusy = false,
+                checkoutErrorAr = null,
+                checkoutErrorEn = null,
+                currentScreen = TraderScreen.RECEIPT,
+                screenHistory = listOf(TraderScreen.HOME),
+                printerStatus = if (ready) PrinterStatus.READY else PrinterStatus.DISCONNECTED,
+                printProgressFraction = 0f,
+                printProgressStepAr = if (ready) {
+                    "وضع المحاكاة: جاهز لمعاينة الطباعة عبر ${printer!!.name} (${current.receiptPaperWidthMm}mm)"
+                } else {
+                    "وضع المحاكاة: لا توجد طابعة متصلة — اختر طابعة أو شارك النص"
+                },
+                printProgressStepEn = if (ready) {
+                    "Simulation mode: Ready for print preview via ${printer!!.name} (${current.receiptPaperWidthMm}mm)"
+                } else {
+                    "Simulation mode: No printer connected — select a printer or share text"
+                }
+            )
         }
     }
 
     fun openInvoiceReceipt(invoice: InvoiceRecord) {
+        if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         if (repository !is OfflineDemoTraderRepository) invoice.serverInvoiceUlid?.let { loadInvoiceDetail(it) }
         _uiState.update { state ->
             val printer = state.connectedPrinter
@@ -1646,6 +1690,12 @@ class TraderViewModel(
     }
 
     fun startFreshSale() {
+        val state = _uiState.value
+        if (state.isSubmittingSale && !state.isPaymentUnverifiedHold) return
+        if (state.isPaymentUnverifiedHold) {
+            navigateTo(TraderScreen.NEW_SALE)
+            return
+        }
         clearBasket()
         _uiState.update { state ->
             state.copy(
@@ -1824,12 +1874,12 @@ class TraderViewModel(
                     syncCustomers()
                     _uiState.update { state ->
                         val updatedCust = state.customers.firstOrNull { it.id == customerId }
-                        val paidStr = WesternFormatters.formatIls(amountExact.toDouble())
+                        val paidStr = WesternFormatters.formatIls(amountExact)
                         val isBalKnown = updatedCust?.balanceExact != null && updatedCust?.balanceIls?.isNaN() == false
                         val newBal = updatedCust?.balanceIls ?: Double.NaN
                         val hasAllocs = allocations.isNotEmpty()
                         val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
-                        val allocStr = WesternFormatters.formatIls(totalAllocExact.toDouble())
+                        val allocStr = WesternFormatters.formatIls(totalAllocExact)
 
                         val msgAr = when {
                             !hasAllocs -> {
@@ -1842,7 +1892,7 @@ class TraderViewModel(
                             }
                             else -> {
                                 val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                                val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                                val unallocStr = WesternFormatters.formatIls(unallocExact)
                                 if (unallocExact > BigDecimal.ZERO) {
                                     "تم قبض $paidStr نقداً (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد الدفتري: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "غير متاح"}"
                                 } else {
@@ -1862,7 +1912,7 @@ class TraderViewModel(
                             }
                             else -> {
                                 val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                                val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                                val unallocStr = WesternFormatters.formatIls(unallocExact)
                                 if (unallocExact > BigDecimal.ZERO) {
                                     "Collected $paidStr in cash (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "unavailable"}"
                                 } else {
@@ -1907,12 +1957,12 @@ class TraderViewModel(
                     syncCustomers()
                     _uiState.update { state ->
                         val updatedCust = state.customers.firstOrNull { it.id == customerId }
-                        val paidStr = WesternFormatters.formatIls(amountExact.toDouble())
+                        val paidStr = WesternFormatters.formatIls(amountExact)
                         val isBalKnown = updatedCust?.balanceExact != null && updatedCust?.balanceIls?.isNaN() == false
                         val newBal = updatedCust?.balanceIls ?: Double.NaN
                         val hasAllocs = allocations.isNotEmpty()
                         val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
-                        val allocStr = WesternFormatters.formatIls(totalAllocExact.toDouble())
+                        val allocStr = WesternFormatters.formatIls(totalAllocExact)
 
                         val msgAr = when {
                             !hasAllocs -> {
@@ -1925,7 +1975,7 @@ class TraderViewModel(
                             }
                             else -> {
                                 val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                                val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                                val unallocStr = WesternFormatters.formatIls(unallocExact)
                                 if (unallocExact > BigDecimal.ZERO) {
                                     "تم قبض $paidStr نقداً (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد الدفتري: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "غير متاح"}"
                                 } else {
@@ -1945,7 +1995,7 @@ class TraderViewModel(
                             }
                             else -> {
                                 val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                                val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                                val unallocStr = WesternFormatters.formatIls(unallocExact)
                                 if (unallocExact > BigDecimal.ZERO) {
                                     "Collected $paidStr in cash (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "unavailable"}"
                                 } else {
@@ -2464,12 +2514,12 @@ class TraderViewModel(
                     val updatedBills = repository.getPurchaseBills()
                     val updatedPayments = repository.getSupplierPayments()
                     val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
-                    val paidStr = WesternFormatters.formatIls(amountExact.toDouble())
+                    val paidStr = WesternFormatters.formatIls(amountExact)
                     val isOwedKnown = updatedSup?.balanceOwedExact != null && updatedSup?.balanceOwedIls?.isNaN() == false
                     val newOwed = updatedSup?.balanceOwedIls ?: Double.NaN
                     val hasAllocs = allocations.isNotEmpty()
                     val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
-                    val allocStr = WesternFormatters.formatIls(totalAllocExact.toDouble())
+                    val allocStr = WesternFormatters.formatIls(totalAllocExact)
 
                     val msgAr = when {
                         !hasAllocs -> {
@@ -2482,7 +2532,7 @@ class TraderViewModel(
                         }
                         else -> {
                             val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                            val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                            val unallocStr = WesternFormatters.formatIls(unallocExact)
                             if (unallocExact > BigDecimal.ZERO) {
                                 "تم صرف $paidStr للمورد (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "غير متاح"}"
                             } else {
@@ -2502,7 +2552,7 @@ class TraderViewModel(
                         }
                         else -> {
                             val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                            val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                            val unallocStr = WesternFormatters.formatIls(unallocExact)
                             if (unallocExact > BigDecimal.ZERO) {
                                 "Paid $paidStr to supplier (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "unavailable"}"
                             } else {
@@ -2565,12 +2615,12 @@ class TraderViewModel(
                     val updatedBills = repository.getPurchaseBills()
                     val updatedPayments = repository.getSupplierPayments()
                     val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
-                    val paidStr = WesternFormatters.formatIls(amountExact.toDouble())
+                    val paidStr = WesternFormatters.formatIls(amountExact)
                     val isOwedKnown = updatedSup?.balanceOwedExact != null && updatedSup?.balanceOwedIls?.isNaN() == false
                     val newOwed = updatedSup?.balanceOwedIls ?: Double.NaN
                     val hasAllocs = allocations.isNotEmpty()
                     val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
-                    val allocStr = WesternFormatters.formatIls(totalAllocExact.toDouble())
+                    val allocStr = WesternFormatters.formatIls(totalAllocExact)
 
                     val msgAr = when {
                         !hasAllocs -> {
@@ -2583,7 +2633,7 @@ class TraderViewModel(
                         }
                         else -> {
                             val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                            val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                            val unallocStr = WesternFormatters.formatIls(unallocExact)
                             if (unallocExact > BigDecimal.ZERO) {
                                 "تم صرف $paidStr للمورد (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "غير متاح"}"
                             } else {
@@ -2603,7 +2653,7 @@ class TraderViewModel(
                         }
                         else -> {
                             val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                            val unallocStr = WesternFormatters.formatIls(unallocExact.toDouble())
+                            val unallocStr = WesternFormatters.formatIls(unallocExact)
                             if (unallocExact > BigDecimal.ZERO) {
                                 "Paid $paidStr to supplier (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "unavailable"}"
                             } else {
@@ -3102,7 +3152,7 @@ class TraderViewModel(
 
     fun saveCurrentBasketAsDraft(customTitle: String = ""): Boolean {
         val state = _uiState.value
-        if (state.basket.isEmpty()) return false
+        if (state.basket.isEmpty() || state.isPaymentUnverifiedHold || state.isSubmittingSale) return false
         val linkedCust = state.selectedCustomer
         val fallbackAr = linkedCust?.let { "مسودة: ${it.nameAr}" }
             ?: state.customerNote.trim().takeIf { it.isNotEmpty() }?.let { "مسودة: $it" }
@@ -3148,14 +3198,15 @@ class TraderViewModel(
 
     fun resumeSaleDraft(draftId: String): Boolean {
         val state = _uiState.value
+        if (state.isPaymentUnverifiedHold || state.isSubmittingSale) return false
         val draft = state.savedDrafts.firstOrNull { it.id == draftId } ?: return false
         val restoredItems = draft.items.mapNotNull { item ->
             val freshProd = state.products.firstOrNull { it.id == item.product.id } ?: item.product
             if (freshProd.isStockTracked) {
                 val allowedQty = item.quantity.coerceAtMost(freshProd.stockCountExact)
-                if (allowedQty > BigDecimal.ZERO) BasketItem(freshProd, allowedQty) else null
+                if (allowedQty > BigDecimal.ZERO) item.copy(product = freshProd, quantity = allowedQty) else null
             } else {
-                BasketItem(freshProd, item.quantity)
+                item.copy(product = freshProd)
             }
         }
         if (restoredItems.isEmpty()) {
@@ -3292,7 +3343,7 @@ class TraderViewModel(
                     syncFromRepository()
                     _uiState.update { state ->
                         val limitDesc = if (updateCreditLimit) {
-                            creditLimit?.let { " (${WesternFormatters.formatIls(it.toDouble())})" } ?: " (غير محدد)"
+                            creditLimit?.let { " (${WesternFormatters.formatIls(it)})" } ?: " (غير محدد)"
                         } else ""
                         state.copy(
                             selectedCustomerForDetail = updated ?: state.selectedCustomerForDetail,
@@ -3332,7 +3383,7 @@ class TraderViewModel(
                     syncFromRepository()
                     _uiState.update { state ->
                         val limitDesc = if (updateCreditLimit) {
-                            creditLimit?.let { " (${WesternFormatters.formatIls(it.toDouble())})" } ?: " (غير محدد)"
+                            creditLimit?.let { " (${WesternFormatters.formatIls(it)})" } ?: " (غير محدد)"
                         } else ""
                         state.copy(
                             selectedCustomerForDetail = updated ?: state.selectedCustomerForDetail,
@@ -3905,7 +3956,7 @@ class TraderViewModel(
             try {
                 val res = repository.getCustomerSettlementTargets(
                     customerId = customerId,
-                    currency = null,
+                    currency = productionRepository?.baseCurrency,
                     limit = 50,
                     cursor = currentCursor
                 )
@@ -3991,7 +4042,7 @@ class TraderViewModel(
             try {
                 val res = repository.getSupplierSettlementTargets(
                     supplierId = supplierId,
-                    currency = null,
+                    currency = productionRepository?.baseCurrency,
                     limit = 50,
                     cursor = currentCursor
                 )

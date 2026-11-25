@@ -4,6 +4,7 @@ import com.example.data.mobile.contract.ContractConstants
 import com.example.data.mobile.contract.StrictJsonObject
 import com.example.data.mobile.contract.StrictJsonString
 import java.math.BigDecimal
+import java.math.RoundingMode
 
 /**
  * Payment and settlement qualification verifying decimal consistency and economic boundary rules
@@ -24,6 +25,13 @@ import java.math.BigDecimal
 object PaymentDecimalConsistency {
 
     private val DECIMAL_MONEY_REGEX = Regex("^(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{1,6})?\$")
+
+    fun fitsCashEntry(amount: BigDecimal, currencyMinorUnits: Int): Boolean =
+        currencyMinorUnits in 0..6 && amount.stripTrailingZeros().scale() <= minOf(2, currencyMinorUnits)
+
+    fun cashEntryText(amount: BigDecimal, currencyMinorUnits: Int): String? =
+        if (fitsCashEntry(amount, currencyMinorUnits)) amount.setScale(2, RoundingMode.UNNECESSARY).toPlainString()
+        else null
 
     /**
      * Parses and validates a monetary string lexeme against the currency minor units scale:

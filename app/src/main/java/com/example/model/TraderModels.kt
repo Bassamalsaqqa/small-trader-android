@@ -1,6 +1,10 @@
 package com.example.model
 
 import com.example.data.ProductSearch
+import com.example.data.mobile.contract.MoneyAmount
+import com.example.data.mobile.contract.PositiveDecimalQuantity
+import com.example.data.mobile.contract.SalesLineCalculator
+import com.example.data.mobile.contract.TaxPercentage
 import com.example.data.mobile.contract.StrictJsonObject
 import com.example.data.mobile.contract.StrictJsonArray
 import com.example.data.mobile.contract.toNullableString
@@ -121,7 +125,8 @@ data class Product(
     val stockCountExact: BigDecimal = BigDecimal.valueOf(stockCount.toLong()),
     val minStockThresholdExact: BigDecimal? = BigDecimal.valueOf(minStockThreshold.toLong()),
     val conversionToBaseExact: BigDecimal = BigDecimal.ONE,
-    val sku: String? = null
+    val sku: String? = null,
+    val saleCurrencyMinorUnits: Int? = null
 ) {
     val code: String? get() = sku
     constructor(
@@ -272,19 +277,29 @@ data class BasketItem(
         isTaxInclusive = product.isTaxInclusive
     )
 
+    val hasResolvedTax: Boolean
+        get() = taxRateExact != null && (taxRateId != null ||
+            (taxRateExact.signum() == 0 && !isTaxInclusive))
+
+    fun calculateLine(minorUnits: Int): SalesLineCalculator.CalculationResult {
+        require(hasResolvedTax) { "Select a tax treatment for each item" }
+        return SalesLineCalculator.calculate(
+            quantity = PositiveDecimalQuantity(quantity.stripTrailingZeros()),
+            unitPrice = MoneyAmount(unitPriceExact.stripTrailingZeros().toPlainString()),
+            taxPercentage = TaxPercentage.fromString(requireNotNull(taxRateExact).stripTrailingZeros().toPlainString()),
+            taxInclusive = isTaxInclusive,
+            minorUnits = minorUnits
+        )
+    }
+
     val lineTotalExact: BigDecimal
         get() {
-            val rawSubtotal = quantity.multiply(unitPriceExact)
-            val taxRate = if (taxRateId != null) (taxRateExact ?: BigDecimal.ZERO) else BigDecimal.ZERO
-            if (taxRateId == null || taxRate.compareTo(BigDecimal.ZERO) == 0) {
-                return rawSubtotal
-            }
-            if (isTaxInclusive) {
-                return rawSubtotal
-            }
-            val rate = taxRate.divide(BigDecimal(100), 8, RoundingMode.HALF_UP)
-            val tax = rawSubtotal.multiply(rate)
-            return rawSubtotal.add(tax)
+            val minorUnits = product.saleCurrencyMinorUnits
+            if (minorUnits != null && hasResolvedTax) return calculateLine(minorUnits).lineTotal.value
+
+            val subtotal = quantity.multiply(unitPriceExact)
+            if (taxRateId == null || isTaxInclusive) return subtotal
+            return subtotal + subtotal.multiply(taxRateExact ?: BigDecimal.ZERO).movePointLeft(2)
         }
 
     val lineTotalDecimal: BigDecimal
@@ -353,7 +368,9 @@ data class InvoiceRecord(
     val serverPaymentUlid: String? = null,
     val serverPaymentReceiptNumber: String? = null,
     val serverPostedAt: String? = null,
-    val outboxStatus: String? = null
+    val outboxStatus: String? = null,
+    val salePayloadDigest: String? = null,
+    val hasLocalTenderDetails: Boolean = true
 ) {
     constructor(
         id: String,

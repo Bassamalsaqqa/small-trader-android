@@ -271,7 +271,8 @@ fun SmallTraderApp(
                                 onResumeDraft = traderViewModel::resumeSaleDraft,
                                 onDeleteDraft = traderViewModel::deleteSaleDraft,
                                 onFormatQuotation = traderViewModel::formatQuotationShareText,
-                                onSearchCustomers = traderViewModel::searchCustomers
+                                onSearchCustomers = traderViewModel::searchCustomers,
+                                onSelectLineTax = traderViewModel::selectSaleLineTax
                             )
                         }
 
@@ -483,11 +484,6 @@ fun SmallTraderApp(
                                     traderViewModel.resetSupplierSettlementTargets()
                                     traderViewModel.navigateBack()
                                 },
-                                onPaySupplier = { sup, amount -> traderViewModel.paySupplierAmount(sup.id, amount) },
-                                onPaySupplierResult = { sup, amount, paymentId -> traderViewModel.paySupplierAmountResult(sup.id, amount, paymentId = paymentId) },
-                                onPaySupplierWithResult = { sup, amount, paymentId, onComplete ->
-                                    traderViewModel.paySupplierAmountResult(sup.id, amount, paymentId = paymentId, onComplete = onComplete)
-                                },
                                 onPaySupplierExactWithResult = { sup, amount, note, paymentId, allocations, onComplete ->
                                     traderViewModel.paySupplierAmountExactResult(
                                         supplierId = sup.id,
@@ -688,14 +684,6 @@ fun SmallTraderApp(
                             traderViewModel.openPaymentCollectionDialog(false)
                             traderViewModel.resetCustomerSettlementTargets()
                         },
-                        onConfirmPayment = { customerId, amountIls, note, paymentId ->
-                            traderViewModel.confirmCustomerCollection(
-                                customerId = customerId,
-                                paymentAmountIls = amountIls,
-                                note = note,
-                                paymentId = paymentId
-                            )
-                        },
                         onConfirmPaymentExact = { customerId, amount, note, paymentId, allocations ->
                             traderViewModel.confirmCustomerCollection(
                                 customerId = customerId,
@@ -711,8 +699,8 @@ fun SmallTraderApp(
                         targetsHasMore = state.customerSettlementTargetsHasMore,
                         onLoadMoreTargets = { traderViewModel.loadCustomerSettlementTargets(cust.id) },
                         onRetryTargets = { traderViewModel.loadCustomerSettlementTargets(cust.id, resetPagination = true) },
-                        currency = state.customerSettlementTargets.firstOrNull()?.currency ?: "ILS",
-                        minorUnits = state.customerSettlementTargets.firstOrNull()?.currencyMinorUnits ?: 2
+                        currency = state.businessInfo.defaultCurrency,
+                        minorUnits = state.businessInfo.defaultCurrencyMinorUnits
                     )
                     }
                 }

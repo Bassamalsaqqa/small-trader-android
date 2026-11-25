@@ -115,7 +115,8 @@ interface OutboxRepository {
         deviceId: ClientUuid,
         currencyMinorUnits: Int,
         profile: OnlineSaleIntentProfile,
-        rawCanonicalProfileUtf8: ByteArray? = null
+        rawCanonicalProfileUtf8: ByteArray? = null,
+        requireNoOtherHeldSale: Boolean = false
     ): CaptureResult
 
     /**
@@ -129,7 +130,8 @@ interface OutboxRepository {
         actorId: ServerUlid,
         deviceId: ClientUuid,
         batchSize: Int = 10,
-        leaseDurationMillis: Long = 30_000L
+        leaseDurationMillis: Long = 30_000L,
+        onlyEventId: ClientUuid? = null
     ): ClaimedBatch
 
     /**
@@ -211,7 +213,8 @@ interface OutboxRepository {
 
     /**
      * Reconciles delivery confirmation from status query without worker claim token.
-     * Explicit path separate from worker claims. Only transitions in_flight or unknown_ack.
+     * Explicit path separate from worker claims for an authoritative status acknowledgement.
+     * Transitions in_flight or unknown_ack, and pending for retained online intents.
      */
     fun reconcileDeliveryConfirmation(
         companyId: ServerUlid,
@@ -269,6 +272,12 @@ interface OutboxRepository {
     /**
      * Retrieves all records within the specified tenant/user/device scope.
      */
+    fun oldestHeldOnlineSale(companyId: ServerUlid, actorId: ServerUlid, deviceId: ClientUuid): OutboxRecord?
+
+    fun confirmedInvoiceMappings(
+        companyId: ServerUlid, actorId: ServerUlid, deviceId: ClientUuid, invoiceIds: List<String>
+    ): List<ConfirmedSaleMapping>
+
     fun getRecordsByScope(
         companyId: ServerUlid,
         actorId: ServerUlid,
@@ -447,7 +456,8 @@ class OutboxRepositoryImpl(
         deviceId: ClientUuid,
         currencyMinorUnits: Int,
         profile: OnlineSaleIntentProfile,
-        rawCanonicalProfileUtf8: ByteArray?
+        rawCanonicalProfileUtf8: ByteArray?,
+        requireNoOtherHeldSale: Boolean
     ): CaptureResult {
         // Guard 1: Scope parameters MUST match profile identity BEFORE write
         require(companyId == profile.companyId) {
@@ -495,7 +505,8 @@ class OutboxRepositoryImpl(
             }.format(java.util.Date(clock())),
             eventVersion = 2,
             payloadDigestStr = computedDigest.value,
-            canonicalBytes = canonicalBytes
+            canonicalBytes = canonicalBytes,
+            requireNoOtherHeldSale = requireNoOtherHeldSale
         )
     }
 
@@ -679,7 +690,8 @@ class OutboxRepositoryImpl(
         capturedAtStr: String,
         eventVersion: Int,
         payloadDigestStr: String,
-        canonicalBytes: ByteArray
+        canonicalBytes: ByteArray,
+        requireNoOtherHeldSale: Boolean = false
     ): CaptureResult {
         val now = clock()
         return database.runInTransaction<CaptureResult> {
@@ -731,6 +743,11 @@ class OutboxRepositoryImpl(
                     }
                 }
             } else {
+                if (requireNoOtherHeldSale &&
+                    database.outboxDao().oldestHeldOnlineSaleId(companyIdStr, actorIdStr, deviceIdStr) != null
+                ) {
+                    return@runInTransaction CaptureResult.ScopeRejected(clientEventIdStr, "A sale is pending verification")
+                }
                 // New event insertion.
                 // Check if queue is locked due to auth denial:
                 val isLocked = database.outboxDao().isScopeLocked(companyIdStr, actorIdStr, deviceIdStr)
@@ -783,7 +800,8 @@ class OutboxRepositoryImpl(
         actorId: ServerUlid,
         deviceId: ClientUuid,
         batchSize: Int,
-        leaseDurationMillis: Long
+        leaseDurationMillis: Long,
+        onlyEventId: ClientUuid?
     ): ClaimedBatch {
         require(batchSize in 1..OutboxRepository.MAX_BATCH_SIZE) {
             "batchSize must be between 1 and ${OutboxRepository.MAX_BATCH_SIZE} (was $batchSize)"
@@ -810,7 +828,8 @@ class OutboxRepositoryImpl(
                 actorId = actorId.value,
                 deviceId = deviceId.value,
                 nowMillis = now,
-                limit = batchSize
+                limit = batchSize,
+                onlyEventId = onlyEventId?.value
             )
 
             val claimedRecords = mutableListOf<OutboxRecord>()
@@ -1158,11 +1177,18 @@ class OutboxRepositoryImpl(
                 }
             }
 
-            if (state.status !in listOf(OutboxStatus.IN_FLIGHT.wireValue, OutboxStatus.UNKNOWN_ACK.wireValue)) {
-                throw InvalidAcknowledgementException("Cannot reconcile confirmation for record in state '${state.status}'; must be in_flight or unknown_ack")
+            // An authenticated status lookup can confirm a previously posted online intent
+            // even if the process stopped before recording a local claim.
+            val allowPending = profile != null
+            if (state.status != OutboxStatus.IN_FLIGHT.wireValue &&
+                state.status != OutboxStatus.UNKNOWN_ACK.wireValue &&
+                !(allowPending && state.status == OutboxStatus.PENDING.wireValue)
+            ) {
+                throw InvalidAcknowledgementException("Cannot reconcile confirmation for record in state '${state.status}'")
             }
 
             val updated = database.outboxDao().reconcileConfirmation(
+                allowPending = allowPending,
                 clientEventId = clientEventId.value,
                 companyId = companyId.value,
                 actorId = actorId.value,
@@ -1248,6 +1274,20 @@ class OutboxRepositoryImpl(
             deviceId = deviceId.value,
             clientEventId = clientEventId.value
         )?.let { decryptRecord(it) }
+    }
+
+    override fun oldestHeldOnlineSale(
+        companyId: ServerUlid, actorId: ServerUlid, deviceId: ClientUuid
+    ): OutboxRecord? = database.runInTransaction<OutboxRecord?> {
+        val id = database.outboxDao().oldestHeldOnlineSaleId(companyId.value, actorId.value, deviceId.value)
+            ?: return@runInTransaction null
+        checkNotNull(getRecord(companyId, actorId, deviceId, ClientUuid.parse(id)))
+    }
+
+    override fun confirmedInvoiceMappings(
+        companyId: ServerUlid, actorId: ServerUlid, deviceId: ClientUuid, invoiceIds: List<String>
+    ): List<ConfirmedSaleMapping> = if (invoiceIds.isEmpty()) emptyList() else {
+        database.outboxDao().confirmedInvoiceMappings(companyId.value, actorId.value, deviceId.value, invoiceIds)
     }
 
     override fun getRecordsByScope(

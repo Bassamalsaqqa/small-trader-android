@@ -55,6 +55,8 @@ import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
@@ -106,6 +108,7 @@ import com.example.ui.components.StitchTonalButton
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
+import com.example.data.mobile.readclient.BootstrapTax
 
 /**
  * Rebuilt Native Invoice Review Screen for Small Trader (التاجر الصغير).
@@ -138,7 +141,8 @@ fun InvoiceReviewScreen(
     onResumeDraft: ((String) -> Unit)? = null,
     onDeleteDraft: ((String) -> Unit)? = null,
     onFormatQuotation: (() -> String)? = null,
-    onSearchCustomers: ((String) -> Unit)? = null
+    onSearchCustomers: ((String) -> Unit)? = null,
+    onSelectLineTax: ((String, String?) -> Unit)? = null
 ) {
     val lang = state.language
     var isCustomerPickerOpen by rememberSaveable { mutableStateOf(false) }
@@ -189,7 +193,10 @@ fun InvoiceReviewScreen(
                     EditableInvoiceLinesSection(
                         basket = state.basket,
                         totalUnits = state.basketItemCount,
-                        subtotalIls = state.basketSubtotalIls,
+                        subtotal = state.basketSubtotalExact.takeUnless { state.hasUnresolvedSaleTax },
+                        currency = state.businessInfo.defaultCurrency,
+                        taxes = state.saleTaxOptions,
+                        onSelectLineTax = onSelectLineTax,
                         lang = lang,
                         onAddMoreItems = onAddMoreItems,
                         onIncrementProduct = onIncrementProduct,
@@ -648,7 +655,10 @@ private fun CustomerAndAccountImpactCard(
 private fun EditableInvoiceLinesSection(
     basket: List<BasketItem>,
     totalUnits: Int,
-    subtotalIls: Double,
+    subtotal: java.math.BigDecimal?,
+    currency: String,
+    taxes: List<BootstrapTax>,
+    onSelectLineTax: ((String, String?) -> Unit)?,
     lang: AppLanguage,
     onAddMoreItems: () -> Unit,
     onIncrementProduct: (Product) -> Unit,
@@ -681,8 +691,8 @@ private fun EditableInvoiceLinesSection(
                     )
                     Text(
                         text = lang.tr(
-                            "${WesternFormatters.formatInt(basket.size)} أصناف • ${WesternFormatters.formatInt(totalUnits)} قطع • المجموع ${WesternFormatters.formatIls(subtotalIls)}",
-                            "${WesternFormatters.formatInt(basket.size)} items • ${WesternFormatters.formatInt(totalUnits)} units • Total ${WesternFormatters.formatIls(subtotalIls)}"
+                            "${WesternFormatters.formatInt(basket.size)} أصناف • ${WesternFormatters.formatInt(totalUnits)} قطع • المجموع ${WesternFormatters.formatCurrency(subtotal, currency)}",
+                            "${WesternFormatters.formatInt(basket.size)} items • ${WesternFormatters.formatInt(totalUnits)} units • Total ${WesternFormatters.formatCurrency(subtotal, currency)}"
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -733,6 +743,38 @@ private fun EditableInvoiceLinesSection(
                         .testTag("invoice_line_${product.id}"),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    if (product.saleCurrencyMinorUnits != null && onSelectLineTax != null) {
+                        var showTaxes by remember(product.id) { mutableStateOf(false) }
+                        val noTax = lang.tr("بدون ضريبة", "No tax")
+                        val selectedTax = taxes.firstOrNull { it.id.value == item.taxRateId }
+                        Box {
+                            OutlinedButton(
+                                onClick = { showTaxes = true },
+                                modifier = Modifier.heightIn(min = 44.dp).testTag("sale_tax_${product.id}")
+                            ) {
+                                Text(selectedTax?.name ?: if (item.hasResolvedTax) noTax else lang.tr("اختر الضريبة", "Select tax"))
+                            }
+                            DropdownMenu(expanded = showTaxes, onDismissRequest = { showTaxes = false }) {
+                                DropdownMenuItem(text = { Text(noTax) }, onClick = {
+                                    onSelectLineTax(product.id, null)
+                                    showTaxes = false
+                                })
+                                taxes.forEach { tax ->
+                                    val calculation = if (tax.calculation == "inclusive") {
+                                        lang.tr("شاملة", "inclusive")
+                                    } else lang.tr("إضافية", "exclusive")
+                                    DropdownMenuItem(
+                                        text = { Text("${tax.name} · ${tax.rate.value.stripTrailingZeros().toPlainString()}% · $calculation") },
+                                        onClick = {
+                                            onSelectLineTax(product.id, tax.id.value)
+                                            showTaxes = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     // Top Row: Index + Title | Line Total
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -764,7 +806,10 @@ private fun EditableInvoiceLinesSection(
                         }
 
                         Text(
-                            text = WesternFormatters.formatIls(item.lineTotal),
+                            text = WesternFormatters.formatCurrency(
+                                item.lineTotalExact.takeIf { item.hasResolvedTax || product.saleCurrencyMinorUnits == null },
+                                currency
+                            ),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -1664,6 +1709,14 @@ private fun ReviewCheckoutDock(
                 )
             }
 
+            if (state.hasUnresolvedSaleTax) {
+                Text(
+                    text = lang.tr("اختر ضريبة كل صنف للمتابعة", "Select a tax treatment for each item to continue"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
             // Single Authoritative Net Total Due + Primary Continue Action
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1677,7 +1730,10 @@ private fun ReviewCheckoutDock(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = WesternFormatters.formatIls(state.basketNetTotalIls),
+                        text = WesternFormatters.formatCurrency(
+                            state.basketNetTotalExact.takeUnless { state.hasUnresolvedSaleTax },
+                            state.businessInfo.defaultCurrency
+                        ),
                         style = MaterialTheme.typography.headlineMedium.copy(
                             fontWeight = FontWeight.Bold
                         ),
@@ -1692,7 +1748,7 @@ private fun ReviewCheckoutDock(
                             onProceedToCashPayment()
                         }
                     },
-                    enabled = state.basket.isNotEmpty() && !hasUnsupportedDiscount,
+                    enabled = state.basket.isNotEmpty() && !hasUnsupportedDiscount && !state.hasUnresolvedSaleTax,
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,

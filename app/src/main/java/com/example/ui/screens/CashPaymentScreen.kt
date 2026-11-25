@@ -145,6 +145,7 @@ fun CashPaymentScreen(
 ) {
     val lang = state.language
     val financial = TraderTheme.financial
+    val currency = state.businessInfo.defaultCurrency
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
     var isCustomerPickerOpen by rememberSaveable(state.saleSessionId) { mutableStateOf(false) }
@@ -156,6 +157,67 @@ fun CashPaymentScreen(
     val sufficient = state.isCashSufficient
     val isExact = state.isExactCashTendered
     val errorMsg = state.checkoutErrorMessage
+
+    if (state.isPaymentUnverifiedHold) {
+        Column(
+            modifier = Modifier.fillMaxSize().verticalScroll(scrollState)
+                .padding(horizontal = 16.dp, vertical = 12.dp).testTag("cash_payment_screen")
+        ) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("held_sale_status_card")
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Text(
+                            text = lang.tr(
+                                "العملية قيد التحقق — يرجى الانتظار لتأكيد الدفع",
+                                "Payment pending verification — awaiting confirmation"
+                            ),
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
+                    Button(
+                        onClick = onCheckHeldStatus,
+                        enabled = !state.isSubmittingSale,
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.tertiary,
+                            contentColor = MaterialTheme.colorScheme.onTertiary
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("check_held_status_button")
+                    ) {
+                        Text(
+                            text = if (state.isSubmittingSale) {
+                                lang.tr("جارٍ التحقق من الدفع…", "Checking payment status…")
+                            } else lang.tr("التحقق من حالة الدفع", "Check Payment Status"),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                }
+            }
+        }
+        return
+    }
 
     Column(
         modifier = Modifier
@@ -242,7 +304,7 @@ fun CashPaymentScreen(
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Text(
-                                text = WesternFormatters.formatIls(state.basketNetTotalIls),
+                                text = WesternFormatters.formatCurrency(state.basketNetTotalExact, currency),
                                 style = MaterialTheme.typography.displayMedium.copy(
                                     fontSize = 28.sp,
                                     fontWeight = FontWeight.Bold
@@ -412,7 +474,7 @@ fun CashPaymentScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = WesternFormatters.formatIls(state.cashTenderedIls),
+                                text = WesternFormatters.formatCurrency(state.cashTenderedExact, currency),
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.testTag("payment_cash_received_text")
@@ -532,7 +594,7 @@ fun CashPaymentScreen(
                                     )
                                 }
                                 Text(
-                                    text = WesternFormatters.formatIls(state.basketNetTotalIls),
+                                    text = WesternFormatters.formatCurrency(state.basketNetTotalExact, currency),
                                     style = MaterialTheme.typography.titleSmall.copy(
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = MonoFontFamily
@@ -647,7 +709,7 @@ fun CashPaymentScreen(
                                 }
 
                                 Text(
-                                    text = WesternFormatters.formatIls(state.changeDueIls),
+                                    text = WesternFormatters.formatCurrency(state.changeDueExact, currency),
                                     style = MaterialTheme.typography.displayMedium.copy(
                                         fontSize = 26.sp,
                                         fontWeight = FontWeight.Bold
@@ -708,7 +770,7 @@ fun CashPaymentScreen(
                                 }
 
                                 Text(
-                                    text = WesternFormatters.formatIls(state.remainingUnpaidIls),
+                                    text = WesternFormatters.formatCurrency(state.remainingUnpaidExact, currency),
                                     style = MaterialTheme.typography.displayMedium.copy(
                                         fontSize = 24.sp,
                                         fontWeight = FontWeight.Bold
@@ -727,8 +789,8 @@ fun CashPaymentScreen(
                             ) {
                                 Text(
                                     text = lang.tr(
-                                        "استلم كامل المبلغ (${WesternFormatters.formatIls(state.basketNetTotalIls)}) لإتمام البيع النقدي",
-                                        "Collect full amount (${WesternFormatters.formatIls(state.basketNetTotalIls)}) to complete cash sale"
+                                        "استلم كامل المبلغ (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}) لإتمام البيع النقدي",
+                                        "Collect full amount (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}) to complete cash sale"
                                     ),
                                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                     color = financial.warning.copy(alpha = 0.95f),
@@ -754,58 +816,6 @@ fun CashPaymentScreen(
                                         )
                                     }
                                 }
-                            }
-                        }
-                    }
-                }
-
-                if (state.isPaymentUnverifiedHold) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("held_sale_status_card")
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.tertiary,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Text(
-                                    text = lang.tr(
-                                        "العملية قيد التحقق — يرجى الانتظار لتأكيد الدفع",
-                                        "Payment pending verification — awaiting confirmation"
-                                    ),
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer
-                                )
-                            }
-                            Button(
-                                onClick = onCheckHeldStatus,
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.tertiary,
-                                    contentColor = MaterialTheme.colorScheme.onTertiary
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("check_held_status_button")
-                            ) {
-                                Text(
-                                    text = lang.tr("التحقق من حالة الدفع", "Check Payment Status"),
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                                )
                             }
                         }
                     }
@@ -1193,8 +1203,8 @@ fun CashPaymentScreen(
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
-                                            text = if (isCustBalKnown) "${WesternFormatters.formatIls(selectedCustomer.balanceIls)} + ${WesternFormatters.formatIls(state.basketNetTotalIls)}"
-                                                   else "-- ₪ + ${WesternFormatters.formatIls(state.basketNetTotalIls)}",
+                                            text = if (isCustBalKnown) "${WesternFormatters.formatIls(selectedCustomer.balanceIls)} + ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}"
+                                                   else "-- ₪ + ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}",
                                             style = MaterialTheme.typography.bodySmall.copy(
                                                 fontSize = 12.sp,
                                                 fontFamily = MonoFontFamily
@@ -1239,8 +1249,8 @@ fun CashPaymentScreen(
                                         )
                                         Text(
                                             text = lang.tr(
-                                                "يتجاوز سقف الدين المسموح بمقدار ${WesternFormatters.formatIls(state.creditCeilingExcessIls)}. استلم الفاتورة نقداً، أو غيّر الزبون.",
-                                                "Exceeds credit ceiling by ${WesternFormatters.formatIls(state.creditCeilingExcessIls)}. Collect cash or change customer."
+                                                "يتجاوز سقف الدين المسموح بمقدار ${WesternFormatters.formatCurrency(state.creditCeilingExcessExact, currency)}. استلم الفاتورة نقداً، أو غيّر الزبون.",
+                                                "Exceeds credit ceiling by ${WesternFormatters.formatCurrency(state.creditCeilingExcessExact, currency)}. Collect cash or change customer."
                                             ),
                                             style = MaterialTheme.typography.bodySmall.copy(
                                                 fontSize = 12.sp,
@@ -1349,8 +1359,8 @@ fun CashPaymentScreen(
                             )
                             Text(
                                 text = lang.tr(
-                                    "سيسجل المبلغ كاملاً (${WesternFormatters.formatIls(state.basketNetTotalIls)}) كذمة مستحقة على حساب الزبون. المقبوض نقداً: 0.00 ₪.",
-                                    "Full amount (${WesternFormatters.formatIls(state.basketNetTotalIls)}) will be debited to customer account. Cash received: 0.00 ₪."
+                                    "سيسجل المبلغ كاملاً (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}) كذمة مستحقة على حساب الزبون. المقبوض نقداً: 0.00 ₪.",
+                                    "Full amount (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}) will be debited to customer account. Cash received: 0.00 ₪."
                                 ),
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1390,16 +1400,16 @@ fun CashPaymentScreen(
                                 "Unpayable cash fractions — select credit sale or adjust basket."
                             )
                             !sufficient -> lang.tr(
-                                "المتبقي لإتمام البيع: ${WesternFormatters.formatIls(state.remainingUnpaidIls)}",
-                                "Shortfall: ${WesternFormatters.formatIls(state.remainingUnpaidIls)}"
+                                "المتبقي لإتمام البيع: ${WesternFormatters.formatCurrency(state.remainingUnpaidExact, currency)}",
+                                "Shortfall: ${WesternFormatters.formatCurrency(state.remainingUnpaidExact, currency)}"
                             )
                             state.changeDueExact > java.math.BigDecimal.ZERO -> lang.tr(
-                                "المقبوض: ${WesternFormatters.formatIls(state.cashTenderedIls)} • الباقي: ${WesternFormatters.formatIls(state.changeDueIls)}",
-                                "Received: ${WesternFormatters.formatIls(state.cashTenderedIls)} • Change: ${WesternFormatters.formatIls(state.changeDueIls)}"
+                                "المقبوض: ${WesternFormatters.formatCurrency(state.cashTenderedExact, currency)} • الباقي: ${WesternFormatters.formatCurrency(state.changeDueExact, currency)}",
+                                "Received: ${WesternFormatters.formatCurrency(state.cashTenderedExact, currency)} • Change: ${WesternFormatters.formatCurrency(state.changeDueExact, currency)}"
                             )
                             else -> lang.tr(
-                                "المقبوض: ${WesternFormatters.formatIls(state.cashTenderedIls)} • بدون باقي (مطابق)",
-                                "Received: ${WesternFormatters.formatIls(state.cashTenderedIls)} • Exact"
+                                "المقبوض: ${WesternFormatters.formatCurrency(state.cashTenderedExact, currency)} • بدون باقي (مطابق)",
+                                "Received: ${WesternFormatters.formatCurrency(state.cashTenderedExact, currency)} • Exact"
                             )
                         },
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
@@ -1411,7 +1421,7 @@ fun CashPaymentScreen(
                     // Primary confirmation button (ST-10)
                     Button(
                         onClick = onCompleteSale,
-                        enabled = state.basket.isNotEmpty() && sufficient && !state.isCashCollectionUnrepresentable && !state.isSubmittingSale && !state.isPaymentUnverifiedHold,
+                        enabled = state.basket.isNotEmpty() && sufficient && !state.isCashCollectionUnrepresentable && !state.hasUnresolvedSaleTax && !state.isSubmittingSale && !state.isPaymentUnverifiedHold,
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
@@ -1432,8 +1442,8 @@ fun CashPaymentScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = lang.tr(
-                                "تأكيد واستلام النقد (${WesternFormatters.formatIls(state.basketNetTotalIls)})",
-                                "Confirm Cash Sale (${WesternFormatters.formatIls(state.basketNetTotalIls)})"
+                                "تأكيد واستلام النقد (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)})",
+                                "Confirm Cash Sale (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)})"
                             ),
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                         )
@@ -1460,16 +1470,16 @@ fun CashPaymentScreen(
                                 "Customer balance unknown for configured credit limit"
                             )
                             overLimit -> lang.tr(
-                                "يتجاوز سقف الدين بمقدار ${WesternFormatters.formatIls(state.creditCeilingExcessIls)}",
-                                "Exceeds credit limit by ${WesternFormatters.formatIls(state.creditCeilingExcessIls)}"
+                                "يتجاوز سقف الدين بمقدار ${WesternFormatters.formatCurrency(state.creditCeilingExcessExact, currency)}",
+                                "Exceeds credit limit by ${WesternFormatters.formatCurrency(state.creditCeilingExcessExact, currency)}"
                             )
                             selectedCustomer.creditLimitExact == null -> lang.tr(
-                                "سقف الائتمان غير محدد (إرشادي) • قيد على الحساب: ${WesternFormatters.formatIls(state.basketNetTotalIls)}",
-                                "Credit limit unset (advisory) • Debit: ${WesternFormatters.formatIls(state.basketNetTotalIls)}"
+                                "سقف الائتمان غير محدد (إرشادي) • قيد على الحساب: ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}",
+                                "Credit limit unset (advisory) • Debit: ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}"
                             )
                             else -> lang.tr(
-                                "قيد على الحساب: ${WesternFormatters.formatIls(state.basketNetTotalIls)} • الصندوق: 0.00 ₪",
-                                "Account Debit: ${WesternFormatters.formatIls(state.basketNetTotalIls)} • Cash: 0.00 ₪"
+                                "قيد على الحساب: ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)} • الصندوق: 0.00 ₪",
+                                "Account Debit: ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)} • Cash: 0.00 ₪"
                             )
                         },
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
@@ -1485,7 +1495,7 @@ fun CashPaymentScreen(
                     // Primary confirmation button (ST-11)
                     Button(
                         onClick = onCompleteCreditSale,
-                        enabled = selectedCustomer != null && !isDetailLoading && !overLimit && !isConfiguredLimitUnknownBalance && state.basket.isNotEmpty() && !state.isSubmittingSale && !state.isPaymentUnverifiedHold,
+                        enabled = selectedCustomer != null && !isDetailLoading && !overLimit && !isConfiguredLimitUnknownBalance && state.basket.isNotEmpty() && !state.hasUnresolvedSaleTax && !state.isSubmittingSale && !state.isPaymentUnverifiedHold,
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (selectedCustomer != null && !isDetailLoading && !overLimit && !isConfiguredLimitUnknownBalance) financial.debit else MaterialTheme.colorScheme.surfaceVariant,
@@ -1521,8 +1531,8 @@ fun CashPaymentScreen(
                                     "Credit Blocked: Over Limit"
                                 )
                                 else -> lang.tr(
-                                    "تأكيد البيع على الحساب (${WesternFormatters.formatIls(state.basketNetTotalIls)})",
-                                    "Confirm Credit Sale (${WesternFormatters.formatIls(state.basketNetTotalIls)})"
+                                    "تأكيد البيع على الحساب (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)})",
+                                    "Confirm Credit Sale (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)})"
                                 )
                             },
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)

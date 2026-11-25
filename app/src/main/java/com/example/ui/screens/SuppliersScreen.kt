@@ -847,7 +847,7 @@ private fun SupplierDirectoryRow(
 fun SupplierDetailScreen(
     state: TraderUiState,
     onBack: () -> Unit,
-    onPaySupplier: (Supplier, Double) -> Boolean,
+    onPaySupplier: ((Supplier, Double) -> Boolean)? = null,
     onOpenReceivePurchaseDialog: () -> Unit,
     onDismissFeedback: (() -> Unit)? = null,
     onSaveSupplier: ((supplierId: String?, name: String, company: String, phone: String) -> Unit)? = null,
@@ -1392,7 +1392,7 @@ fun SupplierDetailScreen(
                         }
                         res
                     } else {
-                        val ok = onPaySupplier(sup, amount)
+                        val ok = onPaySupplier?.invoke(sup, amount) == true
                         if (ok) {
                             isPayDialogOpen = false
                             Result.success(SupplierPayment("sp_legacy", sup.id, "today", amount, ""))
@@ -1427,8 +1427,8 @@ fun SupplierDetailScreen(
                 targetsHasMore = state.supplierSettlementTargetsHasMore,
                 onLoadMoreTargets = { onLoadMoreSupplierTargets?.invoke(supplier.id) },
                 onRetryTargets = { onLoadSupplierTargets?.invoke(supplier.id, true) },
-                currency = state.supplierSettlementTargets.firstOrNull()?.currency ?: "ILS",
-                minorUnits = state.supplierSettlementTargets.firstOrNull()?.currencyMinorUnits ?: 2
+                currency = state.businessInfo.defaultCurrency,
+                minorUnits = state.businessInfo.defaultCurrencyMinorUnits
             )
         }
     }

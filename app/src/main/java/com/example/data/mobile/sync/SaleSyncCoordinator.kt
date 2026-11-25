@@ -7,6 +7,7 @@ import com.example.data.mobile.contract.Rfc3339Validator
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.contract.v2.OnlineSaleIntentProfile
+import com.example.data.mobile.outbox.OutboxRecord
 import com.example.data.mobile.outbox.OutboxRepository
 import com.example.data.mobile.outbox.OutboxStatus
 import com.example.data.mobile.outbox.QueueLockedException
@@ -77,12 +78,19 @@ object SyncDiagnostics {
  */
 interface SaleSyncCoordinator {
 
+    fun reconcileOnlineSaleStatus(
+        record: OutboxRecord,
+        intent: OnlineSaleIntentProfile,
+        requireActiveScope: () -> Unit
+    ): SyncStatusOutcome
+
     fun synchronizeScope(
         companyId: ServerUlid,
         actorId: ServerUlid,
         deviceId: ClientUuid,
         batchSize: Int = 10,
-        leaseDurationMillis: Long = 30_000L
+        leaseDurationMillis: Long = 30_000L,
+        onlyEventId: ClientUuid? = null
     ): SyncBatchResult
 }
 
@@ -92,12 +100,46 @@ class SaleSyncCoordinatorImpl(
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) : SaleSyncCoordinator {
 
+    override fun reconcileOnlineSaleStatus(
+        record: OutboxRecord,
+        intent: OnlineSaleIntentProfile,
+        requireActiveScope: () -> Unit
+    ): SyncStatusOutcome {
+        val digest = intent.computePayloadDigest()
+        require(record.companyId == intent.companyId.value && record.actorId == intent.actorId.value &&
+            record.deviceId == intent.deviceId.value && record.clientEventId == intent.clientEventId.value &&
+            record.payloadDigest == digest.value && PayloadDigest.fromBytes(record.payloadBytes) == digest)
+        requireActiveScope()
+        val outcome = gateway.checkStatus(
+            intent.companyId, intent.actorId, intent.deviceId, intent.clientEventId, digest, intent
+        )
+        requireActiveScope()
+        when (outcome) {
+            is SyncStatusOutcome.Posted -> {
+                val ack = outcome.ack
+                if (!isValidAck(ack, intent.companyId, intent.clientEventId, digest, intent) ||
+                    record.status == OutboxStatus.CONFLICT || record.status == OutboxStatus.AUTH_BLOCKED ||
+                    !outboxRepository.reconcileDeliveryConfirmation(
+                        intent.companyId, intent.actorId, intent.deviceId, intent.clientEventId,
+                        digest, ack.invoiceUlid, ack.paymentUlid, ack.serverAcknowledgedAt
+                    )
+                ) return SyncStatusOutcome.TransientUnknown(SyncDiagnostics.INVALID_SERVER_ACK)
+            }
+            is SyncStatusOutcome.AuthDenied -> outboxRepository.lockQueueOnAuthDenied(
+                intent.companyId, intent.actorId, intent.deviceId, SyncDiagnostics.AUTH_DENIED
+            )
+            else -> Unit
+        }
+        return outcome
+    }
+
     override fun synchronizeScope(
         companyId: ServerUlid,
         actorId: ServerUlid,
         deviceId: ClientUuid,
         batchSize: Int,
-        leaseDurationMillis: Long
+        leaseDurationMillis: Long,
+        onlyEventId: ClientUuid?
     ): SyncBatchResult {
         require(batchSize in 1..OutboxRepository.MAX_BATCH_SIZE) {
             "batchSize must be between 1 and ${OutboxRepository.MAX_BATCH_SIZE} (was $batchSize)"
@@ -123,7 +165,8 @@ class SaleSyncCoordinatorImpl(
                 actorId = actorId,
                 deviceId = deviceId,
                 batchSize = batchSize,
-                leaseDurationMillis = leaseDurationMillis
+                leaseDurationMillis = leaseDurationMillis,
+                onlyEventId = onlyEventId
             )
         } catch (e: QueueLockedException) {
             return SyncBatchResult(

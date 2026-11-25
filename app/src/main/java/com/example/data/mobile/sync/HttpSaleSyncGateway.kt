@@ -47,6 +47,11 @@ class HttpSaleSyncGateway(
         payloadDigest: PayloadDigest,
         expectedIntent: OnlineSaleIntentProfile?
     ): SyncStatusOutcome {
+        if (expectedIntent != null) {
+            require(expectedIntent.companyId == companyId && expectedIntent.actorId == actorId &&
+                expectedIntent.deviceId == deviceId && expectedIntent.clientEventId == clientEventId &&
+                expectedIntent.computePayloadDigest() == payloadDigest)
+        }
         val path = "/api/mobile/v2/companies/${companyId.value}/offline-events/${clientEventId.value}/status"
         val token = tokenProvider()
         val headers = mapOf(
@@ -71,6 +76,10 @@ class HttpSaleSyncGateway(
                     require(root.require("client_event_id").asString() == clientEventId.value) {
                         "Status response client_event_id mismatch"
                     }
+                    // The current server binds actor and device through the bearer token.
+                    // If returned by the server, these fields must agree with that scope.
+                    require(root["actor_id"]?.asString()?.let { it == actorId.value } != false)
+                    require(root["device_id"]?.asString()?.let { it == deviceId.value } != false)
                     when (root.require("status").asString()) {
                         "posted" -> {
                             val rawDigestElem = root.require("payload_digest")
@@ -100,14 +109,14 @@ class HttpSaleSyncGateway(
                                 rawInvoiceNumberElem.asString().takeIf { it.isNotBlank() }
                             } else null
 
-                            val rawPaymentElem = invoice["payment_id"]
-                            val isPaymentNull = rawPaymentElem == null || rawPaymentElem is StrictJsonNull
+                            val rawPaymentElem = invoice.require("payment_id")
+                            val isPaymentNull = rawPaymentElem is StrictJsonNull
 
                             val paymentUlid: ServerUlid?
                             if (isPaymentNull) {
                                 paymentUlid = null
                             } else {
-                                val rawPaymentId = rawPaymentElem!!.asString()
+                                val rawPaymentId = rawPaymentElem.asString()
                                 require(ServerUlid.isValid(rawPaymentId)) {
                                     "Invalid payment ULID format: $rawPaymentId"
                                 }

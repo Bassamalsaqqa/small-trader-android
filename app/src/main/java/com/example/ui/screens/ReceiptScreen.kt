@@ -590,7 +590,8 @@ fun ReceiptScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text(
-                                            text = lang.tr("المقبوض نقداً", "Cash Tendered"),
+                                            text = if (receipt.hasLocalTenderDetails) lang.tr("المقبوض نقداً", "Cash Tendered")
+                                            else lang.tr("المدفوع نقداً", "Cash Paid"),
                                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -1556,7 +1557,8 @@ private fun InvoiceReceiptDocumentCard(
                             valueColor = TraderTheme.financial.income
                         )
                         DocumentMetaRow(
-                            label = lang.tr("المبلغ المقبوض نقداً:", "Cash Received:"),
+                            label = if (receipt.hasLocalTenderDetails) lang.tr("المبلغ المقبوض نقداً:", "Cash Received:")
+                                else lang.tr("المدفوع نقداً:", "Cash Paid:"),
                             value = displayPaid,
                             useMono = false
                         )
@@ -1674,8 +1676,12 @@ private fun buildPlainTextDocument(
     }
     sb.appendLine("${lang.tr("الصافي المطلوب", "Net Total")}: ${WesternFormatters.formatIls(receipt.netTotalIls)}")
     if (receipt.isPaidInFull) {
-        sb.appendLine("${lang.tr("المقبوض نقداً", "Cash Received")}: ${WesternFormatters.formatIls(receipt.cashReceivedIls)}")
-        sb.appendLine("${lang.tr("الباقي للزبون", "Change Returned")}: ${WesternFormatters.formatIls(receipt.changeReturnedIls)}")
+        val cashLabel = if (receipt.hasLocalTenderDetails) lang.tr("المقبوض نقداً", "Cash Received")
+            else lang.tr("المدفوع نقداً", "Cash Paid")
+        sb.appendLine("$cashLabel: ${WesternFormatters.formatIls(receipt.cashReceivedExact)}")
+        if (receipt.hasLocalTenderDetails) {
+            sb.appendLine("${lang.tr("الباقي للزبون", "Change Returned")}: ${WesternFormatters.formatIls(receipt.changeReturnedExact)}")
+        }
     } else {
         if (receipt.cashReceivedIls > 0.005) {
             sb.appendLine("${lang.tr("المدفوع نقداً", "Cash Paid")}: ${WesternFormatters.formatIls(receipt.cashReceivedIls)}")

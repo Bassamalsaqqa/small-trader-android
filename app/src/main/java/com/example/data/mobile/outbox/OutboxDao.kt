@@ -241,6 +241,31 @@ abstract class OutboxDao {
         status: String
     ): List<OutboxEventEntity>
 
+    @Query("""
+        SELECT state.client_event_id
+        FROM outbox_delivery_states AS state
+        JOIN outbox_events AS event USING (company_id, client_event_id)
+        WHERE state.company_id = :companyId AND state.actor_id = :actorId AND state.device_id = :deviceId
+          AND event.event_version = 2 AND event.device_lease_id IS NULL
+          AND state.status != 'confirmed'
+        ORDER BY state.created_at, state.client_event_id
+        LIMIT 1
+    """)
+    abstract fun oldestHeldOnlineSaleId(companyId: String, actorId: String, deviceId: String): String?
+
+    @Query("""
+        SELECT state.client_event_id, event.payload_digest, state.invoice_ulid, state.payment_ulid,
+               state.server_acknowledged_at
+        FROM outbox_delivery_states AS state
+        JOIN outbox_events AS event USING (company_id, client_event_id)
+        WHERE state.company_id = :companyId AND state.actor_id = :actorId AND state.device_id = :deviceId
+          AND event.actor_id = :actorId AND event.device_id = :deviceId
+          AND state.status = 'confirmed' AND state.invoice_ulid IN (:invoiceIds)
+    """)
+    abstract fun confirmedInvoiceMappings(
+        companyId: String, actorId: String, deviceId: String, invoiceIds: List<String>
+    ): List<ConfirmedSaleMapping>
+
     @Transaction
     open fun getRecord(
         companyId: String,
@@ -251,6 +276,7 @@ abstract class OutboxDao {
         val event = getEvent(companyId, clientEventId) ?: return null
         if (event.actorId != actorId || event.deviceId != deviceId) return null
         val state = getDeliveryState(companyId, clientEventId) ?: return null
+        check(state.actorId == actorId && state.deviceId == deviceId) { "Outbox delivery scope does not match event" }
         return OutboxRecord(event, state)
     }
 
@@ -286,6 +312,7 @@ abstract class OutboxDao {
         WHERE company_id = :companyId
           AND actor_id = :actorId
           AND device_id = :deviceId
+          AND (:onlyEventId IS NULL OR client_event_id = :onlyEventId)
           AND (
             status = 'pending'
             OR (status IN ('in_flight', 'unknown_ack') AND (claim_expires_at IS NULL OR claim_expires_at < :nowMillis))
@@ -298,7 +325,8 @@ abstract class OutboxDao {
         actorId: String,
         deviceId: String,
         nowMillis: Long,
-        limit: Int
+        limit: Int,
+        onlyEventId: String? = null
     ): List<String>
 
     @Query("""
@@ -460,9 +488,10 @@ abstract class OutboxDao {
           AND client_event_id = :clientEventId
           AND actor_id = :actorId
           AND device_id = :deviceId
-          AND status IN ('in_flight', 'unknown_ack')
+          AND (status IN ('in_flight', 'unknown_ack') OR (:allowPending AND status = 'pending'))
     """)
     abstract fun reconcileConfirmation(
+        allowPending: Boolean,
         clientEventId: String,
         companyId: String,
         actorId: String,

@@ -99,6 +99,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.example.data.mobile.outbox.OutboxStatus
+import com.example.data.mobile.outbox.OutboxRecord
+import com.example.data.mobile.contract.PayloadDigest
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.nio.charset.StandardCharsets
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -158,6 +162,11 @@ class ProductionTraderRepository(
 
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
     private val retainedGeneration = authScopeProvider?.invoke()?.generation
+
+    init {
+        require(currencyMinorUnits in 0..6) { "Missing or invalid business currency precision" }
+        require(ContractConstants.CURRENCY_CODE_REGEX.matches(baseCurrency)) { "Missing or invalid business currency" }
+    }
 
     private fun requireActiveScope(): CurrentAuthScope {
         val current = authScopeProvider?.invoke() ?: throw SecurityException("Authenticated scope is not active")
@@ -447,7 +456,10 @@ class ProductionTraderRepository(
         permissions = permissions
     )
 
-    private val businessInfo = initialBusinessInfo ?: BusinessInfo(
+    private val businessInfo = initialBusinessInfo?.copy(
+        defaultCurrency = baseCurrency,
+        defaultCurrencyMinorUnits = currencyMinorUnits
+    ) ?: BusinessInfo(
         nameAr = companyName,
         nameEn = companyName,
         cityAr = "",
@@ -913,6 +925,9 @@ class ProductionTraderRepository(
         val conversionExact = defaultPackaging?.conversionToBase?.value ?: item.defaultUnit.conversionToBase.value
         val productUnitUlid = defaultPackaging?.productUnitId?.value ?: item.defaultUnit.productUnitId.value
 
+        val tax = item.taxRateId?.let { id ->
+            bootstrapTaxes.singleOrNull { it.id == id && item.taxRate?.value?.compareTo(it.rate.value) == 0 }
+        }
         return Product(
             id = item.id.value,
             nameAr = item.name,
@@ -923,6 +938,7 @@ class ProductionTraderRepository(
             costExact = null,
             unitAr = item.baseUnit.name,
             unitEn = item.baseUnit.code,
+            stockCount = stockCountExact.toInt(),
             stockCountExact = stockCountExact,
             minStockThresholdExact = BigDecimal.valueOf(8),
             accentHex = 0xFF2E7D32,
@@ -933,8 +949,10 @@ class ProductionTraderRepository(
             isWeightedDisplayOnly = false,
             productUnitId = productUnitUlid,
             conversionToBaseExact = conversionExact,
-            taxRateId = item.taxRateId?.value,
-            taxRateExact = item.taxRate?.value,
+            taxRateId = tax?.id?.value,
+            taxRateExact = tax?.rate?.value,
+            isTaxInclusive = tax?.calculation == "inclusive",
+            saleCurrencyMinorUnits = currencyMinorUnits,
             sku = item.sku
         )
     }
@@ -1274,7 +1292,145 @@ class ProductionTraderRepository(
 
     override fun getInvoices(): List<InvoiceRecord> = _invoicesFlow.value
 
+    val supportsSaleRecovery: Boolean get() = outboxRepository != null
+    private val saleMutex = Mutex()
+
+    private fun heldOnlineSale(): OutboxRecord? {
+        requireActiveScope()
+        return checkNotNull(outboxRepository).oldestHeldOnlineSale(companyId, actorId, deviceId)
+    }
+
+    private fun retainedSaleIntent(record: OutboxRecord): OnlineSaleIntentProfile {
+        val bytes = record.payloadBytes
+        val intent = OnlineSaleIntentProfile.fromStrictJson(
+            StrictJsonParser.parseObject(String(bytes, StandardCharsets.UTF_8))
+        )
+        require(record.eventVersion == 2 && record.event.deviceLeaseId == null &&
+            intent.companyId == companyId && intent.actorId == actorId && intent.deviceId == deviceId &&
+            intent.clientEventId.value == record.clientEventId &&
+            PayloadDigest.fromBytes(bytes).value == record.payloadDigest &&
+            intent.computePayloadDigest().value == record.payloadDigest
+        ) { "Stored sale identity could not be verified" }
+        return intent
+    }
+
+    private fun recoverInvoice(record: OutboxRecord, intent: OnlineSaleIntentProfile): InvoiceRecord {
+        val catalog = _productsFlow.value.associateBy { it.id }
+        val items = intent.lines.map { line ->
+            val product = catalog[line.productId.value] ?: Product(
+                id = line.productId.value,
+                nameAr = line.productId.value,
+                nameEn = line.productId.value,
+                category = ProductCategory.ALL,
+                barcode = "",
+                priceExact = line.unitPrice.value,
+                unitAr = "",
+                unitEn = "",
+                stockCount = 0,
+                accentHex = 0xFF2E7D32
+            )
+            BasketItem(
+                product = product.copy(
+                    productUnitId = line.productUnitId.value,
+                    conversionToBaseExact = line.conversionToBase.value,
+                    saleCurrencyMinorUnits = intent.currencyMinorUnits
+                ),
+                quantity = line.quantity.value,
+                unitPriceExact = line.unitPrice.value,
+                taxRateId = line.taxRateId?.value,
+                taxRateExact = line.taxRate.value,
+                isTaxInclusive = line.taxInclusive
+            )
+        }
+        val total = items.fold(BigDecimal.ZERO) { sum, item -> sum + item.lineTotalExact }
+        val settled = intent.payment.amount.value
+        return InvoiceRecord(
+            id = record.clientEventId,
+            invoiceNumber = 0,
+            timestamp = record.event.capturedAt,
+            items = items,
+            subtotalExact = total,
+            discountExact = BigDecimal.ZERO,
+            netTotalExact = total,
+            cashReceivedExact = settled,
+            changeReturnedExact = BigDecimal.ZERO,
+            customerId = intent.customerId.value.takeUnless { it == walkInCustomerId.value },
+            customerNote = "",
+            cashierNameAr = actorName,
+            cashierNameEn = actorName,
+            isPaidInFull = intent.payment.settlementMode == "full",
+            remainingDebitExact = total - settled,
+            hasLocalTenderDetails = false
+        ).withOutboxState(record)
+    }
+
+    private fun InvoiceRecord.withOutboxState(record: OutboxRecord): InvoiceRecord {
+        val delivery = record.deliveryState
+        return copy(
+            id = delivery.invoiceUlid ?: record.clientEventId,
+            clientEventId = record.clientEventId,
+            salePayloadDigest = record.payloadDigest,
+            serverInvoiceUlid = delivery.invoiceUlid,
+            serverPaymentUlid = delivery.paymentUlid,
+            serverPostedAt = delivery.serverAcknowledgedAt,
+            outboxStatus = if (record.status == OutboxStatus.CONFIRMED) "CONFIRMED" else record.status.wireValue
+        )
+    }
+
+    private fun publishSale(invoice: InvoiceRecord): InvoiceRecord {
+        requireActiveScope()
+        _invoicesFlow.update { invoices ->
+            listOf(invoice) + invoices.filterNot {
+                it.clientEventId == invoice.clientEventId || it.id == invoice.id
+            }
+        }
+        return invoice
+    }
+
+    private fun heldInvoice(record: OutboxRecord): InvoiceRecord =
+        _invoicesFlow.value.firstOrNull {
+            it.clientEventId == record.clientEventId && it.salePayloadDigest == record.payloadDigest
+        } ?: recoverInvoice(record, retainedSaleIntent(record))
+
+    suspend fun restoreHeldSale(): Result<InvoiceRecord?> = withContext(ioDispatcher) {
+        saleMutex.withLock {
+            runCatching {
+                heldOnlineSale()?.let { publishSale(heldInvoice(it).withOutboxState(it)) }
+            }
+        }
+    }
+
+    suspend fun checkHeldSaleStatus(expectedEventId: String): Result<InvoiceRecord> = withContext(ioDispatcher) {
+        saleMutex.withLock {
+            runCatching {
+                requireActiveScope()
+                val outbox = checkNotNull(outboxRepository)
+                val eventId = ClientUuid.parse(expectedEventId)
+                val record = checkNotNull(outbox.getRecord(companyId, actorId, deviceId, eventId))
+                val intent = retainedSaleIntent(record)
+                val invoice = heldInvoice(record)
+                if (outbox.isQueueLocked(companyId, actorId, deviceId)) return@runCatching invoice.withOutboxState(record)
+                val coordinator = syncCoordinator ?: SaleSyncCoordinatorImpl(outbox, checkNotNull(saleSyncGateway))
+                val outcome = coordinator.reconcileOnlineSaleStatus(record, intent) { requireActiveScope() }
+                val current = checkNotNull(outbox.getRecord(companyId, actorId, deviceId, eventId))
+                val receipt = invoice.withOutboxState(current)
+                if (outcome is SyncStatusOutcome.Posted) publishSale(receipt.copy(
+                    serverInvoiceNumber = outcome.ack.invoiceNumber,
+                    serverPaymentReceiptNumber = outcome.ack.paymentReceiptNumber
+                )) else {
+                    // A check can clear a hold only when its own authenticated lookup verifies the result.
+                    require(current.status != OutboxStatus.CONFIRMED) { "Could not verify the held sale" }
+                    receipt
+                }
+            }
+        }
+    }
+
     override suspend fun recordSale(invoice: InvoiceRecord): Result<InvoiceRecord> = withContext(ioDispatcher) {
+        saleMutex.withLock { recordSaleLocked(invoice) }
+    }
+
+    private suspend fun recordSaleLocked(invoice: InvoiceRecord): Result<InvoiceRecord> = withContext(ioDispatcher) {
         try { requireActiveScope() } catch (denied: SecurityException) { return@withContext Result.failure(denied) }
 
         // 1. Line item validation
@@ -1349,72 +1505,50 @@ class ProductionTraderRepository(
             }
             val productUnitUlid = ServerUlid.parse(packagingUnitStr)
 
-            // Exact selected packaging unit conversion from server catalog
-            val conversionToBaseStr = basketItem.product.conversionToBaseExact.setScale(6, RoundingMode.HALF_UP).toPlainString()
-
-            // Exact quantity preserving up to 6 decimals
-            val qtyStr = basketItem.quantity.setScale(6, RoundingMode.HALF_UP).toPlainString()
-
-            // Exact unit price from basket item override (not un-overridden catalog price)
-            val priceStr = basketItem.unitPriceExact.setScale(6, RoundingMode.HALF_UP).toPlainString()
-
-            // Explicit coherent chosen tax basis/model: honor line-level taxRateId, preserve null noTax semantics
-            val chosenTaxRateId = basketItem.taxRateId
-            val taxRateId: ServerUlid?
-            val taxRateStr: String
-            val taxInclusive: Boolean
-
-            if (chosenTaxRateId == null) {
-                // ExplicitNoTax constraint: if taxRateId is null, taxRate must be "0.000000" and taxInclusive false
-                if (basketItem.taxRateExact != null && basketItem.taxRateExact.compareTo(BigDecimal.ZERO) != 0) {
-                    return@withContext Result.failure(
-                        IllegalArgumentException("Line '${basketItem.product.nameAr}': Inconsistent tax model - taxRateId is null (no tax) but taxRateExact is ${basketItem.taxRateExact}")
-                    )
-                }
-                if (basketItem.isTaxInclusive) {
-                    return@withContext Result.failure(
-                        IllegalArgumentException("Line '${basketItem.product.nameAr}': Inconsistent tax model - taxRateId is null (no tax) but isTaxInclusive is true")
-                    )
-                }
-                taxRateId = null
-                taxRateStr = "0.000000"
-                taxInclusive = false
-            } else {
-                if (!ServerUlid.isValid(chosenTaxRateId)) {
-                    return@withContext Result.failure(
-                        IllegalArgumentException("Line '${basketItem.product.nameAr}': Invalid tax_rate_id ULID '$chosenTaxRateId'")
-                    )
-                }
-                taxRateId = ServerUlid.parse(chosenTaxRateId)
-                val rate = basketItem.taxRateExact
-                    ?: return@withContext Result.failure(
-                        IllegalArgumentException("Line '${basketItem.product.nameAr}': taxRateExact is required when taxRateId is non-null")
-                    )
-                if (rate < BigDecimal.ZERO || rate > BigDecimal("100")) {
-                    return@withContext Result.failure(
-                        IllegalArgumentException("Line '${basketItem.product.nameAr}': taxRateExact out of bounds [0..100]: $rate")
-                    )
-                }
-                taxRateStr = rate.setScale(6, RoundingMode.HALF_UP).toPlainString()
-                taxInclusive = basketItem.isTaxInclusive
+            if (!basketItem.hasResolvedTax) {
+                return@withContext Result.failure(IllegalArgumentException(
+                    "اختر ضريبة كل صنف | Select a tax treatment for each item."
+                ))
             }
-
+            val rate = requireNotNull(basketItem.taxRateExact)
+            val taxRateId = basketItem.taxRateId?.let { id ->
+                val tax = bootstrapTaxes.singleOrNull { it.id.value == id }
+                if (tax == null || rate.compareTo(tax.rate.value) != 0 ||
+                    basketItem.isTaxInclusive != (tax.calculation == "inclusive")
+                ) return@withContext Result.failure(IllegalArgumentException("Selected tax does not match company tax settings"))
+                tax.id
+            }
             lines.add(
                 OnlineSaleIntentLine(
                     productId = prodUlid,
                     productUnitId = productUnitUlid,
-                    conversionToBase = PositiveDecimalQuantity.fromPositiveString(conversionToBaseStr),
-                    quantity = PositiveDecimalQuantity.fromPositiveString(qtyStr),
-                    unitPrice = MoneyAmount.fromNonnegativeString(priceStr),
+                    conversionToBase = PositiveDecimalQuantity(basketItem.product.conversionToBaseExact.setScale(6, RoundingMode.UNNECESSARY)),
+                    quantity = PositiveDecimalQuantity(basketItem.quantity.setScale(6, RoundingMode.UNNECESSARY)),
+                    unitPrice = MoneyAmount(basketItem.unitPriceExact.setScale(6, RoundingMode.UNNECESSARY)),
                     taxRateId = taxRateId,
-                    taxRate = TaxPercentage.fromString(taxRateStr),
-                    taxInclusive = taxInclusive
+                    taxRate = TaxPercentage(rate.setScale(6, RoundingMode.UNNECESSARY)),
+                    taxInclusive = basketItem.isTaxInclusive
                 )
             )
         }
 
+        val expectedTotal = invoice.items.fold(BigDecimal.ZERO) { sum, item ->
+            sum + item.calculateLine(currencyMinorUnits).lineTotal.value
+        }
+        val settled = tenderedExact.min(expectedTotal)
+        if (netTotalExact.compareTo(expectedTotal) != 0 || invoice.subtotalExact.compareTo(expectedTotal) != 0 ||
+            tenderedExact.signum() < 0 || changeReturnedExact.signum() < 0 ||
+            remainingDebitExact.compareTo(expectedTotal - settled) != 0 ||
+            (tenderedExact > BigDecimal.ZERO &&
+                (approvedCashAccount.currency != baseCurrency ||
+                    listOf(tenderedExact, settled, changeReturnedExact).any {
+                        !PaymentDecimalConsistency.fitsCashEntry(it, currencyMinorUnits)
+                    })) ||
+            (!invoice.isPaidInFull && (tenderedExact >= expectedTotal || changeReturnedExact.signum() != 0))
+        ) return@withContext Result.failure(IllegalArgumentException("Sale amounts do not match the calculated total or cash precision"))
+
         val settlementMode = if (invoice.isPaidInFull) "full" else if (tenderedExact > BigDecimal.ZERO) "partial" else "unpaid"
-        val paymentAmountExact = tenderedExact.min(netTotalExact).setScale(6, RoundingMode.HALF_UP).toPlainString()
+        val paymentAmountExact = settled.setScale(6, RoundingMode.UNNECESSARY).toPlainString()
         val payment = OnlineSaleIntentPayment(
             settlementMode = settlementMode,
             paymentMethod = if (settlementMode != "unpaid") "cash" else null,
@@ -1438,11 +1572,22 @@ class ProductionTraderRepository(
         // 4. Canonical JCS serialization & digest calculation BEFORE dispatch
         val canonicalBytes = CanonicalJsonSerializer.serialize(profile)
         val canonicalByteArray = canonicalBytes.toByteArray(StandardCharsets.UTF_8)
-        val digest = CanonicalJsonSerializer.computeDigest(profile)
-
-        // 5. Pre-network durable Room outbox capture FIRST without fabricated device lease
+        val digest = profile.computePayloadDigest()
         val outbox = outboxRepository ?: return@withContext Result.failure(IllegalStateException("OutboxRepository not configured"))
         val gateway = saleSyncGateway ?: return@withContext Result.failure(IllegalStateException("SaleSyncGateway not configured"))
+
+        val held = heldOnlineSale()
+        if (held != null && held.clientEventId != clientEventId.value) {
+            return@withContext Result.failure(IllegalStateException("A sale is pending verification"))
+        }
+        // Re-entering this method is never permission to dispatch an existing held sale.
+        val existing = outbox.getRecord(companyId, actorId, deviceId, clientEventId)
+        if (existing != null) {
+            if (existing.payloadDigest != digest.value) {
+                return@withContext Result.failure(IllegalStateException("Sale payload differs from the retained event"))
+            }
+            return@withContext Result.success(publishSale(invoice.withOutboxState(existing)))
+        }
 
         val captureResult = outbox.captureOnlineSaleIntent(
             companyId = companyId,
@@ -1450,67 +1595,43 @@ class ProductionTraderRepository(
             deviceId = deviceId,
             currencyMinorUnits = currencyMinorUnits,
             profile = profile,
-            rawCanonicalProfileUtf8 = canonicalByteArray
+            rawCanonicalProfileUtf8 = canonicalByteArray,
+            requireNoOtherHeldSale = true
         )
-
         when (captureResult) {
-            is CaptureResult.Conflict -> {
+            is CaptureResult.Conflict ->
                 return@withContext Result.failure(IllegalStateException("Local outbox conflict for event ${clientEventId.value}"))
-            }
-            is CaptureResult.ScopeRejected -> {
+            is CaptureResult.ScopeRejected ->
                 return@withContext Result.failure(SecurityException("Outbox scope rejected: ${captureResult.message}"))
+            is CaptureResult.Created -> {
+                requireActiveScope()
+                val coordinator = syncCoordinator ?: SaleSyncCoordinatorImpl(outbox, gateway)
+                coordinator.synchronizeScope(companyId, actorId, deviceId, batchSize = 1, onlyEventId = clientEventId)
             }
-            else -> { /* Created or Duplicate replay */ }
+            is CaptureResult.Duplicate -> Unit
         }
 
-        // 6. Revalidate retained company, actor, device under current auth scope before any POST
-        try { requireActiveScope() } catch (denied: SecurityException) { return@withContext Result.failure(denied) }
+        val record = checkNotNull(outbox.getRecord(companyId, actorId, deviceId, clientEventId))
+        Result.success(publishSale(invoice.withOutboxState(record)))
+    }
 
-        // 7. Route through SaleSyncCoordinator claims/unknownack/reconcile protocol
-        val coordinator = syncCoordinator ?: SaleSyncCoordinatorImpl(outbox, gateway)
-        val syncResult = coordinator.synchronizeScope(
-            companyId = companyId,
-            actorId = actorId,
-            deviceId = deviceId,
-            batchSize = 10
-        )
-
-        if (syncResult.authBlocked) {
-            return@withContext Result.failure(SecurityException("Sale queue locked: authentication denied (401 UNAUTHENTICATED)."))
-        }
-        if (syncResult.membershipDenied) {
-            return@withContext Result.failure(SecurityException("Sale rejected: forbidden tenant permission (403 FORBIDDEN)."))
-        }
-
-        // 8. Inspect authoritative persisted record from outbox
-        val record = outbox.getRecord(companyId, actorId, deviceId, clientEventId)
-        if (record != null && record.deliveryState.status == OutboxStatus.CONFIRMED.wireValue &&
-            record.deliveryState.invoiceUlid != null && (record.deliveryState.paymentUlid != null || profile.payment.settlementMode == "unpaid")) {
-            val confirmed = invoice.copy(
-                clientEventId = clientEventId.value,
-                serverInvoiceUlid = record.deliveryState.invoiceUlid,
-                serverInvoiceNumber = null,
-                serverPaymentUlid = record.deliveryState.paymentUlid,
-                serverPaymentReceiptNumber = null,
-                serverPostedAt = record.deliveryState.serverAcknowledgedAt ?: WesternFormatters.currentTimestamp(),
-                outboxStatus = "CONFIRMED"
+    private fun mergeServerInvoices(serverList: List<SalesInvoiceListItem>, locals: List<InvoiceRecord>): List<InvoiceRecord> {
+        requireActiveScope()
+        val mappings = outboxRepository?.confirmedInvoiceMappings(
+            companyId, actorId, deviceId, serverList.map { it.id.value }
+        ).orEmpty().associateBy { it.invoiceUlid }
+        val cached = locals.filter { it.serverInvoiceUlid != null }.associateBy { it.serverInvoiceUlid }
+        requireActiveScope()
+        return serverList.map { item ->
+            val mapping = mappings[item.id.value]
+            val local = cached[item.id.value]?.takeIf { it.clientEventId == mapping?.clientEventId }
+            val serverInvoice = MerchantReadAdapter.toDomainInvoiceRecord(item, local)
+            if (mapping == null) serverInvoice else serverInvoice.copy(
+                clientEventId = mapping.clientEventId,
+                serverPaymentUlid = mapping.paymentUlid,
+                serverPostedAt = mapping.serverAcknowledgedAt,
+                salePayloadDigest = mapping.payloadDigest
             )
-            _invoicesFlow.update { listOf(confirmed) + it }
-            return@withContext Result.success(confirmed)
-        } else if (record != null && record.deliveryState.status == OutboxStatus.CONFLICT.wireValue) {
-            return@withContext Result.failure(IllegalStateException("Sale resulted in server/local conflict (409 CONFLICT)."))
-        } else {
-            // Durable pending record in Room outbox (timeout or pending drain)
-            val pending = invoice.copy(
-                clientEventId = clientEventId.value,
-                serverInvoiceUlid = null,
-                serverInvoiceNumber = null,
-                serverPaymentUlid = null,
-                serverPaymentReceiptNumber = null,
-                outboxStatus = "PENDING_SYNC"
-            )
-            _invoicesFlow.update { listOf(pending) + it }
-            return@withContext Result.success(pending)
         }
     }
 
@@ -1539,27 +1660,13 @@ class ProductionTraderRepository(
                     _invoicesHasMoreFlow.value = res.value.hasMore
                     _invoicesHasMoreGapFlow.value = res.value.hasMore
 
-                    val currentLocal = _invoicesFlow.value
-
-                    // Identify local outbox invoices that must not be dropped:
-                    // Any pending/unreconciled local record, including unknown ACK events
-                    val pendingOutbox = currentLocal.filter { local ->
-                        !local.clientEventId.isNullOrBlank() && local.outboxStatus != "CONFIRMED"
+                    saleMutex.withLock {
+                        val currentLocal = _invoicesFlow.value
+                        val pending = currentLocal.filter { it.clientEventId != null && it.outboxStatus != "CONFIRMED" }
+                        val mergedList = pending + mergeServerInvoices(serverList, currentLocal)
+                        _invoicesFlow.value = mergedList
+                        Result.success(mergedList)
                     }
-
-                    // Map server list, merging with matching local outbox invoice by real ULID / ID / clientEventId
-                    val serverMerged = serverList.map { serverItem ->
-                        val localMatch = currentLocal.firstOrNull { local ->
-                            local.serverInvoiceUlid == serverItem.id.value ||
-                            local.id == serverItem.id.value ||
-                            (!local.clientEventId.isNullOrBlank() && local.clientEventId == serverItem.id.value)
-                        }
-                        MerchantReadAdapter.toDomainInvoiceRecord(serverItem, localMatch)
-                    }
-
-                    val mergedList = pendingOutbox + serverMerged
-                    _invoicesFlow.value = mergedList
-                    Result.success(mergedList)
                 }
                 is MerchantReadResult.Forbidden -> {
                     Result.failure(SecurityException("Forbidden: ${res.error?.message ?: "Missing sales.invoice.view permission"}"))
@@ -1623,27 +1730,13 @@ class ProductionTraderRepository(
                     _invoicesHasMoreFlow.value = res.value.hasMore
                     _invoicesHasMoreGapFlow.value = res.value.hasMore
 
-                    val currentLocal = _invoicesFlow.value
-                    val pendingOutbox = currentLocal.filter { local ->
-                        !local.clientEventId.isNullOrBlank() && local.outboxStatus != "CONFIRMED"
+                    saleMutex.withLock {
+                        val currentLocal = _invoicesFlow.value
+                        val updatedList = currentLocal + mergeServerInvoices(dedupedNewServerList, currentLocal)
+                            .filter { server -> currentLocal.none { it.serverInvoiceUlid == server.serverInvoiceUlid } }
+                        _invoicesFlow.value = updatedList
+                        Result.success(updatedList)
                     }
-
-                    val existingDomainIds = currentLocal.mapNotNull { it.serverInvoiceUlid ?: it.id }.toSet()
-                    val newDomainRecords = mutableListOf<InvoiceRecord>()
-                    for (serverItem in dedupedNewServerList) {
-                        if (!existingDomainIds.contains(serverItem.id.value)) {
-                            val localMatch = currentLocal.firstOrNull { local ->
-                                local.serverInvoiceUlid == serverItem.id.value ||
-                                local.id == serverItem.id.value ||
-                                (!local.clientEventId.isNullOrBlank() && local.clientEventId == serverItem.id.value)
-                            }
-                            newDomainRecords.add(MerchantReadAdapter.toDomainInvoiceRecord(serverItem, localMatch))
-                        }
-                    }
-
-                    val updatedList = currentLocal + newDomainRecords
-                    _invoicesFlow.value = updatedList
-                    Result.success(updatedList)
                 }
                 is MerchantReadResult.Forbidden -> {
                     Result.failure(SecurityException("Forbidden: ${res.error?.message ?: "Missing sales.invoice.view permission"}"))
@@ -1728,6 +1821,9 @@ class ProductionTraderRepository(
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 check(requireActiveScope() == before) { "Session changed during customer settlement targets read" }
                 val parsed = parseSettlementTargetsResponse(res.getOrThrow(), isSupplier = false)
+                if (currency == baseCurrency) {
+                    require(parsed.targets.all { it.currency == baseCurrency && it.currencyMinorUnits == currencyMinorUnits })
+                }
                 Result.success(parsed)
             } else {
                 val ex = res.exceptionOrNull() ?: RuntimeException("Failed to read customer settlement targets")
@@ -3002,6 +3098,9 @@ class ProductionTraderRepository(
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 check(requireActiveScope() == before) { "Session changed during supplier settlement targets read" }
                 val parsed = parseSettlementTargetsResponse(res.getOrThrow(), isSupplier = true)
+                if (currency == baseCurrency) {
+                    require(parsed.targets.all { it.currency == baseCurrency && it.currencyMinorUnits == currencyMinorUnits })
+                }
                 Result.success(parsed)
             } else {
                 val ex = res.exceptionOrNull() ?: RuntimeException("Failed to read supplier settlement targets")
@@ -3896,7 +3995,8 @@ class ProductionTraderRepository(
             permissions: Set<String> = setOf("pos.sale", "purchases.manage", "expenses.manage", "reports.financial.view"),
             ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
             outboxRepository: OutboxRepository? = null,
-            saleSyncGateway: SaleSyncGateway? = null
+            saleSyncGateway: SaleSyncGateway? = null,
+            bootstrapTaxes: List<BootstrapTax> = emptyList()
         ): ProductionTraderRepository {
             val readTokenProvider = MerchantReadTokenProvider { reqCompanyId, retainedGen ->
                 val current = (authScopeProvider ?: { CurrentAuthScope(companyId = companyId, actorId = actorId, deviceId = deviceId, token = "test-token", generation = 1L) }).invoke()
@@ -3934,7 +4034,7 @@ class ProductionTraderRepository(
                 approvedCashAccount = ApprovedCashAccount(id = ServerUlid.parse("01JMB000000000000000000004"), code = "CASH-01", name = "Main Drawer", currency = baseCurrency),
                 walkInCustomerId = ServerUlid.parse("01JMB000000000000000000005"),
                 bootstrapUnits = emptyList(),
-                bootstrapTaxes = emptyList(),
+                bootstrapTaxes = bootstrapTaxes,
                 apiClient = apiClient,
                 outboxRepository = outboxRepository,
                 saleSyncGateway = saleSyncGateway,

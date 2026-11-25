@@ -116,7 +116,7 @@ class MerchantCheckoutPrecisionAndSafetyRegressionTest {
         assertNotNull(viewModel.uiState.value.checkoutErrorMessage)
         assertTrue(
             "Checkout error must advise credit sale or adjusting invoice: ${viewModel.uiState.value.checkoutErrorMessage}",
-            viewModel.uiState.value.checkoutErrorMessage?.contains("خانتين") == true ||
+            viewModel.uiState.value.checkoutErrorMessage?.contains("دقة النقد") == true ||
                 viewModel.uiState.value.checkoutErrorMessage?.contains("decimal") == true ||
                 viewModel.uiState.value.checkoutErrorMessage?.contains("credit") == true
         )

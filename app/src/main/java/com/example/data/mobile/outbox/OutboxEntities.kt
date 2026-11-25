@@ -214,3 +214,11 @@ data class OutboxRecord(
     val payloadBytes: ByteArray get() = event.payloadBytes.clone()
     val eventVersion: Int get() = event.eventVersion
 }
+
+data class ConfirmedSaleMapping(
+    @ColumnInfo(name = "client_event_id") val clientEventId: String,
+    @ColumnInfo(name = "payload_digest") val payloadDigest: String,
+    @ColumnInfo(name = "invoice_ulid") val invoiceUlid: String,
+    @ColumnInfo(name = "payment_ulid") val paymentUlid: String?,
+    @ColumnInfo(name = "server_acknowledged_at") val serverAcknowledgedAt: String?
+)
