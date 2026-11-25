@@ -248,7 +248,8 @@ class EncryptedOutboxTest {
         db.close()
         db = OutboxDatabase.buildDatabase(context, path.path, true)
         assertArrayEquals(a.payloadBytes, cipher.decrypt(db.outboxDao().getEvent(a.companyId, a.clientEventId)!!).payloadBytes)
-        assertEquals(2, db.openHelper.readableDatabase.version)
+        assertEquals(3, db.openHelper.readableDatabase.version)
+        assertNull(db.outboxDao().getEvent(a.companyId, a.clientEventId)!!.currencyMinorUnits)
         db.close()
     }
 
