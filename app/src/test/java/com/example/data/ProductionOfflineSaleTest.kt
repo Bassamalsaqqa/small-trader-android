@@ -1066,6 +1066,220 @@ class ProductionOfflineSaleTest {
         }
     }
 
+    @Test
+    fun onlineAndOfflineProfileUuidCollisionPreservesCanonicalPayloadAndLeaseBudget() = withFixture { server, file ->
+        withDatabase(file) { db ->
+            val store = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
+            val storage = outbox(db)
+            val repo = repository(server, storage, leaseStore = store)
+            repo.clock = { fixedClockMillis }
+            try {
+                repo.isOfflineSalesCapabilityEnabled = true
+                server.enqueue(json(catalog(null, "10.00")))
+                runBlocking { repo.prepareOfflineCatalog(1, 1) {}.getOrThrow() }
+                take(server)
+
+                server.enqueue(json(leaseResponse(maxCount = 5, maxAmount = "100.000000")))
+                val lease = runBlocking { repo.acquireOfflineSaleLease().getOrThrow() }
+                take(server)
+
+                val item = repo.getProducts().single()
+                val line = testBasketItem(item)
+                val sharedOnlineUuid = ClientUuid.random()
+                val onlineInvoice = InvoiceRecord(
+                    id = sharedOnlineUuid.value,
+                    clientEventId = sharedOnlineUuid.value,
+                    invoiceNumber = 0,
+                    timestamp = "2026-11-25T10:00:00Z",
+                    items = listOf(line),
+                    subtotalExact = BigDecimal("10.00"),
+                    discountExact = BigDecimal.ZERO,
+                    netTotalExact = BigDecimal("10.00"),
+                    cashReceivedExact = BigDecimal("10.00"),
+                    changeReturnedExact = BigDecimal.ZERO,
+                    customerNote = "",
+                    cashierNameAr = "User",
+                    cashierNameEn = "User"
+                )
+
+                // 1. Capture an online sale profile (held as UNKNOWN_ACK after lost ACK).
+                server.enqueue(MockResponse().setResponseCode(404))
+                server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+                runBlocking { repo.recordSale(onlineInvoice).getOrThrow() }
+                take(server)
+                take(server)
+
+                val onlineBefore = checkNotNull(storage.getRecord(companyA, actor, device, sharedOnlineUuid))
+                assertNull(onlineBefore.event.deviceLeaseId)
+                assertEquals(OutboxStatus.UNKNOWN_ACK, onlineBefore.status)
+                val onlineBytes = onlineBefore.payloadBytes
+                val onlineDigest = onlineBefore.payloadDigest
+                val onlineDelivery = onlineBefore.deliveryState
+
+                // 2. Switch offline and attempt capture with the exact same event UUID via both repo and captureLeaseSale.
+                repo.isNetworkOffline = true
+                val forwardRepoCollision = runBlocking { repo.recordSale(onlineInvoice) }
+                assertTrue(forwardRepoCollision.isFailure)
+                assertTrue(forwardRepoCollision.exceptionOrNull() is IllegalArgumentException)
+                assertTrue(forwardRepoCollision.exceptionOrNull()!!.message!!.contains("conflicts with an online sale profile"))
+
+                val collidingOfflineEvent = OfflineSaleEventV2(
+                    clientEventId = sharedOnlineUuid,
+                    eventVersion = 2,
+                    companyId = companyA,
+                    actorId = actor,
+                    deviceId = device,
+                    deviceLeaseId = lease.leaseId,
+                    capturedAt = "2026-11-25T10:00:00Z",
+                    customerId = lease.walkInCustomerId,
+                    currency = lease.currency,
+                    warehouseId = lease.warehouseId,
+                    cashAccountId = lease.cashAccountId,
+                    catalogSnapshotVersion = lease.catalogSnapshotVersion,
+                    localReceiptNumber = "LOCAL-${lease.leaseId.value}-1",
+                    lines = listOf(
+                        com.example.data.mobile.contract.v2.OfflineSaleLineV2(
+                            productId = product,
+                            productUnitId = productUnit,
+                            unitId = productUnit,
+                            conversionToBase = com.example.data.mobile.contract.PositiveDecimalQuantity.fromPositiveString("1.000000"),
+                            quantity = com.example.data.mobile.contract.PositiveDecimalQuantity.fromPositiveString("1.000000"),
+                            unitPrice = com.example.data.mobile.contract.MoneyAmount.fromNonnegativeString("10.000000"),
+                            taxRateId = null,
+                            taxRate = TaxPercentage("0.000000"),
+                            taxInclusive = false,
+                            taxAmount = com.example.data.mobile.contract.MoneyAmount.fromNonnegativeString("0.000000"),
+                            lineTotal = com.example.data.mobile.contract.MoneyAmount.fromPositiveString("10.000000")
+                        )
+                    ),
+                    payment = com.example.data.mobile.contract.v2.OfflineSalePaymentV2(
+                        mode = "full",
+                        paymentMethod = "cash",
+                        cashAccountId = lease.cashAccountId,
+                        amountTendered = com.example.data.mobile.contract.MoneyAmount.fromNonnegativeString("10.000000"),
+                        amountSettled = com.example.data.mobile.contract.MoneyAmount.fromPositiveString("10.000000"),
+                        changeReturned = com.example.data.mobile.contract.MoneyAmount.fromNonnegativeString("0.000000")
+                    )
+                )
+                val forwardDirectError = runCatching { storage.captureLeaseSale(lease, collidingOfflineEvent) {} }.exceptionOrNull()
+                assertTrue(forwardDirectError is IllegalArgumentException)
+                assertTrue(forwardDirectError!!.message!!.contains("conflicts with an online sale profile"))
+
+                // Assert old canonical bytes, digest, and delivery state unchanged, zero lease budget charged, no new receipt.
+                val onlineAfter = checkNotNull(storage.getRecord(companyA, actor, device, sharedOnlineUuid))
+                assertNull(onlineAfter.event.deviceLeaseId)
+                org.junit.Assert.assertArrayEquals(onlineBytes, onlineAfter.payloadBytes)
+                assertEquals(onlineDigest, onlineAfter.payloadDigest)
+                assertEquals(onlineDelivery, onlineAfter.deliveryState)
+                val budgetAfterForward = storage.getPendingOfflineSalesBudget(companyA, actor, device, lease.leaseId)
+                assertEquals(0, budgetAfterForward.first)
+                assertEquals(0, BigDecimal.ZERO.compareTo(budgetAfterForward.second))
+                assertEquals(0, repo.getPendingOfflineSalesCount())
+                assertTrue(repo.getPendingOfflineSales().isEmpty())
+                assertEquals(1, storage.getRecordsByScope(companyA, actor, device).size)
+                assertEquals(4, server.requestCount)
+
+                // 3. Confirm the online profile, then re-verify offline collision preserves CONFIRMED state and zero budget charge.
+                repo.isNetworkOffline = false
+                server.enqueue(json(status(sharedOnlineUuid.value, onlineDigest)))
+                assertEquals(1, runBlocking { repo.syncOfflineSales().getOrThrow() }.confirmedCount)
+                take(server)
+                val confirmedBefore = checkNotNull(storage.getRecord(companyA, actor, device, sharedOnlineUuid))
+                assertEquals(OutboxStatus.CONFIRMED, confirmedBefore.status)
+
+                repo.isNetworkOffline = true
+                val confirmedCollision = runBlocking { repo.recordSale(onlineInvoice) }
+                assertTrue(confirmedCollision.isFailure)
+                assertTrue(confirmedCollision.exceptionOrNull()!!.message!!.contains("conflicts with an online sale profile"))
+                val confirmedAfter = checkNotNull(storage.getRecord(companyA, actor, device, sharedOnlineUuid))
+                org.junit.Assert.assertArrayEquals(onlineBytes, confirmedAfter.payloadBytes)
+                assertEquals(onlineDigest, confirmedAfter.payloadDigest)
+                assertEquals(confirmedBefore.deliveryState, confirmedAfter.deliveryState)
+                assertEquals(0, storage.getPendingOfflineSalesBudget(companyA, actor, device, lease.leaseId).first)
+
+                // 4. Reverse profile collision: capture a genuine offline lease sale, then attempt online capture with the same UUID.
+                val offlineUuid = ClientUuid.random()
+                val offlineInvoice = onlineInvoice.copy(id = offlineUuid.value, clientEventId = offlineUuid.value)
+                val capturedOffline = runBlocking { repo.recordSale(offlineInvoice).getOrThrow() }
+                assertEquals("LOCAL-${lease.leaseId.value}-1", capturedOffline.localReceiptNumber)
+
+                val offlineBefore = checkNotNull(storage.getRecord(companyA, actor, device, offlineUuid))
+                assertEquals(lease.leaseId.value, offlineBefore.event.deviceLeaseId)
+                assertEquals(OutboxStatus.PENDING, offlineBefore.status)
+                val offlineBytes = offlineBefore.payloadBytes
+                val offlineDigest = offlineBefore.payloadDigest
+                val offlineDelivery = offlineBefore.deliveryState
+
+                // 4a. Public ProductionTraderRepository online path rejects mismatched payload before network dispatch.
+                repo.isNetworkOffline = false
+                val reverseRepoCollision = runBlocking { repo.recordSale(offlineInvoice) }
+                assertTrue(reverseRepoCollision.isFailure)
+                assertTrue(reverseRepoCollision.exceptionOrNull() is IllegalStateException)
+                assertTrue(reverseRepoCollision.exceptionOrNull()!!.message!!.contains("Sale payload differs from the retained event"))
+                assertEquals(5, server.requestCount)
+
+                val offlineAfterRepo = checkNotNull(storage.getRecord(companyA, actor, device, offlineUuid))
+                org.junit.Assert.assertArrayEquals(offlineBytes, offlineAfterRepo.payloadBytes)
+                assertEquals(offlineDigest, offlineAfterRepo.payloadDigest)
+                assertEquals(offlineDelivery, offlineAfterRepo.deliveryState)
+                assertEquals(lease.leaseId.value, offlineAfterRepo.event.deviceLeaseId)
+                val budgetAfterReverseRepo = storage.getPendingOfflineSalesBudget(companyA, actor, device, lease.leaseId)
+                assertEquals(1, budgetAfterReverseRepo.first)
+                assertEquals(0, BigDecimal("10.00").compareTo(budgetAfterReverseRepo.second))
+
+                // 4b. Direct public OutboxRepository.captureOnlineSaleIntent collision returns Conflict and preserves offline bytes/digest/lease.
+                val reverseProfile = com.example.data.mobile.contract.v2.OnlineSaleIntentProfile(
+                    actorId = actor,
+                    clientEventId = offlineUuid,
+                    companyId = companyA,
+                    currency = "JOD",
+                    currencyMinorUnits = 2,
+                    customerId = lease.walkInCustomerId,
+                    deviceId = device,
+                    lines = listOf(
+                        com.example.data.mobile.contract.v2.OnlineSaleIntentLine(
+                            productId = product,
+                            productUnitId = productUnit,
+                            conversionToBase = com.example.data.mobile.contract.PositiveDecimalQuantity.fromPositiveString("1.000000"),
+                            quantity = com.example.data.mobile.contract.PositiveDecimalQuantity.fromPositiveString("1.000000"),
+                            unitPrice = com.example.data.mobile.contract.MoneyAmount.fromNonnegativeString("10.000000"),
+                            taxRateId = null,
+                            taxRate = TaxPercentage("0.000000"),
+                            taxInclusive = false
+                        )
+                    ),
+                    payment = com.example.data.mobile.contract.v2.OnlineSaleIntentPayment(
+                        settlementMode = "full",
+                        paymentMethod = "cash",
+                        cashAccountId = lease.cashAccountId,
+                        amount = com.example.data.mobile.contract.MoneyAmount.fromNonnegativeString("10.000000")
+                    ),
+                    warehouseId = lease.warehouseId
+                )
+                val directReverse = storage.captureOnlineSaleIntent(
+                    companyId = companyA,
+                    actorId = actor,
+                    deviceId = device,
+                    currencyMinorUnits = 2,
+                    profile = reverseProfile,
+                    requireNoOtherHeldSale = true
+                )
+                assertTrue(directReverse is com.example.data.mobile.outbox.CaptureResult.Conflict)
+                val directConflict = directReverse as com.example.data.mobile.outbox.CaptureResult.Conflict
+                assertEquals(offlineDigest, directConflict.existingDigest)
+                assertEquals(reverseProfile.computePayloadDigest().value, directConflict.incomingDigest)
+
+                val offlineAfterDirect = checkNotNull(storage.getRecord(companyA, actor, device, offlineUuid))
+                assertEquals(lease.leaseId.value, offlineAfterDirect.event.deviceLeaseId)
+                org.junit.Assert.assertArrayEquals(offlineBytes, offlineAfterDirect.payloadBytes)
+                assertEquals(offlineDigest, offlineAfterDirect.payloadDigest)
+                assertEquals(OutboxStatus.CONFLICT, offlineAfterDirect.status)
+                assertEquals(2, storage.getRecordsByScope(companyA, actor, device).size)
+                assertEquals(1, storage.getPendingOfflineSalesBudget(companyA, actor, device, lease.leaseId).first)
+            } finally { repo.close() }
+        }
+    }
+
     private fun outbox(db: OutboxDatabase) = OutboxRepositoryImpl(db, payloadCipher = OutboxPayloadCipher(crypto),
         requireLeaseAuthorization = true, leaseAuthority = { lease, event ->
             SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db.openHelper.writableDatabase }
