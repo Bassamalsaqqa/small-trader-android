@@ -45,8 +45,8 @@ android {
     applicationId = "com.aistudio.smalltrader.psdukx"
     minSdk = 24
     targetSdk = 36
-    versionCode = 6
-    versionName = "1.4"
+    versionCode = 7
+    versionName = "1.4.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
