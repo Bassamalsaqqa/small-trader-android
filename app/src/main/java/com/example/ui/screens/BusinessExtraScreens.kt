@@ -104,6 +104,7 @@ import com.example.model.TraderScreen
 import com.example.model.UserRole
 import com.example.model.UserSession
 import com.example.model.WesternFormatters
+import com.example.ui.components.SelectAllNumericOutlinedTextField
 import com.example.ui.components.StitchBadge
 import com.example.ui.components.StitchBadgeTone
 import com.example.ui.components.StitchBidiUtils
@@ -798,7 +799,7 @@ fun AddExpenseDialog(
 
                 // Amount Field
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedTextField(
+                    SelectAllNumericOutlinedTextField(
                         value = amountText,
                         onValueChange = {
                             amountText = WesternFormatters.sanitizeWesternDigits(it)
@@ -1199,7 +1200,7 @@ fun ShiftCloseDialog(
                 }
 
                 // Counted Cash Input Field
-                OutlinedTextField(
+                SelectAllNumericOutlinedTextField(
                     value = localInput,
                     onValueChange = { raw ->
                         val sanitized = WesternFormatters.sanitizeWesternDigits(raw)
@@ -2154,7 +2155,7 @@ fun FinancialReportsScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            OutlinedTextField(
+                            SelectAllNumericOutlinedTextField(
                                 value = state.countedPhysicalCashText,
                                 onValueChange = onUpdateCountedCashText,
                                 label = {

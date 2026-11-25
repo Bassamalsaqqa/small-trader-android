@@ -89,6 +89,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.Customer
 import com.example.model.WesternFormatters
+import com.example.ui.components.SelectAllNumericOutlinedTextField
 import com.example.ui.components.StitchBadge
 import com.example.ui.components.StitchBadgeTone
 import com.example.ui.components.StitchBidiUtils
@@ -482,7 +483,7 @@ fun CashPaymentScreen(
                         }
 
                         // Large Numeric Input Container (ST-10)
-                        OutlinedTextField(
+                        SelectAllNumericOutlinedTextField(
                             value = state.cashInputText,
                             onValueChange = { input ->
                                 val cleaned = input.filter { it.isDigit() || it == '.' }

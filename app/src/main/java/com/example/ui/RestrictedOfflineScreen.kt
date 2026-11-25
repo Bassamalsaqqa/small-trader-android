@@ -3,15 +3,18 @@ package com.example.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.data.mobile.offline.RestrictedOfflineWorkspace
 import com.example.model.BasketItem
 import com.example.model.InvoiceRecord
 import com.example.model.Product
+import com.example.ui.components.SelectAllNumericOutlinedTextField
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -73,18 +76,30 @@ internal fun RestrictedOfflineScreen(baseOrigin: String, onRetry: () -> Unit, on
                 }
                 items(basket, key = { "basket:${it.product.id}" }) { line ->
                     Text(line.product.nameAr + " / " + line.product.nameEn)
-                    OutlinedTextField(value = quantities[line.product.id].orEmpty(), enabled = !busy, onValueChange = { text ->
-                        if (text.length <= 32) { quantities[line.product.id] = text; text.takeIf { it.matches(Regex("[0-9]+(\\.[0-9]+)?")) }?.toBigDecimalOrNull()?.takeIf { it > BigDecimal.ZERO }?.let { amount ->
-                            basket = basket.map { if (it.product.id == line.product.id) it.copy(quantity = amount) else it }
-                        } }
-                    }, label = { Text("Quantity / الكمية") })
+                    SelectAllNumericOutlinedTextField(
+                        value = quantities[line.product.id].orEmpty(),
+                        enabled = !busy,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        onValueChange = { text ->
+                            if (text.length <= 32) { quantities[line.product.id] = text; text.takeIf { it.matches(Regex("[0-9]+(\\.[0-9]+)?")) }?.toBigDecimalOrNull()?.takeIf { it > BigDecimal.ZERO }?.let { amount ->
+                                basket = basket.map { if (it.product.id == line.product.id) it.copy(quantity = amount) else it }
+                            } }
+                        },
+                        label = { Text("Quantity / الكمية") }
+                    )
                     Text("Unit price / سعر الوحدة: \u2066${line.unitPriceExact.toPlainString()}\u2069")
                     TextButton(enabled = !busy, onClick = { basket = basket.filter { it.product.id != line.product.id } }) { Text("Remove / حذف") }
                 }
             }
             val total = runCatching { basket.fold(BigDecimal.ZERO) { sum, line -> sum.add(line.calculateLine(lease.currencyMinorUnits).lineTotal.value) } }.getOrNull()
             Text("\u2066${total?.toPlainString().orEmpty()} ${lease.currency}\u2069", style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum"))
-            OutlinedTextField(value = tender, enabled = !busy, onValueChange = { if (it.length <= 32) tender = it }, label = { Text("Cash tendered / النقد المستلم") })
+            SelectAllNumericOutlinedTextField(
+                value = tender,
+                enabled = !busy,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                onValueChange = { if (it.length <= 32) tender = it },
+                label = { Text("Cash tendered / النقد المستلم") }
+            )
             val cash = tender.takeIf { it.matches(Regex("[0-9]{1,14}(\\.[0-9]{1,2})?")) }?.toBigDecimalOrNull()
             val entriesValid = basket.all { line ->
                 quantities[line.product.id]?.matches(Regex("[0-9]+(\\.[0-9]+)?")) == true &&

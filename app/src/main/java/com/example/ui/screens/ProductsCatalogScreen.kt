@@ -82,6 +82,7 @@ import com.example.model.Product
 import com.example.model.ProductCategory
 import com.example.model.StockMovement
 import com.example.model.WesternFormatters
+import com.example.ui.components.SelectAllNumericOutlinedTextField
 import com.example.ui.components.StitchBadge
 import com.example.ui.components.StitchBadgeTone
 import com.example.ui.components.StitchBidiUtils
@@ -1715,7 +1716,7 @@ fun ProductDetailScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    OutlinedTextField(
+                    SelectAllNumericOutlinedTextField(
                         value = newPriceText,
                         onValueChange = { newPriceText = WesternFormatters.sanitizeWesternDigits(it) },
                         label = { Text(lang.tr("سعر البيع الجديد (₪)", "New Selling Price (₪)")) },
@@ -1853,7 +1854,7 @@ fun ProductDetailScreen(
                         )
                     }
 
-                    OutlinedTextField(
+                    SelectAllNumericOutlinedTextField(
                         value = qtyInputText,
                         onValueChange = {
                             qtyInputText = WesternFormatters.sanitizeWesternDigits(it).filter { ch -> ch.isDigit() }
@@ -2069,7 +2070,7 @@ internal fun ProductEditorDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedTextField(
+                    SelectAllNumericOutlinedTextField(
                         value = priceText,
                         onValueChange = {
                             priceText = WesternFormatters.sanitizeWesternDigits(it)
@@ -2083,7 +2084,7 @@ internal fun ProductEditorDialog(
                             .weight(1f)
                             .testTag("product_editor_price_input")
                     )
-                    OutlinedTextField(
+                    SelectAllNumericOutlinedTextField(
                         value = costText,
                         onValueChange = {
                             costText = WesternFormatters.sanitizeWesternDigits(it)
@@ -2115,7 +2116,7 @@ internal fun ProductEditorDialog(
                             .testTag("product_editor_unit_input")
                     )
                     if (!isEditing) {
-                        OutlinedTextField(
+                        SelectAllNumericOutlinedTextField(
                             value = stockText,
                             onValueChange = {
                                 stockText = WesternFormatters.sanitizeWesternDigits(it).filter { ch -> ch.isDigit() }
@@ -2129,7 +2130,7 @@ internal fun ProductEditorDialog(
                                 .testTag("product_editor_stock_input")
                         )
                     } else {
-                        OutlinedTextField(
+                        SelectAllNumericOutlinedTextField(
                             value = minStockText,
                             onValueChange = {
                                 minStockText = WesternFormatters.sanitizeWesternDigits(it).filter { ch -> ch.isDigit() }

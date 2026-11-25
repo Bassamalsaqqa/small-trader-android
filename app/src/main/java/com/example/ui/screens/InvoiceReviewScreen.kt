@@ -99,6 +99,7 @@ import com.example.model.DiscountPreset
 import com.example.model.Product
 import com.example.model.SaleDraft
 import com.example.model.WesternFormatters
+import com.example.ui.components.SelectAllNumericOutlinedTextField
 import com.example.ui.components.StitchBadge
 import com.example.ui.components.StitchBadgeTone
 import com.example.ui.components.StitchBidiUtils
@@ -1176,7 +1177,7 @@ private fun DiscountAndRoundingCard(
 
                     AnimatedVisibility(visible = state.discountPreset == DiscountPreset.CUSTOM_ILS) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            OutlinedTextField(
+                            SelectAllNumericOutlinedTextField(
                                 value = state.customDiscountText,
                                 onValueChange = onUpdateCustomDiscount,
                                 label = {

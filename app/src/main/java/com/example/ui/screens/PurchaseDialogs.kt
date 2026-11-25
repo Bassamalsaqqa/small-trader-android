@@ -80,6 +80,7 @@ import com.example.model.StockMovement
 import com.example.model.Supplier
 import com.example.model.SupplierPayment
 import com.example.model.WesternFormatters
+import com.example.ui.components.SelectAllNumericOutlinedTextField
 import com.example.ui.components.StitchBadge
 import com.example.ui.components.StitchBadgeTone
 import com.example.ui.components.StitchBidiUtils
@@ -514,7 +515,7 @@ fun PaySupplierDialog(
                                             }
 
                                             if (isChecked) {
-                                                OutlinedTextField(
+                                                SelectAllNumericOutlinedTextField(
                                                     value = selectedAllocations[key] ?: "",
                                                     onValueChange = { newVal ->
                                                         val sanitized = WesternFormatters.sanitizeWesternDigits(newVal)
@@ -548,7 +549,7 @@ fun PaySupplierDialog(
                     }
                 }
 
-                OutlinedTextField(
+                SelectAllNumericOutlinedTextField(
                     value = payAmountText,
                     onValueChange = {
                         payAmountText = WesternFormatters.sanitizeWesternDigits(it)
@@ -1047,7 +1048,7 @@ fun PhysicalGoodsReceiptDialog(
                     }
 
                     if (maxReceivableQtyExact > BigDecimal.ZERO) {
-                        OutlinedTextField(
+                        SelectAllNumericOutlinedTextField(
                             value = receivingQtyText,
                             onValueChange = {
                                 receivingQtyText = WesternFormatters.sanitizeWesternDigits(it)
@@ -1844,7 +1845,7 @@ fun ReceivePurchaseBillDialog(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            OutlinedTextField(
+                            SelectAllNumericOutlinedTextField(
                                 value = linkedQuantityText,
                                 onValueChange = {
                                     linkedQuantityText = WesternFormatters.sanitizeWesternDigits(it)
@@ -1859,7 +1860,7 @@ fun ReceivePurchaseBillDialog(
                                     .weight(1f)
                                     .testTag("purchase_bill_linked_qty_input")
                             )
-                            OutlinedTextField(
+                            SelectAllNumericOutlinedTextField(
                                 value = unitCostText,
                                 onValueChange = {
                                     unitCostText = WesternFormatters.sanitizeWesternDigits(it)
@@ -1975,7 +1976,7 @@ fun ReceivePurchaseBillDialog(
                 }
 
                 // Authoritative Total Field
-                OutlinedTextField(
+                SelectAllNumericOutlinedTextField(
                     value = if (billMode == PurchaseBillMode.STRUCTURED) {
                         if (structuredLines.isNotEmpty()) derivedTotal.toPlainString() else ""
                     } else {
@@ -2021,7 +2022,7 @@ fun ReceivePurchaseBillDialog(
                         .testTag("purchase_bill_total_input")
                 )
 
-                OutlinedTextField(
+                SelectAllNumericOutlinedTextField(
                     value = purchasePaid,
                     onValueChange = {
                         purchasePaid = WesternFormatters.sanitizeWesternDigits(it)

@@ -96,6 +96,7 @@ import com.example.model.Customer
 import com.example.model.CustomerTransaction
 import com.example.model.InvoiceRecord
 import com.example.model.WesternFormatters
+import com.example.ui.components.SelectAllNumericOutlinedTextField
 import com.example.ui.components.StitchBadge
 import com.example.ui.components.StitchBadgeTone
 import com.example.ui.components.StitchBidiUtils
@@ -1672,7 +1673,7 @@ private fun EditCustomerDialog(
                         .fillMaxWidth()
                         .testTag("edit_customer_address_input")
                 )
-                OutlinedTextField(
+                SelectAllNumericOutlinedTextField(
                     value = limitText,
                     onValueChange = {
                         limitText = WesternFormatters.sanitizeWesternDigits(it)
@@ -2413,7 +2414,7 @@ fun CustomerPaymentCollectionDialog(
                                             }
 
                                             if (isChecked) {
-                                                OutlinedTextField(
+                                                SelectAllNumericOutlinedTextField(
                                                     value = selectedAllocations[key] ?: "",
                                                     onValueChange = { newVal ->
                                                         val sanitized = WesternFormatters.sanitizeWesternDigits(newVal)
@@ -2448,7 +2449,7 @@ fun CustomerPaymentCollectionDialog(
                 }
 
                 // Cash Amount Input (Large readable field with Western numbers)
-                OutlinedTextField(
+                SelectAllNumericOutlinedTextField(
                     value = payAmountText,
                     onValueChange = { payAmountText = WesternFormatters.sanitizeWesternDigits(it) },
                     label = { Text(lang.tr("المبلغ المقبوض نقداً ($currencySymbolOrCode) *", "Cash Collected ($currencySymbolOrCode) *")) },

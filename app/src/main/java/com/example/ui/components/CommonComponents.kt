@@ -10,6 +10,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -92,38 +93,54 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextFieldColors
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1659,7 +1676,7 @@ fun CustomQuickItemDialog(
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth().testTag("custom_item_name_input")
                 )
-                OutlinedTextField(
+                SelectAllNumericOutlinedTextField(
                     value = priceText,
                     onValueChange = { priceText = WesternFormatters.sanitizeWesternDigits(it) },
                     label = { Text(language.tr("السعر بالشيكل (₪)", "Price in Shekels (₪)")) },
@@ -1689,5 +1706,190 @@ fun CustomQuickItemDialog(
                 Text(language.tr("إلغاء", "Cancel"))
             }
         }
+    )
+}
+
+/**
+ * Reusable numeric input field wrapping [OutlinedTextField] with first-focus full-range selection.
+ * Selects the full text on first focus (pointer click or keyboard focus) so immediate typing replaces
+ * prefilled/default numeric figures cleanly, while preserving normal cursor placement on subsequent
+ * taps or key navigation, preserving unchanged values on blur, and tracking external value updates.
+ */
+@Composable
+fun SelectAllNumericOutlinedTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    readOnly: Boolean = false,
+    textStyle: TextStyle = LocalTextStyle.current,
+    label: @Composable (() -> Unit)? = null,
+    placeholder: @Composable (() -> Unit)? = null,
+    leadingIcon: @Composable (() -> Unit)? = null,
+    trailingIcon: @Composable (() -> Unit)? = null,
+    supportingText: @Composable (() -> Unit)? = null,
+    isError: Boolean = false,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
+    singleLine: Boolean = true,
+    maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
+    shape: Shape = OutlinedTextFieldDefaults.shape,
+    colors: TextFieldColors = OutlinedTextFieldDefaults.colors(),
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() }
+) {
+    val latestValue by rememberUpdatedState(value)
+    val latestOnValueChange by rememberUpdatedState(onValueChange)
+    var tfv by remember {
+        mutableStateOf(TextFieldValue(text = value, selection = TextRange(value.length)))
+    }
+    var wasFocused by remember { mutableStateOf(false) }
+    var unfocusedPressTimestampMs by remember { mutableStateOf<Long?>(null) }
+    var pendingTapCursorSelectAll by remember { mutableStateOf(false) }
+    var hasPointerTapInFocusSession by remember { mutableStateOf(false) }
+    var hasEditedOrNavigatedInFocusSession by remember { mutableStateOf(false) }
+
+    val syncedTfv = if (value == tfv.text) {
+        tfv
+    } else {
+        val prevAtEnd = tfv.selection.collapsed && tfv.selection.end == tfv.text.length
+        val newSelection = if (prevAtEnd) {
+            TextRange(value.length)
+        } else {
+            TextRange(
+                tfv.selection.start.coerceIn(0, value.length),
+                tfv.selection.end.coerceIn(0, value.length)
+            )
+        }
+        TextFieldValue(text = value, selection = newSelection)
+    }
+    SideEffect {
+        if (tfv != syncedTfv) {
+            tfv = syncedTfv
+        }
+    }
+
+    OutlinedTextField(
+        value = syncedTfv,
+        onValueChange = { incoming ->
+            val resolved = if (
+                pendingTapCursorSelectAll &&
+                enabled &&
+                !readOnly &&
+                incoming.text == latestValue &&
+                incoming.text.isNotEmpty()
+            ) {
+                pendingTapCursorSelectAll = false
+                incoming.copy(selection = TextRange(0, incoming.text.length))
+            } else {
+                if (incoming.text != latestValue) {
+                    pendingTapCursorSelectAll = false
+                    hasEditedOrNavigatedInFocusSession = true
+                }
+                incoming
+            }
+            tfv = resolved
+            if (resolved.text != latestValue) {
+                latestOnValueChange(resolved.text)
+            }
+        },
+        modifier = modifier
+            .pointerInput(enabled, readOnly) {
+                var pressPos: Offset? = null
+                awaitPointerEventScope {
+                    while (true) {
+                        val initialEvent = awaitPointerEvent(PointerEventPass.Initial)
+                        val primaryChange = initialEvent.changes.firstOrNull()
+                        when (initialEvent.type) {
+                            PointerEventType.Press -> {
+                                val isInitialTapForSession = enabled && !readOnly && (
+                                    !wasFocused ||
+                                        (!hasPointerTapInFocusSession && !hasEditedOrNavigatedInFocusSession)
+                                )
+                                if (isInitialTapForSession) {
+                                    pressPos = primaryChange?.position
+                                    unfocusedPressTimestampMs = android.os.SystemClock.uptimeMillis()
+                                    if (wasFocused) {
+                                        // Field was auto-focused by a dialog/scroll before any user interaction;
+                                        // preserve select-all on this first pointer tap and guard tap cursor placement.
+                                        hasPointerTapInFocusSession = true
+                                        val currentText = latestValue
+                                        if (currentText.isNotEmpty()) {
+                                            tfv = syncedTfv.copy(
+                                                text = currentText,
+                                                selection = TextRange(0, currentText.length)
+                                            )
+                                            pendingTapCursorSelectAll = true
+                                        }
+                                    }
+                                } else {
+                                    pressPos = null
+                                    unfocusedPressTimestampMs = null
+                                    pendingTapCursorSelectAll = false
+                                    hasPointerTapInFocusSession = true
+                                }
+                            }
+                            PointerEventType.Move -> {
+                                val start = pressPos
+                                if (start != null && primaryChange != null &&
+                                    (primaryChange.position - start).getDistance() > viewConfiguration.touchSlop
+                                ) {
+                                    // Scroll/drag cancelled tap: do not treat a later unrelated focus as this tap.
+                                    pressPos = null
+                                    unfocusedPressTimestampMs = null
+                                    pendingTapCursorSelectAll = false
+                                }
+                            }
+                            else -> Unit
+                        }
+                    }
+                }
+            }
+            .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.type == KeyEventType.KeyDown) {
+                    unfocusedPressTimestampMs = null
+                    pendingTapCursorSelectAll = false
+                    hasEditedOrNavigatedInFocusSession = true
+                }
+                false
+            }
+            .onFocusChanged { focusState ->
+                val isFocusedNow = focusState.hasFocus
+                if (!wasFocused && isFocusedNow && enabled && !readOnly) {
+                    val currentText = latestValue
+                    tfv = syncedTfv.copy(
+                        text = currentText,
+                        selection = TextRange(0, currentText.length)
+                    )
+                    val pressTime = unfocusedPressTimestampMs
+                    val recentUnfocusedPress = pressTime != null &&
+                        (android.os.SystemClock.uptimeMillis() - pressTime) <= 2_000L
+                    pendingTapCursorSelectAll = recentUnfocusedPress && currentText.isNotEmpty()
+                    hasPointerTapInFocusSession = recentUnfocusedPress
+                    hasEditedOrNavigatedInFocusSession = false
+                    unfocusedPressTimestampMs = null
+                } else if (!isFocusedNow) {
+                    unfocusedPressTimestampMs = null
+                    pendingTapCursorSelectAll = false
+                    hasPointerTapInFocusSession = false
+                    hasEditedOrNavigatedInFocusSession = false
+                }
+                wasFocused = isFocusedNow
+            },
+        enabled = enabled,
+        readOnly = readOnly,
+        textStyle = textStyle,
+        label = label,
+        placeholder = placeholder,
+        leadingIcon = leadingIcon,
+        trailingIcon = trailingIcon,
+        supportingText = supportingText,
+        isError = isError,
+        keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
+        singleLine = singleLine,
+        maxLines = maxLines,
+        shape = shape,
+        colors = colors,
+        interactionSource = interactionSource
     )
 }
