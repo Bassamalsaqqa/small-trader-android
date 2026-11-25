@@ -4,6 +4,8 @@ import android.content.Context
 import com.example.data.mobile.contract.CanonicalJsonSerializer
 import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.ServerUlid
+import com.example.data.mobile.contract.StrictJsonObject
+import com.example.data.mobile.contract.StrictJsonNumber
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.readclient.ActorProfile
 import com.example.data.mobile.readclient.AuthChallengeResponse
@@ -137,6 +139,13 @@ class StaffSessionCoordinatorTest {
         tempDir.deleteRecursively()
     }
 
+    private fun loadBootstrapJson(minorUnits: Int = 2): String {
+        val raw = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val obj = StrictJsonParser.parse(raw).asObject().properties.toMutableMap()
+        obj["currency_minor_units"] = StrictJsonNumber(minorUnits.toString(), isInt = true)
+        return CanonicalJsonSerializer.serialize(StrictJsonObject(obj))
+    }
+
     private fun setupDefaultGoldenRoutes() {
         // Challenge route
         val challengeJson = File(fixturesDir, "golden-auth-challenge.json").readText(Charsets.UTF_8)
@@ -160,7 +169,7 @@ class StaffSessionCoordinatorTest {
         }
 
         // Bootstrap route
-        val bootstrapJson = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val bootstrapJson = loadBootstrapJson()
         transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = {
             TransportResponse(statusCode = 200, body = bootstrapJson)
         }
@@ -338,7 +347,7 @@ class StaffSessionCoordinatorTest {
 
     @Test
     fun companySwitchPreservesSessionOnlyWhenNotRemembered() {
-        val secondBootstrapJson = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val secondBootstrapJson = loadBootstrapJson()
             .replace(testCompanyUlid.value, testSecondCompanyUlid.value)
         transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testSecondCompanyUlid/bootstrap")] = {
             TransportResponse(statusCode = 200, body = secondBootstrapJson)
@@ -492,7 +501,7 @@ class StaffSessionCoordinatorTest {
         assertTrue(coordinator.authState is StaffAuthState.CompanySelectionRequired)
 
         // Select second company
-        val secondBootstrapJson = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val secondBootstrapJson = loadBootstrapJson()
             .replace(testCompanyUlid.value, testSecondCompanyUlid.value)
         transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testSecondCompanyUlid/bootstrap")] = {
             TransportResponse(statusCode = 200, body = secondBootstrapJson)
@@ -512,7 +521,7 @@ class StaffSessionCoordinatorTest {
     fun testBootstrapActorUlidMismatchFailsClosedWithLockedScopeMismatch() {
         // Return bootstrap with different staff actor ID
         val foreignActorUlid = ServerUlid.parse("01JCV8X9M8T1V2W3X4Y5Z67899")
-        val mismatchedBootstrap = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val mismatchedBootstrap = loadBootstrapJson()
             .replace(testActorUlid.value, foreignActorUlid.value)
         transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = {
             TransportResponse(statusCode = 200, body = mismatchedBootstrap)
@@ -535,7 +544,7 @@ class StaffSessionCoordinatorTest {
     fun testBootstrapCompanyMismatchFailsClosedWithLockedScopeMismatch() {
         // Return bootstrap with different company ID
         val foreignCompanyUlid = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789Z")
-        val mismatchedBootstrap = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val mismatchedBootstrap = loadBootstrapJson()
             .replace(testCompanyUlid.value, foreignCompanyUlid.value)
         transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = {
             TransportResponse(statusCode = 200, body = mismatchedBootstrap)
@@ -885,7 +894,7 @@ class StaffSessionCoordinatorTest {
         val genBefore = coordinator.currentGeneration
 
         // Map second company bootstrap
-        val secondBootstrapJson = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val secondBootstrapJson = loadBootstrapJson()
             .replace(testCompanyUlid.value, testSecondCompanyUlid.value)
         transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testSecondCompanyUlid/bootstrap")] = {
             TransportResponse(statusCode = 200, body = secondBootstrapJson)
@@ -1074,14 +1083,14 @@ class StaffSessionCoordinatorTest {
         val firstBootstrapEntered = CountDownLatch(1)
         val allowFirstBootstrapFinish = CountDownLatch(1)
 
-        val bootstrapJson = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val bootstrapJson = loadBootstrapJson()
         transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = {
             firstBootstrapEntered.countDown()
             allowFirstBootstrapFinish.await(5, TimeUnit.SECONDS)
             TransportResponse(statusCode = 200, body = bootstrapJson)
         }
 
-        val secondBootstrapJson = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val secondBootstrapJson = loadBootstrapJson()
             .replace(testCompanyUlid.value, testSecondCompanyUlid.value)
         transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testSecondCompanyUlid/bootstrap")] = {
             TransportResponse(statusCode = 200, body = secondBootstrapJson)
@@ -1295,7 +1304,7 @@ class StaffSessionCoordinatorTest {
     fun testStaleCompareAndPersistVsLogoutOrNewLogin() {
         val bootstrapEntered = CountDownLatch(1)
         val allowBootstrapFinish = CountDownLatch(1)
-        val bootstrapJson = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val bootstrapJson = loadBootstrapJson()
 
         transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = {
             bootstrapEntered.countDown()
@@ -1424,7 +1433,7 @@ class StaffSessionCoordinatorTest {
 
         val bootstrapEntered = CountDownLatch(1)
         val allowBootstrapFinish = CountDownLatch(1)
-        val bootstrapJson = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val bootstrapJson = loadBootstrapJson()
 
         transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = {
             bootstrapEntered.countDown()
@@ -1483,7 +1492,7 @@ class StaffSessionCoordinatorTest {
         assertTrue(readEntered.await(5, TimeUnit.SECONDS))
 
         // Set up second company bootstrap
-        val secondBootstrapJson = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val secondBootstrapJson = loadBootstrapJson()
             .replace(testCompanyUlid.value, testSecondCompanyUlid.value)
         transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testSecondCompanyUlid/bootstrap")] = {
             TransportResponse(statusCode = 200, body = secondBootstrapJson)
@@ -1599,7 +1608,7 @@ class StaffSessionCoordinatorTest {
     @Test
     fun testTokenExpiryAfterBootstrapAndQueryCompletion() {
         // Test 1: Clock advances during bootstrap
-        val bootstrapJson = File(fixturesDir, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val bootstrapJson = loadBootstrapJson()
         transport.handlers[Pair(HttpMethod.GET, "/api/mobile/v1/companies/$testCompanyUlid/bootstrap")] = {
             // Advance clock past login token expiry (2026-11-17T12:00:00Z = 1794916800000L)
             testClock.epochMs = 1795000000000L
@@ -1819,6 +1828,16 @@ class StaffSessionCoordinatorTest {
             assertTrue(other.requestChallenge() is CoordinatorResult.Error)
             assertTrue(other.getProducts() is CoordinatorResult.Error)
         }
+    }
+
+    @Test
+    fun bootstrap_explicitIncludeCurrencyMinorUnits_retainedInReadReady() {
+        coordinator.requestChallenge(appVersion)
+        val res = coordinator.login("cashier@smalltrader.example", "CorrectHorseBatteryStaple123!", "Test Tablet")
+        assertTrue(res is CoordinatorResult.Success)
+        assertTrue(coordinator.authState is StaffAuthState.ReadReady)
+        val ready = coordinator.authState as StaffAuthState.ReadReady
+        assertEquals(2, ready.bootstrap.currencyMinorUnits)
     }
 
 }

@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAddAlt1
 import androidx.compose.material.icons.filled.PersonSearch
 import androidx.compose.material.icons.filled.PriceCheck
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
@@ -139,7 +140,8 @@ fun CashPaymentScreen(
     onEditInvoice: () -> Unit = {},
     onCompleteSale: () -> Unit,
     onCompleteCreditSale: () -> Unit = {},
-    onSearchCustomers: ((String) -> Unit)? = null
+    onSearchCustomers: ((String) -> Unit)? = null,
+    onCheckHeldStatus: () -> Unit = {}
 ) {
     val lang = state.language
     val financial = TraderTheme.financial
@@ -757,6 +759,90 @@ fun CashPaymentScreen(
                     }
                 }
 
+                if (state.isPaymentUnverifiedHold) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("held_sale_status_card")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.tertiary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Text(
+                                    text = lang.tr(
+                                        "العملية قيد التحقق — يرجى الانتظار لتأكيد الدفع",
+                                        "Payment pending verification — awaiting confirmation"
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                            }
+                            Button(
+                                onClick = onCheckHeldStatus,
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.tertiary,
+                                    contentColor = MaterialTheme.colorScheme.onTertiary
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("check_held_status_button")
+                            ) {
+                                Text(
+                                    text = lang.tr("التحقق من حالة الدفع", "Check Payment Status"),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (state.isCashCollectionUnrepresentable) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("cash_collection_unrepresentable_warning")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.WarningAmber,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Text(
+                                text = lang.tr(
+                                    "المبلغ الصافي (${state.basketNetTotalExact} ${state.businessInfo.defaultCurrency}) يحتوي على كسور نقدية غير قابلة للتحصيل — اختر البيع الآجل أو عدّل السلة.",
+                                    "Net amount (${state.basketNetTotalExact} ${state.businessInfo.defaultCurrency}) has fractions unpayable in cash — select credit sale or adjust basket."
+                                ),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+
                 // Optional Keypad Toggle (Collapsible to prevent soft keyboard collision)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1295,11 +1381,19 @@ fun CashPaymentScreen(
                     // Consequence line for cash sale
                     Text(
                         text = when {
+                            state.isPaymentUnverifiedHold -> lang.tr(
+                                "العملية قيد التحقق — يرجى الانتظار لتأكيد الدفع",
+                                "Payment pending verification — awaiting confirmation"
+                            )
+                            state.isCashCollectionUnrepresentable -> lang.tr(
+                                "كسور نقدية غير قابلة للتحصيل — اختر البيع الآجل أو عدّل السلة.",
+                                "Unpayable cash fractions — select credit sale or adjust basket."
+                            )
                             !sufficient -> lang.tr(
                                 "المتبقي لإتمام البيع: ${WesternFormatters.formatIls(state.remainingUnpaidIls)}",
                                 "Shortfall: ${WesternFormatters.formatIls(state.remainingUnpaidIls)}"
                             )
-                            state.changeDueIls > 0.005 -> lang.tr(
+                            state.changeDueExact > java.math.BigDecimal.ZERO -> lang.tr(
                                 "المقبوض: ${WesternFormatters.formatIls(state.cashTenderedIls)} • الباقي: ${WesternFormatters.formatIls(state.changeDueIls)}",
                                 "Received: ${WesternFormatters.formatIls(state.cashTenderedIls)} • Change: ${WesternFormatters.formatIls(state.changeDueIls)}"
                             )
@@ -1309,15 +1403,15 @@ fun CashPaymentScreen(
                             )
                         },
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
-                        color = if (sufficient) MaterialTheme.colorScheme.onSurfaceVariant else financial.warning,
-                        maxLines = 1,
+                        color = if (state.isPaymentUnverifiedHold || state.isCashCollectionUnrepresentable) financial.warning else if (sufficient) MaterialTheme.colorScheme.onSurfaceVariant else financial.warning,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
 
                     // Primary confirmation button (ST-10)
                     Button(
                         onClick = onCompleteSale,
-                        enabled = state.basket.isNotEmpty() && sufficient && !state.isSubmittingSale,
+                        enabled = state.basket.isNotEmpty() && sufficient && !state.isCashCollectionUnrepresentable && !state.isSubmittingSale && !state.isPaymentUnverifiedHold,
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
@@ -1391,7 +1485,7 @@ fun CashPaymentScreen(
                     // Primary confirmation button (ST-11)
                     Button(
                         onClick = onCompleteCreditSale,
-                        enabled = selectedCustomer != null && !isDetailLoading && !overLimit && !isConfiguredLimitUnknownBalance && state.basket.isNotEmpty() && !state.isSubmittingSale,
+                        enabled = selectedCustomer != null && !isDetailLoading && !overLimit && !isConfiguredLimitUnknownBalance && state.basket.isNotEmpty() && !state.isSubmittingSale && !state.isPaymentUnverifiedHold,
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (selectedCustomer != null && !isDetailLoading && !overLimit && !isConfiguredLimitUnknownBalance) financial.debit else MaterialTheme.colorScheme.surfaceVariant,

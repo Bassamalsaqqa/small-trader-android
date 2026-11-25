@@ -118,6 +118,7 @@ data class TraderUiState(
     val draftShiftCloseOperationId: String = "",
     val isShiftCloseRecovering: Boolean = false,
     val activeShiftCloseDraft: com.example.data.mobile.contract.StrictJsonObject? = null,
+    val isPaymentUnverifiedHold: Boolean = false,
     val checkoutErrorAr: String? = null,
     val checkoutErrorEn: String? = null,
 
@@ -309,8 +310,8 @@ data class TraderUiState(
 
     val basketSubtotalExact: BigDecimal
         get() = basket.fold(BigDecimal.ZERO) { acc, item ->
-            acc.add(item.lineTotalDecimal)
-        }.setScale(2, RoundingMode.HALF_UP)
+            acc.add(item.lineTotalExact)
+        }
 
     val basketSubtotalIls: Double
         get() = basketSubtotalExact.toDouble()
@@ -368,28 +369,57 @@ data class TraderUiState(
     val basketNetTotalIls: Double
         get() = basketNetTotalExact.setScale(2, RoundingMode.HALF_UP).toDouble()
 
+    val cashTenderedExact: BigDecimal
+        get() {
+            val sanitized = WesternFormatters.sanitizeWesternDigits(cashInputText).trim()
+            if (sanitized.isEmpty()) return BigDecimal.ZERO
+            return try {
+                BigDecimal(sanitized)
+            } catch (_: NumberFormatException) {
+                BigDecimal.ZERO
+            }
+        }
+
     val cashTenderedIls: Double
-        get() = WesternFormatters.sanitizeWesternDigits(cashInputText).toDoubleOrNull() ?: 0.0
+        get() = cashTenderedExact.toDouble()
+
+    val changeDueExact: BigDecimal
+        get() = if (cashTenderedExact > basketNetTotalExact) {
+            cashTenderedExact.subtract(basketNetTotalExact)
+        } else {
+            BigDecimal.ZERO
+        }
 
     val changeDueIls: Double
-        get() {
-            val tendered = BigDecimal(cashTenderedIls.toString()).setScale(2, RoundingMode.HALF_UP)
-            val net = BigDecimal(basketNetTotalIls.toString()).setScale(2, RoundingMode.HALF_UP)
-            return tendered.subtract(net).setScale(2, RoundingMode.HALF_UP).toDouble().coerceAtLeast(0.0)
+        get() = changeDueExact.toDouble()
+
+    val remainingUnpaidExact: BigDecimal
+        get() = if (basketNetTotalExact > cashTenderedExact) {
+            basketNetTotalExact.subtract(cashTenderedExact)
+        } else {
+            BigDecimal.ZERO
         }
 
     val remainingUnpaidIls: Double
+        get() = remainingUnpaidExact.toDouble()
+
+    /**
+     * Fails safe when cash collection cannot represent the required amount with 2-decimal money entry.
+     * Prevents arbitrary rounding (e.g. JOD 9.833 to 9.83 payment) before cash collection.
+     */
+    val isCashCollectionUnrepresentable: Boolean
         get() {
-            val tendered = BigDecimal(cashTenderedIls.toString()).setScale(2, RoundingMode.HALF_UP)
-            val net = BigDecimal(basketNetTotalIls.toString()).setScale(2, RoundingMode.HALF_UP)
-            return net.subtract(tendered).setScale(2, RoundingMode.HALF_UP).toDouble().coerceAtLeast(0.0)
+            if (basket.isEmpty()) return false
+            if (basketNetTotalExact.stripTrailingZeros().scale() > 2) return true
+            if (cashTenderedExact.stripTrailingZeros().scale() > 2) return true
+            return false
         }
 
     val isCashSufficient: Boolean
-        get() = basket.isNotEmpty() && cashTenderedIls + 0.005 >= basketNetTotalIls
+        get() = basket.isNotEmpty() && !isCashCollectionUnrepresentable && cashTenderedExact >= basketNetTotalExact
 
     val isExactCashTendered: Boolean
-        get() = isCashSufficient && changeDueIls <= 0.004
+        get() = isCashSufficient && cashTenderedExact.compareTo(basketNetTotalExact) == 0
 
     val selectedCustomer: Customer?
         get() = customers.firstOrNull { it.id == selectedCustomerId }
@@ -409,32 +439,35 @@ data class TraderUiState(
     val isCreditSaleBlockedByUnknownBalance: Boolean
         get() = selectedCustomer?.let { it.creditLimitExact != null && !isCustomerBalanceKnown } ?: false
 
-    val projectedCustomerBalanceIfCreditIls: Double?
+    val projectedCustomerBalanceIfCreditExact: BigDecimal?
         get() = if (!isCustomerBalanceKnown) null else selectedCustomer?.let { customer ->
-            customer.balanceExact?.add(BigDecimal(basketNetTotalIls.toString()))
-                ?.setScale(2, RoundingMode.HALF_UP)
-                ?.toDouble()
+            val bal = customer.balanceExact ?: return null
+            bal.add(basketNetTotalExact)
         }
+
+    val projectedCustomerBalanceIfCreditIls: Double?
+        get() = projectedCustomerBalanceIfCreditExact?.toDouble()
 
     val wouldCreditExceedCustomerLimit: Boolean
         get() {
             if (!isCustomerBalanceKnown) return false
             val customer = selectedCustomer ?: return false
             val limitExact = customer.creditLimitExact ?: return false
-            val projected = projectedCustomerBalanceIfCreditIls ?: return false
-            return projected > limitExact.toDouble() + 0.001
+            val projected = projectedCustomerBalanceIfCreditExact ?: return false
+            return projected > limitExact
+        }
+
+    val creditCeilingExcessExact: BigDecimal
+        get() {
+            if (!isCustomerBalanceKnown) return BigDecimal.ZERO
+            val customer = selectedCustomer ?: return BigDecimal.ZERO
+            val limitExact = customer.creditLimitExact ?: return BigDecimal.ZERO
+            val projected = projectedCustomerBalanceIfCreditExact ?: return BigDecimal.ZERO
+            return if (projected > limitExact) projected.subtract(limitExact) else BigDecimal.ZERO
         }
 
     val creditCeilingExcessIls: Double
-        get() {
-            if (!isCustomerBalanceKnown) return 0.0
-            val customer = selectedCustomer ?: return 0.0
-            val limitExact = customer.creditLimitExact ?: return 0.0
-            val projected = projectedCustomerBalanceIfCreditIls ?: return 0.0
-            val projBd = BigDecimal(projected.toString()).setScale(2, RoundingMode.HALF_UP)
-            val limitBd = limitExact.setScale(2, RoundingMode.HALF_UP)
-            return projBd.subtract(limitBd).setScale(2, RoundingMode.HALF_UP).toDouble().coerceAtLeast(0.0)
-        }
+        get() = creditCeilingExcessExact.toDouble()
 
     val checkoutErrorMessage: String?
         get() = language.tr(checkoutErrorAr ?: "", checkoutErrorEn ?: "").takeIf { it.isNotBlank() }

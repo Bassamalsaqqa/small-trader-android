@@ -3,8 +3,11 @@ package com.example.data.mobile.integration
 import com.example.data.mobile.outbox.testOutboxRepository
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.example.data.mobile.contract.CanonicalJsonSerializer
 import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.ServerUlid
+import com.example.data.mobile.contract.StrictJsonObject
+import com.example.data.mobile.contract.StrictJsonNumber
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.outbox.CaptureResult
 import com.example.data.mobile.outbox.OutboxDatabase
@@ -118,10 +121,13 @@ class AuthDenialOutboxLockIntegrationTest {
             }
             if (path.contains("/bootstrap")) {
                 val golden = File(OutboxTestFixtures.locateFixturesDir(), "golden-bootstrap.json").readText(Charsets.UTF_8)
+                val obj = StrictJsonParser.parse(golden).asObject().properties.toMutableMap()
+                obj["currency_minor_units"] = StrictJsonNumber("2", isInt = true)
+                val body = CanonicalJsonSerializer.serialize(StrictJsonObject(obj))
                 return TransportResponse(
                     statusCode = 200,
                     headers = mapOf("content-type" to "application/json"),
-                    body = golden
+                    body = body
                 )
             }
             if (path.contains("/products")) {

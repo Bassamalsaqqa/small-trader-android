@@ -2056,6 +2056,7 @@ fun CustomerPaymentCollectionDialog(
         payAmountText.toBigDecimalOrNull()
     }
     val validEnteredAmountExact = enteredAmountExact ?: BigDecimal.ZERO
+    val isAmountPrecisionValid = validEnteredAmountExact.stripTrailingZeros().scale().coerceAtLeast(0) <= minorUnits
     val currencySymbolOrCode = if (currency == "ILS") "₪" else currency
 
     val projectedBalance: BigDecimal? = remember(customer.balanceExact, enteredAmountExact) {
@@ -2467,6 +2468,17 @@ fun CustomerPaymentCollectionDialog(
                         .heightIn(min = 48.dp)
                         .testTag("payment_amount_input")
                 )
+                if (validEnteredAmountExact > BigDecimal.ZERO && !isAmountPrecisionValid) {
+                    Text(
+                        text = lang.tr(
+                            "دقة المبلغ تتجاوز الحد المسموح ($minorUnits خانات)",
+                            "Amount precision exceeds allowed limit ($minorUnits decimals)"
+                        ),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.testTag("payment_amount_precision_error")
+                    )
+                }
 
                 // Quick Preset Chips (Full Debt, 50, 100, 200, Total Allocated)
                 LazyRow(
@@ -2680,7 +2692,7 @@ fun CustomerPaymentCollectionDialog(
                         onConfirmPayment(customer.id, finalAmount.toDouble(), payNoteText, operationId)
                     }
                 },
-                enabled = validEnteredAmountExact > BigDecimal.ZERO && !isOverAllocated,
+                enabled = validEnteredAmountExact > BigDecimal.ZERO && !isOverAllocated && isAmountPrecisionValid,
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,

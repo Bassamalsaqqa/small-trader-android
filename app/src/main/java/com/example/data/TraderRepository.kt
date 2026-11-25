@@ -342,11 +342,16 @@ data class RecordedGrnOperation(
  * This class is the single authoritative domain engine for local POS demo operations.
  */
 class OfflineDemoTraderRepository(
-    initialProducts: List<Product> = SampleCatalog.initialProducts
+    initialProducts: List<Product> = SampleCatalog.initialProducts,
+    initialBusinessInfo: BusinessInfo = SampleCatalog.defaultBusiness
 ) : TraderRepository {
 
     private var currentSession: UserSession = SampleCatalog.demoStaff.first()
-    private val businessInfo: BusinessInfo = SampleCatalog.defaultBusiness
+    private var businessInfo: BusinessInfo = initialBusinessInfo
+
+    fun updateBusinessInfo(info: BusinessInfo) {
+        businessInfo = info
+    }
 
     private val products = initialProducts.toMutableList()
     private val stockMovements = SampleCatalog.initialStockMovements.toMutableList()
@@ -646,35 +651,28 @@ class OfflineDemoTraderRepository(
         // 5. Monetary invariant derivation & validation (prevent caller-tampered invoice totals)
         var canonicalSubtotal = BigDecimal.ZERO
         for (item in invoice.items) {
-            val catalogProd = products.firstOrNull { it.id == item.product.id }
-            val unitPrice = if (catalogProd != null) {
-                BigDecimal(catalogProd.priceIls.toString()).setScale(2, RoundingMode.HALF_UP)
-            } else {
-                BigDecimal(item.product.priceIls.toString()).setScale(2, RoundingMode.HALF_UP)
-            }
-            val lineTotal = unitPrice.multiply(BigDecimal(item.quantity.toString())).setScale(2, RoundingMode.HALF_UP)
+            val lineTotal = item.lineTotalExact
             canonicalSubtotal = canonicalSubtotal.add(lineTotal)
         }
-        canonicalSubtotal = canonicalSubtotal.setScale(2, RoundingMode.HALF_UP)
 
-        val declaredSubtotal = BigDecimal(invoice.subtotalIls.toString()).setScale(2, RoundingMode.HALF_UP)
-        val declaredDiscount = BigDecimal(invoice.discountIls.toString()).setScale(2, RoundingMode.HALF_UP)
-        val declaredNet = BigDecimal(invoice.netTotalIls.toString()).setScale(2, RoundingMode.HALF_UP)
+        val declaredSubtotal = invoice.subtotalExact
+        val declaredDiscount = invoice.discountExact
+        val declaredNet = invoice.netTotalExact
 
-        if (declaredSubtotal.subtract(canonicalSubtotal).abs() > BigDecimal("0.02")) {
-            return Result.failure(IllegalArgumentException("Invoice subtotal mismatch. Expected: $canonicalSubtotal ₪, declared: $declaredSubtotal ₪"))
+        if (declaredSubtotal.compareTo(canonicalSubtotal) != 0) {
+            return Result.failure(IllegalArgumentException("Invoice subtotal mismatch. Expected: $canonicalSubtotal, declared: $declaredSubtotal"))
         }
         if (declaredDiscount < BigDecimal.ZERO || declaredDiscount > declaredSubtotal) {
-            return Result.failure(IllegalArgumentException("Invalid invoice discount: $declaredDiscount ₪"))
+            return Result.failure(IllegalArgumentException("Invalid invoice discount: $declaredDiscount"))
         }
-        val canonicalNet = canonicalSubtotal.subtract(declaredDiscount).setScale(2, RoundingMode.HALF_UP)
-        if (declaredNet.subtract(canonicalNet).abs() > BigDecimal("0.02")) {
-            return Result.failure(IllegalArgumentException("Invoice net total mismatch. Expected: $canonicalNet ₪, declared: $declaredNet ₪"))
+        val canonicalNet = canonicalSubtotal.subtract(declaredDiscount)
+        if (declaredNet.compareTo(canonicalNet) != 0) {
+            return Result.failure(IllegalArgumentException("Invoice net total mismatch. Expected: $canonicalNet, declared: $declaredNet"))
         }
 
         // 6. Payment & Credit limit validation
-        val tendered = BigDecimal(invoice.cashReceivedIls.toString()).setScale(2, RoundingMode.HALF_UP)
-        val remainingDebit = BigDecimal(invoice.remainingDebitIls.toString()).setScale(2, RoundingMode.HALF_UP)
+        val tendered = invoice.cashReceivedExact
+        val remainingDebit = invoice.remainingDebitExact
 
         if (tendered < BigDecimal.ZERO) {
             return Result.failure(IllegalArgumentException("Cash tendered cannot be negative."))
@@ -695,13 +693,12 @@ class OfflineDemoTraderRepository(
             // Registered customer sale: verify credit limit if debt is added
             if (remainingDebit > BigDecimal.ZERO) {
                 val cust = customer!!
-                val newBalance = BigDecimal(cust.balanceIls.toString())
-                    .add(remainingDebit)
-                    .setScale(2, RoundingMode.HALF_UP)
-                    .toDouble()
-                if (newBalance > cust.creditLimitIls) {
+                val limit = cust.creditLimitExact
+                val currentBalance = cust.balanceExact ?: BigDecimal.ZERO
+                val newBalance = currentBalance.add(remainingDebit)
+                if (limit != null && newBalance > limit) {
                     return Result.failure(
-                        IllegalStateException("تجاوز سقف الدين المحدد (${cust.creditLimitIls} ₪) للزبون ${cust.nameAr}. الرصيد الناتج: $newBalance ₪ | Sale exceeds credit limit")
+                        IllegalStateException("تجاوز سقف الدين المحدد ($limit) للزبون ${cust.nameAr}. الرصيد الناتج: $newBalance | Sale exceeds credit limit")
                     )
                 }
             }
@@ -737,10 +734,8 @@ class OfflineDemoTraderRepository(
             val newDebtAdded = remainingDebit
             val newTotalPurchases = (customer.totalPurchasesExact ?: BigDecimal.ZERO)
                 .add(declaredNet)
-                .setScale(2, RoundingMode.HALF_UP)
             val newBalance = (customer.balanceExact ?: BigDecimal.ZERO)
                 .add(newDebtAdded)
-                .setScale(2, RoundingMode.HALF_UP)
 
             customers[custIdx] = customer.copy(
                 balanceExact = newBalance,
@@ -749,17 +744,16 @@ class OfflineDemoTraderRepository(
 
             val netCashApplied = declaredNet
                 .subtract(remainingDebit)
-                .setScale(2, RoundingMode.HALF_UP)
-                .toDouble()
-                .coerceAtLeast(0.0)
+                .max(BigDecimal.ZERO)
+            val isPartialCash = netCashApplied.compareTo(BigDecimal.ZERO) > 0
             val txTypeAr = when {
-                remainingDebit <= BigDecimal("0.00") -> "فاتورة مبيعات مسددة #INV-${invoice.invoiceNumber}"
-                netCashApplied > 0.005 -> "فاتورة مبيعات مدفوعة جزئياً #INV-${invoice.invoiceNumber}"
+                remainingDebit.compareTo(BigDecimal.ZERO) <= 0 -> "فاتورة مبيعات مسددة #INV-${invoice.invoiceNumber}"
+                isPartialCash -> "فاتورة مبيعات مدفوعة جزئياً #INV-${invoice.invoiceNumber}"
                 else -> "مبيعات على الحساب #INV-${invoice.invoiceNumber}"
             }
             val txTypeEn = when {
-                remainingDebit <= BigDecimal("0.00") -> "Paid Invoice #INV-${invoice.invoiceNumber}"
-                netCashApplied > 0.005 -> "Partially Paid Invoice #INV-${invoice.invoiceNumber}"
+                remainingDebit.compareTo(BigDecimal.ZERO) <= 0 -> "Paid Invoice #INV-${invoice.invoiceNumber}"
+                isPartialCash -> "Partially Paid Invoice #INV-${invoice.invoiceNumber}"
                 else -> "Credit Sale #INV-${invoice.invoiceNumber}"
             }
 
@@ -772,9 +766,9 @@ class OfflineDemoTraderRepository(
                     typeAr = txTypeAr,
                     typeEn = txTypeEn,
                     invoiceNumber = invoice.invoiceNumber,
-                    debitIls = invoice.netTotalIls,
-                    creditIls = netCashApplied,
-                    runningBalanceIls = newBalance.toDouble(),
+                    debitExact = declaredNet,
+                    creditExact = netCashApplied,
+                    runningBalanceExact = newBalance,
                     note = invoice.customerNote
                 )
             )

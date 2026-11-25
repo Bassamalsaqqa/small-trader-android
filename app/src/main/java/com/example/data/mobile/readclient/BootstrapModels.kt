@@ -316,7 +316,8 @@ class BootstrapResponse(
     units: List<BootstrapUnit>,
     taxes: List<BootstrapTax>,
     val offlinePolicy: OfflinePolicy,
-    val catalogSnapshotVersion: String
+    val catalogSnapshotVersion: String,
+    val currencyMinorUnits: Int? = null
 ) {
     val units: List<BootstrapUnit> = Collections.unmodifiableList(units.toList())
     val taxes: List<BootstrapTax> = Collections.unmodifiableList(taxes.toList())
@@ -327,6 +328,11 @@ class BootstrapResponse(
             "base_currency must be 3 uppercase letters, got '$baseCurrency'"
         }
         validateStringBounds(catalogSnapshotVersion, "catalog_snapshot_version", minLength = 1, maxLength = 64)
+        if (currencyMinorUnits != null) {
+            require(currencyMinorUnits in 0..6) {
+                "currency_minor_units must be between 0 and 6, got $currencyMinorUnits"
+            }
+        }
 
         // Schema invariant: when offline_policy.enabled is false, device_lease MUST be null
         if (!offlinePolicy.enabled) {
@@ -348,11 +354,12 @@ class BootstrapResponse(
         units: List<BootstrapUnit> = this.units,
         taxes: List<BootstrapTax> = this.taxes,
         offlinePolicy: OfflinePolicy = this.offlinePolicy,
-        catalogSnapshotVersion: String = this.catalogSnapshotVersion
+        catalogSnapshotVersion: String = this.catalogSnapshotVersion,
+        currencyMinorUnits: Int? = this.currencyMinorUnits
     ): BootstrapResponse = BootstrapResponse(
         companyId, companyName, baseCurrency, walkInCustomerId, staff,
         deviceLease, defaultWarehouse, approvedCashAccount, units, taxes,
-        offlinePolicy, catalogSnapshotVersion
+        offlinePolicy, catalogSnapshotVersion, currencyMinorUnits
     )
 
     override fun equals(other: Any?): Boolean {
@@ -369,7 +376,8 @@ class BootstrapResponse(
                 units == other.units &&
                 taxes == other.taxes &&
                 offlinePolicy == other.offlinePolicy &&
-                catalogSnapshotVersion == other.catalogSnapshotVersion
+                catalogSnapshotVersion == other.catalogSnapshotVersion &&
+                currencyMinorUnits == other.currencyMinorUnits
     }
 
     override fun hashCode(): Int {
@@ -385,6 +393,7 @@ class BootstrapResponse(
         result = 31 * result + taxes.hashCode()
         result = 31 * result + offlinePolicy.hashCode()
         result = 31 * result + catalogSnapshotVersion.hashCode()
+        result = 31 * result + (currencyMinorUnits ?: 0)
         return result
     }
 
@@ -393,17 +402,40 @@ class BootstrapResponse(
                 "walkInCustomerId=$walkInCustomerId, staff=$staff, deviceLease=$deviceLease, " +
                 "defaultWarehouse=$defaultWarehouse, approvedCashAccount=$approvedCashAccount, " +
                 "unitsCount=${units.size}, taxesCount=${taxes.size}, offlinePolicy=$offlinePolicy, " +
-                "catalogSnapshotVersion='$catalogSnapshotVersion')"
+                "catalogSnapshotVersion='$catalogSnapshotVersion', currencyMinorUnits=$currencyMinorUnits)"
 
     companion object {
-        private val ALLOWED_KEYS = setOf(
+        /** Strict 12-key set for DEFAULT bootstrap calls (no include param). */
+        private val ALLOWED_KEYS_DEFAULT = setOf(
             "company_id", "company_name", "base_currency", "walk_in_customer_id",
             "staff", "device_lease", "default_warehouse", "approved_cash_account",
             "units", "taxes", "offline_policy", "catalog_snapshot_version"
         )
 
-        fun fromStrictJson(obj: StrictJsonObject): BootstrapResponse {
-            checkAllowedKeys(obj, ALLOWED_KEYS, "BootstrapResponse")
+        /** Strict 13-key set for REQUESTED bootstrap calls (include=currency_minor_units). */
+        private val ALLOWED_KEYS_WITH_CURRENCY = setOf(
+            "company_id", "company_name", "base_currency", "walk_in_customer_id",
+            "staff", "device_lease", "default_warehouse", "approved_cash_account",
+            "units", "taxes", "offline_policy", "catalog_snapshot_version",
+            "currency_minor_units"
+        )
+
+        /**
+         * Parses a [BootstrapResponse] from strict JSON.
+         *
+         * @param obj The strict JSON object to parse.
+         * @param includeCurrencyMinorUnits Whether the caller requested `currency_minor_units`
+         *   via the `include=currency_minor_units` query parameter. When false (DEFAULT mode),
+         *   the response MUST NOT contain `currency_minor_units` — its presence is rejected as
+         *   a strict-12 schema violation. When true (REQUESTED mode), the field MUST be present
+         *   and contain a valid integer in [0..6].
+         */
+        fun fromStrictJson(
+            obj: StrictJsonObject,
+            includeCurrencyMinorUnits: Boolean = false
+        ): BootstrapResponse {
+            val allowedKeys = if (includeCurrencyMinorUnits) ALLOWED_KEYS_WITH_CURRENCY else ALLOWED_KEYS_DEFAULT
+            checkAllowedKeys(obj, allowedKeys, "BootstrapResponse")
 
             val offlinePolicyObj = requireObject(obj, "offline_policy")
             val offlineEnabled = requireBoolean(offlinePolicyObj, "enabled")
@@ -441,6 +473,17 @@ class BootstrapResponse(
                 BootstrapTax.fromStrictJson(tObj)
             }
 
+            val currencyMinorUnits = if (includeCurrencyMinorUnits) {
+                if (!obj.properties.containsKey("currency_minor_units")) {
+                    throw CanonicalSerializationException(
+                        "currency_minor_units was requested (include=currency_minor_units) but is absent from server response"
+                    )
+                }
+                requireInt(obj, "currency_minor_units", min = 0, max = 6)
+            } else {
+                null
+            }
+
             return BootstrapResponse(
                 companyId = requireUlid(obj, "company_id"),
                 companyName = requireString(obj, "company_name", minLength = 1, maxLength = 255),
@@ -453,7 +496,8 @@ class BootstrapResponse(
                 units = units,
                 taxes = taxes,
                 offlinePolicy = offlinePolicy,
-                catalogSnapshotVersion = requireString(obj, "catalog_snapshot_version", minLength = 1, maxLength = 64)
+                catalogSnapshotVersion = requireString(obj, "catalog_snapshot_version", minLength = 1, maxLength = 64),
+                currencyMinorUnits = currencyMinorUnits
             )
         }
     }

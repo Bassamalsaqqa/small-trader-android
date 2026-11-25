@@ -78,7 +78,8 @@ data class BusinessInfo(
     val taxNumber: String = "901248731",
     val defaultCurrency: String = "ILS",
     val defaultTaxPercent: Double = 0.0, // Most small grocery / roastery items in local market retail are zero-rated / inclusive
-    val laravelSyncStatus: String = "جاهز للمزامنة مع نظام الحسابات (Laravel API v1)"
+    val laravelSyncStatus: String = "جاهز للمزامنة مع نظام الحسابات (Laravel API v1)",
+    val defaultCurrencyMinorUnits: Int = 2
 ) {
     fun name(lang: AppLanguage): String = lang.tr(nameAr, nameEn)
     fun city(lang: AppLanguage): String = lang.tr(cityAr, cityEn)
@@ -116,6 +117,7 @@ data class Product(
     val productUnitId: String? = null,
     val taxRateId: String? = null,
     val taxRateExact: BigDecimal? = null,
+    val isTaxInclusive: Boolean = false,
     val stockCountExact: BigDecimal = BigDecimal.valueOf(stockCount.toLong()),
     val minStockThresholdExact: BigDecimal? = BigDecimal.valueOf(minStockThreshold.toLong()),
     val conversionToBaseExact: BigDecimal = BigDecimal.ONE,
@@ -148,8 +150,8 @@ data class Product(
         nameEn = nameEn,
         category = category,
         barcode = barcode,
-        priceExact = if (priceIls.isNaN() || priceIls.isInfinite()) null else BigDecimal(priceIls.toString()).setScale(2, RoundingMode.HALF_UP),
-        costExact = if (costIls.isNaN() || costIls.isInfinite()) null else BigDecimal(costIls.toString()).setScale(2, RoundingMode.HALF_UP),
+        priceExact = if (priceIls.isNaN() || priceIls.isInfinite()) null else BigDecimal(priceIls.toString()),
+        costExact = if (costIls.isNaN() || costIls.isInfinite()) null else BigDecimal(costIls.toString()),
         unitAr = unitAr,
         unitEn = unitEn,
         stockCount = stockCount,
@@ -163,6 +165,7 @@ data class Product(
         productUnitId = null,
         taxRateId = null,
         taxRateExact = null,
+        isTaxInclusive = false,
         stockCountExact = BigDecimal.valueOf(stockCount.toLong()),
         minStockThresholdExact = BigDecimal.valueOf(minStockThreshold.toLong()),
         conversionToBaseExact = BigDecimal.ONE,
@@ -190,6 +193,7 @@ data class Product(
         productUnitId: String? = null,
         taxRateId: String? = null,
         taxRateExact: BigDecimal? = null,
+        isTaxInclusive: Boolean = false,
         conversionToBaseExact: BigDecimal = BigDecimal.ONE,
         sku: String? = null
     ) : this(
@@ -213,6 +217,7 @@ data class Product(
         productUnitId = productUnitId,
         taxRateId = taxRateId,
         taxRateExact = taxRateExact,
+        isTaxInclusive = isTaxInclusive,
         stockCountExact = stockCountExact,
         minStockThresholdExact = minStockThresholdExact,
         conversionToBaseExact = conversionToBaseExact,
@@ -253,19 +258,40 @@ data class Product(
 data class BasketItem(
     val product: Product,
     val quantity: BigDecimal,
-    val unitPriceExact: BigDecimal = product.priceExact ?: BigDecimal.ZERO
+    val unitPriceExact: BigDecimal = product.priceExact ?: BigDecimal.ZERO,
+    val taxRateId: String? = product.taxRateId,
+    val taxRateExact: BigDecimal? = product.taxRateExact,
+    val isTaxInclusive: Boolean = product.isTaxInclusive
 ) {
     constructor(product: Product, quantity: Int) : this(
         product = product,
         quantity = BigDecimal.valueOf(quantity.toLong()),
-        unitPriceExact = product.priceExact ?: BigDecimal.ZERO
+        unitPriceExact = product.priceExact ?: BigDecimal.ZERO,
+        taxRateId = product.taxRateId,
+        taxRateExact = product.taxRateExact,
+        isTaxInclusive = product.isTaxInclusive
     )
 
+    val lineTotalExact: BigDecimal
+        get() {
+            val rawSubtotal = quantity.multiply(unitPriceExact)
+            val taxRate = if (taxRateId != null) (taxRateExact ?: BigDecimal.ZERO) else BigDecimal.ZERO
+            if (taxRateId == null || taxRate.compareTo(BigDecimal.ZERO) == 0) {
+                return rawSubtotal
+            }
+            if (isTaxInclusive) {
+                return rawSubtotal
+            }
+            val rate = taxRate.divide(BigDecimal(100), 8, RoundingMode.HALF_UP)
+            val tax = rawSubtotal.multiply(rate)
+            return rawSubtotal.add(tax)
+        }
+
     val lineTotalDecimal: BigDecimal
-        get() = quantity.multiply(unitPriceExact).setScale(2, RoundingMode.HALF_UP)
+        get() = lineTotalExact
 
     val lineTotal: Double
-        get() = lineTotalDecimal.toDouble()
+        get() = lineTotalExact.toDouble()
 }
 
 data class SaleDraft(

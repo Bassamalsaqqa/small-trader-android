@@ -288,7 +288,8 @@ fun SmallTraderApp(
                                 onEditInvoice = { traderViewModel.navigateTo(TraderScreen.INVOICE_REVIEW) },
                                 onCompleteSale = { traderViewModel.completeCashSale(asCreditDebt = false) },
                                 onCompleteCreditSale = { traderViewModel.completeCashSale(asCreditDebt = true) },
-                                onSearchCustomers = traderViewModel::searchCustomers
+                                onSearchCustomers = traderViewModel::searchCustomers,
+                                onCheckHeldStatus = traderViewModel::checkHeldSaleStatus
                             )
                         }
 

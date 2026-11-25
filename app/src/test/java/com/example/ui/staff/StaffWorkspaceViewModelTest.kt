@@ -22,6 +22,8 @@ import com.example.data.mobile.readclient.ProductCatalogItem
 import com.example.data.mobile.readclient.ProductCatalogResponse
 import com.example.data.mobile.readclient.ProductDefaultUnit
 import com.example.data.mobile.contract.CanonicalJsonSerializer
+import com.example.data.mobile.contract.StrictJsonObject
+import com.example.data.mobile.contract.StrictJsonNumber
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.readclient.HttpMethod
 import com.example.data.mobile.readclient.ReadClientTransport
@@ -528,6 +530,13 @@ class StaffWorkspaceViewModelTest {
         val tempDir: File
     )
 
+    private fun loadBootstrapJson(fixtures: File, minorUnits: Int = 2): String {
+        val raw = File(fixtures, "golden-bootstrap.json").readText(Charsets.UTF_8)
+        val obj = StrictJsonParser.parse(raw).asObject().properties.toMutableMap()
+        obj["currency_minor_units"] = StrictJsonNumber(minorUnits.toString(), isInt = true)
+        return CanonicalJsonSerializer.serialize(StrictJsonObject(obj))
+    }
+
     private fun setupRealCoordinator(): RealCoordinatorEnv {
         val tempDir = File.createTempFile("vm_test_", "_dir").apply {
             delete()
@@ -562,7 +571,7 @@ class StaffWorkspaceViewModelTest {
             val challengeRes = StrictJsonParser.parse(challengeJson).asObject().require("response")
             val loginJson = File(fixtures, "golden-auth-login.json").readText(Charsets.UTF_8)
             val loginRes = StrictJsonParser.parse(loginJson).asObject().require("response")
-            val bootstrapJson = File(fixtures, "golden-bootstrap.json").readText(Charsets.UTF_8)
+            val bootstrapJson = loadBootstrapJson(fixtures)
             val productJson = File(fixtures, "golden-product-catalog.json").readText(Charsets.UTF_8)
             val customerJson = File(fixtures, "golden-customer-directory.json").readText(Charsets.UTF_8)
 
@@ -632,7 +641,7 @@ class StaffWorkspaceViewModelTest {
             val fixtures = locateFixturesDir()
             val loginJson = File(fixtures, "golden-auth-login.json").readText(Charsets.UTF_8)
             val loginRes = StrictJsonParser.parse(loginJson).asObject().require("response")
-            val bootstrapJson = File(fixtures, "golden-bootstrap.json").readText(Charsets.UTF_8)
+            val bootstrapJson = loadBootstrapJson(fixtures)
             val productJson = File(fixtures, "golden-product-catalog.json").readText(Charsets.UTF_8)
             val customerJson = File(fixtures, "golden-customer-directory.json").readText(Charsets.UTF_8)
 
@@ -725,7 +734,7 @@ class StaffWorkspaceViewModelTest {
             val challengeRes = StrictJsonParser.parse(challengeJson).asObject().require("response")
             val loginJson = File(fixtures, "golden-auth-login.json").readText(Charsets.UTF_8)
             val loginRes = StrictJsonParser.parse(loginJson).asObject().require("response")
-            val bootstrapJson = File(fixtures, "golden-bootstrap.json").readText(Charsets.UTF_8)
+            val bootstrapJson = loadBootstrapJson(fixtures)
             val productJson = File(fixtures, "golden-product-catalog.json").readText(Charsets.UTF_8)
             val customerJson = File(fixtures, "golden-customer-directory.json").readText(Charsets.UTF_8)
 
@@ -788,7 +797,7 @@ class StaffWorkspaceViewModelTest {
             val loginRes = StrictJsonParser.parse(loginJson).asObject().require("response")
             val logoutJson = File(fixtures, "golden-auth-logout.json").readText(Charsets.UTF_8)
             val logoutRes = StrictJsonParser.parse(logoutJson).asObject().require("response")
-            val bootstrapJson = File(fixtures, "golden-bootstrap.json").readText(Charsets.UTF_8)
+            val bootstrapJson = loadBootstrapJson(fixtures)
             val productJson = File(fixtures, "golden-product-catalog.json").readText(Charsets.UTF_8)
             val customerJson = File(fixtures, "golden-customer-directory.json").readText(Charsets.UTF_8)
 
@@ -847,7 +856,7 @@ class StaffWorkspaceViewModelTest {
             val challengeRes = StrictJsonParser.parse(challengeJson).asObject().require("response")
             val loginJson = File(fixtures, "golden-auth-login.json").readText(Charsets.UTF_8)
             val loginRes = StrictJsonParser.parse(loginJson).asObject().require("response")
-            val bootstrapJson = File(fixtures, "golden-bootstrap.json").readText(Charsets.UTF_8)
+            val bootstrapJson = loadBootstrapJson(fixtures)
             val productJson = File(fixtures, "golden-product-catalog.json").readText(Charsets.UTF_8)
             val customerJson = File(fixtures, "golden-customer-directory.json").readText(Charsets.UTF_8)
 

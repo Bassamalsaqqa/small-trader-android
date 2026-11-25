@@ -455,6 +455,7 @@ class ProductionTraderRepository(
         phone = "",
         taxNumber = "",
         defaultCurrency = baseCurrency,
+        defaultCurrencyMinorUnits = currencyMinorUnits,
         defaultTaxPercent = 0.0,
         laravelSyncStatus = "متصل بالخادم (Laravel Mobile API v1/v2)"
     )
@@ -1357,14 +1358,46 @@ class ProductionTraderRepository(
             // Exact unit price from basket item override (not un-overridden catalog price)
             val priceStr = basketItem.unitPriceExact.setScale(6, RoundingMode.HALF_UP).toPlainString()
 
-            // ExplicitNoTax constraint: if taxRateId is null, taxRate must be "0.000000" and taxInclusive false
-            val taxRateId = basketItem.product.taxRateId?.let { if (ServerUlid.isValid(it)) ServerUlid.parse(it) else null }
-            val taxRateStr = if (taxRateId != null) {
-                basketItem.product.taxRateExact?.setScale(6, RoundingMode.HALF_UP)?.toPlainString() ?: "0.000000"
+            // Explicit coherent chosen tax basis/model: honor line-level taxRateId, preserve null noTax semantics
+            val chosenTaxRateId = basketItem.taxRateId
+            val taxRateId: ServerUlid?
+            val taxRateStr: String
+            val taxInclusive: Boolean
+
+            if (chosenTaxRateId == null) {
+                // ExplicitNoTax constraint: if taxRateId is null, taxRate must be "0.000000" and taxInclusive false
+                if (basketItem.taxRateExact != null && basketItem.taxRateExact.compareTo(BigDecimal.ZERO) != 0) {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("Line '${basketItem.product.nameAr}': Inconsistent tax model - taxRateId is null (no tax) but taxRateExact is ${basketItem.taxRateExact}")
+                    )
+                }
+                if (basketItem.isTaxInclusive) {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("Line '${basketItem.product.nameAr}': Inconsistent tax model - taxRateId is null (no tax) but isTaxInclusive is true")
+                    )
+                }
+                taxRateId = null
+                taxRateStr = "0.000000"
+                taxInclusive = false
             } else {
-                "0.000000"
+                if (!ServerUlid.isValid(chosenTaxRateId)) {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("Line '${basketItem.product.nameAr}': Invalid tax_rate_id ULID '$chosenTaxRateId'")
+                    )
+                }
+                taxRateId = ServerUlid.parse(chosenTaxRateId)
+                val rate = basketItem.taxRateExact
+                    ?: return@withContext Result.failure(
+                        IllegalArgumentException("Line '${basketItem.product.nameAr}': taxRateExact is required when taxRateId is non-null")
+                    )
+                if (rate < BigDecimal.ZERO || rate > BigDecimal("100")) {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("Line '${basketItem.product.nameAr}': taxRateExact out of bounds [0..100]: $rate")
+                    )
+                }
+                taxRateStr = rate.setScale(6, RoundingMode.HALF_UP).toPlainString()
+                taxInclusive = basketItem.isTaxInclusive
             }
-            val taxInclusive = false
 
             lines.add(
                 OnlineSaleIntentLine(
@@ -3796,7 +3829,7 @@ class ProductionTraderRepository(
             val phone = settingsObj?.properties?.get("phone")?.asString() ?: ""
             val taxNumber = settingsObj?.properties?.get("tax_number")?.asString() ?: ""
 
-            val cmu = authoritativeMinorUnits ?: run {
+            val cmu = authoritativeMinorUnits ?: bootstrap.currencyMinorUnits ?: run {
                 val elem = settingsObj?.properties?.get("default_currency_minor_units")
                     ?: throw (settingsRes.exceptionOrNull() ?: IllegalStateException("Missing currency precision in business settings"))
                 val parsed = when (elem) {
@@ -3816,6 +3849,7 @@ class ProductionTraderRepository(
                 phone = phone,
                 taxNumber = taxNumber,
                 defaultCurrency = bootstrap.baseCurrency,
+                defaultCurrencyMinorUnits = cmu,
                 defaultTaxPercent = 0.0,
                 laravelSyncStatus = "متصل بالخادم (Laravel Mobile API v1/v2)"
             )
