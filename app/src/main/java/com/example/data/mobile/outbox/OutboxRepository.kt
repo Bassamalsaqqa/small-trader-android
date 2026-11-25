@@ -299,6 +299,13 @@ interface OutboxRepository {
      * under the given lease where delivery status is not yet 'confirmed'.
      * Survives restarts and process kills as it is queried directly from persistent Room storage.
      */
+    /** Reserve lifetime capacity and immutable receipt in the same SQLite transaction. */
+    fun captureLeaseSale(
+        lease: com.example.data.mobile.contract.v2.OfflineSaleLease,
+        event: OfflineSaleEventV2,
+        validateScope: () -> Unit
+    ): CaptureResult
+
     fun getPendingOfflineSalesBudget(
         companyId: ServerUlid,
         actorId: ServerUlid,
@@ -1328,6 +1335,30 @@ class OutboxRepositoryImpl(
         ).map { decryptRecord(it) }
     }
 
+    override fun captureLeaseSale(
+        lease: com.example.data.mobile.contract.v2.OfflineSaleLease,
+        event: OfflineSaleEventV2,
+        validateScope: () -> Unit
+    ): CaptureResult = database.runInTransaction<CaptureResult> {
+        validateScope()
+        require(event.companyId == lease.companyId && event.actorId == lease.actorId &&
+            event.deviceId == lease.deviceId && event.deviceLeaseId == lease.leaseId)
+        val existing = getRecord(event.companyId, event.actorId, event.deviceId, event.clientEventId)
+        if (existing != null) {
+            val saved = OfflineSaleEventV2.fromStrictJson(StrictJsonParser.parseObject(String(existing.payloadBytes, StandardCharsets.UTF_8)))
+            return@runInTransaction captureSaleV2(event.companyId, event.actorId, event.deviceId,
+                lease.currencyMinorUnits, event.copy(localReceiptNumber = saved.localReceiptNumber))
+        }
+        val (count, total) = getPendingOfflineSalesBudget(lease.companyId, lease.actorId, lease.deviceId, lease.leaseId)
+        // Local immutable history includes confirmed and rejected cash. Sync never replenishes it.
+        require(lease.postedSalesCount.toLong() + count + 1 <= lease.maxOfflineSalesCount) { "Offline sale count exhausted" }
+        require(lease.postedTotalAmount.add(total).add(event.payment.amountSettled.value) <= lease.maxOfflineTotalAmount) { "Offline sale amount exhausted" }
+        val numbered = event.copy(localReceiptNumber = "LOCAL-${lease.leaseId.value}-${count + 1}")
+        val result = captureSaleV2(numbered.companyId, numbered.actorId, numbered.deviceId, lease.currencyMinorUnits, numbered)
+        validateScope()
+        result
+    }
+
     override fun getPendingOfflineSalesBudget(
         companyId: ServerUlid,
         actorId: ServerUlid,
@@ -1338,14 +1369,11 @@ class OutboxRepositoryImpl(
         var pendingCount = 0
         var pendingTotal = BigDecimal.ZERO
         for (record in records) {
-            if (record.event.deviceLeaseId == deviceLeaseId.value && record.deliveryState.status != "confirmed") {
+            if (record.event.deviceLeaseId == deviceLeaseId.value) {
                 pendingCount++
-                try {
-                    val json = StrictJsonParser.parseObject(String(record.event.payloadBytes, StandardCharsets.UTF_8))
-                    val event = OfflineSaleEventV2.fromStrictJson(json)
-                    pendingTotal = pendingTotal.add(event.payment.amountSettled.value)
-                } catch (_: Exception) {
-                }
+                val json = StrictJsonParser.parseObject(String(record.event.payloadBytes, StandardCharsets.UTF_8))
+                val event = OfflineSaleEventV2.fromStrictJson(json)
+                pendingTotal = pendingTotal.add(event.payment.amountSettled.value)
             }
         }
         return Pair(pendingCount, pendingTotal)

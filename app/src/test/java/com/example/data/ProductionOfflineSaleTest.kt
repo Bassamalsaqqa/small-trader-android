@@ -70,7 +70,7 @@ class ProductionOfflineSaleTest {
     fun test1_airplaneEquivalentNetworkOffCapture() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
             val repo = repository(server, outbox, leaseStore = leaseStore)
             repo.clock = { fixedClockMillis }
             val vm = TraderViewModel(repo)
@@ -113,7 +113,7 @@ class ProductionOfflineSaleTest {
                 assertEquals(2, server.requestCount)
 
                 // Assert offline local pending receipt semantics
-                assertEquals("LOCAL-1", receipt.localReceiptNumber)
+                assertEquals("LOCAL-${leaseId.value}-1", receipt.localReceiptNumber)
                 assertNull(receipt.serverInvoiceNumber)
                 assertNull(receipt.serverInvoiceUlid)
                 assertEquals("pending", receipt.outboxStatus)
@@ -134,7 +134,7 @@ class ProductionOfflineSaleTest {
     fun test2_severalQueuedOfflineSales() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
             val repo = repository(server, outbox, leaseStore = leaseStore)
             repo.clock = { fixedClockMillis }
             val vm = TraderViewModel(repo)
@@ -160,8 +160,8 @@ class ProductionOfflineSaleTest {
                 vm.selectSaleLineTax(item.id, null)
                 vm.updateCashInputText("10.00")
                 vm.completeCashSale()
-                val receipt1 = await(vm) { it.activeReceipt?.localReceiptNumber == "LOCAL-1" }.activeReceipt!!
-                assertEquals("LOCAL-1", receipt1.localReceiptNumber)
+                val receipt1 = await(vm) { it.activeReceipt?.localReceiptNumber == "LOCAL-${leaseId.value}-1" }.activeReceipt!!
+                assertEquals("LOCAL-${leaseId.value}-1", receipt1.localReceiptNumber)
 
                 // Sale 2
                 vm.startFreshSale()
@@ -169,8 +169,8 @@ class ProductionOfflineSaleTest {
                 vm.selectSaleLineTax(item.id, null)
                 vm.updateCashInputText("15.00")
                 vm.completeCashSale()
-                val receipt2 = await(vm) { it.activeReceipt?.localReceiptNumber == "LOCAL-2" }.activeReceipt!!
-                assertEquals("LOCAL-2", receipt2.localReceiptNumber)
+                val receipt2 = await(vm) { it.activeReceipt?.localReceiptNumber == "LOCAL-${leaseId.value}-2" }.activeReceipt!!
+                assertEquals("LOCAL-${leaseId.value}-2", receipt2.localReceiptNumber)
 
                 // Sale 3
                 vm.startFreshSale()
@@ -178,8 +178,8 @@ class ProductionOfflineSaleTest {
                 vm.selectSaleLineTax(item.id, null)
                 vm.updateCashInputText("20.00")
                 vm.completeCashSale()
-                val receipt3 = await(vm) { it.activeReceipt?.localReceiptNumber == "LOCAL-3" }.activeReceipt!!
-                assertEquals("LOCAL-3", receipt3.localReceiptNumber)
+                val receipt3 = await(vm) { it.activeReceipt?.localReceiptNumber == "LOCAL-${leaseId.value}-3" }.activeReceipt!!
+                assertEquals("LOCAL-${leaseId.value}-3", receipt3.localReceiptNumber)
 
                 // Assert zero network requests for the 3 offline sales
                 assertEquals(2, server.requestCount)
@@ -199,7 +199,7 @@ class ProductionOfflineSaleTest {
         // Step 1: Capture 2 sales in process 1
         withDatabase(file) { db1 ->
             val outbox1 = outbox(db1)
-            val leaseStore1 = SqliteOfflineLeaseStore { db1.openHelper.writableDatabase }
+            val leaseStore1 = SqliteOfflineLeaseStore(crypto) { db1.openHelper.writableDatabase }
             val repo1 = repository(server, outbox1, leaseStore = leaseStore1)
             repo1.clock = { fixedClockMillis }
 
@@ -240,7 +240,7 @@ class ProductionOfflineSaleTest {
         // Step 2: Open fresh database and fresh repository instance from the same disk file
         withDatabase(file) { db2 ->
             val outbox2 = outbox(db2)
-            val leaseStore2 = SqliteOfflineLeaseStore { db2.openHelper.writableDatabase }
+            val leaseStore2 = SqliteOfflineLeaseStore(crypto) { db2.openHelper.writableDatabase }
             val repo2 = repository(server, outbox2, leaseStore = leaseStore2)
             repo2.clock = { fixedClockMillis }
             repo2.isOfflineSalesCapabilityEnabled = true
@@ -257,8 +257,8 @@ class ProductionOfflineSaleTest {
 
                 val pending = repo2.getPendingOfflineSales()
                 assertEquals(2, pending.size)
-                assertEquals("LOCAL-1", pending[0].localReceiptNumber)
-                assertEquals("LOCAL-2", pending[1].localReceiptNumber)
+                assertEquals("LOCAL-${leaseId.value}-1", pending[0].localReceiptNumber)
+                assertEquals("LOCAL-${leaseId.value}-2", pending[1].localReceiptNumber)
             } finally {
                 repo2.close()
             }
@@ -269,7 +269,7 @@ class ProductionOfflineSaleTest {
     fun test4_statusLostAckRecovery() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
             val repo = repository(server, outbox, leaseStore = leaseStore)
             repo.clock = { fixedClockMillis }
 
@@ -335,7 +335,7 @@ class ProductionOfflineSaleTest {
     fun test5_leaseExpiryFailClosedClockUncertainty() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
             val repo = repository(server, outbox, leaseStore = leaseStore)
             repo.clock = { fixedClockMillis }
 
@@ -372,7 +372,7 @@ class ProductionOfflineSaleTest {
                 assertTrue(resultExpired.exceptionOrNull()!!.message!!.contains("No active valid offline sale lease"))
 
                 // 2. Clock moved backwards before issuedAt (clock uncertainty / backwards skew, e.g. 07:00 UTC)
-                val backwardsMillis = 1795590000000L
+                val backwardsMillis = fixedClockMillis // Returning inside the original validity window must not revive expiry
                 repo.clock = { backwardsMillis }
                 assertNull(repo.getActiveOfflineSaleLease())
                 val resultSkew = runBlocking { repo.recordSale(inv) }
@@ -388,7 +388,7 @@ class ProductionOfflineSaleTest {
     fun test6_leaseRevocationConflict() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
             val repo = repository(server, outbox, leaseStore = leaseStore)
             repo.clock = { fixedClockMillis }
 
@@ -441,7 +441,7 @@ class ProductionOfflineSaleTest {
                 // Rejected cash is preserved in UI query for owner supervision
                 val rejected = repo.getRejectedCashSales()
                 assertEquals(1, rejected.size)
-                assertEquals("LOCAL-1", rejected[0].localReceiptNumber)
+                assertEquals("LOCAL-${leaseId.value}-1", rejected[0].localReceiptNumber)
                 assertEquals(BigDecimal("10.00"), rejected[0].netTotalExact)
             } finally {
                 repo.close()
@@ -453,7 +453,7 @@ class ProductionOfflineSaleTest {
     fun test7_stockConflict() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
             val repo = repository(server, outbox, leaseStore = leaseStore)
             repo.clock = { fixedClockMillis }
 
@@ -510,7 +510,7 @@ class ProductionOfflineSaleTest {
     fun test8_budgetLimitsEnforcedFailClosed() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
             val repo = repository(server, outbox, leaseStore = leaseStore)
             repo.clock = { fixedClockMillis }
 
@@ -536,7 +536,7 @@ class ProductionOfflineSaleTest {
                     netTotalExact = BigDecimal("10.00"), cashReceivedExact = BigDecimal("10.00"), changeReturnedExact = BigDecimal.ZERO,
                     customerNote = "", cashierNameAr = "User", cashierNameEn = "User"
                 )
-                runBlocking { repo.recordSale(inv1).getOrThrow() }
+                val first = runBlocking { repo.recordSale(inv1).getOrThrow() }
 
                 // Sale 2: 10.00 (Count = 2, Total = 20.00) -> SUCCESS
                 val inv2 = InvoiceRecord(
@@ -545,7 +545,23 @@ class ProductionOfflineSaleTest {
                     netTotalExact = BigDecimal("10.00"), cashReceivedExact = BigDecimal("10.00"), changeReturnedExact = BigDecimal.ZERO,
                     customerNote = "", cashierNameAr = "User", cashierNameEn = "User"
                 )
-                runBlocking { repo.recordSale(inv2).getOrThrow() }
+                val firstRecord = outbox.getRecord(companyA, actor, device, ClientUuid.parse(first.clientEventId!!))!!
+                val template = OfflineSaleEventV2.fromStrictJson(StrictJsonParser.parseObject(String(firstRecord.payloadBytes, Charsets.UTF_8)))
+                val activeLease = leaseStore.getLease(companyA, actor, device)!!
+                withDatabase(file) { secondDb ->
+                    val secondOutbox = outbox(secondDb)
+                    val executor = java.util.concurrent.Executors.newFixedThreadPool(2)
+                    try {
+                        val tasks = listOf(outbox, secondOutbox).map { storage ->
+                            executor.submit<Boolean> {
+                                runCatching { storage.captureLeaseSale(activeLease, template.copy(clientEventId = ClientUuid.random())) {} }.isSuccess
+                            }
+                        }
+                        assertEquals(1, tasks.count { it.get(10, TimeUnit.SECONDS) })
+                    } finally { executor.shutdownNow() }
+                }
+                // Delivery acknowledgement must never replenish the two consumed slots.
+                db.openHelper.writableDatabase.execSQL("UPDATE outbox_delivery_states SET status='confirmed'")
 
                 // Sale 3: Count would become 3 > 2 -> FAILS CLOSED
                 val inv3 = InvoiceRecord(
@@ -559,8 +575,10 @@ class ProductionOfflineSaleTest {
                 assertTrue(resultCountLimit.exceptionOrNull()!!.message!!.contains("Exceeded max offline sales count limit"))
 
                 // Verify outbox remains at 2 sales
-                assertEquals(2, repo.getPendingOfflineSalesCount())
-                assertEquals(BigDecimal("20.00"), repo.getPendingOfflineSalesTotal())
+                assertEquals(0, repo.getPendingOfflineSalesCount())
+                val lifetime = outbox.getPendingOfflineSalesBudget(companyA, actor, device, leaseId)
+                assertEquals(2, lifetime.first)
+                assertEquals(0, BigDecimal("20.00").compareTo(lifetime.second))
             } finally {
                 repo.close()
             }
@@ -571,7 +589,7 @@ class ProductionOfflineSaleTest {
     fun test9_tenantSwitchIsolation() = withFixture { server, file ->
         withDatabase(file) { db ->
             val outbox = outbox(db)
-            val leaseStore = SqliteOfflineLeaseStore { db.openHelper.writableDatabase }
+            val leaseStore = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
 
             // Company A setup and offline sale capture
             val repoA = repository(server, outbox, scope = authA, leaseStore = leaseStore)
@@ -649,6 +667,23 @@ class ProductionOfflineSaleTest {
         )
     }
 
+    @Test
+    fun encryptedLeaseRejectsMetadataAndScopeTampering() = withFixture { _, file ->
+        withDatabase(file) { db ->
+            val store = SqliteOfflineLeaseStore(crypto) { db.openHelper.writableDatabase }
+            val lease = OfflineSaleLease.fromStrictJson(StrictJsonParser.parseObject(leaseResponse()))
+            store.saveLease(lease, true)
+            assertNotNull(store.getLease(companyA, actor, device))
+            db.openHelper.writableDatabase.execSQL("UPDATE offline_sale_leases SET is_catalog_complete=0")
+            assertNull(store.getLease(companyA, actor, device))
+            assertNull(store.getVerifiedCatalogSnapshotVersion(companyA, actor, device))
+            store.saveLease(lease, true)
+            db.openHelper.writableDatabase.execSQL("UPDATE offline_sale_leases SET company_id=?", arrayOf(companyB.value))
+            assertNull(store.getLease(companyB, actor, device))
+            assertNull(store.getLease(companyA, actor, device))
+        }
+    }
+
     private fun withFixture(body: (MockWebServer, File) -> Unit) {
         val dbFile = File(context.filesDir, "offline-sale-${ClientUuid.random().value}.db")
         MockWebServer().use { server ->
@@ -662,9 +697,20 @@ class ProductionOfflineSaleTest {
     }
 
     private fun <T> withDatabase(file: File, body: (OutboxDatabase) -> T): T {
-        val db = OutboxDatabase.buildDatabase(context, file.absolutePath, allowMainThreadQueries = true)
+        val db = OutboxDatabase.buildDatabase(context, file.absolutePath)
         return try {
-            body(db)
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+                try {
+                    val result = executor.submit<T> { body(db) }
+                    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60)
+                    while (!result.isDone && System.nanoTime() < deadline) {
+                        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) ShadowLooper.idleMainLooper()
+                        Thread.sleep(5)
+                    }
+                    result.get(1, TimeUnit.SECONDS)
+                } finally { executor.shutdownNow() }
+            } else runBlocking(kotlinx.coroutines.Dispatchers.IO) { body(db) }
         } finally {
             db.close()
         }
@@ -691,7 +737,7 @@ class ProductionOfflineSaleTest {
     private fun await(vm: TraderViewModel, ready: (TraderUiState) -> Boolean): TraderUiState {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
         do {
-            ShadowLooper.idleMainLooper()
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) ShadowLooper.idleMainLooper()
             val state = vm.uiState.value
             if (ready(state)) return state
             Thread.sleep(5)

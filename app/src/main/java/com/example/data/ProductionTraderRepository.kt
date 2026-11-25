@@ -163,7 +163,7 @@ class ProductionTraderRepository(
     val commandStore: MerchantCommandStore,
     private val merchantReadClient: MerchantReadClient? = null,
     private val autoRefresh: Boolean = true,
-    val offlineLeaseStore: OfflineLeaseStore = InMemoryOfflineLeaseStore()
+    val offlineLeaseStore: OfflineLeaseStore
 ) : TraderRepository {
 
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
@@ -179,7 +179,7 @@ class ProductionTraderRepository(
     init {
         require(currencyMinorUnits in 0..6) { "Missing or invalid business currency precision" }
         require(ContractConstants.CURRENCY_CODE_REGEX.matches(baseCurrency)) { "Missing or invalid business currency" }
-        _activeOfflineLeaseFlow.value = offlineLeaseStore.getLease(companyId, actorId, deviceId)
+        scope.launch { _activeOfflineLeaseFlow.value = offlineLeaseStore.getLease(companyId, actorId, deviceId) }
     }
 
     private fun requireActiveScope(): CurrentAuthScope {
@@ -581,6 +581,14 @@ class ProductionTraderRepository(
 
     init {
         rehydrateCompletedShiftClose()
+        scope.launch {
+            val pages = offlineLeaseStore.getCatalogPages(companyId, actorId, deviceId)
+            if (pages.isNotEmpty()) {
+                val products = pages.flatMap { bytes -> com.example.data.mobile.readclient.ProductCatalogResponse.fromStrictJson(StrictJsonParser.parseObject(String(bytes, Charsets.UTF_8))).products }
+                requireActiveScope()
+                _productsFlow.value = products.map { mapProductFromCatalog(it) }
+            }
+        }
         if (autoRefresh) refreshFromBackend()
     }
 
@@ -634,21 +642,50 @@ class ProductionTraderRepository(
         }
     }
 
+    /** Explicit owner-configured bounds; coroutine cancellation preserves the last complete snapshot. */
+    suspend fun prepareOfflineCatalog(maxPages: Int, maxProducts: Int, progress: (Int) -> Unit): Result<Unit> = withContext(ioDispatcher) {
+        try {
+            requireActiveScope()
+            require(isOfflineSalesCapabilityEnabled && !isNetworkOffline)
+            require(maxPages > 0 && maxProducts > 0)
+            val pages = ArrayList<ByteArray>()
+            val products = ArrayList<Product>()
+            val cursors = HashSet<String>()
+            var cursor: String? = null
+            var version: String? = null
+            do {
+                kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { if (!it.isActive) throw kotlinx.coroutines.CancellationException() }
+                require(pages.size < maxPages) { "Offline preparation page limit reached" }
+                val page = apiClient.getProducts(companyId, limit = 50, cursor = cursor, snapshotVersion = version,
+                    verifiedBytes = { pages.add(it) }).getOrThrow()
+                require(page.companyId == companyId)
+                if (version == null) version = page.catalogSnapshotVersion
+                require(page.catalogSnapshotVersion == version)
+                products.addAll(page.products.map { mapProductFromCatalog(it) })
+                require(products.size <= maxProducts) { "Offline preparation product limit reached" }
+                progress(products.size)
+                cursor = if (page.hasMore) requireNotNull(page.nextCursor) else null
+                if (cursor != null) require(cursors.add(cursor)) { "Catalog cursor repeated" }
+            } while (cursor != null)
+            requireActiveScope()
+            offlineLeaseStore.saveCatalogPages(companyId, actorId, deviceId, requireNotNull(version), pages)
+            _productsFlow.value = products
+            Result.success(Unit)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (error: Exception) { Result.failure(error) }
+    }
+
     override suspend fun refreshProducts(): Result<Unit> = withContext(ioDispatcher) {
         try {
             requireActiveScope()
-            val page = apiClient.getProducts(companyId, limit = 50).getOrThrow()
+            var verifiedPage: ByteArray? = null
+            val page = apiClient.getProducts(companyId, limit = 50, verifiedBytes = { verifiedPage = it }).getOrThrow()
             require(page.companyId == companyId)
             val mapped = page.products.map { item -> mapProductFromCatalog(item) }
             _productsFlow.value = mapped
             _productsHasMoreFlow.value = page.hasMore
-            offlineLeaseStore.saveVerifiedCatalogSnapshot(
-                companyId = companyId,
-                actorId = actorId,
-                deviceId = deviceId,
-                snapshotVersion = page.catalogSnapshotVersion,
-                isComplete = !page.hasMore
-            )
+            if (!page.hasMore) offlineLeaseStore.saveCatalogPages(companyId, actorId, deviceId,
+                page.catalogSnapshotVersion, listOf(requireNotNull(verifiedPage)))
             Result.success(Unit)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
@@ -700,7 +737,7 @@ class ProductionTraderRepository(
         try {
             val res = apiClient.getCustomers(companyId, search = trimmed, limit = 30)
             if (res.isSuccess) {
-                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { if (!it.isActive) throw kotlinx.coroutines.CancellationException() }
                 check(requireActiveScope() == before) { "Session changed during customer search" }
                 val page = res.getOrThrow()
                 val list = page.customers.map { item ->
@@ -743,7 +780,7 @@ class ProductionTraderRepository(
         try {
             val res = apiClient.getProducts(companyId, limit = limit, search = trimmed)
             if (res.isSuccess) {
-                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { if (!it.isActive) throw kotlinx.coroutines.CancellationException() }
                 check(requireActiveScope() == before) { "Session changed during product search" }
                 val page = res.getOrThrow()
                 val list = page.products.map { item -> mapProductFromCatalog(item) }
@@ -766,7 +803,7 @@ class ProductionTraderRepository(
         try {
             val res = apiClient.getSuppliers(companyId, search = search)
             if (res.isSuccess) {
-                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { if (!it.isActive) throw kotlinx.coroutines.CancellationException() }
                 check(requireActiveScope() == before) { "Session changed during supplier refresh" }
 
                 val root = res.getOrThrow()
@@ -834,7 +871,7 @@ class ProductionTraderRepository(
         try {
             val res = apiClient.getSuppliers(companyId, search = trimmed, limit = 50)
             if (res.isSuccess) {
-                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { if (!it.isActive) throw kotlinx.coroutines.CancellationException() }
                 check(requireActiveScope() == before) { "Session changed during supplier search" }
                 val root = res.getOrThrow()
                 val dataElem = root.properties["suppliers"] ?: root.properties["data"] ?: root.properties["items"]
@@ -1388,6 +1425,7 @@ class ProductionTraderRepository(
     fun getActiveOfflineSaleLease(): OfflineSaleLease? {
         val lease = offlineLeaseStore.getLease(companyId, actorId, deviceId) ?: return null
         if (!lease.isTimeValid(clock())) {
+            offlineLeaseStore.clearLease(companyId, actorId, deviceId)
             return null
         }
         return lease
@@ -1406,6 +1444,7 @@ class ProductionTraderRepository(
             if (snapshotVersion == null || !isComplete) {
                 return@withContext Result.failure(IllegalStateException("Product catalog is incomplete or missing for offline sales"))
             }
+            val requestElapsed = android.os.SystemClock.elapsedRealtime()
             val result = apiClient.acquireOfflineSaleLease(companyId, snapshotVersion)
             if (result.isFailure) {
                 return@withContext Result.failure(result.exceptionOrNull()!!)
@@ -1414,10 +1453,12 @@ class ProductionTraderRepository(
             require(lease.companyId == companyId && lease.actorId == actorId && lease.deviceId == deviceId) {
                 "Acquired lease scope mismatch"
             }
+            require(lease.catalogSnapshotVersion == snapshotVersion) { "Acquired lease catalog mismatch" }
+            requireActiveScope()
             require(lease.currency == baseCurrency && lease.currencyMinorUnits == currencyMinorUnits) {
                 "Acquired lease currency mismatch"
             }
-            offlineLeaseStore.saveLease(lease, isCatalogComplete = true)
+            offlineLeaseStore.saveLease(lease, isCatalogComplete = true, requestElapsed = requestElapsed)
             _activeOfflineLeaseFlow.value = lease
             Result.success(lease)
         } catch (e: Exception) {
@@ -1725,7 +1766,7 @@ class ProductionTraderRepository(
         val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
             timeZone = java.util.TimeZone.getTimeZone("UTC")
         }
-        val capturedAt = sdf.format(Date(clock()))
+        val capturedAt = sdf.format(Date(offlineLeaseStore.trustedTime(lease) ?: clock()))
 
         val event = OfflineSaleEventV2(
             clientEventId = clientEventId,
@@ -1749,14 +1790,13 @@ class ProductionTraderRepository(
         val canonicalByteArray = canonicalBytes.toByteArray(StandardCharsets.UTF_8)
         val digest = event.computePayloadDigest()
 
-        val captureResult = outbox.captureSaleV2(
-            companyId = companyId,
-            actorId = actorId,
-            deviceId = deviceId,
-            currencyMinorUnits = lease.currencyMinorUnits,
-            event = event,
-            rawCanonicalEventUtf8 = canonicalByteArray
-        )
+        val captureResult = try {
+            outbox.captureLeaseSale(lease, event) {
+                requireActiveScope()
+                require(getActiveOfflineSaleLease()?.leaseId == lease.leaseId) { "Offline lease expired" }
+            }
+        } catch (error: Exception) { return@withContext Result.failure(error) }
+
 
         when (captureResult) {
             is CaptureResult.Conflict ->
@@ -1768,18 +1808,35 @@ class ProductionTraderRepository(
                 val offlineInvoice = invoice.copy(
                     id = clientEventId.value,
                     clientEventId = clientEventId.value,
-                    localReceiptNumber = localReceiptNumber,
+                    localReceiptNumber = OfflineSaleEventV2.fromStrictJson(StrictJsonParser.parseObject(String(record.payloadBytes, StandardCharsets.UTF_8))).localReceiptNumber,
                     serverInvoiceUlid = null,
                     serverInvoiceNumber = null,
                     serverPaymentUlid = null,
                     serverPaymentReceiptNumber = null,
                     outboxStatus = record.deliveryState.status,
-                    salePayloadDigest = digest.value,
+                    salePayloadDigest = record.payloadDigest,
                     hasLocalTenderDetails = true
                 )
                 Result.success(publishSale(offlineInvoice))
             }
         }
+    }
+
+    data class OfflineQueueSummary(val count: Int, val total: BigDecimal, val rejected: List<InvoiceRecord>)
+
+    suspend fun offlineQueueSummary(): OfflineQueueSummary = withContext(ioDispatcher) {
+        requireActiveScope()
+        val records = outboxRepository?.getRecordsByScope(companyId, actorId, deviceId).orEmpty()
+            .filter { it.event.deviceLeaseId != null && it.status != OutboxStatus.CONFIRMED }
+        var total = BigDecimal.ZERO
+        val rejected = ArrayList<InvoiceRecord>()
+        for (record in records) {
+            val event = OfflineSaleEventV2.fromStrictJson(StrictJsonParser.parseObject(String(record.payloadBytes, StandardCharsets.UTF_8)))
+            total = total.add(event.payment.amountSettled.value)
+            if (record.status == OutboxStatus.CONFLICT) rejected.add(heldInvoice(record).withOutboxState(record))
+        }
+        requireActiveScope()
+        OfflineQueueSummary(records.size, total, rejected)
     }
 
     fun getPendingOfflineSales(): List<InvoiceRecord> {
@@ -2238,7 +2295,7 @@ class ProductionTraderRepository(
                 cursor = cursor
             )
             if (res.isSuccess) {
-                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { if (!it.isActive) throw kotlinx.coroutines.CancellationException() }
                 check(requireActiveScope() == before) { "Session changed during customer settlement targets read" }
                 val parsed = parseSettlementTargetsResponse(res.getOrThrow(), isSupplier = false)
                 if (currency == baseCurrency) {
@@ -2693,7 +2750,7 @@ class ProductionTraderRepository(
                 updateCreditLimit = updateCreditLimit
             ).getOrThrow()
 
-            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { if (!it.isActive) throw kotlinx.coroutines.CancellationException() }
             check(requireActiveScope() == before) { "Session changed" }
 
             val id = response.properties["id"].toNullableString() ?: error("Missing customer ID")
@@ -2811,7 +2868,7 @@ class ProductionTraderRepository(
             if (res.isFailure) {
                 return@withContext Result.failure(res.exceptionOrNull() ?: RuntimeException("Failed to get customer detail"))
             }
-            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { if (!it.isActive) throw kotlinx.coroutines.CancellationException() }
             check(requireActiveScope() == before) { "Session changed" }
             val obj = res.getOrThrow()
             val id = obj.properties["id"].toNullableString() ?: return@withContext Result.failure(IllegalStateException("Missing customer ID"))
@@ -2905,7 +2962,7 @@ class ProductionTraderRepository(
             if (res.isFailure) {
                 return@withContext Result.failure(res.exceptionOrNull() ?: RuntimeException("Failed to get supplier detail"))
             }
-            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { if (!it.isActive) throw kotlinx.coroutines.CancellationException() }
             check(requireActiveScope() == before) { "Session changed" }
             val obj = res.getOrThrow()
             val id = obj.properties["id"].toNullableString() ?: return@withContext Result.failure(IllegalStateException("Missing supplier ID"))
@@ -3164,7 +3221,7 @@ class ProductionTraderRepository(
         try {
             val before = requireActiveScope()
             val response = apiClient.updateSupplier(companyId, ServerUlid.parse(supplierId), cleanName, phone.ifBlank { null }).getOrThrow()
-            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { if (!it.isActive) throw kotlinx.coroutines.CancellationException() }
             check(requireActiveScope() == before) { "Session changed" }
             val id = response.properties["id"].toNullableString() ?: error("Missing supplier ID")
             ServerUlid.parse(id)
@@ -3515,7 +3572,7 @@ class ProductionTraderRepository(
                 cursor = cursor
             )
             if (res.isSuccess) {
-                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { if (!it.isActive) throw kotlinx.coroutines.CancellationException() }
                 check(requireActiveScope() == before) { "Session changed during supplier settlement targets read" }
                 val parsed = parseSettlementTargetsResponse(res.getOrThrow(), isSupplier = true)
                 if (currency == baseCurrency) {
@@ -4287,7 +4344,8 @@ class ProductionTraderRepository(
             authScopeProvider: (() -> CurrentAuthScope?)? = null,
             onClose: (() -> Unit)? = null,
             authoritativeMinorUnits: Int? = null,
-            merchantReadClient: MerchantReadClient? = null
+            merchantReadClient: MerchantReadClient? = null,
+            offlineLeaseStore: OfflineLeaseStore
         ): ProductionTraderRepository {
             val bootstrap = readReady.bootstrap
             val session = readReady.session
@@ -4397,7 +4455,8 @@ class ProductionTraderRepository(
                 initialBusinessInfo = realBusinessInfo,
                 commandStore = commandStore,
                 merchantReadClient = effectiveReadClient,
-                autoRefresh = false
+                autoRefresh = false,
+                offlineLeaseStore = offlineLeaseStore
             )
         }
 

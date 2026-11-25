@@ -136,9 +136,10 @@ class MobileMerchantApiClient(
     // Products
     // -------------------------------------------------------------------------
 
-    fun getProducts(companyId: ServerUlid, limit: Int = 30, cursor: String? = null, search: String? = null): Result<ProductCatalogResponse> {
+    fun getProducts(companyId: ServerUlid, limit: Int = 30, cursor: String? = null, search: String? = null, snapshotVersion: String? = null, verifiedBytes: ((ByteArray) -> Unit)? = null): Result<ProductCatalogResponse> {
         val path = "/api/mobile/v1/companies/${companyId.value}/products"
         val params = mutableMapOf("limit" to limit.coerceIn(1, 100).toString())
+        if (snapshotVersion != null) params["catalog_snapshot_version"] = snapshotVersion
         if (cursor != null) params["cursor"] = cursor
         if (search != null && search.isNotBlank()) params["search"] = search.trim()
         val request = TransportRequest(
@@ -152,7 +153,10 @@ class MobileMerchantApiClient(
             val response = transport.execute(request)
             if (response.statusCode in 200..299) {
                 val obj = StrictJsonParser.parseObject(response.body)
-                Result.success(ProductCatalogResponse.fromStrictJson(obj))
+                val page = ProductCatalogResponse.fromStrictJson(obj)
+                require(snapshotVersion == null || page.catalogSnapshotVersion == snapshotVersion)
+                verifiedBytes?.invoke(response.body.toByteArray(Charsets.UTF_8))
+                Result.success(page)
             } else {
                 Result.failure(HttpTransportException(HttpTransportException.CATEGORY_SERVER_ERROR, parseErrorMessage(response.body, response.statusCode)))
             }

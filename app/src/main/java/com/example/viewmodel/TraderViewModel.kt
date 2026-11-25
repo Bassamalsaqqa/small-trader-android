@@ -1756,16 +1756,17 @@ class TraderViewModel(
 
     fun refreshOfflineLeaseState() {
         if (repository !is ProductionTraderRepository) return
-        val lease = repository.getActiveOfflineSaleLease()
-        _uiState.update { current ->
-            current.copy(
+        viewModelScope.launch {
+            val summary = repository.offlineQueueSummary()
+            val lease = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { repository.getActiveOfflineSaleLease() }
+            _uiState.update { current -> current.copy(
                 isOfflineSalesCapabilityEnabled = repository.isOfflineSalesCapabilityEnabled,
                 isNetworkOffline = repository.isNetworkOffline,
                 activeOfflineSaleLease = lease,
-                pendingOfflineSalesCount = repository.getPendingOfflineSalesCount(),
-                pendingOfflineSalesTotalExact = repository.getPendingOfflineSalesTotal(),
-                rejectedCashSales = repository.getRejectedCashSales()
-            )
+                pendingOfflineSalesCount = summary.count,
+                pendingOfflineSalesTotalExact = summary.total,
+                rejectedCashSales = summary.rejected
+            ) }
         }
     }
 
@@ -1774,15 +1775,8 @@ class TraderViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isOfflineSyncing = true) }
             val res = repository.syncOfflineSales()
-            _uiState.update { current ->
-                current.copy(
-                    isOfflineSyncing = false,
-                    offlineSyncSummary = res.getOrNull()?.summary,
-                    pendingOfflineSalesCount = repository.getPendingOfflineSalesCount(),
-                    pendingOfflineSalesTotalExact = repository.getPendingOfflineSalesTotal(),
-                    rejectedCashSales = repository.getRejectedCashSales()
-                )
-            }
+            _uiState.update { it.copy(isOfflineSyncing = false, offlineSyncSummary = res.getOrNull()?.summary) }
+            refreshOfflineLeaseState()
         }
     }
 

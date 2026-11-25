@@ -173,6 +173,7 @@ fun AuthenticatedTraderApp(
                                             transport = transport,
                                             baseOrigin = configuredOrigin,
                                             commandStore = commandStore,
+                                            offlineLeaseStore = com.example.data.mobile.offline.SqliteOfflineLeaseStore { db.openHelper.writableDatabase },
                                             authScopeProvider = authScopeProvider,
                                             onClose = { db.close() }
                                         ).also { created = it } } catch (error: Exception) { db.close(); throw error }
