@@ -1,5 +1,6 @@
 package com.example.data.mobile.sync
 
+import com.example.data.mobile.contract.CanonicalJsonSerializer
 import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.PayloadDigest
 import com.example.data.mobile.contract.Rfc3339Validator
@@ -7,6 +8,8 @@ import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.StrictJsonNull
 import com.example.data.mobile.contract.StrictJsonObject
 import com.example.data.mobile.contract.StrictJsonParser
+import com.example.data.mobile.contract.v2.OfflineSaleEventV2
+import com.example.data.mobile.contract.v2.OfflineSaleIntakeRequestV2
 import com.example.data.mobile.contract.v2.OnlineSaleIntentProfile
 import com.example.data.mobile.readclient.HttpMethod
 import com.example.data.mobile.readclient.ReadClientTransport
@@ -226,22 +229,54 @@ class HttpSaleSyncGateway(
         canonicalEventUtf8: ByteArray
     ): SyncSubmitOutcome {
         require(PayloadDigest.fromBytes(canonicalEventUtf8) == payloadDigest)
-        val path = "/api/mobile/v2/companies/${companyId.value}/sales/online-cash"
         val token = tokenProvider()
         val headers = mapOf(
             "Accept" to "application/json",
             "Content-Type" to "application/json; charset=utf-8",
             "Authorization" to "Bearer $token"
         )
-        val profile = try {
-            val root = StrictJsonParser.parseObject(String(canonicalEventUtf8, StandardCharsets.UTF_8))
-            val p = OnlineSaleIntentProfile.fromStrictJson(root)
-            require(p.companyId == companyId && p.actorId == actorId && p.deviceId == deviceId && p.clientEventId == clientEventId)
-            p
+
+        val root = try {
+            StrictJsonParser.parseObject(String(canonicalEventUtf8, StandardCharsets.UTF_8))
         } catch (_: Exception) {
-            return SyncSubmitOutcome.BusinessConflict("Invalid online sale intent representation")
+            return SyncSubmitOutcome.BusinessConflict("Invalid sale representation")
         }
-        val bodyString = profile.toWireRequestJson()
+
+        val isOfflineSale = root.properties.containsKey("device_lease_id")
+        val path: String
+        val bodyString: String
+        val expectedIntent: OnlineSaleIntentProfile?
+
+        if (isOfflineSale) {
+            val event = try {
+                val ev = OfflineSaleEventV2.fromStrictJson(root)
+                require(ev.companyId == companyId && ev.actorId == actorId && ev.deviceId == deviceId && ev.clientEventId == clientEventId)
+                ev
+            } catch (_: Exception) {
+                return SyncSubmitOutcome.BusinessConflict("Invalid offline sale event representation")
+            }
+            val intakeRequest = OfflineSaleIntakeRequestV2(
+                clientEventId = clientEventId,
+                deviceId = deviceId,
+                capturedAt = event.capturedAt,
+                payloadDigest = payloadDigest,
+                event = event
+            )
+            bodyString = CanonicalJsonSerializer.serialize(intakeRequest)
+            path = "/api/mobile/v2/companies/${companyId.value}/offline-events"
+            expectedIntent = null
+        } else {
+            val profile = try {
+                val p = OnlineSaleIntentProfile.fromStrictJson(root)
+                require(p.companyId == companyId && p.actorId == actorId && p.deviceId == deviceId && p.clientEventId == clientEventId)
+                p
+            } catch (_: Exception) {
+                return SyncSubmitOutcome.BusinessConflict("Invalid online sale intent representation")
+            }
+            bodyString = profile.toWireRequestJson()
+            path = "/api/mobile/v2/companies/${companyId.value}/sales/online-cash"
+            expectedIntent = profile
+        }
 
         val request = TransportRequest(
             method = HttpMethod.POST,
@@ -257,8 +292,8 @@ class HttpSaleSyncGateway(
                 200, 201 -> {
                     // Commit responses omit the canonical digest. Confirm only through the
                     // scoped status resource, which supplies the persisted digest and receipt,
-                    // bound to original retained canonical profile.
-                    when (val status = checkStatus(companyId, actorId, deviceId, clientEventId, payloadDigest, expectedIntent = profile)) {
+                    // bound to original retained canonical profile or verified offline event.
+                    when (val status = checkStatus(companyId, actorId, deviceId, clientEventId, payloadDigest, expectedIntent = expectedIntent)) {
                         is SyncStatusOutcome.Posted -> SyncSubmitOutcome.Posted(status.ack)
                         is SyncStatusOutcome.AuthDenied -> SyncSubmitOutcome.AuthDenied()
                         is SyncStatusOutcome.MembershipDenied -> SyncSubmitOutcome.MembershipDenied()

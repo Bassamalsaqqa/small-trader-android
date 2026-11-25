@@ -182,6 +182,8 @@ object EndpointSecurity {
         Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/receipts/[a-zA-Z0-9_.-]{1,128}/status$"""),
         // Companies V2
         Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/online-cash$"""),
+        Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/offline-sale-lease$"""),
+        Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/offline-events$"""),
         Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/offline-events/[0-9a-fA-F-]{36}/status$""")
     )
 
@@ -385,7 +387,9 @@ object EndpointSecurity {
                     Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/purchases/returns$""").matches(basePath) ||
                     Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/expenses$""").matches(basePath) ||
                     Regex("""^/api/mobile/v1/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/reports/shift-close$""").matches(basePath) ||
-                    Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/online-cash$""").matches(basePath)
+                    Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/sales/online-cash$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/offline-sale-lease$""").matches(basePath) ||
+                    Regex("""^/api/mobile/v2/companies/[0-7][0-9A-HJKMNP-TV-Z]{25}/offline-events$""").matches(basePath)
                 require(isPostEndpoint) {
                     "Unauthorized POST endpoint: '$path'."
                 }
@@ -395,6 +399,8 @@ object EndpointSecurity {
                     basePath == "/api/mobile/v1/auth/challenge" ||
                     basePath == "/api/mobile/v1/auth/logout" ||
                     basePath.endsWith("/sales/online-cash") ||
+                    basePath.endsWith("/offline-sale-lease") ||
+                    basePath.endsWith("/offline-events") ||
                     basePath.endsWith("/inventory/adjustments") ||
                     basePath.endsWith("/shift-close") ||
                     basePath.endsWith("/payments") ||

@@ -254,7 +254,9 @@ fun ReceiptScreen(
                         }
 
                         Text(
-                            text = if (isCash) {
+                            text = if (receipt.localReceiptNumber != null && receipt.serverInvoiceNumber == null) {
+                                lang.tr("تم تسجيل البيع محلياً (معلق)", "Sale Captured Locally (Pending)")
+                            } else if (isCash) {
                                 lang.tr("تم تسجيل البيع بنجاح", "Sale Completed Successfully")
                             } else {
                                 lang.tr("تم تسجيل البيع الآجل بالذمة", "Credit Invoice Posted")
@@ -268,9 +270,12 @@ fun ReceiptScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            val displayDocNumber = receipt.serverInvoiceNumber
+                                ?: receipt.localReceiptNumber
+                                ?: StitchBidiUtils.formatInvoiceCode(receipt.invoiceNumber)
                             StitchBadge(
-                                text = StitchBidiUtils.formatInvoiceCode(receipt.invoiceNumber),
-                                tone = StitchBadgeTone.PRIMARY
+                                text = displayDocNumber,
+                                tone = if (receipt.localReceiptNumber != null && receipt.serverInvoiceNumber == null) StitchBadgeTone.WARNING else StitchBadgeTone.PRIMARY
                             )
                             Text(
                                 text = "•",
@@ -318,7 +323,7 @@ fun ReceiptScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text(
-                                    text = StitchBidiUtils.formatInvoiceCode(receipt.invoiceNumber),
+                                    text = receipt.serverInvoiceNumber ?: receipt.localReceiptNumber ?: StitchBidiUtils.formatInvoiceCode(receipt.invoiceNumber),
                                     style = MaterialTheme.typography.labelLarge.copy(
                                         fontFamily = MonoFontFamily,
                                         fontWeight = FontWeight.Bold
@@ -1370,7 +1375,7 @@ private fun InvoiceReceiptDocumentCard(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = WesternFormatters.formatInvoiceCode(receipt.invoiceNumber),
+                        text = receipt.serverInvoiceNumber ?: receipt.localReceiptNumber ?: WesternFormatters.formatInvoiceCode(receipt.invoiceNumber),
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontFamily = MonoFontFamily,
                             fontWeight = FontWeight.Bold
@@ -1388,7 +1393,7 @@ private fun InvoiceReceiptDocumentCard(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 DocumentMetaRow(
                     label = lang.tr("رقم الوثيقة:", "Document No:"),
-                    value = WesternFormatters.formatInvoiceCode(receipt.invoiceNumber),
+                    value = receipt.serverInvoiceNumber ?: receipt.localReceiptNumber ?: WesternFormatters.formatInvoiceCode(receipt.invoiceNumber),
                     useMono = true
                 )
                 DocumentMetaRow(

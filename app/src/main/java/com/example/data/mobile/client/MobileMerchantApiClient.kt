@@ -14,6 +14,7 @@ import com.example.data.mobile.contract.StrictJsonElement
 import com.example.data.mobile.contract.StrictJsonObject
 import com.example.data.mobile.contract.StrictJsonParser
 import com.example.data.mobile.contract.StrictJsonString
+import com.example.data.mobile.contract.v2.OfflineSaleLease
 import com.example.data.mobile.readclient.CustomerDirectoryItem
 import com.example.data.mobile.readclient.CustomerDirectoryResponse
 import com.example.data.mobile.readclient.HttpMethod
@@ -102,6 +103,32 @@ class MobileMerchantApiClient(
                 ?: "HTTP $statusCode"
         } catch (_: Exception) {
             "HTTP $statusCode"
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Offline Sale Lease (Revision 3)
+    // -------------------------------------------------------------------------
+
+    fun acquireOfflineSaleLease(
+        companyId: ServerUlid,
+        catalogSnapshotVersion: String
+    ): Result<OfflineSaleLease> {
+        require(catalogSnapshotVersion.isNotBlank() && catalogSnapshotVersion.length <= 64) {
+            "catalogSnapshotVersion must be 1..64 chars"
+        }
+        val path = "/api/mobile/v2/companies/${companyId.value}/offline-sale-lease"
+        val body = StrictJsonObject(
+            mapOf("catalog_snapshot_version" to StrictJsonString(catalogSnapshotVersion))
+        )
+        val bodyString = CanonicalJsonSerializer.serialize(body)
+        val result = execute(
+            method = HttpMethod.POST,
+            path = path,
+            body = bodyString
+        )
+        return result.mapCatching { root ->
+            OfflineSaleLease.fromStrictJson(root)
         }
     }
 

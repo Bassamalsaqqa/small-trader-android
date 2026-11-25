@@ -1507,6 +1507,8 @@ class TraderViewModel(
                     val recorded = result.getOrNull()
                     if (recorded != null && isInvoiceCanonicallyConfirmed(recorded, state.currentSaleClientEventId)) {
                         showConfirmedSale(recorded)
+                    } else if (recorded != null && recorded.localReceiptNumber != null) {
+                        showOfflineCompletedSale(recorded)
                     } else {
                         showHeldSale(recorded ?: newInvoice.copy(outboxStatus = "PENDING_SYNC"))
                         showBanner(
@@ -1686,6 +1688,101 @@ class TraderViewModel(
                     "Simulation mode: No printer connected — select a printer or share text"
                 }
             )
+        }
+    }
+
+    private fun showOfflineCompletedSale(receipt: InvoiceRecord) {
+        syncFromRepository()
+        _uiState.update { current ->
+            val printer = current.connectedPrinter
+            val ready = printer != null && printer.isPaired
+            current.copy(
+                activeReceipt = receipt,
+                selectedInvoiceDetail = null,
+                isNewlyCompletedSale = true,
+                isPaymentUnverifiedHold = false,
+                receiptShareCount = 0,
+                receiptCopyCount = 0,
+                lastSharedReceiptText = null,
+                basket = emptyList(),
+                currentSaleClientEventId = java.util.UUID.randomUUID().toString(),
+                saleSessionId = current.saleSessionId + 1,
+                discountPreset = DiscountPreset.NONE,
+                customDiscountText = "",
+                customerNote = "",
+                selectedCustomerId = null,
+                cashInputText = "",
+                isSubmittingSale = false,
+                isActionBusy = false,
+                checkoutErrorAr = null,
+                checkoutErrorEn = null,
+                currentScreen = TraderScreen.RECEIPT,
+                screenHistory = listOf(TraderScreen.HOME),
+                printerStatus = if (ready) PrinterStatus.READY else PrinterStatus.DISCONNECTED,
+                printProgressFraction = 0f,
+                printProgressStepAr = if (ready) {
+                    "وضع المحاكاة: جاهز لمعاينة الطباعة عبر ${printer!!.name} (${current.receiptPaperWidthMm}mm)"
+                } else {
+                    "وضع المحاكاة: لا توجد طابعة متصلة — اختر طابعة أو شارك النص"
+                },
+                printProgressStepEn = if (ready) {
+                    "Simulation mode: Ready for print preview via ${printer!!.name} (${current.receiptPaperWidthMm}mm)"
+                } else {
+                    "Simulation mode: No printer connected — select a printer or share text"
+                }
+            )
+        }
+        showBanner(
+            ar = "تم تسجيل البيع محلياً برقم إيصال مؤقت (${receipt.localReceiptNumber})",
+            en = "Sale recorded locally with pending receipt (${receipt.localReceiptNumber})",
+            isError = false
+        )
+    }
+
+    fun setOfflineSalesCapabilityEnabled(enabled: Boolean) {
+        if (repository is ProductionTraderRepository) {
+            repository.isOfflineSalesCapabilityEnabled = enabled
+        }
+        _uiState.update { it.copy(isOfflineSalesCapabilityEnabled = enabled) }
+        refreshOfflineLeaseState()
+    }
+
+    fun setNetworkOffline(isOffline: Boolean) {
+        if (repository is ProductionTraderRepository) {
+            repository.isNetworkOffline = isOffline
+        }
+        _uiState.update { it.copy(isNetworkOffline = isOffline) }
+    }
+
+    fun refreshOfflineLeaseState() {
+        if (repository !is ProductionTraderRepository) return
+        val lease = repository.getActiveOfflineSaleLease()
+        _uiState.update { current ->
+            current.copy(
+                isOfflineSalesCapabilityEnabled = repository.isOfflineSalesCapabilityEnabled,
+                isNetworkOffline = repository.isNetworkOffline,
+                activeOfflineSaleLease = lease,
+                pendingOfflineSalesCount = repository.getPendingOfflineSalesCount(),
+                pendingOfflineSalesTotalExact = repository.getPendingOfflineSalesTotal(),
+                rejectedCashSales = repository.getRejectedCashSales()
+            )
+        }
+    }
+
+    fun syncOfflineSales() {
+        if (repository !is ProductionTraderRepository) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isOfflineSyncing = true) }
+            val res = repository.syncOfflineSales()
+            _uiState.update { current ->
+                current.copy(
+                    isOfflineSyncing = false,
+                    offlineSyncSummary = res.getOrNull()?.summary,
+                    pendingOfflineSalesCount = repository.getPendingOfflineSalesCount(),
+                    pendingOfflineSalesTotalExact = repository.getPendingOfflineSalesTotal(),
+                    rejectedCashSales = repository.getRejectedCashSales()
+                )
+            }
         }
     }
 

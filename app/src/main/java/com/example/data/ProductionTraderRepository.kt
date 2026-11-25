@@ -9,8 +9,13 @@ import com.example.data.mobile.contract.PositiveDecimalQuantity
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.contract.TaxPercentage
 import com.example.data.mobile.contract.v2.OfflineSaleEventV2
+import com.example.data.mobile.contract.v2.OfflineSaleLease
 import com.example.data.mobile.contract.v2.OfflineSaleLineV2
+import com.example.data.mobile.contract.v2.OfflineSalePaymentV2
 import com.example.data.mobile.contract.v2.OnlineSaleContext
+import com.example.data.mobile.offline.InMemoryOfflineLeaseStore
+import com.example.data.mobile.offline.OfflineLeaseStore
+import com.example.data.mobile.sync.SyncBatchResult
 import com.example.data.mobile.contract.v2.OnlineSaleIntentLine
 import com.example.data.mobile.contract.StrictJsonArray
 import com.example.data.mobile.contract.StrictJsonBoolean
@@ -157,15 +162,24 @@ class ProductionTraderRepository(
     initialBusinessInfo: BusinessInfo? = null,
     val commandStore: MerchantCommandStore,
     private val merchantReadClient: MerchantReadClient? = null,
-    private val autoRefresh: Boolean = true
+    private val autoRefresh: Boolean = true,
+    val offlineLeaseStore: OfflineLeaseStore = InMemoryOfflineLeaseStore()
 ) : TraderRepository {
 
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
     private val retainedGeneration = authScopeProvider?.invoke()?.generation
 
+    var isOfflineSalesCapabilityEnabled: Boolean = false
+    var isNetworkOffline: Boolean = false
+    var clock: () -> Long = { System.currentTimeMillis() }
+
+    private val _activeOfflineLeaseFlow = kotlinx.coroutines.flow.MutableStateFlow<OfflineSaleLease?>(null)
+    val activeOfflineLeaseFlow: kotlinx.coroutines.flow.StateFlow<OfflineSaleLease?> = _activeOfflineLeaseFlow.asStateFlow()
+
     init {
         require(currencyMinorUnits in 0..6) { "Missing or invalid business currency precision" }
         require(ContractConstants.CURRENCY_CODE_REGEX.matches(baseCurrency)) { "Missing or invalid business currency" }
+        _activeOfflineLeaseFlow.value = offlineLeaseStore.getLease(companyId, actorId, deviceId)
     }
 
     private fun requireActiveScope(): CurrentAuthScope {
@@ -628,6 +642,13 @@ class ProductionTraderRepository(
             val mapped = page.products.map { item -> mapProductFromCatalog(item) }
             _productsFlow.value = mapped
             _productsHasMoreFlow.value = page.hasMore
+            offlineLeaseStore.saveVerifiedCatalogSnapshot(
+                companyId = companyId,
+                actorId = actorId,
+                deviceId = deviceId,
+                snapshotVersion = page.catalogSnapshotVersion,
+                isComplete = !page.hasMore
+            )
             Result.success(Unit)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
@@ -1364,8 +1385,106 @@ class ProductionTraderRepository(
         ).withOutboxState(record)
     }
 
+    fun getActiveOfflineSaleLease(): OfflineSaleLease? {
+        val lease = offlineLeaseStore.getLease(companyId, actorId, deviceId) ?: return null
+        if (!lease.isTimeValid(clock())) {
+            return null
+        }
+        return lease
+    }
+
+    fun hasValidOfflineLease(): Boolean = getActiveOfflineSaleLease() != null
+
+    suspend fun acquireOfflineSaleLease(): Result<OfflineSaleLease> = withContext(ioDispatcher) {
+        try {
+            requireActiveScope()
+            if (!isOfflineSalesCapabilityEnabled) {
+                return@withContext Result.failure(IllegalStateException("Offline sales capability is disabled"))
+            }
+            val snapshotVersion = offlineLeaseStore.getVerifiedCatalogSnapshotVersion(companyId, actorId, deviceId)
+            val isComplete = offlineLeaseStore.isCatalogComplete(companyId, actorId, deviceId)
+            if (snapshotVersion == null || !isComplete) {
+                return@withContext Result.failure(IllegalStateException("Product catalog is incomplete or missing for offline sales"))
+            }
+            val result = apiClient.acquireOfflineSaleLease(companyId, snapshotVersion)
+            if (result.isFailure) {
+                return@withContext Result.failure(result.exceptionOrNull()!!)
+            }
+            val lease = result.getOrThrow()
+            require(lease.companyId == companyId && lease.actorId == actorId && lease.deviceId == deviceId) {
+                "Acquired lease scope mismatch"
+            }
+            require(lease.currency == baseCurrency && lease.currencyMinorUnits == currencyMinorUnits) {
+                "Acquired lease currency mismatch"
+            }
+            offlineLeaseStore.saveLease(lease, isCatalogComplete = true)
+            _activeOfflineLeaseFlow.value = lease
+            Result.success(lease)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun recoverOfflineInvoice(record: OutboxRecord, event: OfflineSaleEventV2): InvoiceRecord {
+        val catalog = _productsFlow.value.associateBy { it.id }
+        val items = event.lines.map { line ->
+            val product = catalog[line.productId.value] ?: Product(
+                id = line.productId.value,
+                nameAr = line.productId.value,
+                nameEn = line.productId.value,
+                category = ProductCategory.ALL,
+                barcode = "",
+                priceExact = line.unitPrice.value,
+                unitAr = "",
+                unitEn = "",
+                stockCount = 0,
+                accentHex = 0xFF2E7D32
+            )
+            BasketItem(
+                product = product.copy(
+                    productUnitId = line.productUnitId.value,
+                    conversionToBaseExact = line.conversionToBase.value,
+                    saleCurrencyMinorUnits = currencyMinorUnits
+                ),
+                quantity = line.quantity.value,
+                unitPriceExact = line.unitPrice.value,
+                taxRateId = line.taxRateId?.value,
+                taxRateExact = line.taxRate.value,
+                isTaxInclusive = line.taxInclusive
+            )
+        }
+        val total = items.fold(BigDecimal.ZERO) { sum, item -> sum + item.lineTotalExact }
+        val tendered = event.payment.amountTendered.value
+        val change = event.payment.changeReturned.value
+        return InvoiceRecord(
+            id = record.clientEventId,
+            invoiceNumber = 0,
+            timestamp = record.event.capturedAt,
+            items = items,
+            subtotalExact = total,
+            discountExact = BigDecimal.ZERO,
+            netTotalExact = total,
+            cashReceivedExact = tendered,
+            changeReturnedExact = change,
+            customerId = event.customerId.value.takeUnless { it == walkInCustomerId.value },
+            customerNote = "",
+            cashierNameAr = actorName,
+            cashierNameEn = actorName,
+            isPaidInFull = true,
+            remainingDebitExact = BigDecimal.ZERO,
+            hasLocalTenderDetails = true,
+            localReceiptNumber = event.localReceiptNumber
+        ).withOutboxState(record)
+    }
+
     private fun InvoiceRecord.withOutboxState(record: OutboxRecord): InvoiceRecord {
         val delivery = record.deliveryState
+        val resolvedLocalReceipt = localReceiptNumber ?: if (record.event.deviceLeaseId != null) {
+            try {
+                val root = StrictJsonParser.parseObject(String(record.payloadBytes, StandardCharsets.UTF_8))
+                OfflineSaleEventV2.fromStrictJson(root).localReceiptNumber
+            } catch (_: Exception) { null }
+        } else null
         return copy(
             id = delivery.invoiceUlid ?: record.clientEventId,
             clientEventId = record.clientEventId,
@@ -1373,7 +1492,8 @@ class ProductionTraderRepository(
             serverInvoiceUlid = delivery.invoiceUlid,
             serverPaymentUlid = delivery.paymentUlid,
             serverPostedAt = delivery.serverAcknowledgedAt,
-            outboxStatus = if (record.status == OutboxStatus.CONFIRMED) "CONFIRMED" else record.status.wireValue
+            outboxStatus = if (record.status == OutboxStatus.CONFIRMED) "CONFIRMED" else record.status.wireValue,
+            localReceiptNumber = resolvedLocalReceipt
         )
     }
 
@@ -1387,10 +1507,20 @@ class ProductionTraderRepository(
         return invoice
     }
 
-    private fun heldInvoice(record: OutboxRecord): InvoiceRecord =
-        _invoicesFlow.value.firstOrNull {
+    private fun heldInvoice(record: OutboxRecord): InvoiceRecord {
+        val cached = _invoicesFlow.value.firstOrNull {
             it.clientEventId == record.clientEventId && it.salePayloadDigest == record.payloadDigest
-        } ?: recoverInvoice(record, retainedSaleIntent(record))
+        }
+        if (cached != null) return cached
+
+        return if (record.event.deviceLeaseId != null) {
+            val root = StrictJsonParser.parseObject(String(record.payloadBytes, StandardCharsets.UTF_8))
+            val event = OfflineSaleEventV2.fromStrictJson(root)
+            recoverOfflineInvoice(record, event)
+        } else {
+            recoverInvoice(record, retainedSaleIntent(record))
+        }
+    }
 
     suspend fun restoreHeldSale(): Result<InvoiceRecord?> = withContext(ioDispatcher) {
         saleMutex.withLock {
@@ -1426,12 +1556,302 @@ class ProductionTraderRepository(
         }
     }
 
+    suspend fun recordOfflineSale(invoice: InvoiceRecord): Result<InvoiceRecord> = withContext(ioDispatcher) {
+        saleMutex.withLock { recordOfflineSaleLocked(invoice) }
+    }
+
+    private suspend fun recordOfflineSaleLocked(invoice: InvoiceRecord): Result<InvoiceRecord> = withContext(ioDispatcher) {
+        try { requireActiveScope() } catch (denied: SecurityException) { return@withContext Result.failure(denied) }
+
+        if (!isOfflineSalesCapabilityEnabled) {
+            return@withContext Result.failure(IllegalStateException("إمكانية المبيعات غير المتصلة معطلة | Offline sales capability is disabled"))
+        }
+
+        val lease = getActiveOfflineSaleLease()
+            ?: return@withContext Result.failure(IllegalStateException("لا يوجد إذن نشط صالح للمبيعات غير المتصلة | No active valid offline sale lease"))
+
+        val isCatalogComplete = offlineLeaseStore.isCatalogComplete(companyId, actorId, deviceId)
+        val snapshotVersion = offlineLeaseStore.getVerifiedCatalogSnapshotVersion(companyId, actorId, deviceId)
+        if (!isCatalogComplete || snapshotVersion != lease.catalogSnapshotVersion) {
+            return@withContext Result.failure(IllegalStateException("كتالوج المنتجات غير مكتمل أو لا يطابق إذن المبيعات | Product catalog snapshot is incomplete or mismatches active lease"))
+        }
+
+        if (!invoice.isPaidInFull || invoice.remainingDebitExact > BigDecimal.ZERO) {
+            return@withContext Result.failure(IllegalArgumentException("المبيعات غير المتصلة تدعم الدفع النقدي الكامل فقط | Offline sales support full cash payment only"))
+        }
+
+        if (invoice.discountExact.compareTo(BigDecimal.ZERO) != 0) {
+            return@withContext Result.failure(IllegalArgumentException("الخصومات غير مدعومة في المبيعات غير المتصلة | Discounts are not supported in offline sales"))
+        }
+
+        if (invoice.items.isEmpty()) {
+            return@withContext Result.failure(IllegalArgumentException("Invoice must contain at least one item."))
+        }
+
+        for (item in invoice.items) {
+            if (item.quantity <= BigDecimal.ZERO) {
+                return@withContext Result.failure(IllegalArgumentException("Item quantity must be > 0."))
+            }
+            if (item.unitPriceExact < BigDecimal.ZERO) {
+                return@withContext Result.failure(IllegalArgumentException("Item price cannot be negative."))
+            }
+        }
+
+        val tenderedExact = invoice.cashReceivedExact
+        val netTotalExact = invoice.netTotalExact
+        val changeReturnedExact = invoice.changeReturnedExact
+
+        if (netTotalExact <= BigDecimal.ZERO) {
+            return@withContext Result.failure(IllegalArgumentException("Grand total must be strictly positive."))
+        }
+
+        val expectedTender = netTotalExact.add(changeReturnedExact)
+        if (tenderedExact.compareTo(expectedTender) != 0) {
+            return@withContext Result.failure(
+                IllegalArgumentException("Cash tender conservation violated: tendered ($tenderedExact) != netTotal ($netTotalExact) + change ($changeReturnedExact)")
+            )
+        }
+
+        if (tenderedExact < netTotalExact) {
+            return@withContext Result.failure(IllegalArgumentException("Tendered cash must be >= settled total"))
+        }
+
+        val outbox = outboxRepository ?: return@withContext Result.failure(IllegalStateException("OutboxRepository not configured"))
+
+        val (pendingCount, pendingTotal) = outbox.getPendingOfflineSalesBudget(companyId, actorId, deviceId, lease.leaseId)
+        val newCount = lease.postedSalesCount + pendingCount + 1
+        val newTotal = lease.postedTotalAmount.add(pendingTotal).add(netTotalExact)
+
+        if (newCount > lease.maxOfflineSalesCount) {
+            return@withContext Result.failure(
+                IllegalStateException("تجاوز الحد الأقصى لعدد المبيعات غير المتصلة المسموح به (${lease.maxOfflineSalesCount}) | Exceeded max offline sales count limit")
+            )
+        }
+        if (newTotal.compareTo(lease.maxOfflineTotalAmount) > 0) {
+            return@withContext Result.failure(
+                IllegalStateException("تجاوز الحد الأقصى للمبلغ الإجمالي للمبيعات غير المتصلة المسموح به (${lease.maxOfflineTotalAmount}) | Exceeded max offline total amount limit")
+            )
+        }
+
+        val targetCustomerId = if (invoice.customerId != null && ServerUlid.isValid(invoice.customerId)) {
+            ServerUlid.parse(invoice.customerId)
+        } else {
+            lease.walkInCustomerId
+        }
+
+        val lines = ArrayList<OfflineSaleLineV2>(invoice.items.size)
+        for (basketItem in invoice.items) {
+            val prodUlid = if (ServerUlid.isValid(basketItem.product.id)) {
+                ServerUlid.parse(basketItem.product.id)
+            } else {
+                return@withContext Result.failure(IllegalArgumentException("Cannot record sale: product '${basketItem.product.nameAr}' lacks a valid server ULID."))
+            }
+
+            val packagingUnitStr = basketItem.product.productUnitId
+            if (packagingUnitStr.isNullOrBlank() || !ServerUlid.isValid(packagingUnitStr)) {
+                return@withContext Result.failure(IllegalArgumentException("Cannot record sale: product '${basketItem.product.nameAr}' lacks a valid packaging product_unit_id."))
+            }
+            val productUnitUlid = ServerUlid.parse(packagingUnitStr)
+
+            val lineTaxRate: TaxPercentage
+            val lineTaxRateId: ServerUlid?
+            val lineTaxInclusive: Boolean
+
+            if (lease.taxRateId == null) {
+                if (basketItem.hasResolvedTax && basketItem.taxRateId != null) {
+                    return@withContext Result.failure(IllegalArgumentException("Tax selected but offline lease configured for no tax"))
+                }
+                lineTaxRateId = null
+                lineTaxRate = TaxPercentage("0.000000")
+                lineTaxInclusive = false
+            } else {
+                if (!basketItem.hasResolvedTax || basketItem.taxRateId != lease.taxRateId.value) {
+                    return@withContext Result.failure(IllegalArgumentException("Item tax does not match active lease tax rate"))
+                }
+                val leaseTaxCalc = lease.taxCalculation ?: "exclusive"
+                if (basketItem.isTaxInclusive != (leaseTaxCalc == "inclusive")) {
+                    return@withContext Result.failure(IllegalArgumentException("Item tax calculation does not match active lease"))
+                }
+                lineTaxRateId = lease.taxRateId
+                lineTaxRate = requireNotNull(lease.taxRate)
+                lineTaxInclusive = basketItem.isTaxInclusive
+            }
+
+            val lineResult = basketItem.calculateLine(lease.currencyMinorUnits)
+            lines.add(
+                OfflineSaleLineV2(
+                    productId = prodUlid,
+                    productUnitId = productUnitUlid,
+                    unitId = productUnitUlid,
+                    conversionToBase = PositiveDecimalQuantity(basketItem.product.conversionToBaseExact.setScale(6, RoundingMode.UNNECESSARY)),
+                    quantity = PositiveDecimalQuantity(basketItem.quantity.setScale(6, RoundingMode.UNNECESSARY)),
+                    unitPrice = MoneyAmount(basketItem.unitPriceExact.setScale(6, RoundingMode.UNNECESSARY)),
+                    taxRateId = lineTaxRateId,
+                    taxRate = lineTaxRate,
+                    taxInclusive = lineTaxInclusive,
+                    taxAmount = MoneyAmount(lineResult.taxAmount.value.setScale(6, RoundingMode.UNNECESSARY)),
+                    lineTotal = MoneyAmount(lineResult.lineTotal.value.setScale(6, RoundingMode.UNNECESSARY))
+                )
+            )
+        }
+
+        val expectedTotal = lines.fold(BigDecimal.ZERO) { sum, line -> sum.add(line.lineTotal.value) }
+        if (netTotalExact.compareTo(expectedTotal) != 0 || invoice.subtotalExact.compareTo(expectedTotal) != 0) {
+            return@withContext Result.failure(IllegalArgumentException("Sale amounts do not match the calculated line total"))
+        }
+
+        if (listOf(tenderedExact, netTotalExact, changeReturnedExact).any {
+            !PaymentDecimalConsistency.fitsCashEntry(it, lease.currencyMinorUnits)
+        }) {
+            return@withContext Result.failure(IllegalArgumentException("Cash amounts do not conform to currency minor units (${lease.currencyMinorUnits})"))
+        }
+
+        val payment = OfflineSalePaymentV2(
+            mode = "full",
+            paymentMethod = "cash",
+            cashAccountId = lease.cashAccountId,
+            amountTendered = MoneyAmount(tenderedExact.setScale(6, RoundingMode.UNNECESSARY)),
+            amountSettled = MoneyAmount(netTotalExact.setScale(6, RoundingMode.UNNECESSARY)),
+            changeReturned = MoneyAmount(changeReturnedExact.setScale(6, RoundingMode.UNNECESSARY))
+        )
+
+        val clientEventId = if (!invoice.clientEventId.isNullOrBlank() && ClientUuid.isValid(invoice.clientEventId)) {
+            ClientUuid.parse(requireNotNull(invoice.clientEventId))
+        } else {
+            ClientUuid.random()
+        }
+
+        val localReceiptNumber = "LOCAL-${pendingCount + 1}"
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }
+        val capturedAt = sdf.format(Date(clock()))
+
+        val event = OfflineSaleEventV2(
+            clientEventId = clientEventId,
+            eventVersion = 2,
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            deviceLeaseId = lease.leaseId,
+            capturedAt = capturedAt,
+            customerId = targetCustomerId,
+            currency = lease.currency,
+            warehouseId = lease.warehouseId,
+            cashAccountId = lease.cashAccountId,
+            catalogSnapshotVersion = lease.catalogSnapshotVersion,
+            localReceiptNumber = localReceiptNumber,
+            lines = lines,
+            payment = payment
+        )
+
+        val canonicalBytes = CanonicalJsonSerializer.serialize(event)
+        val canonicalByteArray = canonicalBytes.toByteArray(StandardCharsets.UTF_8)
+        val digest = event.computePayloadDigest()
+
+        val captureResult = outbox.captureSaleV2(
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            currencyMinorUnits = lease.currencyMinorUnits,
+            event = event,
+            rawCanonicalEventUtf8 = canonicalByteArray
+        )
+
+        when (captureResult) {
+            is CaptureResult.Conflict ->
+                return@withContext Result.failure(IllegalStateException("Local outbox conflict for event ${clientEventId.value}"))
+            is CaptureResult.ScopeRejected ->
+                return@withContext Result.failure(SecurityException("Outbox scope rejected: ${captureResult.message}"))
+            is CaptureResult.Created, is CaptureResult.Duplicate -> {
+                val record = checkNotNull(outbox.getRecord(companyId, actorId, deviceId, clientEventId))
+                val offlineInvoice = invoice.copy(
+                    id = clientEventId.value,
+                    clientEventId = clientEventId.value,
+                    localReceiptNumber = localReceiptNumber,
+                    serverInvoiceUlid = null,
+                    serverInvoiceNumber = null,
+                    serverPaymentUlid = null,
+                    serverPaymentReceiptNumber = null,
+                    outboxStatus = record.deliveryState.status,
+                    salePayloadDigest = digest.value,
+                    hasLocalTenderDetails = true
+                )
+                Result.success(publishSale(offlineInvoice))
+            }
+        }
+    }
+
+    fun getPendingOfflineSales(): List<InvoiceRecord> {
+        val outbox = outboxRepository ?: return emptyList()
+        val records = outbox.getRecordsByScope(companyId, actorId, deviceId)
+        return records.filter { it.event.deviceLeaseId != null && it.status != OutboxStatus.CONFIRMED }
+            .map { heldInvoice(it).withOutboxState(it) }
+    }
+
+    fun getRejectedCashSales(): List<InvoiceRecord> {
+        val outbox = outboxRepository ?: return emptyList()
+        val records = outbox.getRecordsByScope(companyId, actorId, deviceId)
+        return records.filter { it.event.deviceLeaseId != null && it.status == OutboxStatus.CONFLICT }
+            .map { heldInvoice(it).withOutboxState(it) }
+    }
+
+    fun getPendingOfflineSalesCount(): Int {
+        val outbox = outboxRepository ?: return 0
+        val records = outbox.getRecordsByScope(companyId, actorId, deviceId)
+        return records.count { it.event.deviceLeaseId != null && it.status != OutboxStatus.CONFIRMED }
+    }
+
+    fun getPendingOfflineSalesTotal(): BigDecimal {
+        val outbox = outboxRepository ?: return BigDecimal.ZERO
+        val records = outbox.getRecordsByScope(companyId, actorId, deviceId)
+        val raw = records.filter { it.event.deviceLeaseId != null && it.status != OutboxStatus.CONFIRMED }
+            .fold(BigDecimal.ZERO) { acc, record ->
+                try {
+                    val root = StrictJsonParser.parseObject(String(record.payloadBytes, StandardCharsets.UTF_8))
+                    val event = OfflineSaleEventV2.fromStrictJson(root)
+                    acc.add(event.payment.amountSettled.value)
+                } catch (_: Exception) {
+                    acc
+                }
+            }
+        return if (raw.signum() == 0) {
+            BigDecimal.ZERO
+        } else {
+            raw.setScale(currencyMinorUnits, RoundingMode.HALF_UP)
+        }
+    }
+
+    suspend fun syncOfflineSales(batchSize: Int = 10): Result<SyncBatchResult> = withContext(ioDispatcher) {
+        try {
+            requireActiveScope()
+            val outbox = outboxRepository ?: return@withContext Result.failure(IllegalStateException("OutboxRepository not configured"))
+            val gateway = saleSyncGateway ?: return@withContext Result.failure(IllegalStateException("SaleSyncGateway not configured"))
+            val coordinator = syncCoordinator ?: SaleSyncCoordinatorImpl(outbox, gateway)
+            val result = coordinator.synchronizeScope(companyId, actorId, deviceId, batchSize = batchSize)
+            val records = outbox.getRecordsByScope(companyId, actorId, deviceId)
+            for (record in records) {
+                if (record.status == OutboxStatus.CONFIRMED) {
+                    val inv = heldInvoice(record).withOutboxState(record)
+                    publishSale(inv)
+                }
+            }
+            Result.success(result)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override suspend fun recordSale(invoice: InvoiceRecord): Result<InvoiceRecord> = withContext(ioDispatcher) {
         saleMutex.withLock { recordSaleLocked(invoice) }
     }
 
     private suspend fun recordSaleLocked(invoice: InvoiceRecord): Result<InvoiceRecord> = withContext(ioDispatcher) {
         try { requireActiveScope() } catch (denied: SecurityException) { return@withContext Result.failure(denied) }
+
+        if (isOfflineSalesCapabilityEnabled && isNetworkOffline) {
+            return@withContext recordOfflineSaleLocked(invoice)
+        }
 
         // 1. Line item validation
         if (invoice.items.isEmpty()) {
@@ -3996,7 +4416,8 @@ class ProductionTraderRepository(
             ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
             outboxRepository: OutboxRepository? = null,
             saleSyncGateway: SaleSyncGateway? = null,
-            bootstrapTaxes: List<BootstrapTax> = emptyList()
+            bootstrapTaxes: List<BootstrapTax> = emptyList(),
+            offlineLeaseStore: OfflineLeaseStore = InMemoryOfflineLeaseStore()
         ): ProductionTraderRepository {
             val readTokenProvider = MerchantReadTokenProvider { reqCompanyId, retainedGen ->
                 val current = (authScopeProvider ?: { CurrentAuthScope(companyId = companyId, actorId = actorId, deviceId = deviceId, token = "test-token", generation = 1L) }).invoke()
@@ -4042,7 +4463,8 @@ class ProductionTraderRepository(
                 authScopeProvider = authScopeProvider ?: { CurrentAuthScope(companyId = companyId, actorId = actorId, deviceId = deviceId, token = "test-token", generation = 1L) },
                 commandStore = commandStore,
                 merchantReadClient = effectiveReadClient,
-                autoRefresh = false
+                autoRefresh = false,
+                offlineLeaseStore = offlineLeaseStore
             )
         }
     }

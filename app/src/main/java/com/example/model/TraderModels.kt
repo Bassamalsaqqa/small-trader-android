@@ -370,7 +370,8 @@ data class InvoiceRecord(
     val serverPostedAt: String? = null,
     val outboxStatus: String? = null,
     val salePayloadDigest: String? = null,
-    val hasLocalTenderDetails: Boolean = true
+    val hasLocalTenderDetails: Boolean = true,
+    val localReceiptNumber: String? = null
 ) {
     constructor(
         id: String,
@@ -395,7 +396,8 @@ data class InvoiceRecord(
         serverPaymentUlid: String? = null,
         serverPaymentReceiptNumber: String? = null,
         serverPostedAt: String? = null,
-        outboxStatus: String? = null
+        outboxStatus: String? = null,
+        localReceiptNumber: String? = null
     ) : this(
         id = id,
         invoiceNumber = invoiceNumber,
@@ -419,7 +421,8 @@ data class InvoiceRecord(
         serverPaymentUlid = serverPaymentUlid,
         serverPaymentReceiptNumber = serverPaymentReceiptNumber,
         serverPostedAt = serverPostedAt,
-        outboxStatus = outboxStatus
+        outboxStatus = outboxStatus,
+        localReceiptNumber = localReceiptNumber
     )
 
     val subtotalIls: Double get() = subtotalExact.toDouble()

@@ -1,5 +1,6 @@
 package com.example.viewmodel
 
+import com.example.data.mobile.contract.v2.OfflineSaleLease
 import com.example.data.mobile.contract.v2.PaymentDecimalConsistency
 import com.example.data.mobile.readclient.BootstrapTax
 import com.example.ui.navigation.TraderNavigationPolicy
@@ -123,6 +124,16 @@ data class TraderUiState(
     val isPaymentUnverifiedHold: Boolean = false,
     val checkoutErrorAr: String? = null,
     val checkoutErrorEn: String? = null,
+
+    // Genuine Disconnected Offline Sales (Revision 3)
+    val isOfflineSalesCapabilityEnabled: Boolean = false,
+    val isNetworkOffline: Boolean = false,
+    val activeOfflineSaleLease: OfflineSaleLease? = null,
+    val pendingOfflineSalesCount: Int = 0,
+    val pendingOfflineSalesTotalExact: java.math.BigDecimal = java.math.BigDecimal.ZERO,
+    val rejectedCashSales: List<InvoiceRecord> = emptyList(),
+    val isOfflineSyncing: Boolean = false,
+    val offlineSyncSummary: String? = null,
 
     // Invoices, Cash Shift & Accounting
     val invoices: List<InvoiceRecord> = emptyList(),

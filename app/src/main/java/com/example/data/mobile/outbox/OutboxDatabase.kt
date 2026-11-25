@@ -74,6 +74,21 @@ abstract class OutboxDatabase : RoomDatabase() {
             )
         """
 
+        const val CREATE_OFFLINE_SALE_LEASES_SQL = """
+            CREATE TABLE IF NOT EXISTS `offline_sale_leases` (
+                `company_id` TEXT NOT NULL,
+                `actor_id` TEXT NOT NULL,
+                `device_id` TEXT NOT NULL,
+                `lease_id` TEXT NOT NULL,
+                `catalog_snapshot_version` TEXT NOT NULL,
+                `lease_payload_bytes` BLOB NOT NULL,
+                `is_catalog_complete` INTEGER NOT NULL,
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`company_id`, `actor_id`, `device_id`)
+            )
+        """
+
         internal fun ensureMerchantCommandsTable(db: SupportSQLiteDatabase) {
             val cursor = db.query("PRAGMA table_info(`merchant_commands`)")
             var hasPayloadBytes = false
@@ -98,6 +113,7 @@ abstract class OutboxDatabase : RoomDatabase() {
             db.execSQL(CREATE_INDEX_SCOPE_KEY_SQL)
             db.execSQL(CREATE_INDEX_SCOPE_STATUS_SQL)
             db.execSQL(CREATE_MERCHANT_FORM_INTENTS_SQL)
+            db.execSQL(CREATE_OFFLINE_SALE_LEASES_SQL)
         }
 
         val CALLBACK = object : RoomDatabase.Callback() {
