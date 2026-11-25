@@ -1,3 +1,5 @@
+> **HISTORICAL BLOCKER & MITIGATION RECORD:** Shift-close submission remains **BLOCKED** and production nonzero discounts remain **REJECTED** (mobile document discounts are a future proposal only). See [README.md](../README.md) and [SURFACE_COVERAGE.md](SURFACE_COVERAGE.md).
+
 # Shift cash observation contract review — BLOCKED
 
 Date: 2026-11-21. Android baseline: d5237479be7f51599c6db62d5b74c95dbc65a0fc, branch t3/android-searchable-selectors-pr22.
@@ -75,8 +77,8 @@ Source review only. No runtime tests/assertions, JVM suite, lint, release build,
 
 ### Cross-Runtime Paired Write Contract Qualification (True Network-Lost Cash-Count ACK)
 1. **Harness Execution**:
-   - Upgraded Scenario 9 in `/tmp/paired_harness/harness_artifacts/PairedWriteContractSmokeTest.kt` to qualify a true network-lost ACK for shift cash count observation (`shift-count-lost-ack-001`).
-   - Sourced disposable MariaDB environment on port `3342` (`/home/t3dev/.t3/userdata/attachments/disposable-mariadb-20261120/connection.env`), pointing to combined backend worktree `/home/t3dev/.t3/worktrees/account/t3-b5bdc8fe-f4f0327d3b7ad078` (`72ef1a532c3fa6136006a54c0cfb89a2c732dcd4`).
+   - Upgraded Scenario 9 in the external paired write smoke harness (`PairedWriteContractSmokeTest.kt`) to qualify a true network-lost ACK for shift cash count observation (`shift-count-lost-ack-001`).
+   - Sourced disposable MariaDB on loopback port `3342` against the combined backend test worktree (`72ef1a532c3fa6136006a54c0cfb89a2c732dcd4`).
    - Sourced disposable schema `accounting_p8_tmp_fb3f864f20a9`, migrated, and booted web server on `127.0.0.1:8089`.
 2. **Verified Invariants**:
    - **Post-Commit Transport Drop**: First OkHttp POST reaches Laravel and commits `MobileShiftClosure` in MariaDB. `droppingTransport` simulates dropped network response by throwing `IOException` on reading HTTP response.

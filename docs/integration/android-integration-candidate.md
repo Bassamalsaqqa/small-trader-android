@@ -1,3 +1,5 @@
+> **HISTORICAL MILESTONE RECORD (PR #19):** Point-in-time integration candidate snapshot. See [README.md](../../README.md) for current `v1.4` (`versionCode 6`) verification status.
+
 # Android integration candidate
 
 Draft PR 19 assembles the reviewed Android branches without merging to main. Its source heads are PR 18 (`46c2cf7`), PR 15 (`d7e4504`), PR 7 (`cfb331d`), PR 8 (`6452196`), and PR 9 (`4a249ca`), including their stacked ancestors.

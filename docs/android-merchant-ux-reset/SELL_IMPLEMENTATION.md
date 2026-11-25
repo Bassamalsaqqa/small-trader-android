@@ -1,5 +1,7 @@
 # Stage 3 Implementation Report: Sell-to-Receipt Experience Reset
 
+> **HISTORICAL RECORD:** Merchant UX reset implementation report. Retained intact for audit history; see [`../../README.md`](../../README.md) for current state.
+
 **Branch:** `ux/merchant-experience-reset`  
 **Base Commit:** `f8629644617d147b1d0920634b3eaed4e410cfb5`  
 **Role:** Implementation Sub-agent (Sell-to-Receipt Vertical Slice)  

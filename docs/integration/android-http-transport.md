@@ -1,3 +1,5 @@
+> **HISTORICAL FOUNDATION SPEC (Phase 2B):** Point-in-time HTTP transport foundation report. See [README.md](../../README.md) for current status.
+
 # Android Read Client HTTP Transport Adapter (Phase 2B)
 
 ## 1. Architectural Scope & Context
@@ -190,7 +192,7 @@ Tests executed with `./gradlew testDebugUnitTest`:
 - Gradle static analysis (`./gradlew lintDebug`): PASSED clean with 0 errors.
 
 ### 5.4 Platform & Device Testing Limits
-- All automated unit tests execute hermetically on JDK 21 (`/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9`) using `MockWebServer` and an in-process local JDK `HttpServer` bound strictly to loopback `127.0.0.1`.
+- All automated unit tests execute hermetically on JDK 21 using `MockWebServer` and an in-process local JDK `HttpServer` bound strictly to loopback `127.0.0.1`.
 - Hermetic loopback tests do not claim to prove on-device TLS certificates or real device networking.
 - Broad Android instrumentation visual test runs are not executed due to known native visual emulator evidence hangs; verification relies on focused mobile unit test suites and official contract parity validators.
 

@@ -1,7 +1,9 @@
+> **HISTORICAL PROTOTYPE ARCHIVE (PR #3 / Candidate v3):** Superseded by `v1.4` (`versionCode 6`); see [README.md](../README.md) and [RELEASING.md](RELEASING.md).
+
 # Android review candidate handoff
 
 PR: https://github.com/Bassamalsaqqa/small-trader-android/pull/3 (draft, targets main).
-Active checkout: `/home/t3dev/projects/small-trader-android`, branch `ux/stitch-native-prototype`.
+Branch: `ux/stitch-native-prototype`.
 Candidate source revision: `9ed37778c7bee4a535944e7f7e2a3ee54086db72` (reviewed and verified).
 
 ## Review & Candidate APK Artifacts
@@ -44,4 +46,4 @@ For Windows review, copy the candidate APK above and install it on the intended 
 
 `docs/candidate-v3/` preserves the original 9336da6-era evidence (104 passed, one skipped); its hashes and counts describe that historical revision, not the current source. Earlier APKs remain preserved in the previous checkout and `app/round2/artifacts/baseline_0a965c0/`.
 
-The previous T3 checkout `/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b` is detached at `3808ae2` and retained because earlier thread handoffs and artifacts reference it. Root crop/slice PNGs and local `app/round2/` artifacts are intentionally untracked and preserved. No destructive cleanup was performed. PRs #1 and #2 remain superseded; PR #3 is the cumulative review surface.
+The prior detached T3 worktree at `3808ae2` was retained for historical artifact provenance. Local `app/round2/` artifacts are intentionally untracked and preserved. No destructive cleanup was performed. PRs #1 and #2 remain superseded; PR #3 is the cumulative review surface.

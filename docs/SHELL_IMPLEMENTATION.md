@@ -3,7 +3,9 @@
 # Native Shell, Navigation & Quick Action Implementation Report
 **Document Version:** 1.0.0  
 **Date:** 2026-11-08  
-**Worktree:** `/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b`  
+**Worktree:** PR #3 historical worktree (`ux/stitch-native-prototype`)
+
+> **HISTORICAL RECORD:** PR #3 implementation report. Retained intact for audit history; see [`../README.md`](../README.md) for current state.
 **Branch:** `ux/stitch-native-prototype` starting from `f4713c0`  
 **Target Stitch Reference:** 
 - ST-01 Header & Root Navigation (`ST-01-AR-LIGHT-OWNER-NORMAL-v02`, Source `0e1f63884b964b639b7fb0203a831da8`)

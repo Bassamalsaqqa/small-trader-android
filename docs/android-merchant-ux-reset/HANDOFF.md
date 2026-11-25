@@ -1,5 +1,7 @@
 # Merchant reset candidate handoff
 
+> **HISTORICAL RECORD:** Superseded candidate handoff for the merchant UX reset milestone. Current documentation starts in [`../../README.md`](../../README.md) and [`../RELEASING.md`](../RELEASING.md).
+
 Status: **READY FOR OWNER TESTING — UX ACCEPTANCE PENDING**.
 
 ## Scope and product decision

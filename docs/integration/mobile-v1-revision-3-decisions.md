@@ -1,3 +1,5 @@
+> **HISTORICAL DECISION RECORD (Contract Revision 3):** Point-in-time Revision 3 contract notes; mobile/offline endpoints remain **OFF** by default in production. See [README.md](../../README.md).
+
 # Coordinated DRAFT contract revision 3
 
 Previous Android Git head: `ec8220934839ade0c4fe5408398ab1a313feb09c` (PR4 rev2).

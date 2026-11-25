@@ -1,8 +1,10 @@
 # PR #3 Minimal Design Addendum: Deliberate Hierarchy & Noise Reduction
 
-**Document Classification:** Design Sub-Agent Addendum (Uncommitted Working Document)  
+> **HISTORICAL RECORD:** PR #3 design addendum (`ux/stitch-native-prototype`). Retained for historical UI reference; see [`../README.md`](../README.md) for current state.
+
+**Document Classification:** Historical Design Sub-Agent Addendum
 **Target Pull Request:** PR #3 (`ux/stitch-native-prototype`)  
-**Parent Worktree:** `/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b`  
+**Parent Worktree:** PR #3 worktree (archived)
 **Quality Benchmark:** `ST-01-AR-LIGHT-OWNER-NORMAL-v02` & Locked Parent Brand Authorities  
 **Binding User Direction:** Simple purpose, simple architecture, simple design, simple implementation. Zero AI slop, zero explanatory filler, zero redundant secondary headers/labels. If a screen requires explanatory prose to make sense, fix hierarchy and layout.
 
@@ -28,8 +30,8 @@ Following direct visual inspection by Owner and Parent of the initial Round 3 ge
 ### 2.1 Screen 1: Simplified Home Screen (`R3-HOME-SIMPLIFIED-v02`)
 - **Stitch Screen ID:** `projects/15641450350510420845/screens/4d0d36bd3dbf4f3d8528808a89b97321` (Refined from `c7da680fc61c4a02847f4648e5f20573`)
 - **Artifacts:**
-  - HTML: [`R3-HOME-SIMPLIFIED-v02.html`](file:///home/t3dev/.t3/artifacts/small-trader-stitch-2026-11-08/design/round3-review/R3-HOME-SIMPLIFIED-v02.html) (12,853 bytes)
-  - PNG: [`R3-HOME-SIMPLIFIED-v02.png`](file:///home/t3dev/.t3/artifacts/small-trader-stitch-2026-11-08/design/round3-review/R3-HOME-SIMPLIFIED-v02.png) (780x1768 px, SHA-256: `ff75a71bcecf...`)
+  - HTML: `round3-review/R3-HOME-SIMPLIFIED-v02.html` (12,853 bytes)
+  - PNG: `round3-review/R3-HOME-SIMPLIFIED-v02.png` (780x1768 px, SHA-256: `ff75a71bcecf...`)
 - **Concrete Removals:**
   - REMOVED: Giant nested outlined card wrapping the primary sale button.
   - REMOVED: Verbose heading "نقطة البيع واستئناف الفاتورة" and redundant status pills ("معلقة").
@@ -50,8 +52,8 @@ Following direct visual inspection by Owner and Parent of the initial Round 3 ge
 ### 2.2 Screen 2: Accessible Bottom Navigation Screen (`R3-BOTTOMNAV-360DP-2X-v02`)
 - **Stitch Screen ID:** `projects/15641450350510420845/screens/8ea59e518331415c984e80c1b484e235` (Refined from `44ab3b17f4944ef4a9d67256b7ae08d6`)
 - **Artifacts:**
-  - HTML: [`R3-BOTTOMNAV-360DP-2X-v02.html`](file:///home/t3dev/.t3/artifacts/small-trader-stitch-2026-11-08/design/round3-review/R3-BOTTOMNAV-360DP-2X-v02.html) (13,549 bytes)
-  - PNG: [`R3-BOTTOMNAV-360DP-2X-v02.png`](file:///home/t3dev/.t3/artifacts/small-trader-stitch-2026-11-08/design/round3-review/R3-BOTTOMNAV-360DP-2X-v02.png) (780x1768 px, SHA-256: `25aef1d38ddd...`)
+  - HTML: `round3-review/R3-BOTTOMNAV-360DP-2X-v02.html` (13,549 bytes)
+  - PNG: `round3-review/R3-BOTTOMNAV-360DP-2X-v02.png` (780x1768 px, SHA-256: `25aef1d38ddd...`)
 - **Concrete Removals:**
   - REMOVED: Artificial 2560px presentation canvas.
   - REMOVED: In-mockup engineering lecture banners ("اختبار إمكانية الوصول والتكبير", "محاكاة حية لسلوك واجهة أندرويد الأصلية").
@@ -71,8 +73,8 @@ Following direct visual inspection by Owner and Parent of the initial Round 3 ge
 ### 2.3 Screen 3: Structured Purchase Creation (`R3-PURCHASE-STRUCTURED-v02`)
 - **Stitch Screen ID:** `projects/15641450350510420845/screens/2e83981a2a8c42dc94b3124e1b814158` (Refined from `3fe102815d2a4ff788627c0c842d0b52`)
 - **Artifacts:**
-  - HTML: [`R3-PURCHASE-STRUCTURED-v02.html`](file:///home/t3dev/.t3/artifacts/small-trader-stitch-2026-11-08/design/round3-review/R3-PURCHASE-STRUCTURED-v02.html) (14,527 bytes)
-  - PNG: [`R3-PURCHASE-STRUCTURED-v02.png`](file:///home/t3dev/.t3/artifacts/small-trader-stitch-2026-11-08/design/round3-review/R3-PURCHASE-STRUCTURED-v02.png) (780x1768 px, SHA-256: `acbfcd8a23e9...`)
+  - HTML: `round3-review/R3-PURCHASE-STRUCTURED-v02.html` (14,527 bytes)
+  - PNG: `round3-review/R3-PURCHASE-STRUCTURED-v02.png` (780x1768 px, SHA-256: `acbfcd8a23e9...`)
 - **Concrete Removals:**
   - REMOVED: Redundant section header "بنود الأصناف المشتراة" and "تفريغ السلة".
   - REMOVED: Redundant section header "التسوية المالية وطرق الدفع".
@@ -99,8 +101,8 @@ Following direct visual inspection by Owner and Parent of the initial Round 3 ge
 ### 2.4 Screen 4: Goods Receipt Note (GRN) & Partial Receiving (`R3-GOODS-RECEIPT-PARTIAL-v02`)
 - **Stitch Screen ID:** `projects/15641450350510420845/screens/77dde46b35de42da9a850d454d333757` (Refined from `5e72ca7495ef42098e2d050f1489cc93`)
 - **Artifacts:**
-  - HTML: [`R3-GOODS-RECEIPT-PARTIAL-v02.html`](file:///home/t3dev/.t3/artifacts/small-trader-stitch-2026-11-08/design/round3-review/R3-GOODS-RECEIPT-PARTIAL-v02.html) (17,806 bytes)
-  - PNG: [`R3-GOODS-RECEIPT-PARTIAL-v02.png`](file:///home/t3dev/.t3/artifacts/small-trader-stitch-2026-11-08/design/round3-review/R3-GOODS-RECEIPT-PARTIAL-v02.png) (780x1768 px, SHA-256: `cca9183b1847...`)
+  - HTML: `round3-review/R3-GOODS-RECEIPT-PARTIAL-v02.html` (17,806 bytes)
+  - PNG: `round3-review/R3-GOODS-RECEIPT-PARTIAL-v02.png` (780x1768 px, SHA-256: `cca9183b1847...`)
 - **Concrete Removals:**
   - REMOVED: "مسودة قيد المطابقة" subtitle and fake status badges from app bar.
   - REMOVED: Fake warehouse shelf location codes (no "رف A1").
@@ -126,13 +128,13 @@ All artifact baselines (`-v01`) remain intact. Refined designs are persisted as 
 | Screen Code | Iteration | Stitch Screen ID | Dimensions | HTML Artifact | PNG SHA-256 | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `R3-HOME-SIMPLIFIED` | v01 (Baseline) | `c7da680fc61c4a02847f4648e5f20573` | 780x1918 px | `round3-review/R3-HOME-SIMPLIFIED-v01.html` | `72f819175be6...` | Superseded |
-| `R3-HOME-SIMPLIFIED` | **v02 (Refined)** | `4d0d36bd3dbf4f3d8528808a89b97321` | **780x1768 px** | [`R3-HOME-SIMPLIFIED-v02.html`](file:///home/t3dev/.t3/artifacts/small-trader-stitch-2026-11-08/design/round3-review/R3-HOME-SIMPLIFIED-v02.html) | `ff75a71bcecf...` | **Canonical Authority** |
+| `R3-HOME-SIMPLIFIED` | **v02 (Refined)** | `4d0d36bd3dbf4f3d8528808a89b97321` | **780x1768 px** | `round3-review/R3-HOME-SIMPLIFIED-v02.html` | `ff75a71bcecf...` | **Canonical Authority** |
 | `R3-BOTTOMNAV-360DP` | v01 (Baseline) | `44ab3b17f4944ef4a9d67256b7ae08d6` | 2560x2048 px | `round3-review/R3-BOTTOMNAV-360DP-2X-v01.html` | `c9cc2ae7be93...` | Superseded |
-| `R3-BOTTOMNAV-360DP` | **v02 (Refined)** | `8ea59e518331415c984e80c1b484e235` | **780x1768 px** | [`R3-BOTTOMNAV-360DP-2X-v02.html`](file:///home/t3dev/.t3/artifacts/small-trader-stitch-2026-11-08/design/round3-review/R3-BOTTOMNAV-360DP-2X-v02.html) | `25aef1d38ddd...` | **Canonical Authority** |
+| `R3-BOTTOMNAV-360DP` | **v02 (Refined)** | `8ea59e518331415c984e80c1b484e235` | **780x1768 px** | `round3-review/R3-BOTTOMNAV-360DP-2X-v02.html` | `25aef1d38ddd...` | **Canonical Authority** |
 | `R3-PURCHASE-STRUCTURED` | v01 (Baseline) | `3fe102815d2a4ff788627c0c842d0b52` | 780x2570 px | `round3-review/R3-PURCHASE-STRUCTURED-v01.html` | `54a54f86724b...` | Superseded |
-| `R3-PURCHASE-STRUCTURED` | **v02 (Refined)** | `2e83981a2a8c42dc94b3124e1b814158` | **780x1768 px** | [`R3-PURCHASE-STRUCTURED-v02.html`](file:///home/t3dev/.t3/artifacts/small-trader-stitch-2026-11-08/design/round3-review/R3-PURCHASE-STRUCTURED-v02.html) | `acbfcd8a23e9...` | **Canonical Authority** |
+| `R3-PURCHASE-STRUCTURED` | **v02 (Refined)** | `2e83981a2a8c42dc94b3124e1b814158` | **780x1768 px** | `round3-review/R3-PURCHASE-STRUCTURED-v02.html` | `acbfcd8a23e9...` | **Canonical Authority** |
 | `R3-GOODS-RECEIPT-PARTIAL` | v01 (Baseline) | `5e72ca7495ef42098e2d050f1489cc93` | 780x2160 px | `round3-review/R3-GOODS-RECEIPT-PARTIAL-v01.html` | `9af1945db1af...` | Superseded |
-| `R3-GOODS-RECEIPT-PARTIAL` | **v02 (Refined)** | `77dde46b35de42da9a850d454d333757` | **780x1768 px** | [`R3-GOODS-RECEIPT-PARTIAL-v02.html`](file:///home/t3dev/.t3/artifacts/small-trader-stitch-2026-11-08/design/round3-review/R3-GOODS-RECEIPT-PARTIAL-v02.html) | `cca9183b1847...` | **Canonical Authority** |
+| `R3-GOODS-RECEIPT-PARTIAL` | **v02 (Refined)** | `77dde46b35de42da9a850d454d333757` | **780x1768 px** | `round3-review/R3-GOODS-RECEIPT-PARTIAL-v02.html` | `cca9183b1847...` | **Canonical Authority** |
 
 ---
 

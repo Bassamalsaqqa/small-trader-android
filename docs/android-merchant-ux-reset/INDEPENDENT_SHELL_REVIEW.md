@@ -1,6 +1,8 @@
 # Independent Shell & Navigation Review
 
-**Target Worktree:** `/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b`  
+> **HISTORICAL RECORD:** Merchant UX reset review report. Retained intact for audit history; see [`../../README.md`](../../README.md) for current state.
+
+**Target Worktree:** archived reset worktree (`t3-fba3c97b`)
 **Branch:** `ux/merchant-experience-reset`  
 **Baseline:** `f862964`  
 **Review Type:** Independent Read-Only Final Review  

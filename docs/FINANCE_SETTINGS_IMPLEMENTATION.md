@@ -3,7 +3,9 @@
 # Native Finance, Cash Drawer Reconciliation & Settings Implementation Report
 **Document Version:** 1.0.0  
 **Date:** 2026-11-08  
-**Worktree:** `/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b`  
+**Worktree:** PR #3 historical worktree (`ux/stitch-native-prototype`)
+
+> **HISTORICAL RECORD:** PR #3 implementation report. Retained intact for audit history; see [`../README.md`](../README.md) for current state.
 **Branch:** `ux/stitch-native-prototype` (Base: `f4713c0`)  
 **Design Reference:** Stitch Project `15641450350510420845` | Asset Key: `assets/51afd92dffb8461ab336e6d3d380e71b`  
 **Screens Covered:** ST-41 (Reports Hub), ST-42 (Shift Cash), ST-43 (Physical Count), ST-44 (Expenses), ST-45 (Add Expense), ST-46 (Profile), ST-47 (Settings Root), ST-48 (Appearance), ST-51 (Limitations & In-Memory Reset) — all v02 canonical repairs

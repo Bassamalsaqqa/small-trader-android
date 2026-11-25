@@ -1,106 +1,44 @@
-# Android releases and updates
+# Android Releases & Updates
 
-Start with a signed APK shared privately with a small pilot group. Use ordinary
-Git tags and GitHub release notes; no custom updater or release service is needed.
-This document defines the procedure, not approval to release the current prototype.
+Lean pilot release playbook for `com.aistudio.smalltrader.psdukx`. Defines procedure only — **not** approval to distribute, deploy, or activate live endpoints.
 
-## Version and identity
+## 1. Current Identity & Outbox Upgrade Rules
 
-- Keep `applicationId = com.aistudio.smalltrader.psdukx` and the same release
-  signing certificate for pilot updates. A different application ID installs a
-  separate app with separate data; an incompatible certificate rejects an update
-  to the same package. Do not uninstall or clear app data to fix an update.
-- In `app/build.gradle.kts`, increase `versionCode` for every distributed APK,
-  including pilot candidates. Set `versionName` to `MAJOR.MINOR.PATCH`, optionally
-  with a suffix such as `-pilot.1`. Use the matching Git tag with a leading `v`.
-  These are naming examples, not existing releases. Baseline main currently uses
-  code `1` and name `1.0`; choose the first pilot version explicitly.
-- Android, the mobile API contract revision, and Laravel have independent versions.
-  Record their tested combination; matching version numbers are unnecessary.
+- **Current Version (`app/build.gradle.kts`):** `versionName = "1.4"`, `versionCode = 6`, `applicationId = "com.aistudio.smalltrader.psdukx"`, default origin `https://account.palsync.net`. Signed release artifact lives in **private userdata (NOT published on GitHub)**.
+- **Signing Incompatibility & Pending Outbox Rule:** The release signing certificate is **incompatible** with debug installs (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`). **Preserve pending offline outbox records; NEVER uninstall, clear app data, or downgrade an installation holding pending outbox sales.** Always bump `versionCode` for every distributed build.
+- **Independent Versioning:** Android, mobile API contract revision, and Laravel backend version independently; record tested compatibility externally in release notes rather than pinning self-referential HEAD SHAs inside source docs.
 
-## Six steps for each release
+## 2. Six-Step Release Procedure
 
-1. **Prepare.** Make the version bump in a reviewed PR. Obtain approval before
-   merging. Select the exact clean source commit to build; do not tag it yet.
-2. **Verify.** Run the applicable regression tests and lint, recording commands,
-   actual counts, failures and skips for that commit:
-
+1. **Prepare:** Bump `versionCode` / `versionName` in `app/build.gradle.kts` on a clean reviewed commit (do not tag yet). Confirm default-OFF pilot flags (`staffReadWorkspace=false`, `offlineOwnerPilot=false`, `staffAllowHttpLoopback=false`).
+2. **Verify:** Run JVM/Robolectric suite, lint, contract validator, and paired harness (record exact counts/skips):
    ```bash
    ./gradlew :app:testDebugUnitTest :app:lintDebug
+   python3 tools/validate-mobile-contract.py && python3 -O tools/validate-mobile-contract.py
    ```
-
-   Require passing checks. The known `NativeVisualEvidenceTest.capture_16` idle
-   hang remains unresolved; report any excluded checks explicitly. A partial
-   suite is not a full visual pass. Complete EN/AR, RTL and real-device acceptance
-   before a live merchant pilot.
-3. **Build and check signing.** Use `release`, never the debug-signed `benchmark`
-   variant or `smalltrader.allowInsecureDebugSigningForRelease=true`. Have the
-   owner supply the existing approved keystore through a protected local secret
-   mechanism. Do not put passwords in commands, Git, release notes or logs.
-   The current Gradle script reads environment variables `KEYSTORE_PATH`
-   (fallback `MYAPP_UPLOAD_STORE_FILE`), `STORE_PASSWORD` and `KEY_PASSWORD`;
-   alias is `upload`. It does not read password project properties. With those
-   variables supplied securely:
-
+   *(Device/KVM emulator checks, hardware Keystore, TalkBack, IME, CameraX, and Bluetooth ESC/POS remain unverified until run on physical hardware.)*
+3. **Build & Verify Signed APK:** Never ship `benchmark` or `-Psmalltrader.allowInsecureDebugSigningForRelease=true`. Supply owner keystore via env vars (`KEYSTORE_PATH` or `MYAPP_UPLOAD_STORE_FILE`, `STORE_PASSWORD`, `KEY_PASSWORD`; alias `upload`). `validateReleaseOrigin` enforces strict HTTPS `STAFF_WORKSPACE_ORIGIN`.
    ```bash
    ./gradlew :app:assembleRelease
    apksigner verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
    sha256sum app/build/outputs/apk/release/app-release.apk
    ```
+4. **Upgrade Compatibility Check:** Install in place (`adb install -r`) over the previous release-signed pilot build on a test device; verify Room outbox v1 (`6eddfecc8dabbb7ec370b858ec36714a`) records, auth locks, and pending sales survive intact.
+5. **Approve & Tag:** Present the release record below to the Owner. Only after approval, tag the verified commit (`v<version>`) and share the signed APK privately (never commit APKs to Git).
+6. **Install In Place:** Distribute via private channel (`adb install -r app/build/outputs/apk/release/app-release.apk`). On defect, ship a higher `versionCode`; never uninstall pending data.
 
-   Confirm the application ID, version and signer against the previous pilot.
-   Retain the exact verified APK; do not silently rebuild it for distribution.
-4. **Check the update and compatibility.** On a test device with the previous
-   pilot installed, install the candidate in place. Verify that every implemented
-   persistent draft, pending sale and tenant boundary survives. Once durable sync
-   is wired, include unknown-ack recovery and migration tests with queued sales.
-   Verify both the previous pilot APK and candidate against the proposed backend.
-   Do not claim preservation of currently in-memory demo state across restarts.
-5. **Approve and tag.** Present the artifact record and short notes below to the
-   owner. Only after release approval, tag the exact verified commit and publish
-   its notes/artifact through the approved private channel. Keep APKs out of Git.
-   Do not create tags, publish or deploy merely by following this document.
-6. **Install in place.** Share the approved APK with the pilot group. For a
-   controlled test-device install:
-
-   ```bash
-   adb install -r app/build/outputs/apk/release/app-release.apk
-   ```
-
-   Stop distribution if verification fails. Deliver a fix with a higher
-   `versionCode`; do not uninstall, clear data or force an APK downgrade.
-
-## Short release record
-
-Copy this into the release notes; use real evidence, not sample commit hashes:
+## 3. Release Record Template (External Pinning)
 
 ```text
-Version/tag and versionCode: <version> / <code>
-Changes: <one or two useful sentences>
-Known limitations and test results: <checks, skips, device evidence>
-Artifact: <source SHA> / <APK SHA-256> / <signer certificate SHA-256>
-Compatibility: <backend SHA/tag, API contract revision, previous pilot tested>
-Approval and private distribution: <owner decision and channel>
+Version / versionCode: <versionName> / <versionCode>
+Source & Compatibility: Android <commit>, Backend <commit/release>, API contract <revision>
+Checks: <unit/paired/lint counts & skips; device acceptance status>
+Artifact: <APK SHA-256> / Signer: <cert SHA-256>
+Approval & Distribution: <Owner decision and private channel>
 ```
 
-## Current limits and backend coordination
+## 4. Current Release Limits
 
-At main `79c9bb348f7ad4840842aa077f1820f75745d2a0`, the app uses an in-memory demo
-repository. Contract, exact-decimal, Room outbox and picker changes are separate
-unmerged drafts (PRs 4–7). Auth, HTTP and background synchronization are unwired;
-offline financial capture is disabled. The line-tax contract gap and device
-acceptance remain release blockers. This playbook does not establish readiness.
-
-Laravel releases follow its existing deployment SOP and controlled release
-checklist. The [Laravel release addendum draft](https://github.com/Bassamalsaqqa/account/blob/t3/laravel-release-guidance/docs/RELEASING.md)
-([PR 90](https://github.com/Bassamalsaqqa/account/pull/90)) passed document review at
-`97a1493c469887f67c6594aac33dfeedd19d0e8d`; it remains an unmerged draft. Document
-review does not verify release artifacts or authorize deployment. Preserve compatibility
-with the previous pilot APK. A server
-rollback requires checking the current database schema; never assume reverting
-code also reverts schema safely. Pending mobile sales must retain their identity
-and bytes through updates or forward fixes.
-
-References: [Android versioning](https://developer.android.com/studio/publish/versioning),
-[app signing](https://developer.android.com/studio/publish/app-signing),
-[apksigner](https://developer.android.com/tools/apksigner).
+- **No deployment occurred** and backend database **restore is NOT VERIFIED**.
+- Mobile API & offline capture remain **OFF** by default; **mobile document discounts are NOT implemented** (future proposal only; nonzero discounts rejected in production); shift-close submission remains **blocked**; physical device/KVM acceptance remains **unverified**.
+- References: [Android versioning](https://developer.android.com/studio/publish/versioning), [App signing](https://developer.android.com/studio/publish/app-signing), [apksigner](https://developer.android.com/tools/apksigner).

@@ -7,7 +7,9 @@ Branch `ux/merchant-experience-reset`, stacked on Phase 1 `f8629644617d147b1d092
 Reused Temurin 21.0.13+9 and SDK android-36.1. App Kotlin plugin 2.2.10 and Robolectric 4.16.1 remain unchanged. No emulator, backend, dependency or host-isolation changes. Existing ignored debug key and SDK properties reused.
 
 ```bash
-JAVA_HOME=/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9 \
+> **HISTORICAL RECORD:** Merchant UX reset validation record. Current test metrics are documented in [`../../README.md`](../../README.md).
+
+JAVA_HOME=/path/to/jdk-21 \
 JAVA_TOOL_OPTIONS=-XX:ActiveProcessorCount=2 \
 ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug \
   --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx2g -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8' --console=plain

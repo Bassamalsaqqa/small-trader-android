@@ -1,5 +1,7 @@
 # Lead reconciliation of stage 1 research
 
+> **HISTORICAL RECORD:** Merchant UX reset Stage 1 reconciliation (`ux/merchant-experience-reset`). Retained intact for audit history; see [`../../README.md`](../../README.md) for current state.
+
 Status: provisional A decision; source/task audit still pending. No production implementation or native visual acceptance in this artifact.
 
 ## Authority and useful patterns

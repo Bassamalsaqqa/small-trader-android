@@ -1,3 +1,5 @@
+> **HISTORICAL FOUNDATION SPEC:** Point-in-time staff session coordinator spec. See [README.md](../../README.md) for current status.
+
 # Android Staff Session & Application Coordinator Lifecycle
 
 ## 1. Architectural Scope & Context

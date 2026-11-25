@@ -3,7 +3,9 @@
 # Native People Hub & Accounting Ledger Implementation Report (ST-32 to ST-40)
 **Document Version:** 1.0.0  
 **Date:** 2026-11-08  
-**Worktree:** `/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b`  
+**Worktree:** PR #3 historical worktree (`ux/stitch-native-prototype`)
+
+> **HISTORICAL RECORD:** PR #3 implementation report. Retained intact for audit history; see [`../README.md`](../README.md) for current state.
 **Branch:** `ux/stitch-native-prototype` (Base: `f4713c0`)  
 **Design Reference:** Stitch Project `15641450350510420845` | Asset Key: `assets/51afd92dffb8461ab336e6d3d380e71b`  
 **Screens Covered:** ST-32, ST-33, ST-34, ST-35, ST-36, ST-37, ST-38, ST-39, ST-40 (v02 canonical repairs)

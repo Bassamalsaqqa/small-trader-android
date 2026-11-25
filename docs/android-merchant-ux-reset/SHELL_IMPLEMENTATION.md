@@ -1,6 +1,8 @@
 # Shell implementation handoff — stages 2/3
 
-Source implementation only; **not built, unit-tested, linted, device-observed or visually accepted**. Lead owns those checks after concurrent writers finish. Worktree `/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b`, branch `ux/merchant-experience-reset`, baseline HEAD `f8629644617d147b1d0920634b3eaed4e410cfb5`. No commits, pushes, PRs, backend accesses, installs or device/system changes.
+> **HISTORICAL RECORD:** Merchant UX reset shell implementation report (`ux/merchant-experience-reset`, baseline `f8629644617d147b1d0920634b3eaed4e410cfb5`). Retained intact for audit history; see [`../../README.md`](../../README.md) for current state.
+
+Source implementation only; **not built, unit-tested, linted, device-observed or visually accepted**. Lead owns those checks after concurrent writers finish. Worktree `ux/merchant-experience-reset` (archived `t3-fba3c97b`), branch `ux/merchant-experience-reset`, baseline HEAD `f8629644617d147b1d0920634b3eaed4e410cfb5`. No commits, pushes, PRs, backend accesses, installs or device/system changes.
 
 ## Files owned and changed
 

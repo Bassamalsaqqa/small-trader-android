@@ -1,3 +1,5 @@
+> **HISTORICAL RECORD (Contract Revision 2):** Point-in-time draft decision note; see [Revision 3](mobile-v1-revision-3-decisions.md) and [README.md](../../README.md).
+
 # Coordinated DRAFT contract revision 2
 
 Previous Android Git head: `088f1f9d5fdb231b31d7bc1525092b500411cb5f`.

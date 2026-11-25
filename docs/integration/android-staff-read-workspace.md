@@ -1,3 +1,5 @@
+> **HISTORICAL MILESTONE RECORD:** Point-in-time staff read workspace integration spec. See [README.md](../../README.md) and [LOCAL_ANDROID_HANDOFF.md](../LOCAL_ANDROID_HANDOFF.md) for current flags and launch routing.
+
 # Android Staff Read Workspace UI Integration
 
 ## 1. Architectural Scope & Context

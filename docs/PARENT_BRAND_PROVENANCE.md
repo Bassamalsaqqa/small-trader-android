@@ -1,3 +1,5 @@
+> **HISTORICAL PROVENANCE NOTE:** Launcher icon and palette reuse record.
+
 # Parent brand reuse
 
 Android launcher resources reuse the storefront path and #255FD6 / white colors from Bassamalsaqqa/account at f8a0cf7012c4875bec7320d42e0f8dde58593b52, public/icon-maskable.svg. Parent repository was inspected through read-only GitHub API; it was not cloned, modified or run.

@@ -1,7 +1,9 @@
 # MERCHANT FINANCIAL PRIVACY & VALUATION REGRESSION TEST HANDOFF
 
 **Target Branch:** `ux/merchant-experience-reset`  
-**Worktree:** `/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b`  
+**Worktree:** archived reset worktree (`t3-fba3c97b`)
+
+> **HISTORICAL RECORD:** Merchant UX reset privacy test handoff. Retained for audit history; see [`../../README.md`](../../README.md) for current state.
 **Role:** Test Sub-Agent (QA / Test Authoring)  
 **Date:** 2026-11-07  
 **Owned Files:**  

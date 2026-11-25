@@ -1,5 +1,7 @@
 # Reset candidate — Windows Pixel_8a_T3 acceptance
 
+> **HISTORICAL RECORD:** Historical Windows emulator acceptance record for the merchant UX reset candidate. Current device/emulator status is documented in [`../../README.md`](../../README.md) and [`../RELEASING.md`](../RELEASING.md).
+
 **Owner acceptance pending.** This is a new candidate stacked on unmerged Phase 1. Neither the HTML concepts nor automated tests certify this mobile design.
 
 ## Install the candidate

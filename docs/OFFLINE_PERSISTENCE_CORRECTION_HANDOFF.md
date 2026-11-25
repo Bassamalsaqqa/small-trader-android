@@ -1,3 +1,5 @@
+> **HISTORICAL MILESTONE RECORD (Offline Persistence & Restricted Restart):** Point-in-time implementation & verification record. See [README.md](../README.md) for current `v1.4` (`versionCode 6`) verification status; offline capture remains **OFF** by default.
+
 # Offline persistence and restricted restart implementation
 
 Baseline: `2b9bffa8742a6c92ddca75574f14b9ee5efea384`, branch `t3/android-searchable-selectors-pr22`.

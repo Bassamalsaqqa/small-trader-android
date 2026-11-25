@@ -1,5 +1,7 @@
 # Phase 1 native Android design direction
 
+> **HISTORICAL RECORD:** Phase 1 design notes (`ux/phase1-master-rework`). Retained intact for audit history; see [`../README.md`](../README.md) for current app state.
+
 Baseline: `ce2bb6ef8c480048036187892850fa6fb8853f6f`. Branch: `ux/native-phase1`.
 
 ## Diagnosis

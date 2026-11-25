@@ -1,5 +1,7 @@
 # Stitch UI/UX Review Plan & Technical Design Specification (PR #3)
 
+> **HISTORICAL RECORD:** PR #3 Stitch review plan (`ux/stitch-native-prototype`). Retained intact for audit history; see [`../README.md`](../README.md) for current app state.
+
 **Document Authority:** Design Sub-Agent Specification for PR #3 (Candidate v3 Review Revision)  
 **Pull Request:** [PR #3: Consolidate candidate v3 prototype and validation handoff](https://github.com/Bassamalsaqqa/small-trader-android/pull/3)  
 **Branch & Target:** `ux/stitch-native-prototype` -> `main` (commit `9336da67784b15bee12346b9c3c255943c9d2ccc`)  
@@ -49,7 +51,7 @@ All visual proposals were generated inside the authentic project workspace using
 - **Design System Asset:** `assets/51afd92dffb8461ab336e6d3d380e71b`
 - **Color Palette:** Primary `#255FD6`, Canvas `#F7F9FC`, Surface `#FFFFFF`, Border `#E4E9F1`, Text `#172033`, Muted `#526174`, Success `#14804A`, Danger `#B42318`, Warning `#A15C00`.
 - **Typography:** `IBM Plex Sans Arabic` (Bold, SemiBold, Medium, Regular).
-- **Physical Output Directory:** `/home/t3dev/.t3/artifacts/small-trader-stitch-2026-11-08/design/round3-review/`
+- **Physical Output Directory:** `<stitch-artifacts>/design/round3-review/`
 
 ### Screen 1: Simplified Home Screen (`R3-HOME-SIMPLIFIED-v01`)
 - **Stitch Screen ID:** `projects/15641450350510420845/screens/c7da680fc61c4a02847f4648e5f20573`
@@ -107,7 +109,7 @@ All visual proposals were generated inside the authentic project workspace using
 ## 4. Repository & Artifacts Audit
 
 ### 4.1 Git Worktrees & Branch Topology
-1. **Primary Workspace (`/home/t3dev/projects/small-trader-android`):**
+1. **Primary Workspace (`small-trader-android`):**
    - Head: `f862964` (`ux/native-phase1`)
    - Untracked Historical Assets:
      - `crop_14.png`
@@ -117,7 +119,7 @@ All visual proposals were generated inside the authentic project workspace using
      - `slice_16_2.png`
      - `slice_16_3.png`
    - **Recommendation:** **MUST PRESERVE PERMANENTLY.** These are historical PSD/Figma visual slice authorities extracted during Phase 1. Do NOT delete, clean, or git-stash.
-2. **PR #3 Worktree (`/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b`):**
+2. **PR #3 Worktree (`ux/stitch-native-prototype`):**
    - Head: `9336da6` (`ux/stitch-native-prototype`)
    - Working Tree: Clean; dedicated worktree for PR #3.
    - **Recommendation:** Maintain as active integration worktree for PR #3 fixes.
@@ -220,6 +222,6 @@ The design assets, Stitch screen IDs, source seams, and acceptance criteria docu
 
 **Integrator Checklist:**
 1. Leave this plan in `docs/PR3_STITCH_REVIEW_PLAN.md` uncommitted for owner/integrator review.
-2. Implement fixes strictly in the worktree `/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b`.
+2. Implement fixes strictly in the PR #3 worktree (`ux/stitch-native-prototype`).
 3. Preserve root checkout untracked PNGs.
 4. Execute test suites and report genuine, unembellished verification metrics.

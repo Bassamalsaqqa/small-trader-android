@@ -1,5 +1,7 @@
 # Phase 1 checkout and customer ledger review
 
+> **HISTORICAL RECORD:** Phase 1 review snapshot (`ux/phase1-master-rework`, baseline era). Superseded by current release documentation in [`../README.md`](../README.md) and [`RELEASING.md`](RELEASING.md); retained intact for audit history.
+
 Baseline `ce2bb6ef8c480048036187892850fa6fb8853f6f`; branch `ux/native-phase1`.
 
 ## Existing foundation

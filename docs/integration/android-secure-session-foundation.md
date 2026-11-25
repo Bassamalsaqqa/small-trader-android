@@ -1,3 +1,5 @@
+> **HISTORICAL FOUNDATION SPEC:** Point-in-time secure session persistence foundation. See [README.md](../../README.md) for current status.
+
 # Android Secure Staff Session Persistence Foundation
 
 ## 1. Architectural Scope & Context

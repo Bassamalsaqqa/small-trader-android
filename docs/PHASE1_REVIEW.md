@@ -1,5 +1,7 @@
 # Lead integration review
 
+> **HISTORICAL RECORD:** Phase 1 lead integration review snapshot. Retained intact for audit history; see [`../README.md`](../README.md) for current app state.
+
 The additional Antigravity review task failed at harness startup (WebSocket close 1006) and produced no findings. The following is the lead's direct source review, not an independent agent approval.
 
 ## Corrected findings

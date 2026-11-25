@@ -1,5 +1,7 @@
 # PR #3 Review Remediation Report
 
+> **HISTORICAL RECORD:** PR #3 remediation report (`ux/stitch-native-prototype`). Retained intact for audit history; see [`../README.md`](../README.md) for current state.
+
 **Date:** 2026-11-09  
 **Branch:** `ux/stitch-native-prototype`  
 **Pull Request:** [PR #3: Consolidate candidate v3 prototype and validation handoff](https://github.com/Bassamalsaqqa/small-trader-android/pull/3)  

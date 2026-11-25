@@ -1,3 +1,5 @@
+> **HISTORICAL BRIEF (Merchant UX Reset, Nov 2026):** Archived product reset brief; current release and architecture state are documented in [`../../README.md`](../../README.md) and [`../RELEASING.md`](../RELEASING.md).
+
 # SMALL TRADER / التاجر الصغير — NATIVE ANDROID PRODUCT EXPERIENCE RESET
 ## Consolidated master execution brief for T3 / Codex / Antigravity
 
@@ -297,7 +299,7 @@ Agent independent review plus recorded tests, true source/APK matching and exhau
 ### Toolchain commands: reuse ONLY existing local toolchain when paths remain valid
 
 ```bash
-export JAVA_HOME=/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9
+export JAVA_HOME=/path/to/jdk-21
 export PATH="$JAVA_HOME/bin:$PATH"
 export JAVA_TOOL_OPTIONS="-XX:ActiveProcessorCount=2"
 ./gradlew :app:assembleDebug --max-workers=2 -Dorg.gradle.jvmargs="-Xmx2g -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8"

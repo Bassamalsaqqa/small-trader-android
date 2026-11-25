@@ -3,7 +3,9 @@
 # Native Inventory & Purchasing Wave Implementation Report (ST-19, ST-23, ST-26, ST-27)
 **Document Version:** 1.0.0  
 **Date:** 2026-11-08  
-**Worktree:** `/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b`  
+**Worktree:** PR #3 historical worktree (`ux/stitch-native-prototype`)
+
+> **HISTORICAL RECORD:** PR #3 implementation report. Retained intact for audit history; see [`../README.md`](../README.md) for current state.
 **Branch:** `ux/stitch-native-prototype` (Base: `f4713c0`)  
 **Design Authority:** Google Stitch Canonical Direction (Project `15641450350510420845` | Asset Key: `assets/51afd92dffb8461ab336e6d3d380e71b`)  
 **Canonical Frames Handed Off:**
@@ -16,7 +18,7 @@
 
 ## 1. Executive Summary & Boundary Enforcement
 
-In strict compliance with sub-agent directives and the primary UI router (`/home/t3dev/.agents/skills/ui-ux-design/SKILL.md`), this implementation executes the native Jetpack Compose inventory and purchasing experience without delegation, background agents, external dependencies, or architecture mutation.
+In strict compliance with sub-agent directives and the primary UI router (per the `ui-ux-design` skill), this implementation executes the native Jetpack Compose inventory and purchasing experience without delegation, background agents, external dependencies, or architecture mutation.
 
 ### 1.1 Strict Disjoint File Ownership
 Only assigned files within our strict boundary were created or modified:

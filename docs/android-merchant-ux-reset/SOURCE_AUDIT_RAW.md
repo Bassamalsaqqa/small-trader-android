@@ -10,7 +10,9 @@
 ## 1. Executive Summary & Baseline Verification
 
 ### 1.1 Repository & Branch State
-- **Android Repository:** `/home/t3dev/projects/small-trader-android`
+> **HISTORICAL RECORD:** Merchant UX reset raw source audit (`f862964` baseline).
+
+- **Android Repository:** `small-trader-android`
 - **Checked-out Branch:** `ux/native-phase1` (tracking `origin/ux/native-phase1`)
 - **Git Commit HEAD:** `f8629644617d147b1d0920634b3eaed4e410cfb5` (*"feat(android): prepare native UX phase one for device acceptance"*)
 - **Working Tree:** Clean (no unstaged or untracked changes, strictly zero repository writes performed during this audit).
@@ -23,9 +25,9 @@
 - **Backend Reality Check:** Inspection of `routes/api-v1.php` confirms that the backend exposes *only* session verification (`/api/v1/session`), assistant turn execution, draft sales invoices (`/api/v1/companies/{companyId}/sales/invoices/*`), and read-only lookups (customers, products, warehouses, currencies, taxes). **There are no backend endpoints for mobile purchasing, offline sync, supplier bills, expenses, or cash drawer reconciliation.** The Android client operates exclusively as an in-memory offline demo repository (`OfflineDemoTraderRepository.kt`).
 
 ### 1.3 Tooling & Environment Status
-- **Java Toolchain:** JDK 21 (`/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9`)
+- **Java Toolchain:** JDK 21 (`JAVA_HOME=/path/to/jdk-21`)
 - **Android Build Tool:** Gradle wrapper with Android Gradle Plugin 8.7.2, Kotlin 2.0.21, Compose BOM `2024.09.00`.
-- **Tool Access Reporting:** Direct path access to outside attachment `/home/t3dev/.t3/userdata/attachments/...` was denied by the pre-tool security boundary hook; full contents were successfully read via bash CLI. No device sessions or Android emulator tools were started during this audit, conforming to the strict read-only audit directive.
+- **Tool Access Reporting:** Outside attachment files were inspected via CLI during the historical audit; no device sessions or Android emulator tools were started, conforming to the read-only audit directive.
 
 ---
 

@@ -2,7 +2,9 @@
 
 **Document version:** 1.0 — 2026-11-07  
 **Execution Environment:** HP-worker (Linux x86_64, headless, no emulator/Pixel device)  
-**Target Worktree:** `/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b`  
+**Target Worktree:** archived reset worktree (`t3-fba3c97b`)
+
+> **HISTORICAL RECORD:** Merchant UX reset initial QA report. Current test metrics are documented in [`../../README.md`](../../README.md).
 **Branch:** `ux/merchant-experience-reset`  
 **Baseline Commit:** `f8629644617d147b1d0920634b3eaed4e410cfb5`  
 **Status:** Automated checks passed; owner Android visual acceptance PENDING.
@@ -12,8 +14,8 @@
 ## 1. Toolchain & Execution Commands
 
 ### Toolchain Configuration
-- **JDK:** Eclipse Adoptium OpenJDK 21.0.13+9 (`/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9`)
-- **Android SDK:** `/home/t3dev/.local/share/android-toolchain/sdk`
+- **JDK:** Eclipse Adoptium OpenJDK 21 (`JAVA_HOME=/path/to/jdk-21`)
+- **Android SDK:** `ANDROID_HOME=/path/to/android-sdk`
 - **Gradle Version:** Gradle 9.3.1; app Kotlin Compose plugin 2.2.10 (Gradle embedded Kotlin is a separate version)
 - **JVM Owner Flags:** `JAVA_TOOL_OPTIONS=-XX:ActiveProcessorCount=2`
 - **Gradle Execution Flags:** `--max-workers=2 -Dorg.gradle.jvmargs='-Xmx2g -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8'`

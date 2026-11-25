@@ -2,7 +2,9 @@
 
 ## Checkout and provenance
 
-- Prepared worktree ONLY: `/home/t3dev/.t3/worktrees/small-trader-android/t3-fba3c97b`.
+> **HISTORICAL RECORD:** Merchant UX reset baseline snapshot (`f862964`, pre-`v1.4`). See [`../../README.md`](../../README.md) for current release state.
+
+- Prepared worktree ONLY: archived reset worktree (`t3-fba3c97b`).
 - Initial branch: `t3/fba3c97b`; initial HEAD exactly `f8629644617d147b1d0920634b3eaed4e410cfb5`.
 - Initial `git status --short`: empty; no tracked or untracked changes. Baseline diff empty.
 - Renamed current branch using `git branch -m ux/merchant-experience-reset`; HEAD unchanged. No new worktree, commit, push or PR.

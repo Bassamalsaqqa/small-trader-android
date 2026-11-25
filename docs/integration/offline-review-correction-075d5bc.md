@@ -1,3 +1,5 @@
+> **HISTORICAL MILESTONE RECORD (075d5bc):** Point-in-time offline capture review correction. See [README.md](../../README.md) for current status.
+
 # Offline capture review correction
 
 Baseline: `075d5bc105a46987451bb720ad6f24119c831d65`, branch `t3/android-searchable-selectors-pr22`.
@@ -13,7 +15,7 @@ Changes are Android-only. The existing two untracked artifacts (`app/round2/`, `
 
 Verification uses offline Gradle, ActiveProcessorCount=2, heap 1536m and one worker. Initial compile succeeded; initial focused run: 3 tests, zero failures/errors/skips. The next affected run had 7 tests: 6 passed and 1 failed on the revision trigger under an outer INSERT OR REPLACE. That regression was corrected by update-before-conditional-insert trigger logic, installed atomically in the open callback. Final affected rerun results are recorded below. JUnit does not instrument assertion totals.
 
-Private evidence is pinned outside Git at `/home/t3dev/.local/state/small-trader-android/075d5bc-review-correction/`, including pre-correction JUnit and existing continuation logs before overwrite. These local private pins are evidence only, not runtime dependencies.
+Private evidence is pinned outside Git in local operator state, including pre-correction JUnit and existing continuation logs before overwrite. These local private pins are evidence only, not runtime dependencies.
 
 Remaining qualification: real production Compose composition with owner-pilot opt-in, device/Keystore and boot identity behavior, observer lifecycle under actual Android connectivity callbacks, and dedicated online/offline profile-collision qualification. JVM composition tests bypass production pilot/open and native Keystore gates; they do not establish device acceptance. This correction does not claim full-product release qualification. Feature remains OFF by default. No CI, push, merge, signing, backend DB, Hostinger, device, deployment or production-data action was performed.
 

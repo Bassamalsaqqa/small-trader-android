@@ -1,5 +1,7 @@
 # Phase 1 reconciled validation evidence
 
+> **HISTORICAL RECORD:** Phase 1 validation record. Retained intact for historical traceability; current release state is documented in [`../README.md`](../README.md) and [`RELEASING.md`](RELEASING.md).
+
 Branch: `ux/native-phase1`. Baseline: `ce2bb6ef8c480048036187892850fa6fb8853f6f`.
 Status: implementation handoff for visual acceptance; UX approval is pending.
 
@@ -12,7 +14,7 @@ Local JDK: Temurin 21.0.13+9; SDK platform android-36.1. Toolchain and ignored l
 Commands reported by QA (each exit 0):
 
 ```bash
-export JAVA_HOME=/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9
+export JAVA_HOME=/path/to/jdk-21
 export PATH=$JAVA_HOME/bin:$PATH
 export JAVA_TOOL_OPTIONS="-XX:ActiveProcessorCount=2"
 ./gradlew :app:assembleDebug --max-workers=2 -Dorg.gradle.jvmargs="-Xmx2g -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8"

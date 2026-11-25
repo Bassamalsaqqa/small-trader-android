@@ -1,3 +1,5 @@
+> **HISTORICAL PROPOSAL (Superseded by Revision 3 / V2 Specs):** Point-in-time design proposal; see [README.md](../../README.md) and [ADR-0001](mobile-v1/ADR-0001-mobile-v1-contract.md).
+
 # Source-Backed Financial Tax Protocol Proposal
 
 **Document Path**: `docs/integration/financial-tax-protocol-proposal.md`  
@@ -9,7 +11,7 @@
 ## 1. Executive Summary & Provenance Baseline (Facts)
 
 ### 1.1 Verified Repository State
-- **Backend Current Main**: Commit `f8a0cf7012c4875bec7320d42e0f8dde58593b52` (`Bassamalsaqqa/account` at `/home/t3dev/projects/account`, clean read-only HEAD).
+- **Backend Current Main**: Commit `f8a0cf7012c4875bec7320d42e0f8dde58593b52` (`Bassamalsaqqa/account`, clean read-only HEAD).
 - **Android READ Contract Rev 2 (PR 4)**: Head `ec8220934839ade0c4fe5408398ab1a313feb09c` (`manifest.sha256`: `ba75352349e552f53b02ad7159570171f88943dc26e5bdf2a4b013386b0d0659`).
 - **Android Contract Primitives (PR 5)**: Head `810c491af4ac9df2918c67072f57a395106eba64` (drift prevention, exact decimal primitives).
 - **Android Room Outbox Foundation (PR 6)**: Head `456bfd39a362f9d3de745f1cf12d918263202dc9` (Room outbox, composite `(company_id, client_event_id)` PK, 6-state status machine, immutable BLOB payload).

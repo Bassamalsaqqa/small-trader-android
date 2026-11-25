@@ -1,125 +1,64 @@
-> **Integration Candidate (Consolidated Working Prototype):** Native Arabic-first merchant workspace with Home, POS Sales, Invoices Ledger, Products Catalog, and People Hub. See **[Integration Candidate (`docs/integration/android-integration-candidate.md`)](docs/integration/android-integration-candidate.md)** and **[Paired Read Pilot (`docs/integration/paired-read-pilot.md`)](docs/integration/paired-read-pilot.md)** for consolidated architecture (see the linked evidence documents for separately recorded candidate and pilot test counts, contract validation, and lint results), offline store-and-forward architecture approval, and HTTPS read pilot gates. Canonical prototype artifacts and legacy Windows notes are archived in **[Candidate v3 Handoff (`docs/CANDIDATE_V3_HANDOFF.md`)](docs/CANDIDATE_V3_HANDOFF.md)**. The prototype description below provides project background and architecture.
+# التاجر الصغير · Small Trader (Android)
 
-# التاجر الصغير · Small Trader (Android POS & Merchant Ledger)
+Arabic-first (RTL) / English (LTR) Kotlin + Jetpack Compose (Material 3) POS, merchant ledger, inventory, and encrypted offline-outbox client integrated with **`Bassamalsaqqa/account`** (`/api/mobile/v1` and `/api/mobile/v2`), plus an isolated debug-only demo mode.
 
-**التاجر الصغير (Small Trader)** is an Arabic-first (RTL) / English (LTR) native Android point-of-sale, customer debt ledger (`دفتر الدين`), inventory, supplier payables, and shift cash-drawer prototype built in **Kotlin** and **Jetpack Compose** (Material 3) for Palestinian shopkeepers, roasteries, and grocery merchants.
+## Current Release & Verification Reality
 
-This repository is prepared for **local Android Studio development** and integration with the **`Bassamalsaqqa/account`** Laravel `/api/v1` accounting backend.
+- **Release Identity:** **`v1.4` (`versionCode = 6`)**, `applicationId = "com.aistudio.smalltrader.psdukx"`, origin `https://account.palsync.net`. The signed APK artifact is stored in **private userdata (NOT published on GitHub)**.
+- **Critical Signing & Outbox Safety:** The release signing certificate is **incompatible** with debug builds (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`). **Preserve pending offline outbox records; NEVER uninstall an installation that has pending outbox data.**
+- **Default-OFF Flags (`gradle.properties` / `app/build.gradle.kts`):** `smalltrader.staffReadWorkspace=false`, `smalltrader.staffAllowHttpLoopback=false`, `smalltrader.offlineOwnerPilot=false`, `smalltrader.allowInsecureDebugSigningForRelease=false` (backend mobile & offline APIs also default **OFF**).
+- **Automated Verification:**
+  - Full standard JVM/Robolectric suite: **`945` passed / `6` skipped** (`951` total: skips 1 `@Ignore` `ExampleRobolectricTest`, 1 `SmallTraderReadPilotSmokeTest`, 4 `OutboxScaleBenchmarkHarnessTest`), plus **`5` targeted tests** (`4` `OutboxScaleBenchmarkHarnessTest` + online/offline UUID collision) passed separately.
+  - Paired real-HTTP harness ([`tools/paired/README.md`](tools/paired/README.md) + `PairedProductionSaleTest`): **`12` real sale vectors** across 3 companies + **`6` backend domain reconciliations** + foreign-tenant zero-leakage passed against the Account `d096` runtime baseline (backend runtime business source unchanged since).
+  - Contract validator (`tools/validate-mobile-contract.py`): validates schemas, OpenAPI 3.1, fixtures, JCS vectors, and `manifest.sha256` parity in normal and `-O` modes.
+- **Blocked / Unverified / Proposals:**
+  - **Physical device & KVM emulator:** **BLOCKED / UNVERIFIED** (no physical device/emulator for hardware `AndroidKeyStore`, `BOOT_COUNT`, TalkBack, IME, CameraX, or Bluetooth ESC/POS printing).
+  - **Deployment & Restore:** **No production deployment occurred**; database **restore is NOT VERIFIED**.
+  - **Document Discounts & Shift Close:** Mobile document discounts are a **FUTURE PROPOSAL (NOT IMPLEMENTED)** — production checkout rejects nonzero discounts. Shift close UI remains **BLOCKED** pending backend contract guarantees ([Shift Count Blocker](docs/SHIFT_COUNT_CONTRACT_BLOCKER.md)).
 
----
+## Toolchain & Commands
 
-## Quick Links
-
-- **[Release Playbook (`docs/RELEASING.md`)](docs/RELEASING.md)** — Lean Android versioning, secure signing, artifact provenance, and safe update playbook for pilot releases.
-- **[Integration Candidate (`docs/integration/android-integration-candidate.md`)](docs/integration/android-integration-candidate.md)** — Consolidated candidate architecture (393 focused unit/Robolectric tests, 303 contract validations), outbox scope lock, and verified gates.
-- **[Paired Read Pilot (`docs/integration/paired-read-pilot.md`)](docs/integration/paired-read-pilot.md)** — Gated read pilot matrix, HTTPS test harness, disposable backend handoff contract, and follow-on proposals.
-- **[Candidate v3 Handoff (`docs/CANDIDATE_V3_HANDOFF.md`)](docs/CANDIDATE_V3_HANDOFF.md)** — Canonical prototype APK digest, legacy prototype test baseline (105 tests), lint report, bottom bar freeze status, and Windows owner installation steps.
-- **[Surface Coverage Matrix (`docs/SURFACE_COVERAGE.md`)](docs/SURFACE_COVERAGE.md)** — Exact classification of every screen, flow, and dialog: *Working Demo*, *Interactive Simulation*, *Shallow Preview*, or *Deferred to Backend / Hardware*.
-- **[Local Android Handoff Guide (`docs/LOCAL_ANDROID_HANDOFF.md`)](docs/LOCAL_ANDROID_HANDOFF.md)** — Architecture overview, financial invariants, hardware boundaries (CameraX/ML Kit & Bluetooth ESC/POS), verified `Bassamalsaqqa/account` (`routes/api-v1.php`) contracts vs future backend requirements, test evidence, and local cleanup priorities.
-
----
-
-## Actual Gradle & SDK Configuration (`app/build.gradle.kts` & `gradle/libs.versions.toml`)
-
-1. **Gradle & Android Gradle Plugin (AGP)**:
-   - **Gradle Wrapper**: `Gradle 9.3.1` (`gradle/wrapper/gradle-wrapper.properties`, `gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`)
-   - **AGP**: `9.1.1` (`com.android.application`)
-   - **Kotlin**: `2.2.10` (`org.jetbrains.kotlin.plugin.compose`, `org.jetbrains.kotlin.plugin.serialization`)
-2. **Android SDK & Java Target**:
-   - `namespace = "com.example"`
-   - `applicationId = "com.aistudio.smalltrader.psdukx"`
-   - `compileSdk = release(36) { minorApiLevel = 1 }`
-   - `minSdk = 24`
-   - `targetSdk = 36`
-   - `sourceCompatibility = JavaVersion.VERSION_11` / `targetCompatibility = JavaVersion.VERSION_11` (runs under JDK 17/21 in Android Studio or CLI; verified on Temurin JDK 21.0.13)
-3. **Locale & Numerals**:
-   - All monetary amounts (`₪` / ILS), quantities, invoice numbers, and timestamps are formatted with **Western Arabic digits (`0-9`)** via `WesternFormatters` regardless of whether the device locale is Arabic (`ar`) or English (`en`).
-
----
-
-## Building & Running Locally
-
-### 1. Open in Android Studio
-1. Open the project root folder in **Android Studio** (with Android SDK API 36.1 installed).
-2. Let Gradle sync finish using the included Gradle 9.3.1 wrapper (`app` module, `com.example` namespace, `com.aistudio.smalltrader.psdukx` application ID).
-3. Select the `app` run configuration and run on any Android Emulator or physical device (API 24+).
-
-### 2. Command-Line Build & Unit Tests
-Using the included Gradle wrapper (`./gradlew` on macOS/Linux or `gradlew.bat` on Windows):
+Configured in `app/build.gradle.kts` & `gradle/libs.versions.toml`: Gradle `9.3.1`, AGP `9.1.1`, Kotlin `2.2.10`, Compose BOM `2024.09.00`, Room `2.7.0`, OkHttp `4.10.0`, `compileSdk 36.1`, `minSdk 24`, `targetSdk 36`, Java 11 target (tested on JDK 21).
 
 ```bash
-# Assemble the debug APK
+# Build debug APK & run standard JVM/Robolectric tests + lint
 ./gradlew :app:assembleDebug
+./gradlew :app:testDebugUnitTest :app:lintDebug
 
-# Run the JVM unit & domain invariant test suite (38 tests)
-./gradlew :app:testDebugUnitTest
+# Contract & schema validation (Python 3.10+)
+python3 tools/validate-mobile-contract.py && python3 -O tools/validate-mobile-contract.py
+
+# Opt-in outbox scale benchmark (1,000 encrypted records; skipped in normal runs)
+OUTBOX_BENCHMARK_ENABLED=true ./gradlew :app:testDebugUnitTest \
+  --tests "com.example.data.mobile.outbox.OutboxScaleBenchmarkHarnessTest"
 ```
 
-*(Note: Inside the cloud build container, `gradle :app:assembleDebug` and `gradle :app:testDebugUnitTest` can also be invoked directly.)*
+See [Release Playbook](docs/RELEASING.md) for signed release builds and [Paired Harness](tools/paired/README.md) for live loopback Laravel integration.
 
----
+## Source Architecture (`app/src/main/java/com/example/`)
 
-## Actual Source Tree
+- **`MainActivity.kt` & `ui/navigation/`:** `AppLaunchTargetResolver` gates `FULL_SHELL` (`AuthenticatedTraderApp`), `STAFF_WORKSPACE` (`StaffWorkspaceApp`), `UNCONFIGURED`, or debug-only `DEMO_TRADER` (never silent demo fallback in release).
+- **`data/mobile/`:** Contract primitives & JCS (`contract/`, `contract/v2/`), `client/` (`MobileMerchantApiClient`), `merchantread/`, `readclient/` (`SmallTraderReadClient`, isolated `OkHttpTransport`), `session/` (`SecureStaffSessionStore` in `noBackupFilesDir`, `StaffSessionCoordinator`), `outbox/` (Room v1 `OutboxDatabase`, `STO/1` AES-256-GCM encryption, `AUTH_BLOCKED` scope locks), `offline/` (`OfflineLeaseStore`, `RestrictedOfflineWorkspace`, `BOOT_COUNT`), `sync/` (`SaleSyncCoordinator`, `HttpSaleSyncGateway`), `integration/` (`OutboxAuthDenialBridge`).
+- **`data/` & `viewmodel/`:** `TraderRepository`, `ProductionTraderRepository`, debug-only `OfflineDemoTraderRepository`, `SampleCatalog`, `ProductSearch`, `TraderViewModel`, `TraderUiState`.
+- **`ui/`:** `AuthenticatedTraderApp`, `RestrictedOfflineScreen`, `OfflinePilotControls`, `staff/`, `screens/` (Home, NewSale, InvoiceReview, CashPayment, Receipt, Customers, Suppliers, Purchases, ProductsCatalog, PeopleHub, BusinessExtraScreens), `components/`, `shell/`, `theme/` (`IBM Plex Sans Arabic`, Western digits via `WesternFormatters`).
 
-```text
-.
-├── app/
-│   ├── build.gradle.kts
-│   └── src/
-│       ├── main/
-│       │   ├── AndroidManifest.xml
-│       │   ├── java/com/example/
-│       │   │   ├── MainActivity.kt                  # App shell, root vs secondary navigation, BackHandler, modal sheets
-│       │   │   ├── data/
-│       │   │   │   ├── SampleCatalog.kt             # Seeded Palestinian merchant catalog, reconciled customers/invoices/statements, drafts
-│       │   │   │   └── TraderRepository.kt          # Repository interface + OfflineDemoTraderRepository with accounting & GRN guards
-│       │   │   ├── model/
-│       │   │   │   └── TraderModels.kt              # Domain models, InvoicePaymentStatus (PAID_CASH/PARTIAL/ON_CREDIT), SaleDraft, WesternFormatters
-│       │   │   ├── ui/
-│       │   │   │   ├── components/
-│       │   │   │   │   ├── ModalSheetsAndDialogs.kt # Custom quick item dialog, simulated Barcode & Bluetooth Printer sheets
-│       │   │   │   │   └── TraderAppBars.kt         # TopBar, 4-tab BottomBar, Store Operations & Account lateral switchers
-│       │   │   │   ├── screens/
-│       │   │   │   │   ├── BusinessExtraScreens.kt  # ExpensesScreen, FinancialReportsScreen, UserProfileScreen, BusinessSettingsScreen
-│       │   │   │   │   ├── CashPaymentScreen.kt     # Tender entry, quick denominations, change & credit posting
-│       │   │   │   │   ├── CustomersScreen.kt       # Customers directory, CustomerDetailScreen, receipt vouchers, statement share
-│       │   │   │   │   ├── HomeScreen.kt            # Shift pulse, unfinished basket resume card, urgent low-stock list, operations grid
-│       │   │   │   │   ├── InvoiceReviewScreen.kt   # Basket review, discounts, customer assignment, drafts & quotation preview
-│       │   │   │   │   ├── NewSaleScreen.kt         # Catalog grid, Arabic-normalized search, category chips, sticky checkout bar
-│       │   │   │   │   ├── ProductsCatalogScreen.kt # Catalog list, ProductDetailScreen, create/edit product, warehouse transfer preview
-│       │   │   │   │   ├── ReceiptScreen.kt         # Thermal receipt (58mm/80mm), 3-state payment status, sales return preview, InvoicesHistoryScreen
-│       │   │   │   │   └── SuppliersScreen.kt       # Suppliers list, SupplierDetailScreen, financial bills, bounded single-SKU GRN, return preview
-│       │   │   │   └── theme/
-│       │   │   │       ├── Color.kt                 # Light & Dark financial color tokens
-│       │   │   │       ├── Theme.kt                 # SmallTraderTheme & TraderTheme financial composition locals
-│       │   │   │       └── Type.kt                  # Cairo & JetBrains Mono typography scale
-│       │   │   └── viewmodel/
-│       │   │       └── TraderViewModel.kt           # Single-source-of-truth StateFlow (TraderUiState) & POS/ledger operations
-│       │   └── res/                                 # Adaptive launcher icons, bundled Cairo/JetBrains Mono fonts, strings.xml
-│       └── test/java/com/example/
-│           └── ExampleUnitTest.kt                   # 38 JVM unit & regression tests
-├── docs/
-│   ├── LOCAL_ANDROID_HANDOFF.md                     # Architecture, verified Bassamalsaqqa/account API routes, and handoff guide
-│   └── SURFACE_COVERAGE.md                          # Screen-by-screen classification matrix
-├── gradle/
-│   ├── libs.versions.toml                           # Version catalog (AGP 9.1.1, Kotlin 2.2.10, Compose BOM 2026.02.01)
-│   └── wrapper/                                     # Gradle 9.3.1 wrapper jar & properties
-├── build.gradle.kts
-├── gradlew
-├── gradlew.bat
-└── settings.gradle.kts
-```
+## Documentation Index (Current vs Historical)
 
----
+### Current & Authoritative
 
-## Truthfulness & Prototype Boundaries
+| Document | Scope |
+|---|---|
+| [AGENTS.md](AGENTS.md) | Posting authority, decimal/JCS/idempotency/Keystore invariants |
+| [Release Playbook](docs/RELEASING.md) | **Single authority** for `v1.4` (`versionCode 6`) signing, upgrades & outbox safety |
+| [Paired Financial Harness](tools/paired/README.md) | Real-HTTP Android <-> Laravel `tools/paired/` verification |
+| [Local Android Handoff](docs/LOCAL_ANDROID_HANDOFF.md) | Developer setup, build flags, and integration status |
+| [Surface Coverage Matrix](docs/SURFACE_COVERAGE.md) | Live-wired vs debug-demo vs simulated vs blocked surfaces |
+| [Product Picker & Search](docs/workflows/product-picker.md) | Arabic normalization, tiered ranking, and bounded search rules |
+| [Frozen Mobile Contract ADR-0001](docs/integration/mobile-v1/ADR-0001-mobile-v1-contract.md) | SHA-256 pinned contract baseline (also see [Revision 3](docs/integration/mobile-v1-revision-3-decisions.md)) |
+| [Font Licenses](docs/fontlicense/README.md) | IBM Plex Sans Arabic SIL OFL 1.1 provenance & hashes |
 
-- **In-Memory Demo Repository (`OfflineDemoTraderRepository`)**: All operations execute against deterministic in-memory state seeded from `SampleCatalog`. Data resets on full app process restart.
-- **Development-Only vs Production Capabilities**:
-  - **Demo Role Switching (`UserProfileScreen` → `demo_role_switcher_card`)**: Clearly isolated under *"Demo & Testing Controls"* for inspecting Owner/Manager vs Cashier permission gates locally; not a production authentication system.
-  - **Authentication & Offline Posting Policy**: The owner has approved the offline store-and-forward architecture (Room durable outbox, strict scope-bound locks, canonical ACK verification, and offline sales data model), but **live financial capture, background sync activation, and live offline financial posting remain unapproved and held OFF**. Runtime authentication and catalog lookup use frozen API v1 contracts; live financial writes require real V2 gateway qualification, encrypted-at-rest outbox storage with explicit backup exclusions, and paired HTTPS reconciliation against the `Bassamalsaqqa/account` backend. No broad policy relaxation is granted.
-- **Financial & Inventory Separation**:
-  - Recording a **Financial Purchase Bill (`فاتورة مشتريات مالية`)** updates supplier payables and cash disbursements only; it **never** auto-increments product shelf stock.
-  - Recording a **Physical Goods Receipt (`سند استلام بضاعة مخزني - GRN`)** is a bounded single-SKU demonstration that verifies the purchase bill exists, has not already been received, and matches the bill's expected product SKU and expected quantity before incrementing stock once.
-  - **Expected Book Cash (`النقد المتوقع دفترياً`)** is computed strictly from shift opening float + cash sales + customer collections − supplier cash payments − shift expenses, and is never conflated with **Actual Physically Counted Cash (`الجرد الفعلي النقدي`)** or the resulting **Cash Variance (`الفرق`)**.
-- **Simulated Hardware**: Barcode scanning and 58mm/80mm Bluetooth thermal printing are interactive UI simulations ready to be replaced by CameraX/ML Kit and `BluetoothSocket` ESC/POS adapters during local hardware integration.
+### Historical Milestones, Proposals & Evidence
+
+- **Blockers & Proposals (Historical / Not Live):** [Shift Count Blocker & Discount Gate](docs/SHIFT_COUNT_CONTRACT_BLOCKER.md), [Financial Tax Protocol Proposal](docs/integration/financial-tax-protocol-proposal.md).
+- **Historical Integration & Milestone Reports:** [Integration Candidate](docs/integration/android-integration-candidate.md), [Paired Read Pilot](docs/integration/paired-read-pilot.md), [Offline Persistence Handoff](docs/OFFLINE_PERSISTENCE_CORRECTION_HANDOFF.md), [Offline Review Correction](docs/integration/offline-review-correction-075d5bc.md), [Remember Session Handoff](docs/REMEMBER_SESSION_HANDOFF.md), [Revision 2](docs/integration/mobile-v1-revision-2-decisions.md), [Revision 3](docs/integration/mobile-v1-revision-3-decisions.md), and module foundation notes (`docs/integration/android-*.md`).
+- **Historical Prototype / UX Archives:** [Candidate v3](docs/CANDIDATE_V3_HANDOFF.md), [Stitch Native](docs/STITCH_NATIVE_HANDOFF.md), `docs/PHASE1_*.md`, `docs/PR3_*.md`, `docs/*_IMPLEMENTATION.md`, [Brand Provenance](docs/PARENT_BRAND_PROVENANCE.md), `docs/android-merchant-ux-reset/`, and evidence directories (`docs/integration/*-evidence/`, `docs/candidate-v3/`, `docs/phase1-evidence/`).

@@ -1,5 +1,7 @@
 # Windows Pixel_8a_T3 visual acceptance
 
+> **HISTORICAL RECORD:** Historical Windows emulator visual acceptance record for the Phase 1 milestone. Current emulator/device status is documented in [`../README.md`](../README.md) and [`RELEASING.md`](RELEASING.md).
+
 Status: **PENDING OWNER REVIEW — UX IS NOT APPROVED**.
 
 ## Install the exact reviewed APK

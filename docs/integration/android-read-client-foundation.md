@@ -1,3 +1,5 @@
+> **HISTORICAL FOUNDATION SPEC (Phase 2):** Point-in-time read client foundation report. See [README.md](../../README.md) for current status.
+
 # Android Read Client Foundation (Phase 2)
 
 ## 1. Architectural Scope & Bounded Context
@@ -123,7 +125,7 @@ Every client call returns an explicit, exhaustive `ReadClientResult<T>`:
 
 ## 5. Automated Verification & Test Evidence
 
-The read client foundation unit tests execute under JDK 21 (`/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9`) without Android framework stubs:
+The read client foundation unit tests execute under JDK 21 without Android framework stubs:
 
 | Test Class | Tests | Checks Covered |
 | :--- | :--- | :--- |

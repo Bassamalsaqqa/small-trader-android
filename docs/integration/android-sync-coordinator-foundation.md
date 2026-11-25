@@ -1,3 +1,5 @@
+> **HISTORICAL FOUNDATION SPEC:** Point-in-time sync coordinator foundation. See [README.md](../../README.md) and [LOCAL_ANDROID_HANDOFF.md](../LOCAL_ANDROID_HANDOFF.md) for current gateway wiring.
+
 # Android Sync Coordinator Foundation Specification
 
 ## 1. Scope Constraints & Unwired Holds

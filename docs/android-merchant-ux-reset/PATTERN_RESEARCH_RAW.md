@@ -11,7 +11,9 @@
 The objective of this design audit is to establish a calm, error-resistant, merchant-first mobile interaction architecture for **Small Trader (التاجر الصغير)**. The current codebase exhibits high technical quality and strict accounting guards, but suffers from an overloaded accounting dashboard model on compact screens (360dp–393dp), duplicated window insets, custom non-tokenized navigation bars, and competing actions that force a shopkeeper to navigate like a desktop accountant.
 
 ### Evidence & Method Boundaries
-- **Codebase Inspected:** Git repository `/home/t3dev/projects/small-trader-android` at commit `f862964` (clean working tree).
+> **HISTORICAL RECORD:** Merchant UX reset raw pattern research notes (`f862964` baseline).
+
+- **Codebase Inspected:** Git repository `small-trader-android` at commit `f862964` (clean working tree).
 - **Modification Policy:** Strictly **read-only**. No source modifications, no branch manipulations, no dependency installations, and no device execution were performed.
 - **External Benchmarks:** Derived strictly from official primary documentation (Android Material 3 guidelines, Shopify POS manuals, Square POS guides, Loyverse POS knowledge base). No third-party blog posts or marketing renders were used as primary sources.
 - **Verification Rule:** Tap counts, transition speeds, and cognitive burdens reported herein are **predicted design models**, not empirically measured merchant field tests.

@@ -1,3 +1,5 @@
+> **HISTORICAL READ PILOT RECORD (V1 Staging Pilot):** `SmallTraderReadPilotSmokeTest` is now retired/skipped in normal runs. For current real-HTTP V1+V2 paired verification (`12` vectors + `6` reconciliations), see [Paired Financial Harness](../../tools/paired/README.md).
+
 # Paired Read Pilot: Android V1 HTTPS Staging & Gate Matrix
 
 This document pins the integration candidate gate matrix, defines the hand-off contract between the Android client and the disposable Laravel staging backend, records backend migration dependencies and file overlaps, and establishes the standalone execution and verification harness for the paired read pilot.
@@ -114,10 +116,9 @@ The read pilot smoke test is isolated from standard build suites:
 
 ### Execution Command
 ```bash
-JAVA_HOME=/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9 \
-ANDROID_HOME=/home/t3dev/Android/Sdk \
-PATH="/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9/bin:$PATH" \
-SMALL_TRADER_READ_PILOT_HANDOFF="/home/t3dev/.t3/userdata/antigravity-tmp/pilot-harness-owned/handoff.json" \
+JAVA_HOME=/path/to/jdk-21 \
+ANDROID_HOME=/path/to/android-sdk \
+SMALL_TRADER_READ_PILOT_HANDOFF="/path/to/private/handoff.json" \
 SMALL_TRADER_EXPECTED_BACKEND_SHA="e111f83bc740e9590142869b30428eaa220eab6f" \
 ./gradlew :app:testDebugUnitTest \
   --tests "com.example.data.mobile.readclient.pilot.SmallTraderReadPilotSmokeTest"
@@ -125,9 +126,8 @@ SMALL_TRADER_EXPECTED_BACKEND_SHA="e111f83bc740e9590142869b30428eaa220eab6f" \
 
 ### Combined Verification Command (Candidate + Pilot Harness)
 ```bash
-JAVA_HOME=/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9 \
-ANDROID_HOME=/home/t3dev/Android/Sdk \
-PATH="/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9/bin:$PATH" \
+JAVA_HOME=/path/to/jdk-21 \
+ANDROID_HOME=/path/to/android-sdk \
 ./gradlew :app:testDebugUnitTest \
   --tests "com.example.data.mobile.*" \
   --tests "com.example.ui.staff.*" \

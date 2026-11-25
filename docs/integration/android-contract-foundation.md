@@ -1,3 +1,5 @@
+> **HISTORICAL FOUNDATION SPEC (PR #5):** Point-in-time Phase 1 contract foundation report. See [README.md](../../README.md) for current architecture and test counts.
+
 # Android Mobile Contract Foundation (Phase 1)
 
 ## 1. Architectural Scope & Bounded Context
@@ -113,7 +115,7 @@ Serializer and digest generation conform to RFC 8785 subset rules:
 
 ## 8. Verification & Parity Test Suite
 
-The pure JVM Gradle test suite runs under JDK 21 (`/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9`) without Android framework stubs:
+The pure JVM Gradle test suite runs under JDK 21 without Android framework stubs:
 
 | Test Class | Tests | Checks Covered |
 | :--- | :--- | :--- |

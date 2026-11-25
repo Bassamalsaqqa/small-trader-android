@@ -1,5 +1,7 @@
 # Stage 1 decision and implementation contract
 
+> **HISTORICAL RECORD:** Merchant UX reset Stage 1 plan (`ux/merchant-experience-reset`). Superseded by [`../../README.md`](../../README.md) and [`../RELEASING.md`](../RELEASING.md); retained intact for audit history.
+
 **PROPOSED; untested merchant/label assumptions.** No merchant sessions, native pixel review or performance measurements. Independent source/POS audits remain lead inputs; this recommendation is provisional until reconciliation. No implementation authorized in this handoff.
 
 ## Decision: A, merchant workspace

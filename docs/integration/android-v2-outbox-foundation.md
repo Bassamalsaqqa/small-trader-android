@@ -1,3 +1,5 @@
+> **HISTORICAL FOUNDATION SPEC:** Point-in-time V2 Room outbox foundation (preceded production offline lease wiring). See [README.md](../../README.md) for current status.
+
 # Android Outbox Foundation V2 Durable Storage Specification
 
 ## 1. Scope Constraints & Unwired Holds

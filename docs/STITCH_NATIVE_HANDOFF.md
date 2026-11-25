@@ -1,3 +1,5 @@
+> **HISTORICAL PROTOTYPE HANDOFF (Stitch Native Demo):** Superseded by `v1.4` (`versionCode 6`); see [README.md](../README.md) for current state.
+
 # Stitch native Android prototype — review handoff
 
 Status: implementation review candidate. General Stitch direction approved; final UX approval and Windows Pixel_8a_T3 device acceptance pending. This document supersedes broad completion claims in individual agent reports.
@@ -23,8 +25,8 @@ Robolectric Native Graphics renders exercise actual Compose code, including 360d
 Use a JDK 21 and Android SDK configured for this checkout. The constrained T3 build uses user-owned tools:
 
 ```bash
-JAVA_HOME=/home/t3dev/.local/share/android-toolchain/jdk-21.0.13+9 \
-ANDROID_HOME=/home/t3dev/.local/share/android-toolchain/sdk \
+JAVA_HOME=/path/to/jdk-21 \
+ANDROID_HOME=/path/to/android-sdk \
 JAVA_TOOL_OPTIONS='-XX:ActiveProcessorCount=1 -XX:+UseSerialGC -Xss1m' \
 ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug \
   --no-daemon --no-configuration-cache --max-workers=1 \

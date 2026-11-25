@@ -1,3 +1,5 @@
+> **HISTORICAL FOUNDATION SPEC (PR #6):** Point-in-time Room outbox foundation. See [README.md](../../README.md) for current status.
+
 # Android Durable Offline Sales Room Outbox Foundation
 
 ## 1. Scope & Architectural Boundaries

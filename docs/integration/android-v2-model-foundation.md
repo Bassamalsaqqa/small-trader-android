@@ -1,3 +1,5 @@
+> **HISTORICAL FOUNDATION SPEC:** Point-in-time Revision 3 / V2 Kotlin model foundation. See [README.md](../../README.md) for current status.
+
 # Android V2 Model Foundation Provenance and Architectural Specification
 
 ## Overview

@@ -1,3 +1,5 @@
+> **HISTORICAL MILESTONE RECORD (`v1.3` / `versionCode 4`):** Superseded by `v1.4` (`versionCode 6`); see [RELEASING.md](RELEASING.md) and [README.md](../README.md) for current state.
+
 # Explicit Android session persistence
 
 Baseline: `7786561ed956920ff12c86104a67e58123ba23cc`.

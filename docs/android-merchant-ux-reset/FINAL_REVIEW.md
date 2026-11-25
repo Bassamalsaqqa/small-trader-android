@@ -1,5 +1,7 @@
 # Final independent sale review and lead corrections
 
+> **HISTORICAL RECORD:** Merchant UX reset review record. Retained intact for audit history; see [`../../README.md`](../../README.md) for current state.
+
 A separate read-only Codex reviewer examined catalog/review/payment/receipt integration and QA fixes. It found two concrete retained-workflow defects before commit:
 
 1. Compact empty basket returned before the Options link, leaving saved drafts unreachable without adding an unrelated product. Lead added a concise Saved drafts action to the empty dock, wired to the existing empty review/draft surface. Empty review now scrolls its draft list on small screens.

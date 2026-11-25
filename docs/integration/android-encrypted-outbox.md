@@ -1,3 +1,5 @@
+> **HISTORICAL MILESTONE RECORD (PR #20–22):** Point-in-time outbox encryption & startup health gate record. See [README.md](../../README.md) for current `v1.4` (`versionCode 6`) status.
+
 # Economic payload encryption and backup policy
 
 Base: PR20 8d05f759ec96999891d54f182b578352638c23a6, fetched and verified against origin/t3/android-v1-read-pilot. Revision 3 contract files are unchanged.
