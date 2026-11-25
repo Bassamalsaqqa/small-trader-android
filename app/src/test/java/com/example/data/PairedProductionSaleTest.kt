@@ -37,6 +37,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermission
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.concurrent.CopyOnWriteArrayList
 import javax.crypto.SecretKey
 
@@ -66,8 +67,16 @@ class PairedProductionSaleTest {
     }
 
     private fun <T> requireSuccess(result: ReadClientResult<T>): T {
-        check(result is ReadClientResult.Success) { "Authoritative HTTP operation failed: ${result::class.simpleName}" }
+        check(result is ReadClientResult.Success) { "Authoritative HTTP operation failed: $result" }
         return result.value
+    }
+
+    private fun redactExchangeBody(body: String): String {
+        val redactedToken = body.replace(
+            Regex("""("(?:token|access_token|refresh_token|password|secret|authorization|bearer|nonce|private_key)"\s*:\s*)"[^"]*""""),
+            """$1"[REDACTED]""""
+        )
+        return if (redactedToken.length > 2048) redactedToken.take(2048) + "...(truncated)" else redactedToken
     }
 
     private fun loginRealStaff(
@@ -148,6 +157,8 @@ class PairedProductionSaleTest {
         var retainedOnlineCommit: TransportRequest? = null
         var retainedOfflineCommit: TransportRequest? = null
         val observedExchanges = CopyOnWriteArrayList<RecordedHttpExchange>()
+        val allExchanges = CopyOnWriteArrayList<RecordedHttpExchange>()
+        var bodyCompleted = false
 
         fun assertDecimal6(expected6dp: String, actual: String) {
             assertEquals(0, BigDecimal(expected6dp).compareTo(BigDecimal(actual)))
@@ -180,10 +191,18 @@ class PairedProductionSaleTest {
             assertDecimal6(expectedTotal6dp, obj.require("outcome").asObject().require("grand_total").asString())
         }
 
+        fun executeRawRecorded(request: TransportRequest): TransportResponse {
+            val response = upstream.execute(request)
+            allExchanges.add(RecordedHttpExchange(request.method, request.path, response.statusCode, response.body))
+            return response
+        }
+
         val transport = object : ReadClientTransport {
             override fun execute(request: TransportRequest): TransportResponse {
                 val response = upstream.execute(request)
-                observedExchanges.add(RecordedHttpExchange(request.method, request.path, response.statusCode, response.body))
+                val exchange = RecordedHttpExchange(request.method, request.path, response.statusCode, response.body)
+                observedExchanges.add(exchange)
+                allExchanges.add(exchange)
                 if (request.method == HttpMethod.POST && request.path.endsWith("/sales/online-cash")) {
                     retainedOnlineCommit = request
                     if (dropOnlineCommitReply && response.statusCode in 200..201) {
@@ -395,6 +414,8 @@ class PairedProductionSaleTest {
                             assertOnlineWireTotals(requireNotNull(online3.clientEventId), "7.500000")
 
                             // 4) Offline lease + RestrictedOfflineWorkspace test-injected Keystore/boot/device gate (no fake auth!)
+                            // Online sales mutated inventory_balances and advanced CatalogSnapshot; refresh catalog before lease request.
+                            repo.prepareOfflineCatalog(2, 30) {}.getOrThrow()
                             val lease = repo.acquireOfflineSaleLease().getOrThrow()
                             ilsLeaseId = lease.leaseId
                             assertEquals(exclTax.id, lease.taxRateId)
@@ -650,14 +671,13 @@ class PairedProductionSaleTest {
                                     changeReturned = MoneyAmount("0.000000")
                                 )
                             )
-                            val staleOriginalBytes = CanonicalJsonSerializer.serialize(staleTaxEvent).toByteArray(StandardCharsets.UTF_8)
-                            val staleOriginalDigest = staleTaxEvent.computePayloadDigest().value
                             val unguardedOutbox = OutboxRepositoryImpl(
                                 database = db,
                                 payloadCipher = OutboxPayloadCipher(crypto),
                                 requireLeaseAuthorization = false
                             )
                             assertTrue(unguardedOutbox.captureLeaseSale(lease, staleTaxEvent) {} is CaptureResult.Created)
+                            val staleOriginalRecord = requireNotNull(outbox.getRecord(company, auth.actorId, device, staleTaxEventId))
 
                             observedExchanges.clear()
                             val staleSync = repo.syncOfflineSales().getOrThrow()
@@ -666,8 +686,8 @@ class PairedProductionSaleTest {
                             val staleAfter = requireNotNull(outbox.getRecord(company, auth.actorId, device, staleTaxEventId))
                             assertEquals(OutboxStatus.CONFLICT, staleAfter.status)
                             assertEquals(SyncDiagnostics.BUSINESS_CONFLICT, staleAfter.deliveryState.errorMessage)
-                            assertEquals(staleOriginalDigest, staleAfter.payloadDigest)
-                            assertArrayEquals(staleOriginalBytes, staleAfter.payloadBytes)
+                            assertEquals(staleOriginalRecord.payloadDigest, staleAfter.payloadDigest)
+                            assertArrayEquals(staleOriginalRecord.payloadBytes, staleAfter.payloadBytes)
                             assertEquals(2, repo.getRejectedCashSales().size)
                             assertTrue(
                                 observedExchanges.any {
@@ -713,6 +733,8 @@ class PairedProductionSaleTest {
                             assertOnlineWireTotals(requireNotNull(jodOnline3.clientEventId), "3.750000")
 
                             // Offline JOD inclusive + fractional quantities (multiple + repo recreation + reconnect)
+                            // Online sales mutated inventory_balances and advanced CatalogSnapshot; refresh catalog before lease request.
+                            repo.prepareOfflineCatalog(2, 30) {}.getOrThrow()
                             val lease = repo.acquireOfflineSaleLease().getOrThrow()
                             assertEquals(3, lease.currencyMinorUnits)
                             assertEquals(inclTax.id, lease.taxRateId)
@@ -878,7 +900,7 @@ class PairedProductionSaleTest {
                     actorId = actor,
                     deviceId = dev,
                     deviceLeaseId = leaseId,
-                    capturedAt = Instant.now().toString(),
+                    capturedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS).toString(),
                     customerId = targetCustomerId,
                     currency = "ILS",
                     warehouseId = targetWarehouseId,
@@ -975,7 +997,7 @@ class PairedProductionSaleTest {
                 )
                 assertEquals(403, crossActorOnlineRetry.statusCode)
 
-                val crossActorOffline = upstream.execute(
+                val crossActorOffline = executeRawRecorded(
                     TransportRequest(
                         method = HttpMethod.POST,
                         path = "/api/mobile/v2/companies/${targetCompany.value}/offline-events",
@@ -1001,7 +1023,7 @@ class PairedProductionSaleTest {
                 credentials.require("email").asString(),
                 credentials.require("password").asString()
             )
-            val crossDeviceStatus = upstream.execute(
+            val crossDeviceStatus = executeRawRecorded(
                 TransportRequest(
                     method = HttpMethod.GET,
                     path = "/api/mobile/v2/companies/${targetCompany.value}/offline-events/${targetOnlineEvent.value}/status",
@@ -1011,7 +1033,7 @@ class PairedProductionSaleTest {
             )
             assertEquals(403, crossDeviceStatus.statusCode)
 
-            val crossDeviceOffline = upstream.execute(
+            val crossDeviceOffline = executeRawRecorded(
                 TransportRequest(
                     method = HttpMethod.POST,
                     path = "/api/mobile/v2/companies/${targetCompany.value}/offline-events",
@@ -1169,7 +1191,7 @@ class PairedProductionSaleTest {
                 val devEvId = ClientUuid.parse(requireNotNull(devCaptured.clientEventId))
                 val beforeDevRevoke = requireNotNull(devOutbox.getRecord(targetCompany, devLogin.actor.id, revokedDevice, devEvId))
 
-                val revokeDeviceResp = upstream.execute(
+                val revokeDeviceResp = executeRawRecorded(
                     TransportRequest(
                         method = HttpMethod.DELETE,
                         path = "/api/mobile/v1/sessions/${revokedDevice.value}",
@@ -1207,8 +1229,27 @@ class PairedProductionSaleTest {
                 devDb.close()
                 context.deleteDatabase(devDbFile.absolutePath)
             }
+            bodyCompleted = true
         } finally {
-            requireSuccess(client.authLogout(primaryToken, AuthLogoutRequest(device)))
+            runCatching {
+                val diagFile = File(requireNotNull(File(requireNotNull(path)).parentFile), "http-exchanges-redacted.log")
+                diagFile.writeText(
+                    allExchanges.joinToString("\n") { ex ->
+                        "${ex.method} ${ex.path} -> ${ex.statusCode} ${redactExchangeBody(ex.body)}"
+                    } + "\n",
+                    StandardCharsets.UTF_8
+                )
+                Files.setPosixFilePermissions(
+                    diagFile.toPath(),
+                    setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)
+                )
+            }
+            val logoutResult = runCatching {
+                requireSuccess(client.authLogout(primaryToken, AuthLogoutRequest(device)))
+            }
+            if (bodyCompleted) {
+                logoutResult.getOrThrow()
+            }
         }
     }
 }

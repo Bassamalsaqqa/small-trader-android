@@ -40,6 +40,7 @@ try {
     $schema->migrate();
     $env = $schema->environment() + [
         'APP_KEY' => 'base64:'.base64_encode(random_bytes(32)),
+        'LOG_CHANNEL' => 'stderr',
         // Explicit synthetic-only process-local flags; checkout .env is never loaded and production defaults stay off.
         'MOBILE_API_ENABLED' => 'true', 'MOBILE_MERCHANT_API_ENABLED' => 'true',
         'MOBILE_V2_API_ENABLED' => 'true', 'MOBILE_V2_CASH_SLICE_ENABLED' => 'true',
@@ -52,7 +53,8 @@ try {
     $fixture = new Process([PHP_BINARY, __DIR__.'/fixture.php'], $root, $env);
     $fixture->setTimeout(120)->mustRun();
     $router = __DIR__.'/router.php';
-    $server = new Process([PHP_BINARY, '-S', '127.0.0.1:18400', $router], $root, $env);
+    $serverLog = $dir.'/http-server.log';
+    $server = new Process(['sh', '-c', 'exec "$1" -S 127.0.0.1:18400 "$2" > "$3" 2>&1', 'sh', PHP_BINARY, $router, $serverLog], $root, $env);
     $server->disableOutput()->start();
     $ready = false;
     for ($i = 0; $i < 50; $i++) {
@@ -72,17 +74,35 @@ try {
         'PAIRED_BACKEND_SHA' => $sha,
         'JAVA_HOME' => getenv('JAVA_HOME') ?: null,
         'ANDROID_HOME' => getenv('ANDROID_HOME') ?: null,
+        'JAVA_TOOL_OPTIONS' => '-XX:ActiveProcessorCount=2',
+        'GRADLE_OPTS' => '-Xmx1536m -Dorg.gradle.daemon=false',
     ], static fn ($value): bool => is_string($value) && $value !== '');
-    $test = new Process([
-        $android.'/gradlew', '--offline', ':app:testDebugUnitTest',
-        '--tests', 'com.example.data.PairedProductionSaleTest',
-    ], $android, $gradleEnv);
+    $gradleCommand = [
+        $android.'/gradlew', '--offline', '--no-daemon', '--max-workers=1',
+        '-Dorg.gradle.workers.max=1', '-Dorg.gradle.parallel=false',
+        '-Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8',
+        ':app:testDebugUnitTest', '--tests', 'com.example.data.PairedProductionSaleTest',
+    ];
+    if (is_executable('/usr/bin/taskset')) {
+        array_unshift($gradleCommand, '/usr/bin/taskset', '-c', '0,1');
+    }
+    $test = new Process($gradleCommand, $android, $gradleEnv);
     // Keep private test diagnostics private: never stream HTTP payloads, credentials or intents.
     $test->setTimeout(600)->run();
+    $testExit = $test->getExitCode() ?? 1;
     file_put_contents($dir.'/gradle.log', $test->getOutput().$test->getErrorOutput());
-    if (!$test->isSuccessful()) { throw new RuntimeException('Paired test failed; private diagnostics retained.'); }
+    $junitSource = $android.'/app/build/test-results/testDebugUnitTest/TEST-com.example.data.PairedProductionSaleTest.xml';
+    if (is_file($junitSource) && !is_link($junitSource)) {
+        @copy($junitSource, $dir.'/junit.xml');
+    }
+    fwrite(STDOUT, "PairedProductionSaleTest exit: {$testExit}".PHP_EOL);
+    if (!$test->isSuccessful()) { throw new RuntimeException("Paired test failed (exit {$testExit}); private diagnostics retained."); }
     $verify = new Process([PHP_BINARY, __DIR__.'/verify.php'], $root, $env);
-    $verify->setTimeout(120)->mustRun();
+    $verify->setTimeout(120)->run();
+    $verifyExit = $verify->getExitCode() ?? 1;
+    file_put_contents($dir.'/verify.log', $verify->getOutput().$verify->getErrorOutput());
+    fwrite(STDOUT, "verify.php exit: {$verifyExit}".PHP_EOL);
+    if (!$verify->isSuccessful()) { throw new RuntimeException("Paired verification failed (exit {$verifyExit}); private diagnostics retained."); }
     $succeeded = true;
     fwrite(STDOUT, "Paired repository smoke and six reconciliations passed.\n");
 } finally {

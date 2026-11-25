@@ -664,6 +664,14 @@ $assertFixtureExactStockAndSnapshots = static function (Company $company, array 
 
 CompanyScope::executeWithoutScope(function () use ($handoff, $fixtureSpecs, $assertCompanyCountsAndRecon, $assertFixtureExactStockAndSnapshots): void {
     $seenKeys = [];
+    $summary = ['fixtures' => [], 'reconciliations' => [
+        'AccountingReconciliationService',
+        'SalesReconciliationService',
+        'MoneyReconciliationService',
+        'Phase7ReconciliationService',
+        'PayablesReconciliationService',
+        'InventoryReconciliationService',
+    ]];
     foreach ($handoff['fixtures'] as $fixture) {
         $key = (string) ($fixture['key'] ?? '');
         if (!isset($fixtureSpecs[$key])) {
@@ -676,6 +684,16 @@ CompanyScope::executeWithoutScope(function () use ($handoff, $fixtureSpecs, $ass
         }
         $company = $assertCompanyCountsAndRecon((string) $fixture['company'], $spec['expected_sales']);
         $assertFixtureExactStockAndSnapshots($company, $fixture, $spec);
+        $summary['fixtures'][$key] = [
+            'currency' => $spec['currency'],
+            'sales_invoices' => $spec['expected_sales'],
+            'customer_payments' => $spec['expected_sales'],
+            'mobile_event_receipts' => $spec['expected_sales'],
+            'sale_stock_movements' => $spec['expected_sales'],
+            'main_remaining_stock' => $spec['main_remaining_stock'],
+            'low_remaining_stock' => $spec['low_remaining_stock'],
+            'six_reconciliations_healthy' => true,
+        ];
     }
     sort($seenKeys);
     $expectedKeys = array_keys($fixtureSpecs);
@@ -690,4 +708,14 @@ CompanyScope::executeWithoutScope(function () use ($handoff, $fixtureSpecs, $ass
         || InventoryCostState::where('company_id', $foreignCompany->id)->count() !== 0) {
         throw new RuntimeException('Foreign company must have zero stock movements or inventory state.');
     }
+    $summary['foreign_company'] = [
+        'sales_invoices' => 0,
+        'customer_payments' => 0,
+        'mobile_event_receipts' => 0,
+        'stock_movements' => 0,
+        'inventory_balances' => 0,
+        'inventory_cost_states' => 0,
+        'six_reconciliations_healthy' => true,
+    ];
+    fwrite(STDOUT, json_encode($summary, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR).PHP_EOL);
 });
