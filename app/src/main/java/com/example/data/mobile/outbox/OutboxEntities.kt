@@ -53,7 +53,10 @@ class OutboxEventEntity(
     payloadBytes: ByteArray,
 
     @ColumnInfo(name = "event_version")
-    val eventVersion: Int = 1
+    val eventVersion: Int = 1,
+
+    @ColumnInfo(name = "currency_minor_units")
+    val currencyMinorUnits: Int? = null
 ) {
     @ColumnInfo(name = "payload_bytes", typeAffinity = ColumnInfo.BLOB)
     val payloadBytes: ByteArray = payloadBytes.clone()
@@ -70,7 +73,8 @@ class OutboxEventEntity(
                 capturedAt == other.capturedAt &&
                 payloadDigest == other.payloadDigest &&
                 payloadBytes.contentEquals(other.payloadBytes) &&
-                eventVersion == other.eventVersion
+                eventVersion == other.eventVersion &&
+                currencyMinorUnits == other.currencyMinorUnits
     }
 
     override fun hashCode(): Int {
@@ -83,6 +87,7 @@ class OutboxEventEntity(
         result = 31 * result + payloadDigest.hashCode()
         result = 31 * result + payloadBytes.contentHashCode()
         result = 31 * result + eventVersion
+        result = 31 * result + (currencyMinorUnits ?: 0)
         return result
     }
 }

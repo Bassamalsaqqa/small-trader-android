@@ -1391,7 +1391,18 @@ class ProductionTraderRepository(
 
     private fun recoverInvoice(record: OutboxRecord, intent: OnlineSaleIntentProfile): InvoiceRecord {
         val catalog = _productsFlow.value.associateBy { it.id }
+        var total = BigDecimal.ZERO
+        var taxTotal = BigDecimal.ZERO
         val items = intent.lines.map { line ->
+            val calc = com.example.data.mobile.contract.SalesLineCalculator.calculate(
+                quantity = line.quantity,
+                unitPrice = line.unitPrice,
+                taxPercentage = line.taxRate,
+                taxInclusive = line.taxInclusive,
+                minorUnits = intent.currencyMinorUnits
+            )
+            total = total.add(calc.lineTotal.value)
+            taxTotal = taxTotal.add(calc.taxAmount.value)
             val product = catalog[line.productId.value] ?: Product(
                 id = line.productId.value,
                 nameAr = line.productId.value,
@@ -1414,10 +1425,10 @@ class ProductionTraderRepository(
                 unitPriceExact = line.unitPrice.value,
                 taxRateId = line.taxRateId?.value,
                 taxRateExact = line.taxRate.value,
-                isTaxInclusive = line.taxInclusive
+                isTaxInclusive = line.taxInclusive,
+                precomputedLineTotalExact = calc.lineTotal.value
             )
         }
-        val total = items.fold(BigDecimal.ZERO) { sum, item -> sum + item.lineTotalExact }
         val settled = intent.payment.amount.value
         return InvoiceRecord(
             id = record.clientEventId,
@@ -1435,7 +1446,10 @@ class ProductionTraderRepository(
             cashierNameEn = actorName,
             isPaidInFull = intent.payment.settlementMode == "full",
             remainingDebitExact = total - settled,
-            hasLocalTenderDetails = false
+            hasLocalTenderDetails = false,
+            currency = intent.currency,
+            currencyMinorUnits = intent.currencyMinorUnits,
+            taxExact = taxTotal
         ).withOutboxState(record)
     }
 
@@ -1487,7 +1501,15 @@ class ProductionTraderRepository(
 
     private fun recoverOfflineInvoice(record: OutboxRecord, event: OfflineSaleEventV2): InvoiceRecord {
         val catalog = _productsFlow.value.associateBy { it.id }
+        val matchingLeaseMinorUnits = offlineLeaseStore.getLease(event.companyId, event.actorId, event.deviceId)
+            ?.takeIf { it.leaseId == event.deviceLeaseId }
+            ?.currencyMinorUnits
+        val frozenMinorUnits = record.event.currencyMinorUnits ?: matchingLeaseMinorUnits
+        var total = BigDecimal.ZERO
+        var taxTotal = BigDecimal.ZERO
         val items = event.lines.map { line ->
+            total = total.add(line.lineTotal.value)
+            taxTotal = taxTotal.add(line.taxAmount.value)
             val product = catalog[line.productId.value] ?: Product(
                 id = line.productId.value,
                 nameAr = line.productId.value,
@@ -1504,16 +1526,16 @@ class ProductionTraderRepository(
                 product = product.copy(
                     productUnitId = line.productUnitId.value,
                     conversionToBaseExact = line.conversionToBase.value,
-                    saleCurrencyMinorUnits = currencyMinorUnits
+                    saleCurrencyMinorUnits = frozenMinorUnits
                 ),
                 quantity = line.quantity.value,
                 unitPriceExact = line.unitPrice.value,
                 taxRateId = line.taxRateId?.value,
                 taxRateExact = line.taxRate.value,
-                isTaxInclusive = line.taxInclusive
+                isTaxInclusive = line.taxInclusive,
+                precomputedLineTotalExact = line.lineTotal.value
             )
         }
-        val total = items.fold(BigDecimal.ZERO) { sum, item -> sum + item.lineTotalExact }
         val tendered = event.payment.amountTendered.value
         val change = event.payment.changeReturned.value
         return InvoiceRecord(
@@ -1533,18 +1555,32 @@ class ProductionTraderRepository(
             isPaidInFull = true,
             remainingDebitExact = BigDecimal.ZERO,
             hasLocalTenderDetails = true,
-            localReceiptNumber = event.localReceiptNumber
+            localReceiptNumber = event.localReceiptNumber,
+            currency = event.currency,
+            currencyMinorUnits = frozenMinorUnits,
+            taxExact = taxTotal
         ).withOutboxState(record)
     }
 
     private fun InvoiceRecord.withOutboxState(record: OutboxRecord): InvoiceRecord {
         val delivery = record.deliveryState
-        val resolvedLocalReceipt = localReceiptNumber ?: if (record.event.deviceLeaseId != null) {
+        var resolvedLocalReceipt = localReceiptNumber
+        var resolvedCurrency = normalizedCurrency
+        var resolvedMinorUnits = currencyMinorUnits ?: record.event.currencyMinorUnits
+        if (resolvedLocalReceipt == null || resolvedCurrency == null || (record.event.deviceLeaseId == null && resolvedMinorUnits == null)) {
             try {
                 val root = StrictJsonParser.parseObject(String(record.payloadBytes, StandardCharsets.UTF_8))
-                OfflineSaleEventV2.fromStrictJson(root).localReceiptNumber
-            } catch (_: Exception) { null }
-        } else null
+                if (record.event.deviceLeaseId != null) {
+                    val ev = OfflineSaleEventV2.fromStrictJson(root)
+                    if (resolvedLocalReceipt == null) resolvedLocalReceipt = ev.localReceiptNumber
+                    if (resolvedCurrency == null) resolvedCurrency = ev.currency
+                } else {
+                    val intent = OnlineSaleIntentProfile.fromStrictJson(root)
+                    if (resolvedCurrency == null) resolvedCurrency = intent.currency
+                    if (resolvedMinorUnits == null) resolvedMinorUnits = intent.currencyMinorUnits
+                }
+            } catch (_: Exception) { }
+        }
         return copy(
             id = delivery.invoiceUlid ?: record.clientEventId,
             clientEventId = record.clientEventId,
@@ -1553,7 +1589,9 @@ class ProductionTraderRepository(
             serverPaymentUlid = delivery.paymentUlid,
             serverPostedAt = delivery.serverAcknowledgedAt,
             outboxStatus = if (record.status == OutboxStatus.CONFIRMED) "CONFIRMED" else record.status.wireValue,
-            localReceiptNumber = resolvedLocalReceipt
+            localReceiptNumber = resolvedLocalReceipt,
+            currency = resolvedCurrency,
+            currencyMinorUnits = resolvedMinorUnits
         )
     }
 
@@ -1663,6 +1701,12 @@ class ProductionTraderRepository(
 
         if (netTotalExact <= BigDecimal.ZERO) {
             return@withContext Result.failure(IllegalArgumentException("Grand total must be strictly positive."))
+        }
+
+        if (invoice.normalizedCurrency != null && !invoice.normalizedCurrency.equals(lease.currency, ignoreCase = true)) {
+            return@withContext Result.failure(
+                IllegalArgumentException("Invoice currency (${invoice.normalizedCurrency}) does not match active lease currency (${lease.currency})")
+            )
         }
 
         val expectedTender = netTotalExact.add(changeReturnedExact)
@@ -1839,6 +1883,7 @@ class ProductionTraderRepository(
                 return@withContext Result.failure(SecurityException("Outbox scope rejected: ${captureResult.message}"))
             is CaptureResult.Created, is CaptureResult.Duplicate -> {
                 val record = checkNotNull(outbox.getRecord(companyId, actorId, deviceId, clientEventId))
+                val capturedTaxExact = lines.fold(BigDecimal.ZERO) { sum, line -> sum.add(line.taxAmount.value) }
                 val offlineInvoice = invoice.copy(
                     timestamp = record.event.capturedAt,
                     id = clientEventId.value,
@@ -1850,7 +1895,10 @@ class ProductionTraderRepository(
                     serverPaymentReceiptNumber = null,
                     outboxStatus = record.deliveryState.status,
                     salePayloadDigest = record.payloadDigest,
-                    hasLocalTenderDetails = true
+                    hasLocalTenderDetails = true,
+                    currency = event.currency,
+                    currencyMinorUnits = lease.currencyMinorUnits,
+                    taxExact = capturedTaxExact
                 )
                 Result.success(publishSale(offlineInvoice, offline = true))
             }
@@ -1968,6 +2016,12 @@ class ProductionTraderRepository(
 
         if (netTotalExact <= BigDecimal.ZERO) {
             return@withContext Result.failure(IllegalArgumentException("Grand total must be strictly positive."))
+        }
+
+        if (invoice.normalizedCurrency != null && !invoice.normalizedCurrency.equals(baseCurrency, ignoreCase = true)) {
+            return@withContext Result.failure(
+                IllegalArgumentException("Invoice currency (${invoice.normalizedCurrency}) does not match active company currency ($baseCurrency)")
+            )
         }
 
         if (invoice.isPaidInFull) {
@@ -2125,8 +2179,27 @@ class ProductionTraderRepository(
             is CaptureResult.Duplicate -> Unit
         }
 
+        val intentTaxExact = lines.fold(BigDecimal.ZERO) { sum, line ->
+            sum.add(
+                com.example.data.mobile.contract.SalesLineCalculator.calculate(
+                    quantity = line.quantity,
+                    unitPrice = line.unitPrice,
+                    taxPercentage = line.taxRate,
+                    taxInclusive = line.taxInclusive,
+                    minorUnits = profile.currencyMinorUnits
+                ).taxAmount.value
+            )
+        }
         val record = checkNotNull(outbox.getRecord(companyId, actorId, deviceId, clientEventId))
-        Result.success(publishSale(invoice.withOutboxState(record)))
+        Result.success(
+            publishSale(
+                invoice.copy(
+                    currency = profile.currency,
+                    currencyMinorUnits = profile.currencyMinorUnits,
+                    taxExact = invoice.taxExact ?: intentTaxExact
+                ).withOutboxState(record)
+            )
+        )
     }
 
     private fun mergeServerInvoices(serverList: List<SalesInvoiceListItem>, locals: List<InvoiceRecord>): List<InvoiceRecord> {

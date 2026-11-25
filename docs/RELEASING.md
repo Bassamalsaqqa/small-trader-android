@@ -4,7 +4,7 @@ Lean pilot release playbook for `com.aistudio.smalltrader.psdukx`. Defines proce
 
 ## 1. Current Identity & Outbox Upgrade Rules
 
-- **Current Version (`app/build.gradle.kts`):** `versionName = "1.4"`, `versionCode = 6`, `applicationId = "com.aistudio.smalltrader.psdukx"`, default origin `https://account.palsync.net`. Signed release artifact lives in **private userdata (NOT published on GitHub)**.
+- **Current Version (`app/build.gradle.kts`):** `versionName = "1.4.1"`, `versionCode = 7`, `applicationId = "com.aistudio.smalltrader.psdukx"`, default origin `https://account.palsync.net`. Signed release artifact lives in **private userdata (NOT published on GitHub)**. Prior `v1.4` (`versionCode = 6`, SHA-256 `4694e5fb4eec8d9623e00b1519a744224f8496397f020e61f6394814528471fe`) APK is **superseded** by `v1.4.1` (`versionCode = 7`) and must not be distributed after receipt currency/tender remediation.
 - **Signing Incompatibility & Pending Outbox Rule:** The release signing certificate is **incompatible** with debug installs (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`). **Preserve pending offline outbox records; NEVER uninstall, clear app data, or downgrade an installation holding pending outbox sales.** Always bump `versionCode` for every distributed build.
 - **Independent Versioning:** Android, mobile API contract revision, and Laravel backend version independently; record tested compatibility externally in release notes rather than pinning self-referential HEAD SHAs inside source docs.
 
@@ -23,7 +23,7 @@ Lean pilot release playbook for `com.aistudio.smalltrader.psdukx`. Defines proce
    apksigner verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
    sha256sum app/build/outputs/apk/release/app-release.apk
    ```
-4. **Upgrade Compatibility Check:** Install in place (`adb install -r`) over the previous release-signed pilot build on a test device; verify Room outbox v1 (`6eddfecc8dabbb7ec370b858ec36714a`) records, auth locks, and pending sales survive intact.
+4. **Upgrade Compatibility Check:** Install in place (`adb install -r`) over the previous release-signed pilot build on a test device; verify Room outbox v1->v2->v3 (`OutboxDatabase`, nullable `currency_minor_units`) records, auth locks, and pending sales survive intact without destructive fallback.
 5. **Approve & Tag:** Present the release record below to the Owner. Only after approval, tag the verified commit (`v<version>`) and share the signed APK privately (never commit APKs to Git).
 6. **Install In Place:** Distribute via private channel (`adb install -r app/build/outputs/apk/release/app-release.apk`). On defect, ship a higher `versionCode`; never uninstall pending data.
 

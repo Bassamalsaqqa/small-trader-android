@@ -266,7 +266,8 @@ data class BasketItem(
     val unitPriceExact: BigDecimal = product.priceExact ?: BigDecimal.ZERO,
     val taxRateId: String? = product.taxRateId,
     val taxRateExact: BigDecimal? = product.taxRateExact,
-    val isTaxInclusive: Boolean = product.isTaxInclusive
+    val isTaxInclusive: Boolean = product.isTaxInclusive,
+    val precomputedLineTotalExact: BigDecimal? = null
 ) {
     constructor(product: Product, quantity: Int) : this(
         product = product,
@@ -274,7 +275,8 @@ data class BasketItem(
         unitPriceExact = product.priceExact ?: BigDecimal.ZERO,
         taxRateId = product.taxRateId,
         taxRateExact = product.taxRateExact,
-        isTaxInclusive = product.isTaxInclusive
+        isTaxInclusive = product.isTaxInclusive,
+        precomputedLineTotalExact = null
     )
 
     val hasResolvedTax: Boolean
@@ -296,6 +298,7 @@ data class BasketItem(
         get() {
             val minorUnits = product.saleCurrencyMinorUnits
             if (minorUnits != null && hasResolvedTax) return calculateLine(minorUnits).lineTotal.value
+            if (precomputedLineTotalExact != null) return precomputedLineTotalExact
 
             val subtotal = quantity.multiply(unitPriceExact)
             if (taxRateId == null || isTaxInclusive) return subtotal
@@ -371,7 +374,10 @@ data class InvoiceRecord(
     val outboxStatus: String? = null,
     val salePayloadDigest: String? = null,
     val hasLocalTenderDetails: Boolean = true,
-    val localReceiptNumber: String? = null
+    val localReceiptNumber: String? = null,
+    val currency: String? = null,
+    val currencyMinorUnits: Int? = null,
+    val taxExact: BigDecimal? = null
 ) {
     constructor(
         id: String,
@@ -397,7 +403,10 @@ data class InvoiceRecord(
         serverPaymentReceiptNumber: String? = null,
         serverPostedAt: String? = null,
         outboxStatus: String? = null,
-        localReceiptNumber: String? = null
+        localReceiptNumber: String? = null,
+        currency: String? = null,
+        currencyMinorUnits: Int? = null,
+        taxExact: BigDecimal? = null
     ) : this(
         id = id,
         invoiceNumber = invoiceNumber,
@@ -422,7 +431,10 @@ data class InvoiceRecord(
         serverPaymentReceiptNumber = serverPaymentReceiptNumber,
         serverPostedAt = serverPostedAt,
         outboxStatus = outboxStatus,
-        localReceiptNumber = localReceiptNumber
+        localReceiptNumber = localReceiptNumber,
+        currency = currency,
+        currencyMinorUnits = currencyMinorUnits,
+        taxExact = taxExact
     )
 
     val subtotalIls: Double get() = subtotalExact.toDouble()
@@ -432,6 +444,16 @@ data class InvoiceRecord(
     val changeReturnedIls: Double get() = changeReturnedExact.toDouble()
     val remainingDebitIls: Double get() = remainingDebitExact.toDouble()
 
+    val normalizedCurrency: String?
+        get() = currency?.trim()?.takeIf { it.isNotEmpty() }?.uppercase(Locale.US)
+
+    val settledPaidExact: BigDecimal
+        get() = if (isPaidInFull || remainingDebitExact.signum() <= 0) {
+            netTotalExact
+        } else {
+            netTotalExact.subtract(remainingDebitExact).coerceAtLeast(BigDecimal.ZERO)
+        }
+
     val totalQuantityDecimal: BigDecimal
         get() = items.fold(BigDecimal.ZERO) { acc, it -> acc.add(it.quantity) }
 
@@ -440,8 +462,8 @@ data class InvoiceRecord(
 
     val paymentStatus: InvoicePaymentStatus
         get() = when {
-            isPaidInFull || remainingDebitExact <= BigDecimal("0.005") -> InvoicePaymentStatus.PAID_CASH
-            cashReceivedExact > BigDecimal("0.005") -> InvoicePaymentStatus.PARTIAL
+            isPaidInFull || remainingDebitExact.signum() <= 0 -> InvoicePaymentStatus.PAID_CASH
+            (if (hasLocalTenderDetails) cashReceivedExact else settledPaidExact).signum() > 0 -> InvoicePaymentStatus.PARTIAL
             else -> InvoicePaymentStatus.ON_CREDIT
         }
 }
@@ -1139,6 +1161,63 @@ object WesternFormatters {
         if (amount == null) return "-- ₪"
         val safe = if (amount.abs() < BigDecimal("0.005")) BigDecimal.ZERO else amount
         return "${moneyFormat.format(safe)} ₪"
+    }
+
+    /**
+     * Authoritative human money decimal presentation (exact 2 decimal places, HALF_UP, no Double rounding).
+     * Exact underlying economic storage remains arbitrary-precision BigDecimal in domain records.
+     */
+    fun formatHumanDecimal2dp(amount: BigDecimal): String {
+        val rounded = amount.setScale(2, RoundingMode.HALF_UP)
+        val safe = if (rounded.signum() == 0) BigDecimal.ZERO.setScale(2, RoundingMode.UNNECESSARY) else rounded
+        return DecimalFormat("#,##0.00", usSymbols).format(safe)
+    }
+
+    /**
+     * Formats receipt/transaction money using the record's frozen transaction currency at 2dp.
+     * Never falls back to ILS/₪ when currency is missing/unknown; surfaces unavailable currency truthfully.
+     */
+    fun formatReceiptMoney(
+        amount: BigDecimal?,
+        currency: String?,
+        unavailableCurrencyLabel: String = "Currency unavailable"
+    ): String {
+        val cleanCurrency = currency?.trim()?.takeIf { it.isNotEmpty() }?.uppercase(Locale.US)
+        if (amount == null) {
+            return when (cleanCurrency) {
+                null -> "-- ($unavailableCurrencyLabel)"
+                "ILS" -> "-- ₪"
+                else -> "-- $cleanCurrency"
+            }
+        }
+        val num = formatHumanDecimal2dp(amount)
+        return when (cleanCurrency) {
+            null -> "$num ($unavailableCurrencyLabel)"
+            "ILS" -> "$num ₪"
+            else -> "$num $cleanCurrency"
+        }
+    }
+
+    fun formatReceiptMoneyBidi(
+        amount: BigDecimal?,
+        currency: String?,
+        lang: AppLanguage
+    ): String {
+        val formatted = formatReceiptMoney(
+            amount = amount,
+            currency = currency,
+            unavailableCurrencyLabel = lang.tr("العملة غير متاحة", "Currency unavailable")
+        )
+        return "\u2066$formatted\u2069"
+    }
+
+    fun formatReceiptCurrencyTag(currency: String?, lang: AppLanguage): String {
+        val cleanCurrency = currency?.trim()?.takeIf { it.isNotEmpty() }?.uppercase(Locale.US)
+        return when (cleanCurrency) {
+            null -> lang.tr("العملة غير متاحة", "Currency unavailable")
+            "ILS" -> "₪"
+            else -> cleanCurrency
+        }
     }
 
     fun formatCurrency(amount: BigDecimal?, currency: String = "ILS", minorUnits: Int = 2): String {

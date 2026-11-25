@@ -4,7 +4,7 @@ Arabic-first (RTL) / English (LTR) Kotlin + Jetpack Compose (Material 3) POS, me
 
 ## Current Release & Verification Reality
 
-- **Release Identity:** **`v1.4` (`versionCode = 6`)**, `applicationId = "com.aistudio.smalltrader.psdukx"`, origin `https://account.palsync.net`. The signed APK artifact is stored in **private userdata (NOT published on GitHub)**.
+- **Release Identity:** **`v1.4.1` (`versionCode = 7`)** (superseding prior signed `v1.4` / `versionCode = 6` APK), `applicationId = "com.aistudio.smalltrader.psdukx"`, origin `https://account.palsync.net`. The signed APK artifact is stored in **private userdata (NOT published on GitHub)**.
 - **Critical Signing & Outbox Safety:** The release signing certificate is **incompatible** with debug builds (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`). **Preserve pending offline outbox records; NEVER uninstall an installation that has pending outbox data.**
 - **Default-OFF Flags (`gradle.properties` / `app/build.gradle.kts`):** `smalltrader.staffReadWorkspace=false`, `smalltrader.staffAllowHttpLoopback=false`, `smalltrader.offlineOwnerPilot=false`, `smalltrader.allowInsecureDebugSigningForRelease=false` (backend mobile & offline APIs also default **OFF**).
 - **Automated Verification:**
@@ -38,7 +38,7 @@ See [Release Playbook](docs/RELEASING.md) for signed release builds and [Paired 
 ## Source Architecture (`app/src/main/java/com/example/`)
 
 - **`MainActivity.kt` & `ui/navigation/`:** `AppLaunchTargetResolver` gates `FULL_SHELL` (`AuthenticatedTraderApp`), `STAFF_WORKSPACE` (`StaffWorkspaceApp`), `UNCONFIGURED`, or debug-only `DEMO_TRADER` (never silent demo fallback in release).
-- **`data/mobile/`:** Contract primitives & JCS (`contract/`, `contract/v2/`), `client/` (`MobileMerchantApiClient`), `merchantread/`, `readclient/` (`SmallTraderReadClient`, isolated `OkHttpTransport`), `session/` (`SecureStaffSessionStore` in `noBackupFilesDir`, `StaffSessionCoordinator`), `outbox/` (Room v1 `OutboxDatabase`, `STO/1` AES-256-GCM encryption, `AUTH_BLOCKED` scope locks), `offline/` (`OfflineLeaseStore`, `RestrictedOfflineWorkspace`, `BOOT_COUNT`), `sync/` (`SaleSyncCoordinator`, `HttpSaleSyncGateway`), `integration/` (`OutboxAuthDenialBridge`).
+- **`data/mobile/`:** Contract primitives & JCS (`contract/`, `contract/v2/`), `client/` (`MobileMerchantApiClient`), `merchantread/`, `readclient/` (`SmallTraderReadClient`, isolated `OkHttpTransport`), `session/` (`SecureStaffSessionStore` in `noBackupFilesDir`, `StaffSessionCoordinator`), `outbox/` (Room v3 `OutboxDatabase` with non-destructive v1->v2->v3 migrations, `STO/1` AES-256-GCM encryption, `AUTH_BLOCKED` scope locks), `offline/` (`OfflineLeaseStore`, `RestrictedOfflineWorkspace`, `BOOT_COUNT`), `sync/` (`SaleSyncCoordinator`, `HttpSaleSyncGateway`), `integration/` (`OutboxAuthDenialBridge`).
 - **`data/` & `viewmodel/`:** `TraderRepository`, `ProductionTraderRepository`, debug-only `OfflineDemoTraderRepository`, `SampleCatalog`, `ProductSearch`, `TraderViewModel`, `TraderUiState`.
 - **`ui/`:** `AuthenticatedTraderApp`, `RestrictedOfflineScreen`, `OfflinePilotControls`, `staff/`, `screens/` (Home, NewSale, InvoiceReview, CashPayment, Receipt, Customers, Suppliers, Purchases, ProductsCatalog, PeopleHub, BusinessExtraScreens), `components/`, `shell/`, `theme/` (`IBM Plex Sans Arabic`, Western digits via `WesternFormatters`).
 
@@ -49,7 +49,7 @@ See [Release Playbook](docs/RELEASING.md) for signed release builds and [Paired 
 | Document | Scope |
 |---|---|
 | [AGENTS.md](AGENTS.md) | Posting authority, decimal/JCS/idempotency/Keystore invariants |
-| [Release Playbook](docs/RELEASING.md) | **Single authority** for `v1.4` (`versionCode 6`) signing, upgrades & outbox safety |
+| [Release Playbook](docs/RELEASING.md) | **Single authority** for `v1.4.1` (`versionCode 7`) signing, upgrades & outbox safety |
 | [Paired Financial Harness](tools/paired/README.md) | Real-HTTP Android <-> Laravel `tools/paired/` verification |
 | [Local Android Handoff](docs/LOCAL_ANDROID_HANDOFF.md) | Developer setup, build flags, and integration status |
 | [Surface Coverage Matrix](docs/SURFACE_COVERAGE.md) | Live-wired vs debug-demo vs simulated vs blocked surfaces |

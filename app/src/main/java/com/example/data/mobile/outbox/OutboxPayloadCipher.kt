@@ -174,4 +174,4 @@ class OutboxPayloadCipher internal constructor(private val engine: SessionCrypto
 }
 
 internal fun OutboxEventEntity.withPayload(bytes: ByteArray) = OutboxEventEntity(
-    clientEventId, companyId, actorId, deviceId, deviceLeaseId, capturedAt, payloadDigest, bytes, eventVersion)
+    clientEventId, companyId, actorId, deviceId, deviceLeaseId, capturedAt, payloadDigest, bytes, eventVersion, currencyMinorUnits)

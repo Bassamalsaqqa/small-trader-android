@@ -96,10 +96,14 @@ internal fun RestrictedOfflineScreen(baseOrigin: String, onRetry: () -> Unit, on
                 if (busy) return@Button
                 val settled = requireNotNull(total)
                 val received = requireNotNull(cash)
+                val taxTotal = basket.fold(BigDecimal.ZERO) { sum, line ->
+                    sum.add(if (line.hasResolvedTax) line.calculateLine(lease.currencyMinorUnits).taxAmount.value else BigDecimal.ZERO)
+                }
                 val invoice = InvoiceRecord(id = eventId, clientEventId = eventId, invoiceNumber = 0, timestamp = lease.issuedAt, items = basket,
                     subtotalExact = settled, discountExact = BigDecimal.ZERO, netTotalExact = settled,
                     cashReceivedExact = received, changeReturnedExact = received.subtract(settled),
-                    customerNote = "", cashierNameAr = "", cashierNameEn = "")
+                    customerNote = "", cashierNameAr = "", cashierNameEn = "",
+                    currency = lease.currency, currencyMinorUnits = lease.currencyMinorUnits, taxExact = taxTotal)
                 busy = true
                 scope.launch {
                     try {

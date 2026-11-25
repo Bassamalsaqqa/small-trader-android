@@ -1484,6 +1484,17 @@ class TraderViewModel(
                 state.language.tr("زبون نقدي", "Walk-in Customer")
         }
 
+        val currencyMinorUnits = state.businessInfo.defaultCurrencyMinorUnits.coerceIn(0, 6)
+        val taxExact = state.basket.fold(java.math.BigDecimal.ZERO) { acc, item ->
+            acc.add(
+                if (item.hasResolvedTax) {
+                    item.calculateLine(currencyMinorUnits).taxAmount.value
+                } else {
+                    java.math.BigDecimal.ZERO
+                }
+            )
+        }
+
         val newInvoice = InvoiceRecord(
             id = "inv_$nextNumber",
             invoiceNumber = nextNumber,
@@ -1501,7 +1512,10 @@ class TraderViewModel(
             isPaidInFull = isPaidInFull,
             remainingDebitExact = remainingDebtExact,
             printCount = 0,
-            clientEventId = state.currentSaleClientEventId
+            clientEventId = state.currentSaleClientEventId,
+            currency = state.businessInfo.defaultCurrency,
+            currencyMinorUnits = state.businessInfo.defaultCurrencyMinorUnits,
+            taxExact = taxExact
         )
 
         if (!_uiState.compareAndSet(state, state.copy(isSubmittingSale = true, isActionBusy = true))) return
@@ -3032,44 +3046,131 @@ class TraderViewModel(
         val state = _uiState.value
         val lang = state.language
         val business = state.businessInfo
+        val matchingDetail = state.selectedInvoiceDetail?.takeIf {
+            target.serverInvoiceUlid == it.id || target.id == it.id
+        }
+        val txCurrency = matchingDetail?.currency?.trim()?.takeIf { it.isNotEmpty() }
+            ?: target.normalizedCurrency
+        val unavailCurrency = lang.tr("العملة غير متاحة", "Currency unavailable")
+        fun fmtMoney(amount: BigDecimal?): String = WesternFormatters.formatReceiptMoney(
+            amount = amount,
+            currency = txCurrency,
+            unavailableCurrencyLabel = unavailCurrency
+        )
+
         val sb = StringBuilder()
+        val isPaidFull = matchingDetail?.isPaidInFull ?: target.isPaidInFull
+        val isCashFull = matchingDetail?.isFullCashSale ?: isPaidFull
 
-        val docTitle = if (target.isPaidInFull) {
-            lang.tr("إيصال قبض وفاتورة مبيعات نقدية", "Cash Sales Invoice & Receipt")
-        } else {
-            lang.tr("فاتورة مبيعات آجلة (ذمة على الحساب)", "Credit Sales Invoice (On Account)")
+        val docTitle = when {
+            isPaidFull && isCashFull -> lang.tr("إيصال قبض وفاتورة مبيعات نقدية", "Cash Sales Invoice & Receipt")
+            isPaidFull -> lang.tr("فاتورة مبيعات مدفوعة", "Paid Sales Invoice")
+            else -> lang.tr("فاتورة مبيعات آجلة (ذمة على الحساب)", "Credit Sales Invoice (On Account)")
         }
+        val docCode = matchingDetail?.invoiceNumber?.takeIf { it.isNotBlank() }
+            ?: target.serverInvoiceNumber?.takeIf { it.isNotBlank() }
+            ?: target.localReceiptNumber?.takeIf { it.isNotBlank() }
+            ?: WesternFormatters.formatInvoiceCode(target.invoiceNumber)
 
-        sb.appendLine(business.name(lang))
-        sb.appendLine("${business.city(lang)} • ${business.phone}")
+        val storeName = matchingDetail?.thermalReceipt?.let { tr ->
+            val ar = tr.storeNameAr?.takeIf { it.isNotBlank() } ?: tr.storeNameEn.orEmpty()
+            val en = tr.storeNameEn?.takeIf { it.isNotBlank() } ?: tr.storeNameAr.orEmpty()
+            lang.tr(ar, en).takeIf { it.isNotBlank() }
+        } ?: business.name(lang)
+        val city = matchingDetail?.thermalReceipt?.let { tr ->
+            val ar = tr.cityAr?.takeIf { it.isNotBlank() } ?: tr.cityEn.orEmpty()
+            val en = tr.cityEn?.takeIf { it.isNotBlank() } ?: tr.cityAr.orEmpty()
+            lang.tr(ar, en).takeIf { it.isNotBlank() }
+        } ?: business.city(lang)
+        val phone = matchingDetail?.thermalReceipt?.phone?.takeIf { it.isNotBlank() } ?: business.phone
+        val customerLabel = matchingDetail?.thermalReceipt?.customerName?.takeIf { it.isNotBlank() }
+            ?: matchingDetail?.customerName?.takeIf { it.isNotBlank() }
+            ?: target.customerNote
+        val cashierLabel = matchingDetail?.thermalReceipt?.cashier?.takeIf { it.isNotBlank() }
+            ?: lang.tr(target.cashierNameAr, target.cashierNameEn)
+        val dateLabel = matchingDetail?.thermalReceipt?.dateTime?.takeIf { it.isNotBlank() }
+            ?: matchingDetail?.date?.takeIf { it.isNotBlank() }
+            ?: target.timestamp
+
+        sb.appendLine(storeName)
+        sb.appendLine("$city • $phone")
         sb.appendLine("--------------------------------")
-        sb.appendLine("$docTitle: ${WesternFormatters.formatInvoiceCode(target.invoiceNumber)}")
-        sb.appendLine("${lang.tr("التاريخ", "Date")}: ${target.timestamp}")
-        sb.appendLine("${lang.tr("الزبون", "Customer")}: ${target.customerNote}")
-        sb.appendLine("${lang.tr("الكاشير", "Cashier")}: ${lang.tr(target.cashierNameAr, target.cashierNameEn)}")
+        sb.appendLine("$docTitle: $docCode")
+        sb.appendLine("${lang.tr("التاريخ", "Date")}: $dateLabel")
+        sb.appendLine("${lang.tr("الزبون", "Customer")}: $customerLabel")
+        sb.appendLine("${lang.tr("الكاشير", "Cashier")}: $cashierLabel")
         sb.appendLine("--------------------------------")
-        target.items.forEachIndexed { idx, item ->
-            sb.appendLine(
-                "${idx + 1}. ${item.product.name(lang)} (${WesternFormatters.formatInt(item.quantity)} × ${WesternFormatters.formatIls(item.product.priceIls)}) = ${WesternFormatters.formatIls(item.lineTotal)}"
-            )
-        }
-        sb.appendLine("--------------------------------")
-        if (target.discountExact.compareTo(BigDecimal.ZERO) != 0) {
-            sb.appendLine("${lang.tr("المجموع الفرعي", "Subtotal")}: ${WesternFormatters.formatIls(target.subtotalExact)}")
-            sb.appendLine("${lang.tr("الخصم", "Discount")}: -${WesternFormatters.formatIls(target.discountExact)}")
-        }
-        sb.appendLine("${lang.tr("الصافي المطلوب", "Net Total")}: ${WesternFormatters.formatIls(target.netTotalExact)}")
-        if (target.isPaidInFull) {
-            sb.appendLine("${lang.tr("الحالة", "Status")}: ${lang.tr("مدفوع نقداً بالكامل", "Paid in Full (Cash)")}")
-            val cashLabel = if (target.hasLocalTenderDetails) lang.tr("المقبوض نقداً", "Cash Received") else lang.tr("المدفوع نقداً", "Cash Paid")
-            sb.appendLine("$cashLabel: ${WesternFormatters.formatIls(target.cashReceivedExact)}")
-            if (target.hasLocalTenderDetails) {
-                sb.appendLine("${lang.tr("الباقي للزبون", "Change Returned")}: ${WesternFormatters.formatIls(target.changeReturnedExact)}")
+        val detailLines = matchingDetail?.thermalReceipt?.lines?.takeIf { it.isNotEmpty() }
+            ?: matchingDetail?.lines
+            ?: emptyList()
+        if (detailLines.isNotEmpty()) {
+            detailLines.forEachIndexed { idx, line ->
+                sb.appendLine(
+                    "${idx + 1}. ${line.productName} (${WesternFormatters.formatQuantity(line.quantity)} × ${fmtMoney(line.unitPrice)}) = ${fmtMoney(line.lineTotal)}"
+                )
             }
         } else {
-            sb.appendLine("${lang.tr("الحالة", "Status")}: ${lang.tr("ذمة آجلة على حساب الزبون", "Unpaid — On Customer Account")}")
-            sb.appendLine("${lang.tr("المدفوع عند الإصدار", "Cash Paid at Issue")}: ${WesternFormatters.formatIls(target.cashReceivedIls)}")
-            sb.appendLine("${lang.tr("المتبقي بالذمة", "Balance Due on Account")}: ${WesternFormatters.formatIls(target.remainingDebitIls)}")
+            target.items.forEachIndexed { idx, item ->
+                sb.appendLine(
+                    "${idx + 1}. ${item.product.name(lang)} (${WesternFormatters.formatQuantity(item.quantity)} × ${fmtMoney(item.unitPriceExact)}) = ${fmtMoney(item.lineTotalExact)}"
+                )
+            }
+        }
+        sb.appendLine("--------------------------------")
+        val subtotal = matchingDetail?.subtotalExact ?: target.subtotalExact
+        val discount = matchingDetail?.discountExact ?: target.discountExact
+        val tax = matchingDetail?.taxExact ?: target.taxExact
+        val netTotal = matchingDetail?.totalExact ?: target.netTotalExact
+        val hasDiscount = discount.signum() > 0
+        val hasTax = tax != null && tax.signum() > 0
+        if (hasDiscount || hasTax) {
+            sb.appendLine("${lang.tr("المجموع الفرعي", "Subtotal")}: ${fmtMoney(subtotal)}")
+            if (hasTax) {
+                sb.appendLine("${lang.tr("الضريبة", "Tax")}: ${fmtMoney(tax)}")
+            }
+            if (hasDiscount) {
+                sb.appendLine("${lang.tr("الخصم", "Discount")}: -${fmtMoney(discount)}")
+            }
+        }
+        sb.appendLine("${lang.tr("الصافي المطلوب", "Net Total")}: ${fmtMoney(netTotal)}")
+
+        val settledPaid = matchingDetail?.paidExact ?: target.settledPaidExact
+        val remainingDue = matchingDetail?.remainingDebitExact ?: target.remainingDebitExact
+        if (isPaidFull) {
+            val statusStr = if (isCashFull) {
+                lang.tr("مدفوع نقداً بالكامل", "Paid in Full (Cash)")
+            } else {
+                lang.tr("مدفوع بالكامل", "Paid in Full")
+            }
+            sb.appendLine("${lang.tr("الحالة", "Status")}: $statusStr")
+            if (target.hasLocalTenderDetails) {
+                sb.appendLine("${lang.tr("المقبوض نقداً", "Cash Tendered")}: ${fmtMoney(target.cashReceivedExact)}")
+                if (target.changeReturnedExact.signum() > 0) {
+                    sb.appendLine("${lang.tr("الباقي للزبون", "Change Returned")}: ${fmtMoney(target.changeReturnedExact)}")
+                }
+            } else {
+                sb.appendLine("${lang.tr("المدفوع", "Paid")}: ${fmtMoney(settledPaid)}")
+                sb.appendLine("${lang.tr("المقبوض نقداً", "Cash Tendered")}: ${lang.tr("غير متاح", "Unavailable")}")
+                sb.appendLine("${lang.tr("الباقي للزبون", "Change Returned")}: ${lang.tr("غير متاح", "Unavailable")}")
+            }
+        } else {
+            val statusStr = if (settledPaid.signum() > 0) {
+                lang.tr("سداد جزئي على حساب الزبون", "Partial Payment — Balance on Account")
+            } else {
+                lang.tr("ذمة آجلة على حساب الزبون", "Unpaid — On Customer Account")
+            }
+            sb.appendLine("${lang.tr("الحالة", "Status")}: $statusStr")
+            if (target.hasLocalTenderDetails) {
+                if (target.cashReceivedExact.signum() > 0) {
+                    sb.appendLine("${lang.tr("المدفوع عند الإصدار", "Cash Paid at Issue")}: ${fmtMoney(target.cashReceivedExact)}")
+                }
+            } else {
+                if (settledPaid.signum() > 0) {
+                    sb.appendLine("${lang.tr("المدفوع", "Paid")}: ${fmtMoney(settledPaid)}")
+                }
+                sb.appendLine("${lang.tr("تفاصيل المقبوض والباقي", "Tender & Change")}: ${lang.tr("غير متاح", "Unavailable")}")
+            }
+            sb.appendLine("${lang.tr("المتبقي بالذمة", "Balance Due on Account")}: ${fmtMoney(remainingDue)}")
         }
         return sb.toString().trim()
     }

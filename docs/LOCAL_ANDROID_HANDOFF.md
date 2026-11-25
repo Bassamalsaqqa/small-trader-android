@@ -6,7 +6,7 @@ Developer guide for Android Studio setup, launch modes, security/outbox architec
 
 Verified against `app/build.gradle.kts`, `gradle/libs.versions.toml`, and `gradle/wrapper/gradle-wrapper.properties`:
 - **Toolchain:** Gradle `9.3.1`, AGP `9.1.1`, Kotlin `2.2.10`, Compose BOM `2024.09.00`, Room `2.7.0`, OkHttp `4.10.0`, Java 11 target (runs under JDK 17/21).
-- **Android App Config:** `namespace = "com.example"`, `applicationId = "com.aistudio.smalltrader.psdukx"`, `compileSdk 36.1`, `minSdk 24`, `targetSdk 36`, `versionCode = 6`, `versionName = "1.4"`.
+- **Android App Config:** `namespace = "com.example"`, `applicationId = "com.aistudio.smalltrader.psdukx"`, `compileSdk 36.1`, `minSdk 24`, `targetSdk 36`, `versionCode = 7`, `versionName = "1.4.1"` (superseding `v1.4` / `versionCode = 6` signed APK).
 - **Gradle Opt-In Flags (`gradle.properties`):**
   - `smalltrader.staffWorkspaceOrigin` (default `https://account.palsync.net`)
   - `smalltrader.staffReadWorkspace` (`false` by default)

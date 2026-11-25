@@ -957,6 +957,74 @@ class ProductionOfflineSaleTest {
         assertNull(runBlocking { com.example.data.mobile.offline.RestrictedOfflineWorkspace.open(context, "https://account.example.test") })
     }
 
+    @Test
+    fun offlineJodSale_survivesRecreateClearedLeaseAndChangedBusinessCurrency() = withFixture { server, file ->
+        withDatabase(file) { db1 ->
+            val store1 = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db1.openHelper.writableDatabase }
+            val outbox1 = outbox(db1)
+            val repo1 = repository(server, outbox1, precision = 3, currency = "JOD", leaseStore = store1)
+            repo1.clock = { fixedClockMillis }
+            try {
+                repo1.isOfflineSalesCapabilityEnabled = true
+                server.enqueue(json(catalog(null, "9.83")))
+                runBlocking { repo1.prepareOfflineCatalog(1, 1) {}.getOrThrow() }
+                take(server)
+
+                server.enqueue(json(leaseResponse(currency = "JOD", precision = 3)))
+                runBlocking { repo1.acquireOfflineSaleLease().getOrThrow() }
+                take(server)
+
+                repo1.isNetworkOffline = true
+                val prod = repo1.getProducts().single()
+                val line = testBasketItem(prod, quantity = BigDecimal("1.00"), unitPrice = BigDecimal("9.83"))
+                val sale = InvoiceRecord(
+                    id = "offline-jod-1",
+                    invoiceNumber = 0,
+                    timestamp = "2026-11-25T10:00:00Z",
+                    items = listOf(line),
+                    subtotalExact = BigDecimal("9.83"),
+                    discountExact = BigDecimal.ZERO,
+                    netTotalExact = BigDecimal("9.83"),
+                    cashReceivedExact = BigDecimal("9.84"),
+                    changeReturnedExact = BigDecimal("0.01"),
+                    customerNote = "",
+                    cashierNameAr = "User",
+                    cashierNameEn = "User"
+                )
+                val captured = runBlocking { repo1.recordSale(sale).getOrThrow() }
+                assertEquals("JOD", captured.currency)
+                assertEquals(3, captured.currencyMinorUnits)
+                assertEquals(0, BigDecimal("0.01").compareTo(captured.changeReturnedExact))
+            } finally {
+                repo1.close()
+            }
+        }
+
+        // Reopen database with cleared lease and switched company base currency (USD, precision = 2).
+        withDatabase(file) { db2 ->
+            val store2 = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db2.openHelper.writableDatabase }
+            store2.clearLease(companyA, actor, device)
+            val outbox2 = outbox(db2)
+            val repo2 = repository(server, outbox2, precision = 2, currency = "USD", leaseStore = store2)
+            repo2.clock = { fixedClockMillis }
+            try {
+                val pending = repo2.getPendingOfflineSales()
+                assertEquals(1, pending.size)
+                val recovered = pending.single()
+                assertEquals("JOD", recovered.currency)
+                assertEquals(3, recovered.currencyMinorUnits)
+                assertEquals(0, BigDecimal("9.83").compareTo(recovered.netTotalExact))
+                assertEquals(0, BigDecimal("9.84").compareTo(recovered.cashReceivedExact))
+                assertEquals(0, BigDecimal("0.01").compareTo(recovered.changeReturnedExact))
+                assertTrue(recovered.hasLocalTenderDetails)
+                assertNotNull(recovered.taxExact)
+                assertEquals("USD", repo2.getBusinessInfo().defaultCurrency)
+            } finally {
+                repo2.close()
+            }
+        }
+    }
+
     private fun withFixture(body: (MockWebServer, File) -> Unit) {
         val dbFile = File(context.filesDir, "offline-sale-${ClientUuid.random().value}.db")
         MockWebServer().use { server ->

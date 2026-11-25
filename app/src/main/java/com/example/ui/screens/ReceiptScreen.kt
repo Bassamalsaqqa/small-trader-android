@@ -193,17 +193,10 @@ fun ReceiptScreen(
     } else null
     val detailLines = liveDetail?.thermalReceipt?.lines?.takeIf { it.isNotEmpty() } ?: liveDetail?.lines ?: emptyList()
     val isPendingSync = receipt.outboxStatus != null || (receipt.serverInvoiceUlid == null && !state.currentSession.isDemoSession)
-    val displayCurrency = liveDetail?.currency ?: "₪"
-    val displayNetTotal = if (liveDetail != null) {
-        "${WesternFormatters.formatExactOrPlain(liveDetail.totalExact)} $displayCurrency"
-    } else {
-        WesternFormatters.formatIls(receipt.netTotalIls)
-    }
-    val displayRemainingDebit = if (liveDetail != null) {
-        "${WesternFormatters.formatExactOrPlain(liveDetail.remainingDebitExact)} $displayCurrency"
-    } else {
-        WesternFormatters.formatIls(receipt.remainingDebitIls)
-    }
+    val amounts = remember(receipt, liveDetail) { resolveReceiptAmounts(receipt, liveDetail) }
+    val displayCurrency = amounts.txCurrency
+    val displayNetTotal = WesternFormatters.formatReceiptMoneyBidi(amounts.netTotalExact, displayCurrency, lang)
+    val displayRemainingDebit = WesternFormatters.formatReceiptMoneyBidi(amounts.remainingDueExact, displayCurrency, lang)
 
     Column(
         modifier = Modifier
@@ -349,19 +342,24 @@ fun ReceiptScreen(
                                     )
                                 }
                             }
+                            val settledPaidLabel = WesternFormatters.formatReceiptMoneyBidi(amounts.paidExact, displayCurrency, lang)
                             Text(
-                                text = when (receipt.paymentStatus) {
-                                    InvoicePaymentStatus.PAID_CASH -> lang.tr(
-                                        "مسددة نقداً بالكامل (${WesternFormatters.formatIls(receipt.netTotalIls)}) بتاريخ ${receipt.timestamp}",
-                                        "Paid in full (Cash ${WesternFormatters.formatIls(receipt.netTotalIls)}) on ${receipt.timestamp}"
+                                text = when {
+                                    amounts.isPaidInFull && amounts.isCashFull -> lang.tr(
+                                        "مسددة نقداً بالكامل ($displayNetTotal) بتاريخ ${receipt.timestamp}",
+                                        "Paid in full (Cash $displayNetTotal) on ${receipt.timestamp}"
                                     )
-                                    InvoicePaymentStatus.PARTIAL -> lang.tr(
-                                        "سداد جزئي: مسدد ${WesternFormatters.formatIls(receipt.cashReceivedIls)} • متبقي ${WesternFormatters.formatIls(receipt.remainingDebitIls)} (الإجمالي ${WesternFormatters.formatIls(receipt.netTotalIls)})",
-                                        "Partial: Paid ${WesternFormatters.formatIls(receipt.cashReceivedIls)} • Remaining ${WesternFormatters.formatIls(receipt.remainingDebitIls)} (Total ${WesternFormatters.formatIls(receipt.netTotalIls)})"
+                                    amounts.isPaidInFull -> lang.tr(
+                                        "مسددة بالكامل ($displayNetTotal) بتاريخ ${receipt.timestamp}",
+                                        "Paid in full ($displayNetTotal) on ${receipt.timestamp}"
                                     )
-                                    InvoicePaymentStatus.ON_CREDIT -> lang.tr(
-                                        "فاتورة آجلة بقيمة ${WesternFormatters.formatIls(receipt.remainingDebitIls)} بتاريخ ${receipt.timestamp}",
-                                        "Credit invoice of ${WesternFormatters.formatIls(receipt.remainingDebitIls)} issued on ${receipt.timestamp}"
+                                    amounts.isPartial -> lang.tr(
+                                        "سداد جزئي: مسدد $settledPaidLabel • متبقي $displayRemainingDebit (الإجمالي $displayNetTotal)",
+                                        "Partial: Paid $settledPaidLabel • Remaining $displayRemainingDebit (Total $displayNetTotal)"
+                                    )
+                                    else -> lang.tr(
+                                        "فاتورة آجلة بقيمة $displayRemainingDebit بتاريخ ${receipt.timestamp}",
+                                        "Credit invoice of $displayRemainingDebit issued on ${receipt.timestamp}"
                                     )
                                 },
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
@@ -458,7 +456,7 @@ fun ReceiptScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "${item.product.name(lang)} (${WesternFormatters.formatInt(item.quantity)}×)",
+                                        text = "${item.product.name(lang)} (${WesternFormatters.formatQuantity(item.quantity)}×)",
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.weight(1f),
@@ -466,7 +464,7 @@ fun ReceiptScreen(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = WesternFormatters.formatIls(item.lineTotal),
+                                        text = WesternFormatters.formatReceiptMoneyBidi(item.lineTotalExact, displayCurrency, lang),
                                         style = MaterialTheme.typography.bodyMedium.copy(
                                             fontWeight = FontWeight.SemiBold,
                                             fontFamily = MonoFontFamily
@@ -483,7 +481,7 @@ fun ReceiptScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "${line.productName} (${WesternFormatters.formatExactOrPlain(line.quantity)}×)",
+                                        text = "${line.productName} (${WesternFormatters.formatQuantity(line.quantity)}×)",
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.weight(1f),
@@ -491,7 +489,7 @@ fun ReceiptScreen(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = "${WesternFormatters.formatExactOrPlain(line.lineTotal)} $displayCurrency",
+                                        text = WesternFormatters.formatReceiptMoneyBidi(line.lineTotal, displayCurrency, lang),
                                         style = MaterialTheme.typography.bodyMedium.copy(
                                             fontWeight = FontWeight.SemiBold,
                                             fontFamily = MonoFontFamily
@@ -509,43 +507,64 @@ fun ReceiptScreen(
                     )
 
                     // Financial Summary
+                    val summaryHasDiscount = amounts.discountExact.signum() > 0
+                    val summaryHasTax = amounts.taxExact != null && amounts.taxExact.signum() > 0
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        if (receipt.discountIls > 0.005) {
+                        if (summaryHasDiscount || summaryHasTax) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = lang.tr("المجموع قبل الخصم", "Subtotal"),
+                                    text = lang.tr("المجموع الفرعي", "Subtotal"),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = WesternFormatters.formatIls(receipt.subtotalIls),
+                                    text = WesternFormatters.formatReceiptMoneyBidi(amounts.subtotalExact, displayCurrency, lang),
                                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = lang.tr("خصم", "Discount"),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TraderTheme.financial.income
-                                )
-                                Text(
-                                    text = "-${WesternFormatters.formatIls(receipt.discountIls)}",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontFamily = MonoFontFamily
-                                    ),
-                                    color = TraderTheme.financial.income
-                                )
+                            if (summaryHasTax) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = lang.tr("الضريبة", "Tax"),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = WesternFormatters.formatReceiptMoneyBidi(amounts.taxExact, displayCurrency, lang),
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                            if (summaryHasDiscount) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = lang.tr("خصم", "Discount"),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TraderTheme.financial.income
+                                    )
+                                    Text(
+                                        text = "-${WesternFormatters.formatReceiptMoneyBidi(amounts.discountExact, displayCurrency, lang)}",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontFamily = MonoFontFamily
+                                        ),
+                                        color = TraderTheme.financial.income
+                                    )
+                                }
                             }
                         }
 
@@ -555,7 +574,7 @@ fun ReceiptScreen(
                             verticalAlignment = Alignment.Bottom
                         ) {
                             Text(
-                                text = if (receipt.isPaidInFull) {
+                                text = if (amounts.isPaidInFull) {
                                     lang.tr("صافي الفاتورة المدفوع", "Total Net Paid")
                                 } else {
                                     lang.tr("صافي الفاتورة", "Net Invoice Total")
@@ -588,68 +607,128 @@ fun ReceiptScreen(
                                 .padding(10.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            when (receipt.paymentStatus) {
-                                InvoicePaymentStatus.PAID_CASH -> {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            text = if (receipt.hasLocalTenderDetails) lang.tr("المقبوض نقداً", "Cash Tendered")
-                                            else lang.tr("المدفوع نقداً", "Cash Paid"),
-                                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Text(
-                                            text = WesternFormatters.formatIls(receipt.cashReceivedIls),
-                                            style = MaterialTheme.typography.bodySmall.copy(
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontFamily = MonoFontFamily
-                                            ),
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-                                    if (receipt.changeReturnedIls > 0.005) {
+                            when {
+                                amounts.isPaidInFull -> {
+                                    if (receipt.hasLocalTenderDetails) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = lang.tr("المقبوض نقداً", "Cash Tendered"),
+                                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = WesternFormatters.formatReceiptMoneyBidi(receipt.cashReceivedExact, displayCurrency, lang),
+                                                style = MaterialTheme.typography.bodySmall.copy(
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontFamily = MonoFontFamily
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                        if (receipt.changeReturnedExact.signum() > 0) {
+                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = lang.tr("الباقي (الفكة المسترجعة)", "Change Returned"),
+                                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = TraderTheme.financial.income
+                                                )
+                                                Text(
+                                                    text = WesternFormatters.formatReceiptMoneyBidi(receipt.changeReturnedExact, displayCurrency, lang),
+                                                    style = MaterialTheme.typography.titleMedium.copy(
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontFamily = MonoFontFamily
+                                                    ),
+                                                    color = TraderTheme.financial.income
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = if (amounts.isCashFull) lang.tr("المدفوع نقداً", "Cash Paid")
+                                                else lang.tr("المدفوع", "Paid"),
+                                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = WesternFormatters.formatReceiptMoneyBidi(amounts.paidExact, displayCurrency, lang),
+                                                style = MaterialTheme.typography.bodySmall.copy(
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontFamily = MonoFontFamily
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
                                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
+                                            horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
                                             Text(
-                                                text = lang.tr("الباقي (الفكة المسترجعة)", "Change Returned"),
-                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                                color = TraderTheme.financial.income
+                                                text = lang.tr("المقبوض والباقي", "Cash Tendered & Change"),
+                                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                             Text(
-                                                text = WesternFormatters.formatIls(receipt.changeReturnedIls),
-                                                style = MaterialTheme.typography.titleMedium.copy(
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontFamily = MonoFontFamily
-                                                ),
-                                                color = TraderTheme.financial.income
+                                                text = lang.tr("غير متاح", "Unavailable"),
+                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                     }
                                 }
-                                InvoicePaymentStatus.PARTIAL -> {
+                                amounts.isPartial -> {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text(
-                                            text = lang.tr("المقبوض نقداً", "Cash Paid"),
+                                            text = if (receipt.hasLocalTenderDetails) lang.tr("المقبوض نقداً", "Cash Paid")
+                                            else lang.tr("المدفوع", "Paid"),
                                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         Text(
-                                            text = WesternFormatters.formatIls(receipt.cashReceivedIls),
+                                            text = WesternFormatters.formatReceiptMoneyBidi(
+                                                if (receipt.hasLocalTenderDetails) receipt.cashReceivedExact else amounts.paidExact,
+                                                displayCurrency,
+                                                lang
+                                            ),
                                             style = MaterialTheme.typography.bodySmall.copy(
                                                 fontWeight = FontWeight.SemiBold,
                                                 fontFamily = MonoFontFamily
                                             ),
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
+                                    }
+                                    if (!receipt.hasLocalTenderDetails) {
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = lang.tr("المقبوض والباقي", "Cash Tendered & Change"),
+                                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = lang.tr("غير متاح", "Unavailable"),
+                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
                                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                                     Row(
@@ -663,7 +742,7 @@ fun ReceiptScreen(
                                             color = TraderTheme.financial.warning
                                         )
                                         Text(
-                                            text = WesternFormatters.formatIls(receipt.remainingDebitIls),
+                                            text = displayRemainingDebit,
                                             style = MaterialTheme.typography.titleMedium.copy(
                                                 fontWeight = FontWeight.Bold,
                                                 fontFamily = MonoFontFamily
@@ -672,19 +751,21 @@ fun ReceiptScreen(
                                         )
                                     }
                                 }
-                                InvoicePaymentStatus.ON_CREDIT -> {
-                                    if (receipt.cashReceivedIls > 0.005) {
+                                else -> {
+                                    val upfrontPaid = if (receipt.hasLocalTenderDetails) receipt.cashReceivedExact else amounts.paidExact
+                                    if (upfrontPaid.signum() > 0) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
                                             Text(
-                                                text = lang.tr("المقبوض نقداً", "Cash Paid"),
+                                                text = if (receipt.hasLocalTenderDetails) lang.tr("المقبوض نقداً", "Cash Paid")
+                                                else lang.tr("المدفوع", "Paid"),
                                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                             Text(
-                                                text = WesternFormatters.formatIls(receipt.cashReceivedIls),
+                                                text = WesternFormatters.formatReceiptMoneyBidi(upfrontPaid, displayCurrency, lang),
                                                 style = MaterialTheme.typography.bodySmall.copy(
                                                     fontWeight = FontWeight.SemiBold,
                                                     fontFamily = MonoFontFamily
@@ -950,7 +1031,7 @@ fun ReceiptScreen(
                         OutlinedButton(
                             onClick = {
                                 val shareText = onShareReceipt?.invoke(receipt)
-                                    ?: buildPlainTextDocument(receipt, state.businessInfo, lang)
+                                    ?: buildPlainTextDocument(receipt, state.businessInfo, lang, liveDetail)
                                 localActionFeedback = lang.tr(
                                     "تم تجهيز نص الوثيقة للمشاركة (${WesternFormatters.formatInvoiceCode(receipt.invoiceNumber)})",
                                     "Document text prepared for sharing (${WesternFormatters.formatInvoiceCode(receipt.invoiceNumber)})"
@@ -986,7 +1067,7 @@ fun ReceiptScreen(
                         OutlinedButton(
                             onClick = {
                                 val copyText = onCopyReceipt?.invoke(receipt)
-                                    ?: buildPlainTextDocument(receipt, state.businessInfo, lang)
+                                    ?: buildPlainTextDocument(receipt, state.businessInfo, lang, liveDetail)
                                 clipboardManager.setText(AnnotatedString(copyText))
                                 val count = state.receiptCopyCount + 1
                                 localActionFeedback = if (count > 1) {
@@ -1133,7 +1214,9 @@ private fun SalesReturnPreviewDialog(
     onDismiss: () -> Unit
 ) {
     val firstLine = receipt.items.firstOrNull()
-    val sampleReturnAmount = firstLine?.product?.priceIls ?: receipt.netTotalIls
+    val txCurrency = receipt.normalizedCurrency
+    val sampleReturnAmountExact = firstLine?.unitPriceExact ?: receipt.netTotalExact
+    val sampleReturnFormatted = WesternFormatters.formatReceiptMoneyBidi(sampleReturnAmountExact, txCurrency, lang)
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -1191,13 +1274,13 @@ private fun SalesReturnPreviewDialog(
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                                 )
                                 Text(
-                                    text = "${lang.tr("المباع:", "Sold:")} ${WesternFormatters.formatInt(item.quantity)} × ${WesternFormatters.formatIls(item.product.priceIls)}",
+                                    text = "${lang.tr("المباع:", "Sold:")} ${WesternFormatters.formatQuantity(item.quantity)} × ${WesternFormatters.formatReceiptMoneyBidi(item.unitPriceExact, txCurrency, lang)}",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             Text(
-                                text = WesternFormatters.formatIls(item.lineTotal),
+                                text = WesternFormatters.formatReceiptMoneyBidi(item.lineTotalExact, txCurrency, lang),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                             )
                         }
@@ -1209,13 +1292,13 @@ private fun SalesReturnPreviewDialog(
                 Text(
                     text = if (receipt.isPaidInFull) {
                         lang.tr(
-                            "الأثر المالي المتوقع عند إرجاع وحدة واحدة: رد نقدي ${WesternFormatters.formatIls(sampleReturnAmount)} من الصندوق + إعادة +1 للمخزون.",
-                            "Projected impact for 1-unit return: Cash refund of ${WesternFormatters.formatIls(sampleReturnAmount)} + restock +1 unit."
+                            "الأثر المالي المتوقع عند إرجاع وحدة واحدة: رد نقدي $sampleReturnFormatted من الصندوق + إعادة +1 للمخزون.",
+                            "Projected impact for 1-unit return: Cash refund of $sampleReturnFormatted + restock +1 unit."
                         )
                     } else {
                         lang.tr(
-                            "الأثر المالي المتوقع عند إرجاع وحدة واحدة: إشعار دائن يخفض ذمة الزبون بمقدار ${WesternFormatters.formatIls(sampleReturnAmount)} + إعادة +1 للمخزون.",
-                            "Projected impact for 1-unit return: Credit note reducing customer debt by ${WesternFormatters.formatIls(sampleReturnAmount)} + restock +1 unit."
+                            "الأثر المالي المتوقع عند إرجاع وحدة واحدة: إشعار دائن يخفض ذمة الزبون بمقدار $sampleReturnFormatted + إعادة +1 للمخزون.",
+                            "Projected impact for 1-unit return: Credit note reducing customer debt by $sampleReturnFormatted + restock +1 unit."
                         )
                     },
                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
@@ -1245,48 +1328,28 @@ private fun InvoiceReceiptDocumentCard(
     liveDetail: LiveInvoiceRecord? = null,
     modifier: Modifier = Modifier
 ) {
-    val paymentStatus = receipt.paymentStatus
-    val isPaidCash = liveDetail?.isFullCashSale ?: (paymentStatus == com.example.model.InvoicePaymentStatus.PAID_CASH)
-    val isPartial = if (liveDetail != null) (!liveDetail.isPaidInFull && liveDetail.paidExact > BigDecimal.ZERO) else (paymentStatus == com.example.model.InvoicePaymentStatus.PARTIAL)
+    val amounts = remember(receipt, liveDetail) { resolveReceiptAmounts(receipt, liveDetail) }
+    val txCurrency = amounts.txCurrency
+    val currTag = WesternFormatters.formatReceiptCurrencyTag(txCurrency, lang)
+    val isPaidCash = amounts.isCashFull && amounts.isPaidInFull
+    val isPartial = amounts.isPartial
     val detailLines = liveDetail?.thermalReceipt?.lines?.takeIf { it.isNotEmpty() } ?: liveDetail?.lines ?: emptyList()
-    val curr = liveDetail?.currency ?: "₪"
     val totalLineCount = if (receipt.items.isNotEmpty()) receipt.items.size else detailLines.size
     val totalUnitQty = if (receipt.items.isNotEmpty()) {
-        WesternFormatters.formatInt(receipt.totalQuantity)
+        WesternFormatters.formatQuantity(receipt.totalQuantityDecimal)
     } else {
-        WesternFormatters.formatExactOrPlain(detailLines.fold(BigDecimal.ZERO) { acc, l -> acc.add(l.quantity) })
+        WesternFormatters.formatQuantity(detailLines.fold(BigDecimal.ZERO) { acc, l -> acc.add(l.quantity) })
     }
 
-    val displayNetTotal = if (liveDetail != null) {
-        "${WesternFormatters.formatExactOrPlain(liveDetail.totalExact)} $curr"
-    } else {
-        WesternFormatters.formatIls(receipt.netTotalIls)
-    }
-    val displaySubtotal = if (liveDetail != null) {
-        "${WesternFormatters.formatExactOrPlain(liveDetail.subtotalExact)} $curr"
-    } else {
-        WesternFormatters.formatIls(receipt.subtotalIls)
-    }
-    val displayDiscount = if (liveDetail != null) {
-        "${WesternFormatters.formatExactOrPlain(liveDetail.discountExact)} $curr"
-    } else {
-        WesternFormatters.formatIls(receipt.discountIls)
-    }
-    val hasDiscount = if (liveDetail != null) {
-        liveDetail.discountExact.compareTo(BigDecimal.ZERO) > 0
-    } else {
-        receipt.discountIls > 0.005
-    }
-    val displayPaid = if (liveDetail != null) {
-        "${WesternFormatters.formatExactOrPlain(liveDetail.paidExact)} $curr"
-    } else {
-        WesternFormatters.formatIls(receipt.cashReceivedIls)
-    }
-    val displayRemaining = if (liveDetail != null) {
-        "${WesternFormatters.formatExactOrPlain(liveDetail.remainingDebitExact)} $curr"
-    } else {
-        WesternFormatters.formatIls(receipt.remainingDebitIls)
-    }
+    val displayNetTotal = WesternFormatters.formatReceiptMoneyBidi(amounts.netTotalExact, txCurrency, lang)
+    val displaySubtotal = WesternFormatters.formatReceiptMoneyBidi(amounts.subtotalExact, txCurrency, lang)
+    val displayTax = amounts.taxExact?.let { WesternFormatters.formatReceiptMoneyBidi(it, txCurrency, lang) }
+    val displayDiscount = WesternFormatters.formatReceiptMoneyBidi(amounts.discountExact, txCurrency, lang)
+    val hasDiscount = amounts.discountExact.signum() > 0
+    val hasTax = amounts.taxExact != null && amounts.taxExact.signum() > 0
+    val displaySettledPaid = WesternFormatters.formatReceiptMoneyBidi(amounts.paidExact, txCurrency, lang)
+    val displayLocalCash = WesternFormatters.formatReceiptMoneyBidi(receipt.cashReceivedExact, txCurrency, lang)
+    val displayRemaining = WesternFormatters.formatReceiptMoneyBidi(amounts.remainingDueExact, txCurrency, lang)
 
     Card(
         modifier = modifier.testTag("thermal_receipt_paper"),
@@ -1430,7 +1493,7 @@ private fun InvoiceReceiptDocumentCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = lang.tr("المبلغ ($curr)", "Amount ($curr)"),
+                    text = lang.tr("المبلغ ($currTag)", "Amount ($currTag)"),
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1458,7 +1521,7 @@ private fun InvoiceReceiptDocumentCard(
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = WesternFormatters.formatIls(item.lineTotal),
+                                    text = WesternFormatters.formatReceiptMoneyBidi(item.lineTotalExact, txCurrency, lang),
                                     style = MaterialTheme.typography.bodyMedium.copy(
                                         fontWeight = FontWeight.SemiBold
                                     ),
@@ -1466,7 +1529,7 @@ private fun InvoiceReceiptDocumentCard(
                                 )
                             }
                             Text(
-                                text = "${WesternFormatters.formatInt(item.quantity)} × ${WesternFormatters.formatIls(item.product.priceIls)} (${item.product.unit(lang)})",
+                                text = "${WesternFormatters.formatQuantity(item.quantity)} × ${WesternFormatters.formatReceiptMoneyBidi(item.unitPriceExact, txCurrency, lang)} (${item.product.unit(lang)})",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(start = 14.dp)
@@ -1493,7 +1556,7 @@ private fun InvoiceReceiptDocumentCard(
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = "${WesternFormatters.formatExactOrPlain(line.lineTotal)} $curr",
+                                    text = WesternFormatters.formatReceiptMoneyBidi(line.lineTotal, txCurrency, lang),
                                     style = MaterialTheme.typography.bodyMedium.copy(
                                         fontWeight = FontWeight.SemiBold
                                     ),
@@ -1501,7 +1564,7 @@ private fun InvoiceReceiptDocumentCard(
                                 )
                             }
                             Text(
-                                text = "${WesternFormatters.formatExactOrPlain(line.quantity)} × ${WesternFormatters.formatExactOrPlain(line.unitPrice)} $curr (${line.unit})",
+                                text = "${WesternFormatters.formatQuantity(line.quantity)} × ${WesternFormatters.formatReceiptMoneyBidi(line.unitPrice, txCurrency, lang)} (${line.unit})",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(start = 14.dp)
@@ -1515,18 +1578,27 @@ private fun InvoiceReceiptDocumentCard(
 
             // 6. Totals & Settlement Breakdown
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (hasDiscount) {
+                if (hasDiscount || hasTax) {
                     DocumentMetaRow(
                         label = lang.tr("المجموع الفرعي:", "Subtotal:"),
                         value = displaySubtotal,
                         useMono = false
                     )
-                    DocumentMetaRow(
-                        label = lang.tr("الخصم الممنوح:", "Discount:"),
-                        value = "- $displayDiscount",
-                        useMono = false,
-                        valueColor = TraderTheme.financial.income
-                    )
+                    if (hasTax && displayTax != null) {
+                        DocumentMetaRow(
+                            label = lang.tr("الضريبة:", "Tax:"),
+                            value = displayTax,
+                            useMono = false
+                        )
+                    }
+                    if (hasDiscount) {
+                        DocumentMetaRow(
+                            label = lang.tr("الخصم الممنوح:", "Discount:"),
+                            value = "- $displayDiscount",
+                            useMono = false,
+                            valueColor = TraderTheme.financial.income
+                        )
+                    }
                 }
 
                 Row(
@@ -1554,23 +1626,41 @@ private fun InvoiceReceiptDocumentCard(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
 
                 when {
-                    isPaidCash -> {
+                    amounts.isPaidInFull -> {
                         DocumentMetaRow(
                             label = lang.tr("طريقة السداد:", "Settlement:"),
-                            value = lang.tr("مدفوع نقداً بالكامل", "Paid in Full (Cash)"),
+                            value = if (isPaidCash) lang.tr("مدفوع نقداً بالكامل", "Paid in Full (Cash)")
+                                else lang.tr("مدفوع بالكامل", "Paid in Full"),
                             useMono = false,
                             valueColor = TraderTheme.financial.income
                         )
-                        DocumentMetaRow(
-                            label = if (receipt.hasLocalTenderDetails) lang.tr("المبلغ المقبوض نقداً:", "Cash Received:")
-                                else lang.tr("المدفوع نقداً:", "Cash Paid:"),
-                            value = displayPaid,
-                            useMono = false
-                        )
-                        if (receipt.changeReturnedIls > 0.005) {
+                        if (receipt.hasLocalTenderDetails) {
+                            DocumentMetaRow(
+                                label = lang.tr("المبلغ المقبوض نقداً:", "Cash Tendered:"),
+                                value = displayLocalCash,
+                                useMono = false
+                            )
+                            if (receipt.changeReturnedExact.signum() > 0) {
+                                DocumentMetaRow(
+                                    label = lang.tr("الباقي المرجع للزبون:", "Change Returned:"),
+                                    value = WesternFormatters.formatReceiptMoneyBidi(receipt.changeReturnedExact, txCurrency, lang),
+                                    useMono = false
+                                )
+                            }
+                        } else {
+                            DocumentMetaRow(
+                                label = lang.tr("المدفوع:", "Paid:"),
+                                value = displaySettledPaid,
+                                useMono = false
+                            )
+                            DocumentMetaRow(
+                                label = lang.tr("المبلغ المقبوض نقداً:", "Cash Tendered:"),
+                                value = lang.tr("غير متاح", "Unavailable"),
+                                useMono = false
+                            )
                             DocumentMetaRow(
                                 label = lang.tr("الباقي المرجع للزبون:", "Change Returned:"),
-                                value = WesternFormatters.formatIls(receipt.changeReturnedIls),
+                                value = lang.tr("غير متاح", "Unavailable"),
                                 useMono = false
                             )
                         }
@@ -1583,11 +1673,19 @@ private fun InvoiceReceiptDocumentCard(
                             valueColor = TraderTheme.financial.warning
                         )
                         DocumentMetaRow(
-                            label = lang.tr("المدفوع نقداً:", "Cash Paid:"),
-                            value = displayPaid,
+                            label = if (receipt.hasLocalTenderDetails) lang.tr("المدفوع نقداً:", "Cash Paid:")
+                                else lang.tr("المدفوع:", "Paid:"),
+                            value = if (receipt.hasLocalTenderDetails) displayLocalCash else displaySettledPaid,
                             useMono = false,
                             valueColor = TraderTheme.financial.income
                         )
+                        if (!receipt.hasLocalTenderDetails) {
+                            DocumentMetaRow(
+                                label = lang.tr("المقبوض والباقي:", "Cash Tendered & Change:"),
+                                value = lang.tr("غير متاح", "Unavailable"),
+                                useMono = false
+                            )
+                        }
                         DocumentMetaRow(
                             label = lang.tr("المتبقي بالذمة على الحساب:", "Remaining Due on Account:"),
                             value = displayRemaining,
@@ -1602,10 +1700,12 @@ private fun InvoiceReceiptDocumentCard(
                             useMono = false,
                             valueColor = TraderTheme.financial.debit
                         )
-                        if (receipt.cashReceivedIls > 0.005) {
+                        val upfrontPaid = if (receipt.hasLocalTenderDetails) receipt.cashReceivedExact else amounts.paidExact
+                        if (upfrontPaid.signum() > 0) {
                             DocumentMetaRow(
-                                label = lang.tr("المدفوع نقداً عند الإصدار:", "Cash Paid at Issue:"),
-                                value = displayPaid,
+                                label = if (receipt.hasLocalTenderDetails) lang.tr("المدفوع نقداً عند الإصدار:", "Cash Paid at Issue:")
+                                    else lang.tr("المدفوع عند الإصدار:", "Paid at Issue:"),
+                                value = if (receipt.hasLocalTenderDetails) displayLocalCash else displaySettledPaid,
                                 useMono = false
                             )
                         }
@@ -1653,45 +1753,144 @@ private fun DocumentMetaRow(
     }
 }
 
+private data class ResolvedReceiptAmounts(
+    val txCurrency: String?,
+    val isCashFull: Boolean,
+    val isPaidInFull: Boolean,
+    val isPartial: Boolean,
+    val subtotalExact: BigDecimal,
+    val discountExact: BigDecimal,
+    val taxExact: BigDecimal?,
+    val netTotalExact: BigDecimal,
+    val paidExact: BigDecimal,
+    val remainingDueExact: BigDecimal
+)
+
+private fun resolveReceiptAmounts(
+    receipt: InvoiceRecord,
+    liveDetail: LiveInvoiceRecord?
+): ResolvedReceiptAmounts {
+    val txCurrency = liveDetail?.currency?.trim()?.takeIf { it.isNotEmpty() }
+        ?: receipt.normalizedCurrency
+    val isPaidFull = liveDetail?.isPaidInFull ?: receipt.isPaidInFull
+    val isCashFull = liveDetail?.isFullCashSale ?: isPaidFull
+    val paid = liveDetail?.paidExact ?: receipt.settledPaidExact
+    val remaining = liveDetail?.remainingDebitExact ?: receipt.remainingDebitExact
+    val isPartial = !isPaidFull && (
+        if (liveDetail != null) paid.signum() > 0 else receipt.paymentStatus == InvoicePaymentStatus.PARTIAL
+    )
+    return ResolvedReceiptAmounts(
+        txCurrency = txCurrency,
+        isCashFull = isCashFull,
+        isPaidInFull = isPaidFull,
+        isPartial = isPartial,
+        subtotalExact = liveDetail?.subtotalExact ?: receipt.subtotalExact,
+        discountExact = liveDetail?.discountExact ?: receipt.discountExact,
+        taxExact = liveDetail?.taxExact ?: receipt.taxExact,
+        netTotalExact = liveDetail?.totalExact ?: receipt.netTotalExact,
+        paidExact = paid,
+        remainingDueExact = remaining
+    )
+}
+
 private fun buildPlainTextDocument(
     receipt: InvoiceRecord,
     business: BusinessInfo,
-    lang: AppLanguage
+    lang: AppLanguage,
+    liveDetail: LiveInvoiceRecord? = null
 ): String {
+    val amounts = resolveReceiptAmounts(receipt, liveDetail)
+    val txCurrency = amounts.txCurrency
+    val unavailCurrency = lang.tr("العملة غير متاحة", "Currency unavailable")
+    fun fmtMoney(amount: BigDecimal?): String = WesternFormatters.formatReceiptMoney(
+        amount = amount,
+        currency = txCurrency,
+        unavailableCurrencyLabel = unavailCurrency
+    )
     val sb = StringBuilder()
-    val docTitle = when (receipt.paymentStatus) {
-        com.example.model.InvoicePaymentStatus.PAID_CASH -> lang.tr("إيصال قبض وفاتورة مبيعات نقدية", "Cash Sales Invoice & Receipt")
-        com.example.model.InvoicePaymentStatus.PARTIAL -> lang.tr("فاتورة مبيعات بسداد جزئي", "Partial-Payment Sales Invoice")
-        com.example.model.InvoicePaymentStatus.ON_CREDIT -> lang.tr("فاتورة مبيعات آجلة (ذمة على الحساب)", "Credit Sales Invoice (On Account)")
+    val docTitle = when {
+        amounts.isPaidInFull && amounts.isCashFull -> lang.tr("إيصال قبض وفاتورة مبيعات نقدية", "Cash Sales Invoice & Receipt")
+        amounts.isPaidInFull -> lang.tr("فاتورة مبيعات مدفوعة", "Paid Sales Invoice")
+        amounts.isPartial -> lang.tr("فاتورة مبيعات بسداد جزئي", "Partial-Payment Sales Invoice")
+        else -> lang.tr("فاتورة مبيعات آجلة (ذمة على الحساب)", "Credit Sales Invoice (On Account)")
     }
-    sb.appendLine(business.name(lang))
-    sb.appendLine("${business.city(lang)} • ${business.phone}")
+    val docCode = liveDetail?.invoiceNumber?.takeIf { it.isNotBlank() }
+        ?: receipt.serverInvoiceNumber?.takeIf { it.isNotBlank() }
+        ?: receipt.localReceiptNumber?.takeIf { it.isNotBlank() }
+        ?: WesternFormatters.formatInvoiceCode(receipt.invoiceNumber)
+    val storeName = liveDetail?.thermalReceipt?.let { tr ->
+        val ar = tr.storeNameAr?.takeIf { it.isNotBlank() } ?: tr.storeNameEn.orEmpty()
+        val en = tr.storeNameEn?.takeIf { it.isNotBlank() } ?: tr.storeNameAr.orEmpty()
+        lang.tr(ar, en).takeIf { it.isNotBlank() }
+    } ?: business.name(lang)
+    val city = liveDetail?.thermalReceipt?.let { tr ->
+        val ar = tr.cityAr?.takeIf { it.isNotBlank() } ?: tr.cityEn.orEmpty()
+        val en = tr.cityEn?.takeIf { it.isNotBlank() } ?: tr.cityAr.orEmpty()
+        lang.tr(ar, en).takeIf { it.isNotBlank() }
+    } ?: business.city(lang)
+    val phone = liveDetail?.thermalReceipt?.phone?.takeIf { it.isNotBlank() } ?: business.phone
+    val customerLabel = liveDetail?.thermalReceipt?.customerName?.takeIf { it.isNotBlank() }
+        ?: liveDetail?.customerName?.takeIf { it.isNotBlank() }
+        ?: receipt.customerNote
+    val dateLabel = liveDetail?.thermalReceipt?.dateTime?.takeIf { it.isNotBlank() }
+        ?: liveDetail?.date?.takeIf { it.isNotBlank() }
+        ?: receipt.timestamp
+
+    sb.appendLine(storeName)
+    sb.appendLine("$city • $phone")
     sb.appendLine("--------------------------------")
-    sb.appendLine("$docTitle: ${WesternFormatters.formatInvoiceCode(receipt.invoiceNumber)}")
-    sb.appendLine("${lang.tr("التاريخ", "Date")}: ${receipt.timestamp}")
-    sb.appendLine("${lang.tr("الزبون", "Customer")}: ${receipt.customerNote}")
+    sb.appendLine("$docTitle: $docCode")
+    sb.appendLine("${lang.tr("التاريخ", "Date")}: $dateLabel")
+    sb.appendLine("${lang.tr("الزبون", "Customer")}: $customerLabel")
     sb.appendLine("--------------------------------")
-    receipt.items.forEachIndexed { idx, item ->
-        sb.appendLine("${idx + 1}. ${item.product.name(lang)} (${WesternFormatters.formatInt(item.quantity)} × ${WesternFormatters.formatIls(item.product.priceIls)}) = ${WesternFormatters.formatIls(item.lineTotal)}")
-    }
-    sb.appendLine("--------------------------------")
-    if (receipt.discountIls > 0.005) {
-        sb.appendLine("${lang.tr("المجموع الفرعي", "Subtotal")}: ${WesternFormatters.formatIls(receipt.subtotalIls)}")
-        sb.appendLine("${lang.tr("الخصم", "Discount")}: -${WesternFormatters.formatIls(receipt.discountIls)}")
-    }
-    sb.appendLine("${lang.tr("الصافي المطلوب", "Net Total")}: ${WesternFormatters.formatIls(receipt.netTotalIls)}")
-    if (receipt.isPaidInFull) {
-        val cashLabel = if (receipt.hasLocalTenderDetails) lang.tr("المقبوض نقداً", "Cash Received")
-            else lang.tr("المدفوع نقداً", "Cash Paid")
-        sb.appendLine("$cashLabel: ${WesternFormatters.formatIls(receipt.cashReceivedExact)}")
-        if (receipt.hasLocalTenderDetails) {
-            sb.appendLine("${lang.tr("الباقي للزبون", "Change Returned")}: ${WesternFormatters.formatIls(receipt.changeReturnedExact)}")
+    val detailLines = liveDetail?.thermalReceipt?.lines?.takeIf { it.isNotEmpty() }
+        ?: liveDetail?.lines
+        ?: emptyList()
+    if (detailLines.isNotEmpty()) {
+        detailLines.forEachIndexed { idx, line ->
+            sb.appendLine("${idx + 1}. ${line.productName} (${WesternFormatters.formatQuantity(line.quantity)} × ${fmtMoney(line.unitPrice)}) = ${fmtMoney(line.lineTotal)}")
         }
     } else {
-        if (receipt.cashReceivedIls > 0.005) {
-            sb.appendLine("${lang.tr("المدفوع نقداً", "Cash Paid")}: ${WesternFormatters.formatIls(receipt.cashReceivedIls)}")
+        receipt.items.forEachIndexed { idx, item ->
+            sb.appendLine("${idx + 1}. ${item.product.name(lang)} (${WesternFormatters.formatQuantity(item.quantity)} × ${fmtMoney(item.unitPriceExact)}) = ${fmtMoney(item.lineTotalExact)}")
         }
-        sb.appendLine("${lang.tr("المتبقي بالذمة", "Balance Due on Account")}: ${WesternFormatters.formatIls(receipt.remainingDebitIls)}")
+    }
+    sb.appendLine("--------------------------------")
+    val hasDiscount = amounts.discountExact.signum() > 0
+    val hasTax = amounts.taxExact != null && amounts.taxExact.signum() > 0
+    if (hasDiscount || hasTax) {
+        sb.appendLine("${lang.tr("المجموع الفرعي", "Subtotal")}: ${fmtMoney(amounts.subtotalExact)}")
+        if (hasTax) {
+            sb.appendLine("${lang.tr("الضريبة", "Tax")}: ${fmtMoney(amounts.taxExact)}")
+        }
+        if (hasDiscount) {
+            sb.appendLine("${lang.tr("الخصم", "Discount")}: -${fmtMoney(amounts.discountExact)}")
+        }
+    }
+    sb.appendLine("${lang.tr("الصافي المطلوب", "Net Total")}: ${fmtMoney(amounts.netTotalExact)}")
+    if (amounts.isPaidInFull) {
+        if (receipt.hasLocalTenderDetails) {
+            sb.appendLine("${lang.tr("المقبوض نقداً", "Cash Tendered")}: ${fmtMoney(receipt.cashReceivedExact)}")
+            if (receipt.changeReturnedExact.signum() > 0) {
+                sb.appendLine("${lang.tr("الباقي للزبون", "Change Returned")}: ${fmtMoney(receipt.changeReturnedExact)}")
+            }
+        } else {
+            sb.appendLine("${lang.tr("المدفوع", "Paid")}: ${fmtMoney(amounts.paidExact)}")
+            sb.appendLine("${lang.tr("المقبوض نقداً", "Cash Tendered")}: ${lang.tr("غير متاح", "Unavailable")}")
+            sb.appendLine("${lang.tr("الباقي للزبون", "Change Returned")}: ${lang.tr("غير متاح", "Unavailable")}")
+        }
+    } else {
+        if (receipt.hasLocalTenderDetails) {
+            if (receipt.cashReceivedExact.signum() > 0) {
+                sb.appendLine("${lang.tr("المدفوع نقداً", "Cash Paid")}: ${fmtMoney(receipt.cashReceivedExact)}")
+            }
+        } else {
+            if (amounts.paidExact.signum() > 0) {
+                sb.appendLine("${lang.tr("المدفوع", "Paid")}: ${fmtMoney(amounts.paidExact)}")
+            }
+            sb.appendLine("${lang.tr("تفاصيل المقبوض والباقي", "Tender & Change")}: ${lang.tr("غير متاح", "Unavailable")}")
+        }
+        sb.appendLine("${lang.tr("المتبقي بالذمة", "Balance Due on Account")}: ${fmtMoney(amounts.remainingDueExact)}")
     }
     return sb.toString().trim()
 }
@@ -1773,22 +1972,36 @@ fun InvoicesHistoryScreen(
         }
     }
 
-    val filteredPaidTotalIls = remember(filteredInvoices) {
-        calculateFilteredInvoicesPaidTotalIls(filteredInvoices)
+    val filteredPaidTotalExact = remember(filteredInvoices) {
+        filteredInvoices.fold(BigDecimal.ZERO) { acc, inv -> acc.add(inv.settledPaidExact) }
     }
 
-    val filteredCreditTotalIls = remember(filteredInvoices) {
-        filteredInvoices.filter { !it.isPaidInFull && it.remainingDebitIls > 0.005 }
-            .fold(BigDecimal.ZERO) { acc, inv -> acc.add(BigDecimal(inv.remainingDebitIls.toString())) }
-            .setScale(2, RoundingMode.HALF_UP)
-            .toDouble()
+    val filteredCreditTotalExact = remember(filteredInvoices) {
+        filteredInvoices.filter { !it.isPaidInFull && it.remainingDebitExact.signum() > 0 }
+            .fold(BigDecimal.ZERO) { acc, inv -> acc.add(inv.remainingDebitExact) }
     }
 
-    val filteredTotalIls = remember(filteredInvoices) {
-        filteredInvoices.fold(BigDecimal.ZERO) { acc, inv ->
-            acc.add(BigDecimal(inv.netTotalIls.toString()))
-        }.setScale(2, RoundingMode.HALF_UP).toDouble()
+    val filteredTotalExact = remember(filteredInvoices) {
+        filteredInvoices.fold(BigDecimal.ZERO) { acc, inv -> acc.add(inv.netTotalExact) }
     }
+
+    val singleViewCurrency = remember(filteredInvoices, state.businessInfo.defaultCurrency) {
+        if (filteredInvoices.isEmpty()) {
+            state.businessInfo.defaultCurrency.trim().takeIf { it.isNotEmpty() }
+        } else {
+            val currencies = filteredInvoices.mapNotNull { it.normalizedCurrency }.distinct()
+            val hasMissing = filteredInvoices.any { it.normalizedCurrency == null }
+            if (!hasMissing && currencies.size == 1) currencies.single() else null
+        }
+    }
+
+    val shiftCurrency = state.liveShiftSummary?.currency?.trim()?.takeIf { it.isNotEmpty() }
+        ?: state.businessInfo.defaultCurrency.trim().takeIf { it.isNotEmpty() }
+
+    val unavailableMultiOrMissingLabel = lang.tr(
+        "غير متاح (عملة غير محددة أو متعددة)",
+        "Unavailable (missing/mixed currency)"
+    )
 
     val canViewReports = state.currentSession.canViewReports()
     val isFiltered = selectedFilter != InvoiceHistoryFilter.ALL || searchQuery.isNotBlank()
@@ -1928,9 +2141,13 @@ fun InvoicesHistoryScreen(
                                     lang.tr("الإجمالي: ", "Total: ")
                                 }
                                 val totalValue = if (isFiltered || !canViewReports) {
-                                    WesternFormatters.formatIls(filteredTotalIls)
+                                    if (filteredInvoices.isNotEmpty() && singleViewCurrency == null) {
+                                        unavailableMultiOrMissingLabel
+                                    } else {
+                                        WesternFormatters.formatReceiptMoneyBidi(filteredTotalExact, singleViewCurrency, lang)
+                                    }
                                 } else {
-                                    WesternFormatters.formatIls(state.todaySalesTotalIls)
+                                    WesternFormatters.formatReceiptMoneyBidi(BigDecimal.valueOf(state.todaySalesTotalIls), shiftCurrency, lang)
                                 }
 
                                 Text(
@@ -1966,8 +2183,13 @@ fun InvoicesHistoryScreen(
                                         color = TraderTheme.financial.income,
                                         modifier = Modifier.size(8.dp)
                                     ) {}
+                                    val paidInViewValue = if (filteredInvoices.isNotEmpty() && singleViewCurrency == null) {
+                                        unavailableMultiOrMissingLabel
+                                    } else {
+                                        WesternFormatters.formatReceiptMoneyBidi(filteredPaidTotalExact, singleViewCurrency, lang)
+                                    }
                                     Text(
-                                        text = "${lang.tr("مسدد بالعرض:", "Paid in View:")} ${WesternFormatters.formatIls(filteredPaidTotalIls)}",
+                                        text = "${lang.tr("مسدد بالعرض:", "Paid in View:")} $paidInViewValue",
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             fontFamily = MonoFontFamily,
                                             fontWeight = FontWeight.SemiBold
@@ -1976,7 +2198,7 @@ fun InvoicesHistoryScreen(
                                     )
                                 }
 
-                                if (filteredCreditTotalIls > 0.005) {
+                                if (filteredCreditTotalExact.signum() > 0) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1986,8 +2208,13 @@ fun InvoicesHistoryScreen(
                                             color = TraderTheme.financial.warning,
                                             modifier = Modifier.size(8.dp)
                                         ) {}
+                                        val unpaidInViewValue = if (singleViewCurrency == null) {
+                                            unavailableMultiOrMissingLabel
+                                        } else {
+                                            WesternFormatters.formatReceiptMoneyBidi(filteredCreditTotalExact, singleViewCurrency, lang)
+                                        }
                                         Text(
-                                            text = "${lang.tr("متبقي ذمم بالعرض:", "Unpaid in View:")} ${WesternFormatters.formatIls(filteredCreditTotalIls)}",
+                                            text = "${lang.tr("متبقي ذمم بالعرض:", "Unpaid in View:")} $unpaidInViewValue",
                                             style = MaterialTheme.typography.bodySmall.copy(
                                                 fontFamily = MonoFontFamily,
                                                 fontWeight = FontWeight.SemiBold
@@ -2007,8 +2234,9 @@ fun InvoicesHistoryScreen(
                                         color = TraderTheme.financial.income,
                                         modifier = Modifier.size(8.dp)
                                     ) {}
+                                    val shiftCashExact = state.liveShiftSummary?.cashSales ?: BigDecimal.valueOf(state.shiftCashSalesIls)
                                     Text(
-                                        text = "${lang.tr("مبيعات نقدية (وردية):", "Shift Cash Sales:")} ${WesternFormatters.formatIls(state.shiftCashSalesIls)}",
+                                        text = "${lang.tr("مبيعات نقدية (وردية):", "Shift Cash Sales:")} ${WesternFormatters.formatReceiptMoneyBidi(shiftCashExact, shiftCurrency, lang)}",
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             fontFamily = MonoFontFamily,
                                             fontWeight = FontWeight.SemiBold
@@ -2017,7 +2245,8 @@ fun InvoicesHistoryScreen(
                                     )
                                 }
 
-                                if (state.shiftCreditSalesIls > 0.005) {
+                                val shiftCreditExact = BigDecimal.valueOf(state.shiftCreditSalesIls)
+                                if (shiftCreditExact.signum() > 0) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -2028,7 +2257,7 @@ fun InvoicesHistoryScreen(
                                             modifier = Modifier.size(8.dp)
                                         ) {}
                                         Text(
-                                            text = "${lang.tr("ذمم آجلة (وردية):", "Shift Credit Sales:")} ${WesternFormatters.formatIls(state.shiftCreditSalesIls)}",
+                                            text = "${lang.tr("ذمم آجلة (وردية):", "Shift Credit Sales:")} ${WesternFormatters.formatReceiptMoneyBidi(shiftCreditExact, shiftCurrency, lang)}",
                                             style = MaterialTheme.typography.bodySmall.copy(
                                                 fontFamily = MonoFontFamily,
                                                 fontWeight = FontWeight.SemiBold

@@ -125,7 +125,7 @@ object MerchantReadAdapter {
             discountExact = serverItem.discount,
             netTotalExact = serverItem.total,
             cashReceivedExact = localMatch?.takeIf { it.hasLocalTenderDetails }?.cashReceivedExact ?: serverItem.paid,
-            changeReturnedExact = localMatch?.changeReturnedExact ?: BigDecimal.ZERO,
+            changeReturnedExact = localMatch?.takeIf { it.hasLocalTenderDetails }?.changeReturnedExact ?: BigDecimal.ZERO,
             customerId = serverItem.customerId.value,
             customerNote = localMatch?.customerNote ?: "",
             cashierNameAr = localMatch?.cashierNameAr ?: "",
@@ -140,7 +140,11 @@ object MerchantReadAdapter {
             serverPaymentReceiptNumber = localMatch?.serverPaymentReceiptNumber,
             serverPostedAt = serverItem.createdAt,
             outboxStatus = "CONFIRMED",
-            hasLocalTenderDetails = localMatch?.hasLocalTenderDetails == true
+            hasLocalTenderDetails = localMatch?.hasLocalTenderDetails == true,
+            localReceiptNumber = localMatch?.localReceiptNumber,
+            currency = serverItem.currency,
+            currencyMinorUnits = serverItem.currencyMinorUnits,
+            taxExact = serverItem.tax
         )
     }
 

@@ -742,7 +742,10 @@ object SampleCatalog {
                 cashierNameEn = "Abu Kareem",
                 isPaidInFull = true,
                 remainingDebitIls = 0.0,
-                printCount = 1
+                printCount = 1,
+                currency = "ILS",
+                currencyMinorUnits = 2,
+                taxExact = java.math.BigDecimal.ZERO
             ),
             InvoiceRecord(
                 id = "inv_1041",
@@ -760,7 +763,10 @@ object SampleCatalog {
                 cashierNameEn = "Abu Kareem",
                 isPaidInFull = true,
                 remainingDebitIls = 0.0,
-                printCount = 1
+                printCount = 1,
+                currency = "ILS",
+                currencyMinorUnits = 2,
+                taxExact = java.math.BigDecimal.ZERO
             ),
             InvoiceRecord(
                 id = "inv_1040",
@@ -778,7 +784,10 @@ object SampleCatalog {
                 cashierNameEn = "Abu Kareem",
                 isPaidInFull = true,
                 remainingDebitIls = 0.0,
-                printCount = 2
+                printCount = 2,
+                currency = "ILS",
+                currencyMinorUnits = 2,
+                taxExact = java.math.BigDecimal.ZERO
             ),
             InvoiceRecord(
                 id = "inv_1038",
@@ -796,7 +805,10 @@ object SampleCatalog {
                 cashierNameEn = "Abu Kareem",
                 isPaidInFull = false,
                 remainingDebitIls = 90.00,
-                printCount = 1
+                printCount = 1,
+                currency = "ILS",
+                currencyMinorUnits = 2,
+                taxExact = java.math.BigDecimal.ZERO
             ),
             InvoiceRecord(
                 id = "inv_1036",
@@ -814,7 +826,10 @@ object SampleCatalog {
                 cashierNameEn = "Abu Kareem",
                 isPaidInFull = false,
                 remainingDebitIls = 100.00,
-                printCount = 1
+                printCount = 1,
+                currency = "ILS",
+                currencyMinorUnits = 2,
+                taxExact = java.math.BigDecimal.ZERO
             ),
             InvoiceRecord(
                 id = "inv_1034",
@@ -832,7 +847,10 @@ object SampleCatalog {
                 cashierNameEn = "Abu Kareem",
                 isPaidInFull = false,
                 remainingDebitIls = 185.00,
-                printCount = 0
+                printCount = 0,
+                currency = "ILS",
+                currencyMinorUnits = 2,
+                taxExact = java.math.BigDecimal.ZERO
             )
         )
     }

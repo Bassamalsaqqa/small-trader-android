@@ -30,6 +30,8 @@ import com.example.data.mobile.merchantread.SalesInvoiceDetailLine
 import com.example.data.mobile.merchantread.StockMovementItem
 import com.example.data.mobile.merchantread.TreasuryAccountItem
 import com.example.model.AppLanguage
+import com.example.model.BasketItem
+import com.example.model.BusinessInfo
 import com.example.model.Customer
 import com.example.model.InvoiceRecord
 import com.example.model.Product
@@ -47,6 +49,7 @@ import com.example.viewmodel.TraderUiState
 import com.example.viewmodel.TraderViewModel
 import java.math.BigDecimal
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -994,5 +997,517 @@ class LiveSurfacesIntegrationUiTest {
 
         // Expected cash displays server amount in typed currency
         composeTestRule.onAllNodesWithText("1,900.00 USD", substring = true)[0].assertIsDisplayed()
+    }
+
+    // -------------------------------------------------------------------------
+    // 12. Frozen Transaction Currency, Exact 2dp Human Presentation, Print/Share,
+    //     and Unavailable Legacy Currency / Unavailable Local Tender Honesty
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun receiptScreen_pendingJodSale_rendersJodAt2dpWithChangedTenantCurrency_andNeverAssumesShekel() {
+        val product = Product(
+            id = "01ARZ3NDEKTSV4RRFFQ69G5JE1",
+            nameAr = "قهوة أردنية",
+            nameEn = "Jordanian Coffee",
+            category = ProductCategory.PANTRY,
+            barcode = "625100000001",
+            priceExact = BigDecimal("9.83"),
+            unitAr = "علبة",
+            unitEn = "pack",
+            stockCount = 20,
+            accentHex = 0xFF2E7D32,
+            saleCurrencyMinorUnits = 3
+        )
+        val item = BasketItem(
+            product = product,
+            quantity = BigDecimal.ONE,
+            unitPriceExact = BigDecimal("9.83"),
+            taxRateId = null,
+            taxRateExact = BigDecimal.ZERO,
+            isTaxInclusive = false
+        )
+        val invoice = InvoiceRecord(
+            id = "pending-jod-event-1",
+            invoiceNumber = 0,
+            timestamp = "2026-11-25T10:15:00Z",
+            items = listOf(item),
+            subtotalExact = BigDecimal("9.83"),
+            discountExact = BigDecimal.ZERO,
+            netTotalExact = BigDecimal("9.83"),
+            cashReceivedExact = BigDecimal("9.83"),
+            changeReturnedExact = BigDecimal.ZERO,
+            customerId = null,
+            customerNote = "Walk-in",
+            cashierNameAr = "أحمد",
+            cashierNameEn = "Ahmad",
+            isPaidInFull = true,
+            remainingDebitExact = BigDecimal.ZERO,
+            clientEventId = "pending-jod-event-1",
+            outboxStatus = "PENDING",
+            hasLocalTenderDetails = true,
+            localReceiptNumber = "LOCAL-JOD-1",
+            currency = "JOD",
+            currencyMinorUnits = 3,
+            taxExact = BigDecimal.ZERO
+        )
+        val session = UserSession(
+            id = "usr_cashier_jod",
+            name = "Ahmad",
+            username = "ahmad",
+            role = UserRole.CASHIER,
+            branchNameAr = "الفرع",
+            branchNameEn = "Main",
+            isDemoSession = false
+        )
+        // Current tenant business currency intentionally differs (ILS) to prove historic receipt uses frozen JOD.
+        val state = TraderUiState(
+            currentSession = session,
+            businessInfo = BusinessInfo(defaultCurrency = "ILS", defaultCurrencyMinorUnits = 2),
+            activeReceipt = invoice,
+            invoices = listOf(invoice),
+            selectedInvoiceDetail = null,
+            isNewlyCompletedSale = false,
+            language = AppLanguage.EN
+        )
+
+        val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val clipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = false) {
+                ReceiptScreen(
+                    state = state,
+                    onPrintReceipt = {},
+                    onStartNewSale = {},
+                    onBackToHome = {}
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Pending Sync", substring = true).assertIsDisplayed()
+        assertTrue(composeTestRule.onAllNodesWithText("9.83 JOD", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("₪", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("ILS", substring = true).fetchSemanticsNodes().isEmpty())
+
+        composeTestRule.onNodeWithTag("toggle_invoice_details_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("thermal_receipt_paper").performScrollTo().assertIsDisplayed()
+        assertTrue(composeTestRule.onAllNodesWithText("Amount (JOD)", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("₪", substring = true).fetchSemanticsNodes().isEmpty())
+
+        composeTestRule.onNodeWithTag("copy_receipt_text_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        val copied = clipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
+        assertTrue("Copied pending JOD receipt must contain 9.83 JOD: $copied", copied.contains("9.83 JOD"))
+        assertFalse("Copied pending JOD receipt must never contain ₪: $copied", copied.contains("₪"))
+        assertFalse("Copied pending JOD receipt must never contain ILS: $copied", copied.contains("ILS"))
+    }
+
+    @Test
+    fun receiptScreen_confirmedJodWithTaxDiscountAndSmallPositiveChange_rendersExact2dpAcrossScreenPrintAndShare() {
+        val invoice = InvoiceRecord(
+            id = "01JCV8X9M2NQW3TYZ4R5S6789J",
+            invoiceNumber = 204,
+            timestamp = "2026-11-25 12:00",
+            items = emptyList(),
+            subtotalExact = BigDecimal("10.000"),
+            discountExact = BigDecimal("0.500"),
+            netTotalExact = BigDecimal("11.100"),
+            cashReceivedExact = BigDecimal("11.110"),
+            changeReturnedExact = BigDecimal("0.010"),
+            customerId = null,
+            customerNote = "Walk-in",
+            cashierNameAr = "مالك",
+            cashierNameEn = "Owner",
+            isPaidInFull = true,
+            remainingDebitExact = BigDecimal.ZERO,
+            serverInvoiceUlid = "01JCV8X9M2NQW3TYZ4R5S6789J",
+            serverInvoiceNumber = "INV-JOD-204",
+            outboxStatus = "CONFIRMED",
+            hasLocalTenderDetails = true,
+            currency = "JOD",
+            currencyMinorUnits = 3,
+            taxExact = BigDecimal("1.600")
+        )
+        val liveDetail = LiveInvoiceRecord(
+            id = "01JCV8X9M2NQW3TYZ4R5S6789J",
+            invoiceNumber = "INV-JOD-204",
+            status = "posted",
+            paymentStatus = "PAID_CASH",
+            customerId = "01JMB000000000000000000005",
+            customerName = "Walk-in",
+            date = "2026-11-25",
+            createdAt = "2026-11-25T12:00:00Z",
+            subtotalExact = BigDecimal("10.000"),
+            discountExact = BigDecimal("0.500"),
+            taxExact = BigDecimal("1.600"),
+            totalExact = BigDecimal("11.100"),
+            paidExact = BigDecimal("11.100"),
+            remainingDebitExact = BigDecimal.ZERO,
+            currency = "JOD",
+            currencyMinorUnits = 3,
+            lines = listOf(
+                SalesInvoiceDetailLine(
+                    id = ServerUlid.parse("01JCV8X9M2NQW3TYZ4R5S6789B"),
+                    productId = ServerUlid.parse("01ARZ3NDEKTSV4RRFFQ69G5JE1"),
+                    productName = "Jordanian Coffee",
+                    unit = "pack",
+                    quantity = BigDecimal("1.000000"),
+                    unitPrice = BigDecimal("10.000"),
+                    lineTotal = BigDecimal("10.000"),
+                    taxRate = BigDecimal("16.00"),
+                    discount = BigDecimal.ZERO
+                )
+            ),
+            thermalReceipt = null,
+            clientEventId = null,
+            serverInvoiceUlid = "01JCV8X9M2NQW3TYZ4R5S6789J",
+            outboxStatus = "CONFIRMED"
+        )
+        val session = UserSession(
+            id = "usr_owner_jod",
+            name = "Owner",
+            username = "owner",
+            role = UserRole.OWNER,
+            branchNameAr = "الفرع",
+            branchNameEn = "Main",
+            isDemoSession = false
+        )
+        val state = TraderUiState(
+            currentSession = session,
+            businessInfo = BusinessInfo(defaultCurrency = "ILS", defaultCurrencyMinorUnits = 2),
+            activeReceipt = invoice,
+            invoices = listOf(invoice),
+            selectedInvoiceDetail = liveDetail,
+            isNewlyCompletedSale = false,
+            language = AppLanguage.EN
+        )
+
+        val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val clipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = false) {
+                ReceiptScreen(
+                    state = state,
+                    onPrintReceipt = {},
+                    onStartNewSale = {},
+                    onBackToHome = {}
+                )
+            }
+        }
+
+        // Header, tax/discount/subtotal, tendered, and small positive 0.01 change all strictly 2dp JOD
+        assertTrue(composeTestRule.onAllNodesWithText("11.10 JOD", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("1.60 JOD", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("0.50 JOD", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("11.11 JOD", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("0.01 JOD", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("0.010", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("₪", substring = true).fetchSemanticsNodes().isEmpty())
+
+        composeTestRule.onNodeWithTag("toggle_invoice_details_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("thermal_receipt_paper").performScrollTo().assertIsDisplayed()
+        assertTrue(composeTestRule.onAllNodesWithText("Amount (JOD)", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("0.01 JOD", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("₪", substring = true).fetchSemanticsNodes().isEmpty())
+
+        composeTestRule.onNodeWithTag("copy_receipt_text_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        val copied = clipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
+        assertTrue(copied.contains("10.00 JOD"))
+        assertTrue(copied.contains("1.60 JOD"))
+        assertTrue(copied.contains("-0.50 JOD"))
+        assertTrue(copied.contains("11.10 JOD"))
+        assertTrue(copied.contains("11.11 JOD"))
+        assertTrue(copied.contains("0.01 JOD"))
+        assertFalse(copied.contains("₪"))
+        assertFalse(copied.contains("0.010"))
+    }
+
+    @Test
+    fun receiptScreen_confirmedJodWithoutLocalTenderDetails_showsPaidInJod_andMarksTenderChangeUnavailable() {
+        val invoice = InvoiceRecord(
+            id = "01JCV8X9M2NQW3TYZ4R5S6789K",
+            invoiceNumber = 305,
+            timestamp = "2026-11-25 13:15",
+            items = emptyList(),
+            subtotalExact = BigDecimal("9.83"),
+            discountExact = BigDecimal.ZERO,
+            netTotalExact = BigDecimal("9.83"),
+            cashReceivedExact = BigDecimal("10.00"),
+            changeReturnedExact = BigDecimal("0.17"),
+            customerId = null,
+            customerNote = "Walk-in",
+            cashierNameAr = "سعيد",
+            cashierNameEn = "Saeed",
+            isPaidInFull = true,
+            remainingDebitExact = BigDecimal.ZERO,
+            serverInvoiceUlid = "01JCV8X9M2NQW3TYZ4R5S6789K",
+            serverInvoiceNumber = "INV-JOD-305",
+            outboxStatus = "CONFIRMED",
+            hasLocalTenderDetails = false,
+            currency = "JOD",
+            currencyMinorUnits = 3,
+            taxExact = BigDecimal.ZERO
+        )
+        val liveDetail = LiveInvoiceRecord(
+            id = "01JCV8X9M2NQW3TYZ4R5S6789K",
+            invoiceNumber = "INV-JOD-305",
+            status = "posted",
+            paymentStatus = "PAID_CASH",
+            customerId = "01JMB000000000000000000005",
+            customerName = "Walk-in",
+            date = "2026-11-25",
+            createdAt = "2026-11-25T13:15:00Z",
+            subtotalExact = BigDecimal("9.83"),
+            discountExact = BigDecimal.ZERO,
+            taxExact = BigDecimal.ZERO,
+            totalExact = BigDecimal("9.83"),
+            paidExact = BigDecimal("9.83"),
+            remainingDebitExact = BigDecimal.ZERO,
+            currency = "JOD",
+            currencyMinorUnits = 3,
+            lines = emptyList(),
+            thermalReceipt = null,
+            clientEventId = null,
+            serverInvoiceUlid = "01JCV8X9M2NQW3TYZ4R5S6789K",
+            outboxStatus = "CONFIRMED"
+        )
+        val session = UserSession(
+            id = "usr_mgr_jod",
+            name = "Manager",
+            username = "mgr",
+            role = UserRole.MANAGER,
+            branchNameAr = "الفرع",
+            branchNameEn = "Main",
+            isDemoSession = false
+        )
+        val state = TraderUiState(
+            currentSession = session,
+            businessInfo = BusinessInfo(defaultCurrency = "ILS", defaultCurrencyMinorUnits = 2),
+            activeReceipt = invoice,
+            invoices = listOf(invoice),
+            selectedInvoiceDetail = liveDetail,
+            isNewlyCompletedSale = false,
+            language = AppLanguage.EN
+        )
+
+        val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val clipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = false) {
+                ReceiptScreen(
+                    state = state,
+                    onPrintReceipt = {},
+                    onStartNewSale = {},
+                    onBackToHome = {}
+                )
+            }
+        }
+
+        // Settled Paid amount is shown in JOD; unavailable tender (10.00) & change (0.17) must NEVER be fabricated
+        assertTrue(composeTestRule.onAllNodesWithText("9.83 JOD", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("Unavailable", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("10.00", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("0.17", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("₪", substring = true).fetchSemanticsNodes().isEmpty())
+
+        composeTestRule.onNodeWithTag("toggle_invoice_details_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("copy_receipt_text_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+
+        val copied = clipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
+        assertTrue(copied.contains("9.83 JOD"))
+        assertTrue(copied.contains("Unavailable"))
+        assertFalse(copied.contains("10.00"))
+        assertFalse(copied.contains("0.17"))
+        assertFalse(copied.contains("₪"))
+    }
+
+    @Test
+    fun receiptScreen_missingLegacyCurrency_surfacesUnavailableCurrencyNeverAssumesShekel() {
+        val invoice = InvoiceRecord(
+            id = "legacy-missing-curr-1",
+            invoiceNumber = 404,
+            timestamp = "2026-11-20 09:00",
+            items = emptyList(),
+            subtotalExact = BigDecimal("75.00"),
+            discountExact = BigDecimal.ZERO,
+            netTotalExact = BigDecimal("75.00"),
+            cashReceivedExact = BigDecimal("75.00"),
+            changeReturnedExact = BigDecimal.ZERO,
+            customerNote = "Legacy Customer",
+            cashierNameAr = "أحمد",
+            cashierNameEn = "Ahmad",
+            isPaidInFull = true,
+            remainingDebitExact = BigDecimal.ZERO,
+            currency = null
+        )
+        val state = TraderUiState(
+            currentSession = UserSession(
+                id = "usr_legacy",
+                name = "Ahmad",
+                username = "ahmad",
+                role = UserRole.CASHIER,
+                branchNameAr = "الفرع",
+                branchNameEn = "Main",
+                isDemoSession = false
+            ),
+            businessInfo = BusinessInfo(defaultCurrency = "ILS", defaultCurrencyMinorUnits = 2),
+            activeReceipt = invoice,
+            invoices = listOf(invoice),
+            selectedInvoiceDetail = null,
+            isNewlyCompletedSale = false,
+            language = AppLanguage.EN
+        )
+
+        val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val clipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = false) {
+                ReceiptScreen(
+                    state = state,
+                    onPrintReceipt = {},
+                    onStartNewSale = {},
+                    onBackToHome = {}
+                )
+            }
+        }
+
+        assertTrue(composeTestRule.onAllNodesWithText("75.00 (Currency unavailable)", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("₪", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("ILS", substring = true).fetchSemanticsNodes().isEmpty())
+
+        composeTestRule.onNodeWithTag("toggle_invoice_details_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(composeTestRule.onAllNodesWithText("Amount (Currency unavailable)", substring = true).fetchSemanticsNodes().isNotEmpty())
+
+        composeTestRule.onNodeWithTag("copy_receipt_text_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        val copied = clipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
+        assertTrue(copied.contains("75.00 (Currency unavailable)"))
+        assertFalse(copied.contains("₪"))
+        assertFalse(copied.contains("ILS"))
+    }
+
+    @Test
+    fun receiptScreen_ilsSale_rendersShekelAnd2dpAcrossScreenPrintAndShare() {
+        val invoice = InvoiceRecord(
+            id = "ils-witness-1",
+            invoiceNumber = 1042,
+            timestamp = "2026-11-25 11:45",
+            items = emptyList(),
+            subtotalExact = BigDecimal("50.50"),
+            discountExact = BigDecimal("0.50"),
+            netTotalExact = BigDecimal("50.00"),
+            cashReceivedExact = BigDecimal("50.01"),
+            changeReturnedExact = BigDecimal("0.01"),
+            customerNote = "Walk-in",
+            cashierNameAr = "أبو كريم",
+            cashierNameEn = "Abu Kareem",
+            isPaidInFull = true,
+            remainingDebitExact = BigDecimal.ZERO,
+            hasLocalTenderDetails = true,
+            currency = "ILS",
+            currencyMinorUnits = 2,
+            taxExact = BigDecimal.ZERO
+        )
+        val state = TraderUiState(
+            currentSession = UserSession(
+                id = "usr_demo",
+                name = "Abu Kareem",
+                username = "owner",
+                role = UserRole.OWNER,
+                branchNameAr = "الفرع",
+                branchNameEn = "Main",
+                isDemoSession = true
+            ),
+            businessInfo = BusinessInfo(defaultCurrency = "USD", defaultCurrencyMinorUnits = 2),
+            activeReceipt = invoice,
+            invoices = listOf(invoice),
+            selectedInvoiceDetail = null,
+            isNewlyCompletedSale = false,
+            language = AppLanguage.EN
+        )
+
+        val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val clipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = false) {
+                ReceiptScreen(
+                    state = state,
+                    onPrintReceipt = {},
+                    onStartNewSale = {},
+                    onBackToHome = {}
+                )
+            }
+        }
+
+        assertTrue(composeTestRule.onAllNodesWithText("50.00 ₪", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("50.01 ₪", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("0.01 ₪", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("USD", substring = true).fetchSemanticsNodes().isEmpty())
+
+        composeTestRule.onNodeWithTag("copy_receipt_text_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        val copied = clipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
+        assertTrue(copied.contains("50.50 ₪"))
+        assertTrue(copied.contains("-0.50 ₪"))
+        assertTrue(copied.contains("50.00 ₪"))
+        assertTrue(copied.contains("50.01 ₪"))
+        assertTrue(copied.contains("0.01 ₪"))
+        assertFalse(copied.contains("USD"))
+    }
+
+    @Test
+    fun viewModel_formatReceiptShareText_usesFrozenCurrencyAndGuardsUnavailableTenderAcrossChangedBusinessCurrency() {
+        val vm = TraderViewModel(OfflineDemoTraderRepository())
+        // Default demo businessInfo has defaultCurrency = "ILS", proving formatReceiptShareText freezes receipt currency.
+        val jodLocal = InvoiceRecord(
+            id = "jod-share-local",
+            invoiceNumber = 501,
+            timestamp = "2026-11-25 14:00",
+            items = emptyList(),
+            subtotalExact = BigDecimal("8.470"),
+            discountExact = BigDecimal("0.100"),
+            netTotalExact = BigDecimal("9.830"),
+            cashReceivedExact = BigDecimal("9.840"),
+            changeReturnedExact = BigDecimal("0.010"),
+            customerNote = "Amman Client",
+            cashierNameAr = "أحمد",
+            cashierNameEn = "Ahmad",
+            isPaidInFull = true,
+            remainingDebitExact = BigDecimal.ZERO,
+            hasLocalTenderDetails = true,
+            localReceiptNumber = "LOCAL-JOD-501",
+            currency = "JOD",
+            currencyMinorUnits = 3,
+            taxExact = BigDecimal("1.460")
+        )
+        val jodShare = vm.formatReceiptShareText(jodLocal)
+        assertTrue(jodShare.contains("LOCAL-JOD-501"))
+        assertTrue(jodShare.contains("8.47 JOD"))
+        assertTrue(jodShare.contains("1.46 JOD"))
+        assertTrue(jodShare.contains("-0.10 JOD"))
+        assertTrue(jodShare.contains("9.83 JOD"))
+        assertTrue(jodShare.contains("9.84 JOD"))
+        assertTrue(jodShare.contains("0.01 JOD"))
+        assertFalse(jodShare.contains("₪"))
+        assertFalse(jodShare.contains("ILS"))
+
+        val jodNoLocalTender = jodLocal.copy(hasLocalTenderDetails = false)
+        val serverOnlyShare = vm.formatReceiptShareText(jodNoLocalTender)
+        assertTrue(serverOnlyShare.contains("9.83 JOD"))
+        assertTrue(serverOnlyShare.contains("Unavailable") || serverOnlyShare.contains("غير متاح"))
+        assertFalse(serverOnlyShare.contains("9.84"))
+        assertFalse(serverOnlyShare.contains("0.01"))
+        assertFalse(serverOnlyShare.contains("₪"))
     }
 }

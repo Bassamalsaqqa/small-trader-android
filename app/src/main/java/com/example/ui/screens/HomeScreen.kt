@@ -1000,7 +1000,9 @@ fun HomeScreen(
                                     serverPaymentUlid = null,
                                     serverPaymentReceiptNumber = null,
                                     serverPostedAt = rec.date,
-                                    outboxStatus = "CONFIRMED"
+                                    outboxStatus = "CONFIRMED",
+                                    hasLocalTenderDetails = false,
+                                    currency = rec.currency
                                 )
                                 RecentLiveInvoiceRow(
                                     invoice = rec,
@@ -1078,7 +1080,9 @@ fun RecentInvoiceRow(
     lang: AppLanguage,
     onClick: () -> Unit
 ) {
-    val isPartial = invoice.cashReceivedIls > 0.005 && !invoice.isPaidInFull
+    val txCurrency = invoice.normalizedCurrency
+    val paidAmount = if (invoice.hasLocalTenderDetails) invoice.cashReceivedExact else invoice.settledPaidExact
+    val isPartial = paidAmount.signum() > 0 && !invoice.isPaidInFull
     val statusTone = when {
         invoice.isPaidInFull -> StitchBadgeTone.SUCCESS
         isPartial -> StitchBadgeTone.WARNING
@@ -1095,10 +1099,12 @@ fun RecentInvoiceRow(
     }
 
     val subtitle = if (isPartial) {
+        val paidStr = WesternFormatters.formatReceiptMoneyBidi(paidAmount, txCurrency, lang)
+        val remStr = WesternFormatters.formatReceiptMoneyBidi(invoice.remainingDebitExact, txCurrency, lang)
         if (lang == AppLanguage.AR) {
-            "مسدد ${WesternFormatters.formatIls(invoice.cashReceivedIls)} • متبقي ${WesternFormatters.formatIls(invoice.remainingDebitIls)}"
+            "مسدد $paidStr • متبقي $remStr"
         } else {
-            "Paid ${WesternFormatters.formatIls(invoice.cashReceivedIls)} • Due ${WesternFormatters.formatIls(invoice.remainingDebitIls)}"
+            "Paid $paidStr • Due $remStr"
         }
     } else {
         "$customerTitle • ${if (invoice.isPaidInFull) lang.tr("نقداً", "Cash") else lang.tr("ذمة", "Credit")}"
@@ -1167,7 +1173,7 @@ fun RecentInvoiceRow(
                 modifier = Modifier.padding(start = 8.dp)
             ) {
                 Text(
-                    text = WesternFormatters.formatIls(invoice.netTotalIls),
+                    text = WesternFormatters.formatReceiptMoneyBidi(invoice.netTotalExact, txCurrency, lang),
                     style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -1262,7 +1268,7 @@ fun RecentLiveInvoiceRow(
                 modifier = Modifier.padding(start = 8.dp)
             ) {
                 Text(
-                    text = "${invoice.total.toPlainString()} ${invoice.currency}",
+                    text = WesternFormatters.formatReceiptMoneyBidi(invoice.total, invoice.currency, lang),
                     style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface

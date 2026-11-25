@@ -537,6 +537,7 @@ class OutboxRepositoryImpl(
             eventVersion = 2,
             payloadDigestStr = computedDigest.value,
             canonicalBytes = canonicalBytes,
+            currencyMinorUnits = profile.currencyMinorUnits,
             requireNoOtherHeldSale = requireNoOtherHeldSale
         )
     }
@@ -711,7 +712,8 @@ class OutboxRepositoryImpl(
             capturedAtStr = event.capturedAt,
             eventVersion = event.eventVersion,
             payloadDigestStr = computedDigest.value,
-            canonicalBytes = canonicalBytes
+            canonicalBytes = canonicalBytes,
+            currencyMinorUnits = currencyMinorUnits
         )
     }
 
@@ -725,6 +727,7 @@ class OutboxRepositoryImpl(
         eventVersion: Int,
         payloadDigestStr: String,
         canonicalBytes: ByteArray,
+        currencyMinorUnits: Int? = null,
         requireNoOtherHeldSale: Boolean = false
     ): CaptureResult {
         val now = clock()
@@ -801,7 +804,8 @@ class OutboxRepositoryImpl(
                     capturedAt = capturedAtStr,
                     payloadDigest = payloadDigestStr,
                     payloadBytes = canonicalBytes.clone(),
-                    eventVersion = eventVersion
+                    eventVersion = eventVersion,
+                    currencyMinorUnits = currencyMinorUnits
                 )
                 val stateEntity = OutboxDeliveryStateEntity(
                     clientEventId = clientEventIdStr,

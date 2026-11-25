@@ -11,7 +11,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * Room database for persistent, bounded offline sales outbox.
  *
  * CRITICAL DURABILITY GUARANTEES:
- * 1. Schema version 1 is frozen and exported to schemas/ for reproducible verification.
+ * 1. Schema versions 1, 2, and 3 are frozen and exported to schemas/ for reproducible verification.
  * 2. Destructive migration fallbacks (fallbackToDestructiveMigration) are FORBIDDEN.
  *    Any unhandled schema change must throw an error rather than silently deleting un-synced economic events.
  * 3. Database open/startup never deletes or resets the queue.
@@ -22,7 +22,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         OutboxDeliveryStateEntity::class,
         OutboxScopeLockEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 abstract class OutboxDatabase : RoomDatabase() {
@@ -154,6 +154,12 @@ abstract class OutboxDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `outbox_events` ADD COLUMN `currency_minor_units` INTEGER")
+            }
+        }
+
         fun buildDatabase(
             context: Context,
             name: String = DATABASE_NAME,
@@ -163,7 +169,7 @@ abstract class OutboxDatabase : RoomDatabase() {
                 context.applicationContext,
                 OutboxDatabase::class.java,
                 name
-            ).addMigrations(MIGRATION_1_2)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .addCallback(CALLBACK)
             if (allowMainThreadQueries) {
                 builder.allowMainThreadQueries()
@@ -179,7 +185,7 @@ abstract class OutboxDatabase : RoomDatabase() {
             val builder = Room.inMemoryDatabaseBuilder(
                 context.applicationContext,
                 OutboxDatabase::class.java
-            ).addMigrations(MIGRATION_1_2)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .addCallback(CALLBACK)
             if (allowMainThreadQueries) {
                 builder.allowMainThreadQueries()

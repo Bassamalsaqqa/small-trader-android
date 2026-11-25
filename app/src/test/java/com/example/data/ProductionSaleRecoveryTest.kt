@@ -283,11 +283,79 @@ class ProductionSaleRecoveryTest {
         }
     }
 
+    @Test
+    fun onlineHeldJodSale_survivesRecreateAndChangedCurrentBusinessCurrency_withoutTenderFabrication() {
+        withFixture { server, file ->
+            val eventId = ClientUuid.random()
+            withDatabase(file) { db1 ->
+                val outbox1 = outbox(db1)
+                val repo1 = repository(server, outbox1, precision = 3, baseCurrency = "JOD")
+                try {
+                    server.enqueue(json(catalog(inclusive, "9.830")))
+                    runBlocking { repo1.refreshProducts() }.getOrThrow()
+                    take(server)
+
+                    val basketItem = BasketItem(repo1.getProducts().single(), 1)
+                    val calc = basketItem.calculateLine(3)
+                    val total = calc.lineTotal.value
+                    assertEquals(0, BigDecimal("9.83").compareTo(total))
+                    val heldSale = InvoiceRecord(
+                        id = eventId.value,
+                        invoiceNumber = 1,
+                        timestamp = "2026-11-25T09:00:00Z",
+                        items = listOf(basketItem),
+                        subtotalExact = total,
+                        discountExact = BigDecimal.ZERO,
+                        netTotalExact = total,
+                        cashReceivedExact = BigDecimal("10.00"),
+                        changeReturnedExact = BigDecimal("10.00").subtract(total),
+                        customerNote = "",
+                        cashierNameAr = "Owner",
+                        cashierNameEn = "Owner",
+                        isPaidInFull = true,
+                        remainingDebitExact = BigDecimal.ZERO,
+                        clientEventId = eventId.value,
+                        currency = "JOD",
+                        currencyMinorUnits = 3,
+                        taxExact = calc.taxAmount.value
+                    )
+
+                    server.enqueue(json(status(eventId.value)))
+                    server.enqueue(MockResponse().setResponseCode(500))
+                    val held = runBlocking { repo1.recordSale(heldSale) }.getOrThrow()
+                    assertEquals("JOD", held.currency)
+                    assertEquals(3, held.currencyMinorUnits)
+                    assertEquals(0, total.compareTo(held.netTotalExact))
+                } finally {
+                    repo1.close()
+                }
+            }
+
+            // Reopen durable Room DB on a changed current business currency (USD, 2 minor units)
+            withDatabase(file) { db2 ->
+                val outbox2 = outbox(db2)
+                val repo2 = repository(server, outbox2, precision = 2, baseCurrency = "USD")
+                try {
+                    val restored = checkNotNull(runBlocking { repo2.restoreHeldSale() }.getOrThrow())
+                    assertEquals("JOD", restored.currency)
+                    assertEquals(3, restored.currencyMinorUnits)
+                    assertEquals(false, restored.hasLocalTenderDetails)
+                    assertTrue(restored.taxExact != null && restored.taxExact!!.signum() > 0)
+                    // Current business info changed to USD, while historic held receipt remains frozen in JOD
+                    assertEquals("USD", repo2.getBusinessInfo().defaultCurrency)
+                } finally {
+                    repo2.close()
+                }
+            }
+        }
+    }
+
     private fun repository(
         server: MockWebServer,
         outbox: OutboxRepositoryImpl,
         precision: Int = 2,
-        scope: CurrentAuthScope = auth
+        scope: CurrentAuthScope = auth,
+        baseCurrency: String = "JOD"
     ): ProductionTraderRepository {
         val origin = "http://127.0.0.1:${server.port}"
         val transport = OkHttpTransport(origin, allowHttpLoopback = true, readTimeoutMs = 1500, callTimeoutMs = 3000)
@@ -297,7 +365,7 @@ class ProductionSaleRecoveryTest {
             authScopeProvider = { scope },
             merchantReadClient = MerchantReadClient(transport, origin, allowHttpLoopback = true,
                 tokenProvider = MerchantReadTokenProvider { _, _ -> scope.token }),
-            baseCurrency = "JOD", currencyMinorUnits = precision, outboxRepository = outbox,
+            baseCurrency = baseCurrency, currencyMinorUnits = precision, outboxRepository = outbox,
             saleSyncGateway = HttpSaleSyncGateway(transport, origin) { scope.token },
             bootstrapTaxes = listOf(inclusive, exclusive)
         )
