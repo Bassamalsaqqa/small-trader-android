@@ -215,7 +215,6 @@ fun ReceiptScreen(
         ) {
             // 1. Quiet Outcome Hero (Newly Completed Sale vs Historical Document)
             if (state.isNewlyCompletedSale) {
-                val isCash = receipt.isPaidInFull
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surface,
@@ -247,12 +246,12 @@ fun ReceiptScreen(
                         }
 
                         Text(
-                            text = if (receipt.localReceiptNumber != null && receipt.serverInvoiceNumber == null) {
-                                lang.tr("تم تسجيل البيع محلياً (معلق)", "Sale Captured Locally (Pending)")
-                            } else if (isCash) {
-                                lang.tr("تم تسجيل البيع بنجاح", "Sale Completed Successfully")
-                            } else {
-                                lang.tr("تم تسجيل البيع الآجل بالذمة", "Credit Invoice Posted")
+                            text = when {
+                                receipt.localReceiptNumber != null && receipt.serverInvoiceNumber == null -> lang.tr("تم تسجيل البيع محلياً (معلق)", "Sale Captured Locally (Pending)")
+                                amounts.isPaidInFull && amounts.isCashFull -> lang.tr("تم تسجيل البيع بنجاح", "Sale Completed Successfully")
+                                amounts.isPaidInFull -> lang.tr("تم تسجيل البيع وتحصيله بالكامل", "Sale Recorded — Paid in Full")
+                                amounts.isPartial -> lang.tr("تم تسجيل البيع بسداد جزئي", "Partial-Payment Sale Posted")
+                                else -> lang.tr("تم تسجيل البيع الآجل بالذمة", "Credit Invoice Posted")
                             },
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface,
@@ -276,15 +275,16 @@ fun ReceiptScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             StitchBadge(
-                                text = when (receipt.paymentStatus) {
-                                    InvoicePaymentStatus.PAID_CASH -> lang.tr("نقداً", "Cash")
-                                    InvoicePaymentStatus.PARTIAL -> lang.tr("سداد جزئي", "Partial")
-                                    InvoicePaymentStatus.ON_CREDIT -> lang.tr("ذمة آجلة", "On Credit")
+                                text = when {
+                                    amounts.isPaidInFull && amounts.isCashFull -> lang.tr("نقداً", "Cash")
+                                    amounts.isPaidInFull -> lang.tr("مدفوع بالكامل", "Paid in Full")
+                                    amounts.isPartial -> lang.tr("سداد جزئي", "Partial")
+                                    else -> lang.tr("ذمة آجلة", "On Credit")
                                 },
-                                tone = when (receipt.paymentStatus) {
-                                    InvoicePaymentStatus.PAID_CASH -> StitchBadgeTone.SUCCESS
-                                    InvoicePaymentStatus.PARTIAL -> StitchBadgeTone.WARNING
-                                    InvoicePaymentStatus.ON_CREDIT -> StitchBadgeTone.DANGER
+                                tone = when {
+                                    amounts.isPaidInFull -> StitchBadgeTone.SUCCESS
+                                    amounts.isPartial -> StitchBadgeTone.WARNING
+                                    else -> StitchBadgeTone.DANGER
                                 }
                             )
                         }
@@ -324,15 +324,16 @@ fun ReceiptScreen(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 StitchBadge(
-                                    text = when (receipt.paymentStatus) {
-                                        InvoicePaymentStatus.PAID_CASH -> lang.tr("مدفوع نقداً", "Paid Cash")
-                                        InvoicePaymentStatus.PARTIAL -> lang.tr("سداد جزئي", "Partial Payment")
-                                        InvoicePaymentStatus.ON_CREDIT -> lang.tr("ذمة آجلة", "On Credit")
+                                    text = when {
+                                        amounts.isPaidInFull && amounts.isCashFull -> lang.tr("مدفوع نقداً", "Paid Cash")
+                                        amounts.isPaidInFull -> lang.tr("مدفوع بالكامل", "Paid in Full")
+                                        amounts.isPartial -> lang.tr("سداد جزئي", "Partial Payment")
+                                        else -> lang.tr("ذمة آجلة", "On Credit")
                                     },
-                                    tone = when (receipt.paymentStatus) {
-                                        InvoicePaymentStatus.PAID_CASH -> StitchBadgeTone.SUCCESS
-                                        InvoicePaymentStatus.PARTIAL -> StitchBadgeTone.WARNING
-                                        InvoicePaymentStatus.ON_CREDIT -> StitchBadgeTone.DANGER
+                                    tone = when {
+                                        amounts.isPaidInFull -> StitchBadgeTone.SUCCESS
+                                        amounts.isPartial -> StitchBadgeTone.WARNING
+                                        else -> StitchBadgeTone.DANGER
                                     }
                                 )
                                 if (isPendingSync) {
@@ -609,7 +610,7 @@ fun ReceiptScreen(
                         ) {
                             when {
                                 amounts.isPaidInFull -> {
-                                    if (receipt.hasLocalTenderDetails) {
+                                    if (receipt.hasLocalTenderDetails && amounts.isCashFull) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceBetween
@@ -1331,7 +1332,8 @@ private fun InvoiceReceiptDocumentCard(
     val amounts = remember(receipt, liveDetail) { resolveReceiptAmounts(receipt, liveDetail) }
     val txCurrency = amounts.txCurrency
     val currTag = WesternFormatters.formatReceiptCurrencyTag(txCurrency, lang)
-    val isPaidCash = amounts.isCashFull && amounts.isPaidInFull
+    val isPaidFull = amounts.isPaidInFull
+    val isPaidCash = amounts.isCashFull && isPaidFull
     val isPartial = amounts.isPartial
     val detailLines = liveDetail?.thermalReceipt?.lines?.takeIf { it.isNotEmpty() } ?: liveDetail?.lines ?: emptyList()
     val totalLineCount = if (receipt.items.isNotEmpty()) receipt.items.size else detailLines.size
@@ -1410,6 +1412,7 @@ private fun InvoiceReceiptDocumentCard(
                 shape = RoundedCornerShape(8.dp),
                 color = when {
                     isPaidCash -> TraderTheme.financial.incomeContainer
+                    isPaidFull -> TraderTheme.financial.incomeContainer
                     isPartial -> TraderTheme.financial.warningContainer
                     else -> TraderTheme.financial.debitContainer
                 },
@@ -1425,12 +1428,14 @@ private fun InvoiceReceiptDocumentCard(
                     Text(
                         text = when {
                             isPaidCash -> lang.tr("إيصال قبض وفاتورة مبيعات نقدية", "Cash Sales Invoice & Receipt")
+                            isPaidFull -> lang.tr("فاتورة مبيعات مدفوعة بالكامل", "Paid Sales Invoice — Settled in Full")
                             isPartial -> lang.tr("فاتورة مبيعات — سداد جزئي والباقي بالذمة", "Sales Invoice — Partial Payment & Credit")
                             else -> lang.tr("فاتورة مبيعات آجلة — ذمة على الحساب", "Credit Sales Invoice — On Account")
                         },
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                         color = when {
                             isPaidCash -> TraderTheme.financial.income
+                            isPaidFull -> TraderTheme.financial.income
                             isPartial -> TraderTheme.financial.warning
                             else -> TraderTheme.financial.debit
                         },
@@ -1445,6 +1450,7 @@ private fun InvoiceReceiptDocumentCard(
                         ),
                         color = when {
                             isPaidCash -> TraderTheme.financial.income
+                            isPaidFull -> TraderTheme.financial.income
                             isPartial -> TraderTheme.financial.warning
                             else -> TraderTheme.financial.debit
                         }
@@ -1634,7 +1640,7 @@ private fun InvoiceReceiptDocumentCard(
                             useMono = false,
                             valueColor = TraderTheme.financial.income
                         )
-                        if (receipt.hasLocalTenderDetails) {
+                        if (receipt.hasLocalTenderDetails && amounts.isCashFull) {
                             DocumentMetaRow(
                                 label = lang.tr("المبلغ المقبوض نقداً:", "Cash Tendered:"),
                                 value = displayLocalCash,
@@ -1772,7 +1778,7 @@ private fun resolveReceiptAmounts(
 ): ResolvedReceiptAmounts {
     val txCurrency = liveDetail?.currency?.trim()?.takeIf { it.isNotEmpty() }
         ?: receipt.normalizedCurrency
-    val isPaidFull = liveDetail?.isPaidInFull ?: receipt.isPaidInFull
+    val isPaidFull = liveDetail?.isPaidInFull ?: (receipt.isPaidInFull || receipt.remainingDebitExact.signum() <= 0)
     val isCashFull = liveDetail?.isFullCashSale ?: isPaidFull
     val paid = liveDetail?.paidExact ?: receipt.settledPaidExact
     val remaining = liveDetail?.remainingDebitExact ?: receipt.remainingDebitExact
@@ -1869,7 +1875,7 @@ private fun buildPlainTextDocument(
     }
     sb.appendLine("${lang.tr("الصافي المطلوب", "Net Total")}: ${fmtMoney(amounts.netTotalExact)}")
     if (amounts.isPaidInFull) {
-        if (receipt.hasLocalTenderDetails) {
+        if (receipt.hasLocalTenderDetails && amounts.isCashFull) {
             sb.appendLine("${lang.tr("المقبوض نقداً", "Cash Tendered")}: ${fmtMoney(receipt.cashReceivedExact)}")
             if (receipt.changeReturnedExact.signum() > 0) {
                 sb.appendLine("${lang.tr("الباقي للزبون", "Change Returned")}: ${fmtMoney(receipt.changeReturnedExact)}")

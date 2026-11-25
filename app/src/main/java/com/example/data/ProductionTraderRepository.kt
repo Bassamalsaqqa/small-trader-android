@@ -1504,7 +1504,14 @@ class ProductionTraderRepository(
         val matchingLeaseMinorUnits = offlineLeaseStore.getLease(event.companyId, event.actorId, event.deviceId)
             ?.takeIf { it.leaseId == event.deviceLeaseId }
             ?.currencyMinorUnits
-        val frozenMinorUnits = record.event.currencyMinorUnits ?: matchingLeaseMinorUnits
+            ?.takeIf { it in 0..6 }
+        val rawRecordMinorUnits = record.event.currencyMinorUnits
+        // Plaintext Room column metadata is advisory and bounded to 0..6; tampered out-of-range
+        // values fail closed to null instead of crashing or reconstructing stored economic totals.
+        val frozenMinorUnits = when {
+            rawRecordMinorUnits != null -> rawRecordMinorUnits.takeIf { it in 0..6 }
+            else -> matchingLeaseMinorUnits
+        }
         var total = BigDecimal.ZERO
         var taxTotal = BigDecimal.ZERO
         val items = event.lines.map { line ->
@@ -1566,7 +1573,14 @@ class ProductionTraderRepository(
         val delivery = record.deliveryState
         var resolvedLocalReceipt = localReceiptNumber
         var resolvedCurrency = normalizedCurrency
-        var resolvedMinorUnits = currencyMinorUnits ?: record.event.currencyMinorUnits
+        val rawRecordMinorUnits = record.event.currencyMinorUnits
+        val validatedRecordMinorUnits = rawRecordMinorUnits?.takeIf { it in 0..6 }
+        val hasTamperedOutOfRangeMetadata = rawRecordMinorUnits != null && rawRecordMinorUnits !in 0..6
+        var resolvedMinorUnits = if (record.event.deviceLeaseId != null && hasTamperedOutOfRangeMetadata) {
+            null
+        } else {
+            currencyMinorUnits?.takeIf { it in 0..6 } ?: validatedRecordMinorUnits
+        }
         if (resolvedLocalReceipt == null || resolvedCurrency == null || (record.event.deviceLeaseId == null && resolvedMinorUnits == null)) {
             try {
                 val root = StrictJsonParser.parseObject(String(record.payloadBytes, StandardCharsets.UTF_8))
@@ -1577,7 +1591,7 @@ class ProductionTraderRepository(
                 } else {
                     val intent = OnlineSaleIntentProfile.fromStrictJson(root)
                     if (resolvedCurrency == null) resolvedCurrency = intent.currency
-                    if (resolvedMinorUnits == null) resolvedMinorUnits = intent.currencyMinorUnits
+                    if (resolvedMinorUnits == null) resolvedMinorUnits = intent.currencyMinorUnits.takeIf { it in 0..6 }
                 }
             } catch (_: Exception) { }
         }

@@ -1510,4 +1510,328 @@ class LiveSurfacesIntegrationUiTest {
         assertFalse(serverOnlyShare.contains("0.01"))
         assertFalse(serverOnlyShare.contains("₪"))
     }
+
+    @Test
+    fun receiptScreen_settledNonCashCreditOrigin_rendersPaidInFullAcrossBannerCompactThermalCopyAndShare() {
+        val settledCreditOrigin = InvoiceRecord(
+            id = "inv-credit-settled-1",
+            invoiceNumber = 601,
+            timestamp = "2026-11-25 14:15",
+            items = listOf(
+                BasketItem(
+                    product = Product(
+                        id = "prod-1",
+                        nameAr = "قهوة",
+                        nameEn = "Coffee Beans",
+                        category = ProductCategory.ALL,
+                        barcode = "111",
+                        priceExact = BigDecimal("50.00"),
+                        unitAr = "كغ",
+                        unitEn = "kg",
+                        stockCount = 10,
+                        accentHex = 0xFF2E7D32
+                    ),
+                    quantity = BigDecimal.ONE,
+                    unitPriceExact = BigDecimal("50.00"),
+                    precomputedLineTotalExact = BigDecimal("50.00")
+                )
+            ),
+            subtotalExact = BigDecimal("50.00"),
+            discountExact = BigDecimal.ZERO,
+            netTotalExact = BigDecimal("50.00"),
+            cashReceivedExact = BigDecimal.ZERO,
+            changeReturnedExact = BigDecimal.ZERO,
+            customerNote = "settled credit client",
+            cashierNameAr = "أحمد",
+            cashierNameEn = "Ahmad",
+            isPaidInFull = false,
+            remainingDebitExact = BigDecimal("50.00"),
+            hasLocalTenderDetails = true,
+            serverInvoiceUlid = "01JCV8X9M2NQW3TYZ4R5S6789Z",
+            serverInvoiceNumber = "INV-601",
+            currency = "JOD",
+            currencyMinorUnits = 3
+        )
+        val liveSettled = LiveInvoiceRecord(
+            id = "01JCV8X9M2NQW3TYZ4R5S6789Z",
+            invoiceNumber = "INV-601",
+            status = "posted",
+            paymentStatus = "ON_CREDIT",
+            customerId = "cust-1",
+            customerName = "Amman Client",
+            date = "2026-11-25",
+            createdAt = "2026-11-25 14:15",
+            subtotalExact = BigDecimal("50.00"),
+            discountExact = BigDecimal.ZERO,
+            taxExact = BigDecimal.ZERO,
+            totalExact = BigDecimal("50.00"),
+            paidExact = BigDecimal("50.00"),
+            remainingDebitExact = BigDecimal.ZERO,
+            currency = "JOD",
+            currencyMinorUnits = 3,
+            serverInvoiceUlid = "01JCV8X9M2NQW3TYZ4R5S6789Z",
+            outboxStatus = "CONFIRMED"
+        )
+        val vm = TraderViewModel(OfflineDemoTraderRepository())
+        val state = TraderUiState(
+            currentSession = UserSession(
+                id = "usr_demo",
+                name = "Ahmad",
+                username = "owner",
+                role = UserRole.OWNER,
+                branchNameAr = "الفرع",
+                branchNameEn = "Main",
+                isDemoSession = true
+            ),
+            businessInfo = BusinessInfo(defaultCurrency = "JOD", defaultCurrencyMinorUnits = 3),
+            activeReceipt = settledCreditOrigin,
+            invoices = listOf(settledCreditOrigin),
+            selectedInvoiceDetail = liveSettled,
+            isNewlyCompletedSale = false,
+            language = AppLanguage.EN
+        )
+
+        val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val clipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = false) {
+                ReceiptScreen(
+                    state = state,
+                    onPrintReceipt = {},
+                    onStartNewSale = {},
+                    onBackToHome = {}
+                )
+            }
+        }
+
+        // Historical banner & compact card must render Paid in Full cleanly without Cash Tendered: 0.00
+        assertTrue(composeTestRule.onAllNodesWithText("Paid in Full", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("50.00 JOD", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("\u20660.00 JOD\u2069", substring = false).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("On Credit", substring = true).fetchSemanticsNodes().isEmpty())
+
+        // Expand thermal receipt card and verify non-cash Paid Sales Invoice badge + settlement rows
+        composeTestRule.onNodeWithTag("toggle_invoice_details_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(composeTestRule.onAllNodesWithText("Paid Sales Invoice", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("Credit Sales Invoice", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("Unpaid — On Customer Account", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("\u20660.00 JOD\u2069", substring = false).fetchSemanticsNodes().isEmpty())
+
+        // Copy & share text coherence
+        composeTestRule.onNodeWithTag("copy_receipt_text_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        val copied = clipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
+        assertTrue(copied.contains("Paid Sales Invoice"))
+        assertTrue(copied.contains("Paid: 50.00 JOD"))
+        assertFalse(copied.contains("Credit Sales Invoice"))
+        assertFalse(copied.contains("Cash Tendered: 0.00 JOD"))
+
+        vm.toggleLanguage()
+        val share = vm.formatReceiptShareText(settledCreditOrigin, overrideDetail = liveSettled)
+        assertTrue(share.contains("Paid Sales Invoice"))
+        assertTrue(share.contains("Paid in Full"))
+        assertTrue(share.contains("Paid: 50.00 JOD"))
+        assertFalse(share.contains("Paid in Full (Cash)"))
+        assertFalse(share.contains("Cash Sales Invoice"))
+        assertFalse(share.contains("Credit Sales Invoice"))
+        assertFalse(share.contains("Unpaid — On Customer Account"))
+        assertFalse(share.contains("Cash Tendered: 0.00 JOD"))
+    }
+
+    @Test
+    fun receiptScreen_partialPayment_and_unpaidStates_renderCoherentlyAcrossCardsAndShare() {
+        val partial = InvoiceRecord(
+            id = "inv-partial-602",
+            invoiceNumber = 602,
+            timestamp = "2026-11-25 14:30",
+            items = emptyList(),
+            subtotalExact = BigDecimal("50.00"),
+            discountExact = BigDecimal.ZERO,
+            netTotalExact = BigDecimal("50.00"),
+            cashReceivedExact = BigDecimal("20.00"),
+            changeReturnedExact = BigDecimal.ZERO,
+            customerNote = "Partial Buyer",
+            cashierNameAr = "أحمد",
+            cashierNameEn = "Ahmad",
+            isPaidInFull = false,
+            remainingDebitExact = BigDecimal("30.00"),
+            hasLocalTenderDetails = true,
+            serverInvoiceUlid = "01JCV8X9M2NQW3TYZ4R5S6789P",
+            serverInvoiceNumber = "INV-602",
+            currency = "JOD",
+            currencyMinorUnits = 3
+        )
+        val livePartial = LiveInvoiceRecord(
+            id = "01JCV8X9M2NQW3TYZ4R5S6789P",
+            invoiceNumber = "INV-602",
+            status = "posted",
+            paymentStatus = "PARTIAL",
+            customerId = "cust-1",
+            customerName = "Partial Buyer",
+            date = "2026-11-25",
+            createdAt = "2026-11-25 14:30",
+            subtotalExact = BigDecimal("50.00"),
+            discountExact = BigDecimal.ZERO,
+            taxExact = BigDecimal.ZERO,
+            totalExact = BigDecimal("50.00"),
+            paidExact = BigDecimal("20.00"),
+            remainingDebitExact = BigDecimal("30.00"),
+            currency = "JOD",
+            currencyMinorUnits = 3,
+            serverInvoiceUlid = "01JCV8X9M2NQW3TYZ4R5S6789P",
+            outboxStatus = "CONFIRMED"
+        )
+        val state = TraderUiState(
+            currentSession = UserSession(
+                id = "usr_demo",
+                name = "Ahmad",
+                username = "owner",
+                role = UserRole.OWNER,
+                branchNameAr = "الفرع",
+                branchNameEn = "Main",
+                isDemoSession = true
+            ),
+            businessInfo = BusinessInfo(defaultCurrency = "JOD", defaultCurrencyMinorUnits = 3),
+            activeReceipt = partial,
+            invoices = listOf(partial),
+            selectedInvoiceDetail = livePartial,
+            isNewlyCompletedSale = false,
+            language = AppLanguage.EN
+        )
+
+        val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val clipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = false) {
+                ReceiptScreen(
+                    state = state,
+                    onPrintReceipt = {},
+                    onStartNewSale = {},
+                    onBackToHome = {}
+                )
+            }
+        }
+
+        assertTrue(composeTestRule.onAllNodesWithText("Partial Payment", substring = true).fetchSemanticsNodes().isNotEmpty())
+        composeTestRule.onNodeWithTag("toggle_invoice_details_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(composeTestRule.onAllNodesWithText("Partial Payment & Credit", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("30.00 JOD", substring = true).fetchSemanticsNodes().isNotEmpty())
+
+        composeTestRule.onNodeWithTag("copy_receipt_text_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        val partialCopied = clipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
+        assertTrue(partialCopied.contains("Partial-Payment Sales Invoice"))
+        assertTrue(partialCopied.contains("20.00 JOD"))
+        assertTrue(partialCopied.contains("30.00 JOD"))
+
+        val vm = TraderViewModel(OfflineDemoTraderRepository())
+        vm.toggleLanguage()
+        val partialShare = vm.formatReceiptShareText(partial)
+        assertTrue(partialShare.contains("Partial-Payment Sales Invoice"))
+        assertTrue(partialShare.contains("20.00 JOD"))
+        assertTrue(partialShare.contains("30.00 JOD"))
+
+        val unpaid = partial.copy(
+            id = "inv-unpaid-603",
+            invoiceNumber = 603,
+            cashReceivedExact = BigDecimal.ZERO,
+            remainingDebitExact = BigDecimal("50.00"),
+            hasLocalTenderDetails = false,
+            serverInvoiceNumber = "INV-603"
+        )
+        val unpaidShare = vm.formatReceiptShareText(unpaid)
+        assertTrue(unpaidShare.contains("Credit Sales Invoice (On Account)"))
+        assertTrue(unpaidShare.contains("Unpaid — On Customer Account"))
+        assertTrue(unpaidShare.contains("50.00 JOD"))
+    }
+
+    @Test
+    fun receiptScreen_unavailableMinorUnitsWithPrecomputedLineAndPositiveSub2dp_rendersWithoutCrash() {
+        val product = Product(
+            id = "prod-jod",
+            nameAr = "عنصر دقيق",
+            nameEn = "Precision Item",
+            category = ProductCategory.ALL,
+            barcode = "222",
+            priceExact = BigDecimal("9.833"),
+            unitAr = "قطعة",
+            unitEn = "pc",
+            stockCount = 10,
+            accentHex = 0xFF2E7D32,
+            saleCurrencyMinorUnits = null
+        )
+        val recovered = InvoiceRecord(
+            id = "inv-recovered-3dp",
+            invoiceNumber = 604,
+            timestamp = "2026-11-25 15:00",
+            items = listOf(
+                BasketItem(
+                    product = product,
+                    quantity = BigDecimal.ONE,
+                    unitPriceExact = BigDecimal("9.833"),
+                    precomputedLineTotalExact = BigDecimal("9.833")
+                ),
+                BasketItem(
+                    product = product.copy(id = "prod-tiny", nameEn = "Sub-2dp Micro Line", priceExact = BigDecimal("0.001")),
+                    quantity = BigDecimal.ONE,
+                    unitPriceExact = BigDecimal("0.001"),
+                    precomputedLineTotalExact = BigDecimal("0.001")
+                )
+            ),
+            subtotalExact = BigDecimal("9.834"),
+            discountExact = BigDecimal.ZERO,
+            netTotalExact = BigDecimal("9.834"),
+            cashReceivedExact = BigDecimal.ZERO,
+            changeReturnedExact = BigDecimal.ZERO,
+            customerNote = "Credit Buyer",
+            cashierNameAr = "أحمد",
+            cashierNameEn = "Ahmad",
+            isPaidInFull = false,
+            remainingDebitExact = BigDecimal("9.834"),
+            hasLocalTenderDetails = false,
+            serverInvoiceUlid = "01JCV8X9M2NQW3TYZ4R5S6789U",
+            serverInvoiceNumber = "INV-604",
+            currency = "JOD",
+            currencyMinorUnits = null
+        )
+        val state = TraderUiState(
+            currentSession = UserSession(
+                id = "usr_demo",
+                name = "Ahmad",
+                username = "owner",
+                role = UserRole.OWNER,
+                branchNameAr = "الفرع",
+                branchNameEn = "Main",
+                isDemoSession = true
+            ),
+            businessInfo = BusinessInfo(defaultCurrency = "USD", defaultCurrencyMinorUnits = 2),
+            activeReceipt = recovered,
+            invoices = listOf(recovered),
+            selectedInvoiceDetail = null,
+            isNewlyCompletedSale = false,
+            language = AppLanguage.EN
+        )
+
+        composeTestRule.setContent {
+            SmallTraderTheme(darkTheme = false, isRtl = false) {
+                ReceiptScreen(
+                    state = state,
+                    onPrintReceipt = {},
+                    onStartNewSale = {},
+                    onBackToHome = {}
+                )
+            }
+        }
+
+        assertTrue(composeTestRule.onAllNodesWithText("Credit Sales", substring = true).fetchSemanticsNodes().isEmpty())
+        composeTestRule.onNodeWithTag("toggle_invoice_details_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(composeTestRule.onAllNodesWithText("Credit Sales Invoice — On Account", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("9.83 JOD", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeTestRule.onAllNodesWithText("0.00 JOD", substring = true).fetchSemanticsNodes().isNotEmpty())
+    }
 }

@@ -350,6 +350,76 @@ class ProductionSaleRecoveryTest {
         }
     }
 
+    @Test
+    fun onlineHeldJodSale_tamperedMinorUnitsColumn_usesAuthenticatedProfileWithoutCrash() {
+        withFixture { server, file ->
+            val eventId = ClientUuid.random()
+            val (origBytes, origDigest) = withDatabase(file) { db1 ->
+                val outbox1 = outbox(db1)
+                val repo1 = repository(server, outbox1, precision = 3, baseCurrency = "JOD")
+                try {
+                    server.enqueue(json(catalog(inclusive, "9.833")))
+                    runBlocking { repo1.refreshProducts() }.getOrThrow()
+                    take(server)
+
+                    val basketItem = BasketItem(repo1.getProducts().single(), 1)
+                    val calc = basketItem.calculateLine(3)
+                    val total = calc.lineTotal.value
+                    assertEquals(0, BigDecimal("9.833").compareTo(total))
+                    val heldSale = InvoiceRecord(
+                        id = eventId.value,
+                        invoiceNumber = 1,
+                        timestamp = "2026-11-25T09:00:00Z",
+                        items = listOf(basketItem),
+                        subtotalExact = total,
+                        discountExact = BigDecimal.ZERO,
+                        netTotalExact = total,
+                        cashReceivedExact = BigDecimal.ZERO,
+                        changeReturnedExact = BigDecimal.ZERO,
+                        customerNote = "",
+                        cashierNameAr = "Owner",
+                        cashierNameEn = "Owner",
+                        isPaidInFull = false,
+                        remainingDebitExact = total,
+                        clientEventId = eventId.value,
+                        currency = "JOD",
+                        currencyMinorUnits = 3,
+                        taxExact = calc.taxAmount.value
+                    )
+
+                    server.enqueue(json(status(eventId.value)))
+                    server.enqueue(MockResponse().setResponseCode(500))
+                    runBlocking { repo1.recordSale(heldSale) }.getOrThrow()
+                    val rec = checkNotNull(outbox1.getRecord(company, actor, device, eventId))
+                    rec.payloadBytes to rec.payloadDigest
+                } finally {
+                    repo1.close()
+                }
+            }
+
+            withDatabase(file) { db2 ->
+                db2.openHelper.writableDatabase.execSQL(
+                    "UPDATE outbox_events SET currency_minor_units = 99 WHERE company_id = ? AND client_event_id = ?",
+                    arrayOf(company.value, eventId.value)
+                )
+                val outbox2 = outbox(db2)
+                val repo2 = repository(server, outbox2, precision = 2, baseCurrency = "USD")
+                try {
+                    val restored = checkNotNull(runBlocking { repo2.restoreHeldSale() }.getOrThrow())
+                    assertEquals("JOD", restored.currency)
+                    assertEquals(3, restored.currencyMinorUnits)
+                    assertEquals(0, BigDecimal("9.833").compareTo(restored.netTotalExact))
+                    assertEquals(0, BigDecimal("9.833").compareTo(restored.items.single().lineTotalExact))
+                    val persisted = checkNotNull(outbox2.getRecord(company, actor, device, eventId))
+                    org.junit.Assert.assertArrayEquals(origBytes, persisted.payloadBytes)
+                    assertEquals(origDigest, persisted.payloadDigest)
+                } finally {
+                    repo2.close()
+                }
+            }
+        }
+    }
+
     private fun repository(
         server: MockWebServer,
         outbox: OutboxRepositoryImpl,

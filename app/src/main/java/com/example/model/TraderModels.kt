@@ -296,9 +296,9 @@ data class BasketItem(
 
     val lineTotalExact: BigDecimal
         get() {
-            val minorUnits = product.saleCurrencyMinorUnits
-            if (minorUnits != null && hasResolvedTax) return calculateLine(minorUnits).lineTotal.value
             if (precomputedLineTotalExact != null) return precomputedLineTotalExact
+            val minorUnits = product.saleCurrencyMinorUnits?.takeIf { it in 0..6 }
+            if (minorUnits != null && hasResolvedTax) return calculateLine(minorUnits).lineTotal.value
 
             val subtotal = quantity.multiply(unitPriceExact)
             if (taxRateId == null || isTaxInclusive) return subtotal

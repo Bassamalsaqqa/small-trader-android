@@ -3041,12 +3041,18 @@ class TraderViewModel(
         }
     }
 
-    fun formatReceiptShareText(receipt: InvoiceRecord? = _uiState.value.activeReceipt ?: _uiState.value.invoices.firstOrNull()): String {
+    fun formatReceiptShareText(receipt: InvoiceRecord? = _uiState.value.activeReceipt ?: _uiState.value.invoices.firstOrNull()): String =
+        formatReceiptShareText(receipt, overrideDetail = null)
+
+    internal fun formatReceiptShareText(
+        receipt: InvoiceRecord?,
+        overrideDetail: com.example.data.mobile.merchantread.LiveInvoiceRecord?
+    ): String {
         val target = receipt ?: return ""
         val state = _uiState.value
         val lang = state.language
         val business = state.businessInfo
-        val matchingDetail = state.selectedInvoiceDetail?.takeIf {
+        val matchingDetail = (overrideDetail ?: state.selectedInvoiceDetail)?.takeIf {
             target.serverInvoiceUlid == it.id || target.id == it.id
         }
         val txCurrency = matchingDetail?.currency?.trim()?.takeIf { it.isNotEmpty() }
@@ -3059,12 +3065,18 @@ class TraderViewModel(
         )
 
         val sb = StringBuilder()
-        val isPaidFull = matchingDetail?.isPaidInFull ?: target.isPaidInFull
+        val settledPaid = matchingDetail?.paidExact ?: target.settledPaidExact
+        val remainingDue = matchingDetail?.remainingDebitExact ?: target.remainingDebitExact
+        val isPaidFull = matchingDetail?.isPaidInFull ?: (target.isPaidInFull || remainingDue.signum() <= 0)
         val isCashFull = matchingDetail?.isFullCashSale ?: isPaidFull
+        val isPartial = !isPaidFull && (
+            if (matchingDetail != null) settledPaid.signum() > 0 else target.paymentStatus == com.example.model.InvoicePaymentStatus.PARTIAL
+        )
 
         val docTitle = when {
             isPaidFull && isCashFull -> lang.tr("إيصال قبض وفاتورة مبيعات نقدية", "Cash Sales Invoice & Receipt")
             isPaidFull -> lang.tr("فاتورة مبيعات مدفوعة", "Paid Sales Invoice")
+            isPartial -> lang.tr("فاتورة مبيعات بسداد جزئي", "Partial-Payment Sales Invoice")
             else -> lang.tr("فاتورة مبيعات آجلة (ذمة على الحساب)", "Credit Sales Invoice (On Account)")
         }
         val docCode = matchingDetail?.invoiceNumber?.takeIf { it.isNotBlank() }
@@ -3134,8 +3146,6 @@ class TraderViewModel(
         }
         sb.appendLine("${lang.tr("الصافي المطلوب", "Net Total")}: ${fmtMoney(netTotal)}")
 
-        val settledPaid = matchingDetail?.paidExact ?: target.settledPaidExact
-        val remainingDue = matchingDetail?.remainingDebitExact ?: target.remainingDebitExact
         if (isPaidFull) {
             val statusStr = if (isCashFull) {
                 lang.tr("مدفوع نقداً بالكامل", "Paid in Full (Cash)")
@@ -3143,7 +3153,7 @@ class TraderViewModel(
                 lang.tr("مدفوع بالكامل", "Paid in Full")
             }
             sb.appendLine("${lang.tr("الحالة", "Status")}: $statusStr")
-            if (target.hasLocalTenderDetails) {
+            if (target.hasLocalTenderDetails && isCashFull) {
                 sb.appendLine("${lang.tr("المقبوض نقداً", "Cash Tendered")}: ${fmtMoney(target.cashReceivedExact)}")
                 if (target.changeReturnedExact.signum() > 0) {
                     sb.appendLine("${lang.tr("الباقي للزبون", "Change Returned")}: ${fmtMoney(target.changeReturnedExact)}")

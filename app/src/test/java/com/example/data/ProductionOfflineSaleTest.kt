@@ -223,7 +223,7 @@ class ProductionOfflineSaleTest {
                 netTotalExact = BigDecimal("10.00"), cashReceivedExact = BigDecimal("10.00"), changeReturnedExact = BigDecimal.ZERO,
                 customerNote = "", cashierNameAr = "User", cashierNameEn = "User"
             )
-            runBlocking { repo1.recordSale(inv1).getOrThrow() }
+            val captured1 = runBlocking { repo1.recordSale(inv1).getOrThrow() }
 
             val inv2 = InvoiceRecord(
                 id = "dummy2", invoiceNumber = 2, timestamp = "2026-11-25T10:01:00Z",
@@ -231,37 +231,71 @@ class ProductionOfflineSaleTest {
                 netTotalExact = BigDecimal("10.00"), cashReceivedExact = BigDecimal("15.00"), changeReturnedExact = BigDecimal("5.00"),
                 customerNote = "", cashierNameAr = "User", cashierNameEn = "User"
             )
-            runBlocking { repo1.recordSale(inv2).getOrThrow() }
+            val captured2 = runBlocking { repo1.recordSale(inv2).getOrThrow() }
+
+            val eventId1 = ClientUuid.parse(checkNotNull(captured1.clientEventId))
+            val eventId2 = ClientUuid.parse(checkNotNull(captured2.clientEventId))
+            val persistedInProc1First = checkNotNull(outbox1.getRecord(companyA, actor, device, eventId1))
+            val persistedInProc1Second = checkNotNull(outbox1.getRecord(companyA, actor, device, eventId2))
 
             assertEquals(2, repo1.getPendingOfflineSalesCount())
             assertEquals(BigDecimal("20.00"), repo1.getPendingOfflineSalesTotal())
             repo1.close()
-        } // db1 closed (simulating device process termination)
 
-        // Step 2: Open fresh database and fresh repository instance from the same disk file
-        withDatabase(file) { db2 ->
-            val outbox2 = outbox(db2)
-            val leaseStore2 = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db2.openHelper.writableDatabase }
-            val repo2 = repository(server, outbox2, leaseStore = leaseStore2)
-            repo2.clock = { fixedClockMillis }
-            repo2.isOfflineSalesCapabilityEnabled = true
+            Pair(persistedInProc1First, persistedInProc1Second)
+        }.let { (expectedRec1, expectedRec2) -> // db1 closed (simulating device process termination)
 
-            try {
-                // Lease survived process restart
-                val activeLease = repo2.getActiveOfflineSaleLease()
-                assertNotNull(activeLease)
-                assertEquals(leaseId, activeLease!!.leaseId)
+            // Step 2: Open fresh database and fresh repository instance from the same disk file
+            withDatabase(file) { db2 ->
+                val outbox2 = outbox(db2)
+                val leaseStore2 = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db2.openHelper.writableDatabase }
+                val repo2 = repository(server, outbox2, leaseStore = leaseStore2)
+                repo2.clock = { fixedClockMillis }
+                repo2.isOfflineSalesCapabilityEnabled = true
 
-                // Budget and pending sales survived process restart
-                assertEquals(2, repo2.getPendingOfflineSalesCount())
-                assertEquals(BigDecimal("20.00"), repo2.getPendingOfflineSalesTotal())
+                try {
+                    // Lease survived process restart
+                    val activeLease = repo2.getActiveOfflineSaleLease()
+                    assertNotNull(activeLease)
+                    assertEquals(leaseId, activeLease!!.leaseId)
 
-                val pending = repo2.getPendingOfflineSales()
-                assertEquals(2, pending.size)
-                assertEquals("LOCAL-${leaseId.value}-1", pending[0].localReceiptNumber)
-                assertEquals("LOCAL-${leaseId.value}-2", pending[1].localReceiptNumber)
-            } finally {
-                repo2.close()
+                    // Budget and pending sales survived process restart
+                    assertEquals(2, repo2.getPendingOfflineSalesCount())
+                    assertEquals(BigDecimal("20.00"), repo2.getPendingOfflineSalesTotal())
+
+                    // getPendingOfflineSales() exposes an unordered keyset-paginated queue list (client_event_id order);
+                    // verify durable restoration by receipt identity, sequence, amounts, digest, and immutable bytes.
+                    val pending = repo2.getPendingOfflineSales()
+                    assertEquals(2, pending.size)
+                    val byReceipt = pending.associateBy { it.localReceiptNumber }
+                    assertEquals(setOf("LOCAL-${leaseId.value}-1", "LOCAL-${leaseId.value}-2"), byReceipt.keys)
+
+                    val restored1 = checkNotNull(byReceipt["LOCAL-${leaseId.value}-1"])
+                    val restored2 = checkNotNull(byReceipt["LOCAL-${leaseId.value}-2"])
+
+                    assertEquals(expectedRec1.clientEventId, restored1.clientEventId)
+                    assertEquals(expectedRec1.payloadDigest, restored1.salePayloadDigest)
+                    assertEquals(0, BigDecimal("10.00").compareTo(restored1.netTotalExact))
+                    assertEquals(0, BigDecimal("10.00").compareTo(restored1.cashReceivedExact))
+                    assertEquals(0, BigDecimal.ZERO.compareTo(restored1.changeReturnedExact))
+                    assertTrue(restored1.hasLocalTenderDetails)
+
+                    assertEquals(expectedRec2.clientEventId, restored2.clientEventId)
+                    assertEquals(expectedRec2.payloadDigest, restored2.salePayloadDigest)
+                    assertEquals(0, BigDecimal("10.00").compareTo(restored2.netTotalExact))
+                    assertEquals(0, BigDecimal("15.00").compareTo(restored2.cashReceivedExact))
+                    assertEquals(0, BigDecimal("5.00").compareTo(restored2.changeReturnedExact))
+                    assertTrue(restored2.hasLocalTenderDetails)
+
+                    val reopenedRec1 = checkNotNull(outbox2.getRecord(companyA, actor, device, ClientUuid.parse(expectedRec1.clientEventId)))
+                    val reopenedRec2 = checkNotNull(outbox2.getRecord(companyA, actor, device, ClientUuid.parse(expectedRec2.clientEventId)))
+                    org.junit.Assert.assertArrayEquals(expectedRec1.payloadBytes, reopenedRec1.payloadBytes)
+                    org.junit.Assert.assertArrayEquals(expectedRec2.payloadBytes, reopenedRec2.payloadBytes)
+                    assertEquals(expectedRec1.payloadDigest, reopenedRec1.payloadDigest)
+                    assertEquals(expectedRec2.payloadDigest, reopenedRec2.payloadDigest)
+                } finally {
+                    repo2.close()
+                }
             }
         }
     }
@@ -1347,6 +1381,180 @@ class ProductionOfflineSaleTest {
             } finally { repo.close() }
         }
     }
+
+    @Test
+    fun test9_tamperedCurrencyMinorUnitsColumn_preservesPrecomputedTotalsAndFailsClosedOutOfRange() = withFixture { server, file ->
+        val (saleEventId, saleBytes, saleDigest, tinyEventId, tinyBytes, tinyDigest) = withDatabase(file) { db1 ->
+            val outbox1 = outbox(db1)
+            val leaseStore1 = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db1.openHelper.writableDatabase }
+            val repo1 = repository(server, outbox1, precision = 3, currency = "JOD", leaseStore = leaseStore1)
+            repo1.clock = { fixedClockMillis }
+            try {
+                server.enqueue(json(catalog(inclusiveTax, "9.833")))
+                runBlocking { repo1.refreshProducts().getOrThrow() }
+                take(server)
+
+                server.enqueue(json(leaseResponse(
+                    precision = 3,
+                    currency = "JOD",
+                    taxId = inclusiveTax.id.value,
+                    taxRate = inclusiveTax.rate.value.toPlainString(),
+                    taxCalc = "inclusive"
+                )))
+                repo1.isOfflineSalesCapabilityEnabled = true
+                runBlocking { repo1.acquireOfflineSaleLease().getOrThrow() }
+                take(server)
+
+                repo1.isNetworkOffline = true
+                val item = repo1.getProducts().single()
+                val line9833 = BasketItem(
+                    product = item,
+                    quantity = BigDecimal.ONE,
+                    unitPriceExact = BigDecimal("9.833"),
+                    taxRateId = inclusiveTax.id.value,
+                    taxRateExact = inclusiveTax.rate.value,
+                    isTaxInclusive = true
+                )
+                assertEquals(0, BigDecimal("9.833").compareTo(line9833.lineTotalExact))
+                val invMain = InvoiceRecord(
+                    id = "dummy-9833", invoiceNumber = 1, timestamp = "2026-11-25T10:00:00Z",
+                    items = listOf(line9833), subtotalExact = BigDecimal("9.833"), discountExact = BigDecimal.ZERO,
+                    netTotalExact = BigDecimal("9.833"), cashReceivedExact = BigDecimal("10.00"), changeReturnedExact = BigDecimal("0.167"),
+                    customerNote = "", cashierNameAr = "User", cashierNameEn = "User",
+                    currency = "JOD", currencyMinorUnits = 3, taxExact = line9833.calculateLine(3).taxAmount.value
+                )
+                val capturedMain = runBlocking { repo1.recordSale(invMain).getOrThrow() }
+                val mainId = ClientUuid.parse(checkNotNull(capturedMain.clientEventId))
+                val mainRec = checkNotNull(outbox1.getRecord(companyA, actor, device, mainId))
+
+                val lineTiny = BasketItem(
+                    product = item,
+                    quantity = BigDecimal("0.0001"),
+                    unitPriceExact = BigDecimal("9.833"),
+                    taxRateId = inclusiveTax.id.value,
+                    taxRateExact = inclusiveTax.rate.value,
+                    isTaxInclusive = true
+                )
+                val tinyTotal = lineTiny.lineTotalExact
+                assertEquals(0, BigDecimal("0.001").compareTo(tinyTotal))
+                val invTiny = InvoiceRecord(
+                    id = "dummy-tiny", invoiceNumber = 2, timestamp = "2026-11-25T10:01:00Z",
+                    items = listOf(lineTiny), subtotalExact = tinyTotal, discountExact = BigDecimal.ZERO,
+                    netTotalExact = tinyTotal, cashReceivedExact = BigDecimal("1.00"), changeReturnedExact = BigDecimal("1.00").subtract(tinyTotal),
+                    customerNote = "", cashierNameAr = "User", cashierNameEn = "User",
+                    currency = "JOD", currencyMinorUnits = 3, taxExact = lineTiny.calculateLine(3).taxAmount.value
+                )
+                val capturedTiny = runBlocking { repo1.recordSale(invTiny).getOrThrow() }
+                val tinyId = ClientUuid.parse(checkNotNull(capturedTiny.clientEventId))
+                val tinyRec = checkNotNull(outbox1.getRecord(companyA, actor, device, tinyId))
+
+                listOf(mainId.value, mainRec.payloadBytes, mainRec.payloadDigest, tinyId.value, tinyRec.payloadBytes, tinyRec.payloadDigest)
+            } finally {
+                repo1.close()
+            }
+        }.let { tuple ->
+            @Suppress("UNCHECKED_CAST")
+            Sextuple(
+                tuple[0] as String,
+                tuple[1] as ByteArray,
+                tuple[2] as String,
+                tuple[3] as String,
+                tuple[4] as ByteArray,
+                tuple[5] as String
+            )
+        }
+
+        // Case A: Plaintext SQLite metadata tampered 3 -> 2 while authenticated payload preserves 9.833 and 0.001
+        withDatabase(file) { db2 ->
+            db2.openHelper.writableDatabase.execSQL(
+                "UPDATE outbox_events SET currency_minor_units = 2 WHERE company_id = ? AND client_event_id IN (?, ?)",
+                arrayOf(companyA.value, saleEventId, tinyEventId)
+            )
+            val outbox2 = outbox(db2)
+            val leaseStore2 = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db2.openHelper.writableDatabase }
+            val repo2 = repository(server, outbox2, precision = 2, currency = "USD", leaseStore = leaseStore2)
+            repo2.clock = { fixedClockMillis }
+            repo2.isOfflineSalesCapabilityEnabled = true
+            try {
+                val recoveredById = repo2.getPendingOfflineSales().associateBy { it.clientEventId }
+                val main = checkNotNull(recoveredById[saleEventId])
+                val tiny = checkNotNull(recoveredById[tinyEventId])
+
+                // Recovered precomputed lineTotalExact must remain 9.833 (not recalculated to 9.83 via minorUnits=2)
+                assertEquals(0, BigDecimal("9.833").compareTo(main.items.single().lineTotalExact))
+                assertEquals(0, BigDecimal("9.833").compareTo(main.netTotalExact))
+                assertEquals("JOD", main.currency)
+                assertEquals(2, main.currencyMinorUnits)
+
+                // Positive 0.001 item remains > 0 in domain storage and displays as 0.00 under 2dp presentation policy
+                assertTrue(tiny.netTotalExact > BigDecimal.ZERO)
+                assertEquals(0, BigDecimal("0.001").compareTo(tiny.items.single().lineTotalExact))
+                assertEquals("0.00 JOD", com.example.model.WesternFormatters.formatReceiptMoney(tiny.netTotalExact, tiny.currency))
+            } finally {
+                repo2.close()
+            }
+        }
+
+        // Case B: Plaintext SQLite metadata tampered out-of-range (99 and -1) must fail closed without crash
+        withDatabase(file) { db3 ->
+            db3.openHelper.writableDatabase.execSQL(
+                "UPDATE outbox_events SET currency_minor_units = 99 WHERE company_id = ? AND client_event_id = ?",
+                arrayOf(companyA.value, saleEventId)
+            )
+            db3.openHelper.writableDatabase.execSQL(
+                "UPDATE outbox_events SET currency_minor_units = -1 WHERE company_id = ? AND client_event_id = ?",
+                arrayOf(companyA.value, tinyEventId)
+            )
+            val outbox3 = outbox(db3)
+            val leaseStore3 = SqliteOfflineLeaseStore(crypto, bootIdentity = { "test-boot" }) { db3.openHelper.writableDatabase }
+            val repo3 = repository(server, outbox3, precision = 2, currency = "USD", leaseStore = leaseStore3)
+            repo3.clock = { fixedClockMillis }
+            repo3.isOfflineSalesCapabilityEnabled = true
+            try {
+                val recoveredById = repo3.getPendingOfflineSales().associateBy { it.clientEventId }
+                val main = checkNotNull(recoveredById[saleEventId])
+                val tiny = checkNotNull(recoveredById[tinyEventId])
+
+                // Out-of-range metadata fails closed to null without reconstructing or throwing
+                assertNull(main.currencyMinorUnits)
+                assertNull(main.items.single().product.saleCurrencyMinorUnits)
+                assertEquals(0, BigDecimal("9.833").compareTo(main.items.single().lineTotalExact))
+                assertEquals(0, BigDecimal("9.833").compareTo(main.netTotalExact))
+                assertEquals("JOD", main.currency)
+
+                assertNull(tiny.currencyMinorUnits)
+                assertNull(tiny.items.single().product.saleCurrencyMinorUnits)
+                assertEquals(0, BigDecimal("0.001").compareTo(tiny.items.single().lineTotalExact))
+
+                val shareVm = TraderViewModel(OfflineDemoTraderRepository())
+                val shareMain = shareVm.formatReceiptShareText(main)
+                val shareTiny = shareVm.formatReceiptShareText(tiny)
+                assertTrue(shareMain.contains("9.83 JOD"))
+                assertTrue(shareTiny.contains("0.00 JOD"))
+                assertEquals("9.83 JOD", com.example.model.WesternFormatters.formatReceiptMoney(main.netTotalExact, main.currency))
+                assertEquals("0.00 JOD", com.example.model.WesternFormatters.formatReceiptMoney(tiny.netTotalExact, tiny.currency))
+
+                // Canonical bytes and payloadDigest remain bitwise unchanged across metadata tamper
+                val rawMain = checkNotNull(outbox3.getRecord(companyA, actor, device, ClientUuid.parse(saleEventId)))
+                val rawTiny = checkNotNull(outbox3.getRecord(companyA, actor, device, ClientUuid.parse(tinyEventId)))
+                org.junit.Assert.assertArrayEquals(saleBytes, rawMain.payloadBytes)
+                assertEquals(saleDigest, rawMain.payloadDigest)
+                org.junit.Assert.assertArrayEquals(tinyBytes, rawTiny.payloadBytes)
+                assertEquals(tinyDigest, rawTiny.payloadDigest)
+            } finally {
+                repo3.close()
+            }
+        }
+    }
+
+    private data class Sextuple<A, B, C, D, E, F>(
+        val first: A,
+        val second: B,
+        val third: C,
+        val fourth: D,
+        val fifth: E,
+        val sixth: F
+    )
 
     private fun outbox(db: OutboxDatabase) = OutboxRepositoryImpl(db, payloadCipher = OutboxPayloadCipher(crypto),
         requireLeaseAuthorization = true, leaseAuthority = { lease, event ->
