@@ -2,12 +2,26 @@
 
 declare(strict_types=1);
 
+$root = realpath((string) getenv('PAIRED_BACKEND_ROOT'));
+$defaultSha = '220f5c78fcedcbd2b045d0e9100317a11da07504';
+$rawSha = getenv('PAIRED_BACKEND_SHA');
+$sha = $rawSha === false ? $defaultSha : $rawSha;
+if (!$root || !is_string($sha) || preg_match('/\A[0-9a-f]{40}\z/', $sha) !== 1) {
+    throw new RuntimeException('PAIRED_BACKEND_SHA must be an explicit 40-character lowercase git commit SHA.');
+}
+$head = trim((string) shell_exec('git -C '.escapeshellarg($root).' rev-parse HEAD'));
+if ($head !== $sha || trim((string) shell_exec('git -C '.escapeshellarg($root).' status --porcelain --untracked-files=no')) !== '') {
+    throw new RuntimeException('Backend source pin or tracked cleanliness mismatch in fixture setup.');
+}
+
 require __DIR__.'/boot.php';
 use App\Actions\Company\CreateCompanyAction;
 use App\Actions\Inventory\PostOpeningStockAction;
 use App\Actions\Sales\SaveTaxRateAction;
 use App\Domain\Inventory\ValueObjects\Quantity;
-use App\Models\{User, Company, CompanyUser, CompanyMobileSetting, Customer, Warehouse, Unit, Product, ProductUnit, MoneyAccount, LedgerAccount};
+use App\Models\{User, Company, CompanyUser, CompanyMobileSetting, Warehouse, Unit, Product, MoneyAccount, LedgerAccount};
+use App\Services\Inventory\ProductCatalogService;
+use App\Services\Sales\CustomerCatalogService;
 use App\Services\Tenancy\CompanyRoleService;
 use App\Support\Tenancy\CompanyContext;
 use Illuminate\Support\Facades\Hash;
@@ -88,7 +102,7 @@ foreach ($specs as $spec) {
     app(CompanyRoleService::class)->ensurePermissionsExist();
     app(CompanyRoleService::class)->seedCompanyRoles($company);
     setPermissionsTeamId($company->id);
-    $owner->unsetRelation('roles')->assignRole('Owner');
+    $owner->unsetRelation('roles')->unsetRelation('permissions')->assignRole('Owner');
 
     $assignSalesMember($company, $staff);
     if ($spec['with_extra_members']) {
@@ -96,42 +110,31 @@ foreach ($specs as $spec) {
         $assignSalesMember($company, $deviceStaff);
     }
 
-    $customer = Customer::create([
-        'company_id' => $company->id,
+    $customer = app(CustomerCatalogService::class)->save($company, $owner, [
         'name_ar' => 'نقدي',
         'name_en' => 'Synthetic walk in',
         'default_currency_code' => $currency,
         'preferred_locale' => 'en',
         'status' => 'active',
-        'created_by' => $owner->id,
     ]);
     $warehouse = Warehouse::where('company_id', $company->id)->where('is_default', true)->firstOrFail();
     $unit = Unit::where('company_id', $company->id)->where('code', 'piece')->firstOrFail();
-    $unit->update(['allows_fraction' => true, 'decimal_places' => 6]);
+    $unit = app(ProductCatalogService::class)->updateUnit($company, $unit, [
+        'allows_fraction' => true,
+        'decimal_places' => 6,
+    ]);
 
     $createStockProduct = static function (string $sku, string $nameEn, string $openingQty) use ($company, $unit, $warehouse, $owner): Product {
-        $product = Product::create([
-            'company_id' => $company->id,
+        $product = app(ProductCatalogService::class)->createProduct($company, [
             'base_unit_id' => $unit->id,
             'name_ar' => 'اختبار',
             'name_en' => $nameEn,
             'sku' => $sku,
-            'product_type' => 'stock',
+            'product_type' => Product::TYPE_STOCK,
             'track_stock' => true,
-            'active' => true,
-            'created_by' => $owner->id,
-        ]);
-        ProductUnit::create([
-            'company_id' => $company->id,
-            'product_id' => $product->id,
-            'unit_id' => $unit->id,
-            'conversion_to_base' => '1.000000',
-            'is_base' => true,
-            'is_default_sale' => true,
-            'is_default_purchase' => true,
-            'active' => true,
             'default_sale_price_base' => '10.000000',
-        ]);
+            'active' => true,
+        ], (int) $owner->id);
         app(PostOpeningStockAction::class)->execute(
             company: $company,
             product: $product,
@@ -222,14 +225,14 @@ $foreignCompany = app(CreateCompanyAction::class)->execute($foreignOwner, [
 ]);
 auth()->setUser($foreignOwner);
 app(CompanyContext::class)->setCompany($foreignCompany, $foreignOwner);
-$foreignCustomer = Customer::create([
-    'company_id' => $foreignCompany->id,
+setPermissionsTeamId($foreignCompany->id);
+$foreignOwner->unsetRelation('roles')->unsetRelation('permissions');
+$foreignCustomer = app(CustomerCatalogService::class)->save($foreignCompany, $foreignOwner, [
     'name_ar' => 'نقدي',
     'name_en' => 'Foreign walk in',
     'default_currency_code' => 'ILS',
     'preferred_locale' => 'en',
     'status' => 'active',
-    'created_by' => $foreignOwner->id,
 ]);
 $foreignWarehouse = Warehouse::where('company_id', $foreignCompany->id)->where('is_default', true)->firstOrFail();
 $foreignCash = MoneyAccount::where('company_id', $foreignCompany->id)
@@ -261,7 +264,7 @@ file_put_contents($dir.'/credentials.json', json_encode([
 ], JSON_THROW_ON_ERROR));
 
 file_put_contents($dir.'/handoff.json', json_encode([
-    'backend' => '220f5c78fcedcbd2b045d0e9100317a11da07504',
+    'backend' => $sha,
     'origin' => 'http://127.0.0.1:18400',
     'credentials' => $dir.'/credentials.json',
     'device' => (string) Str::uuid(),

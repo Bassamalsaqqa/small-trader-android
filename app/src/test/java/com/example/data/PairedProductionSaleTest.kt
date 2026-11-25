@@ -32,6 +32,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
 import java.math.BigDecimal
+import java.math.RoundingMode
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermission
@@ -125,7 +126,12 @@ class PairedProductionSaleTest {
         val path = System.getenv("SMALL_TRADER_FINANCIAL_PILOT_HANDOFF")
         assumeTrue("NOT RUN: owned paired financial slot has not been assigned", !path.isNullOrBlank())
         val handoff = privateJson(requireNotNull(path))
-        require(handoff.require("backend").asString() == "220f5c78fcedcbd2b045d0e9100317a11da07504")
+        val rawExpectedBackend = System.getenv("PAIRED_BACKEND_SHA")
+        val expectedBackend = rawExpectedBackend ?: "220f5c78fcedcbd2b045d0e9100317a11da07504"
+        require(Regex("^[0-9a-f]{40}$").matches(expectedBackend)) {
+            "PAIRED_BACKEND_SHA must be an explicit 40-character lowercase git commit SHA"
+        }
+        require(handoff.require("backend").asString() == expectedBackend)
         require(handoff.require("expires").asInt().toLong() > System.currentTimeMillis() / 1000)
         val origin = handoff.require("origin").asString()
         require(origin == "http://127.0.0.1:18400")
@@ -142,6 +148,37 @@ class PairedProductionSaleTest {
         var retainedOnlineCommit: TransportRequest? = null
         var retainedOfflineCommit: TransportRequest? = null
         val observedExchanges = CopyOnWriteArrayList<RecordedHttpExchange>()
+
+        fun assertDecimal6(expected6dp: String, actual: String) {
+            assertEquals(0, BigDecimal(expected6dp).compareTo(BigDecimal(actual)))
+            assertEquals(expected6dp, BigDecimal(actual).setScale(6, RoundingMode.UNNECESSARY).toPlainString())
+        }
+
+        fun assertOnlineWireTotals(clientEventId: String, expectedTotal6dp: String) {
+            val match = observedExchanges.last { ex ->
+                ex.method == HttpMethod.POST &&
+                    ex.path.endsWith("/sales/online-cash") &&
+                    ex.statusCode in 200..201 &&
+                    runCatching { StrictJsonParser.parseObject(ex.body).optionalString("client_event_id") }.getOrNull() == clientEventId
+            }
+            val obj = StrictJsonParser.parseObject(match.body)
+            assertEquals("posted", obj.require("status").asString())
+            assertDecimal6(expectedTotal6dp, obj.require("grand_total").asString())
+            assertDecimal6(expectedTotal6dp, obj.require("amount_paid").asString())
+            assertDecimal6("0.000000", obj.require("change_returned").asString())
+        }
+
+        fun assertOfflineWireTotal(clientEventId: String, expectedTotal6dp: String) {
+            val match = observedExchanges.last { ex ->
+                ex.method == HttpMethod.POST &&
+                    ex.path.endsWith("/offline-events") &&
+                    ex.statusCode == 200 &&
+                    runCatching { StrictJsonParser.parseObject(ex.body).optionalString("client_event_id") }.getOrNull() == clientEventId
+            }
+            val obj = StrictJsonParser.parseObject(match.body)
+            assertEquals("posted", obj.require("status").asString())
+            assertDecimal6(expectedTotal6dp, obj.require("outcome").asObject().require("grand_total").asString())
+        }
 
         val transport = object : ReadClientTransport {
             override fun execute(request: TransportRequest): TransportResponse {
@@ -195,6 +232,7 @@ class PairedProductionSaleTest {
         var ilsCatalogVersion: String? = null
         var ilsExclusiveTaxId: ServerUlid? = null
         var ilsMinorUnits: Int = 2
+        var ilsOffline1Id: String? = null
 
         try {
             val fixtures = handoff.require("fixtures").asArray()
@@ -318,6 +356,10 @@ class PairedProductionSaleTest {
                             val replayObj = StrictJsonParser.parseObject(replayResp.body)
                             assertEquals(invUlid, replayObj.require("invoice_id").asString())
                             assertEquals(payUlid, replayObj.require("payment_id").asString())
+                            assertDecimal6("17.400000", replayObj.require("grand_total").asString())
+                            assertDecimal6("17.400000", replayObj.require("amount_paid").asString())
+                            assertDecimal6("0.000000", replayObj.require("change_returned").asString())
+                            assertOnlineWireTotals(ilsOnlineEventId.value, "17.400000")
                             val origOnlineBody = requireNotNull(origOnline.body)
                             val changedOnlineBody = origOnlineBody.replace("10.000000", "11.000000")
                             check(changedOnlineBody != origOnlineBody) { "Expected retained online price lexeme" }
@@ -336,6 +378,7 @@ class PairedProductionSaleTest {
                             assertEquals("CONFIRMED", online2.outboxStatus)
                             assertNotNull(online2.serverInvoiceUlid)
                             assertNotNull(online2.serverPaymentUlid)
+                            assertOnlineWireTotals(requireNotNull(online2.clientEventId), "12.500000")
 
                             // 3) Online ILS noTax + fractional qty
                             val onlineNoTaxItem = BasketItem(
@@ -349,6 +392,7 @@ class PairedProductionSaleTest {
                             val online3 = repo.recordSale(invoiceFor(listOf(onlineNoTaxItem), cmu)).getOrThrow()
                             assertEquals("CONFIRMED", online3.outboxStatus)
                             assertNotNull(online3.serverInvoiceUlid)
+                            assertOnlineWireTotals(requireNotNull(online3.clientEventId), "7.500000")
 
                             // 4) Offline lease + RestrictedOfflineWorkspace test-injected Keystore/boot/device gate (no fake auth!)
                             val lease = repo.acquireOfflineSaleLease().getOrThrow()
@@ -421,6 +465,7 @@ class PairedProductionSaleTest {
                                     assertEquals("pending", restrictedCaptured.outboxStatus)
                                     assertNotNull(restrictedCaptured.localReceiptNumber)
                                     assertEquals(1, workspace.pending().count)
+                                    ilsOffline1Id = requireNotNull(restrictedCaptured.clientEventId)
                                 } finally {
                                     workspace.close()
                                 }
@@ -461,6 +506,8 @@ class PairedProductionSaleTest {
                             val sync2 = repo.syncOfflineSales().getOrThrow()
                             assertEquals(2, sync2.confirmedCount)
                             assertEquals(0, repo.getPendingOfflineSalesCount())
+                            assertOfflineWireTotal(requireNotNull(ilsOffline1Id), "17.400000")
+                            assertOfflineWireTotal(requireNotNull(offline2.clientEventId), "26.100000")
 
                             // Offline same-event replay (200 same IDs) and changed-payload 409 (zero extra)
                             val origOffline = requireNotNull(retainedOfflineCommit)
@@ -661,6 +708,9 @@ class PairedProductionSaleTest {
                             assertEquals("CONFIRMED", jodOnline1.outboxStatus)
                             assertEquals("CONFIRMED", jodOnline2.outboxStatus)
                             assertEquals("CONFIRMED", jodOnline3.outboxStatus)
+                            assertOnlineWireTotals(requireNotNull(jodOnline1.clientEventId), "13.750000")
+                            assertOnlineWireTotals(requireNotNull(jodOnline2.clientEventId), "13.050000")
+                            assertOnlineWireTotals(requireNotNull(jodOnline3.clientEventId), "3.750000")
 
                             // Offline JOD inclusive + fractional quantities (multiple + repo recreation + reconnect)
                             val lease = repo.acquireOfflineSaleLease().getOrThrow()
@@ -691,6 +741,8 @@ class PairedProductionSaleTest {
                             repo.isNetworkOffline = false
                             assertEquals(2, repo.syncOfflineSales().getOrThrow().confirmedCount)
                             assertEquals(0, repo.getPendingOfflineSalesCount())
+                            assertOfflineWireTotal(requireNotNull(jodOff1.clientEventId), "13.750000")
+                            assertOfflineWireTotal(requireNotNull(jodOff2.clientEventId), "21.250000")
                         }
 
                         "ils_notax" -> {
@@ -699,6 +751,7 @@ class PairedProductionSaleTest {
                             assertNull(lease.taxRateId)
 
                             repo.isNetworkOffline = true
+                            val noTaxIds = ArrayList<String>(2)
                             repeat(2) { idx ->
                                 val qty = if (idx == 0) BigDecimal("1.5") else BigDecimal("2.5")
                                 val local = repo.recordSale(
@@ -710,6 +763,7 @@ class PairedProductionSaleTest {
                                 assertEquals("pending", local.outboxStatus)
                                 assertNull(local.serverInvoiceUlid)
                                 assertNotNull(local.localReceiptNumber)
+                                noTaxIds.add(requireNotNull(local.clientEventId))
                             }
                             assertEquals(2, repo.getPendingOfflineSalesCount())
                             repo.close(); db.close()
@@ -718,6 +772,8 @@ class PairedProductionSaleTest {
                             repo.isNetworkOffline = false
                             assertEquals(2, repo.syncOfflineSales().getOrThrow().confirmedCount)
                             assertEquals(0, repo.getPendingOfflineSalesCount())
+                            assertOfflineWireTotal(noTaxIds[0], "15.000000")
+                            assertOfflineWireTotal(noTaxIds[1], "25.000000")
                         }
 
                         else -> error("Unexpected fixture key: $key")

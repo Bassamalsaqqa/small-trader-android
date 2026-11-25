@@ -4,7 +4,12 @@ declare(strict_types=1);
 
 // Test support only. No framework boot or socket without explicit slot assignment.
 $root = realpath((string) getenv('PAIRED_BACKEND_ROOT'));
-$sha = '220f5c78fcedcbd2b045d0e9100317a11da07504';
+$defaultSha = '220f5c78fcedcbd2b045d0e9100317a11da07504';
+$rawSha = getenv('PAIRED_BACKEND_SHA');
+$sha = $rawSha === false ? $defaultSha : $rawSha;
+if (!is_string($sha) || preg_match('/\A[0-9a-f]{40}\z/', $sha) !== 1) {
+    throw new RuntimeException('PAIRED_BACKEND_SHA must be an explicit 40-character lowercase git commit SHA.');
+}
 if (!$root || getenv('PAIRED_OWNED_SLOT') !== '3342' || getenv('PAIRED_EXECUTE') !== 'synthetic-only') {
     throw new RuntimeException('Assign owned slot 3342 and explicit synthetic-only execution first.');
 }
@@ -39,7 +44,10 @@ try {
         'MOBILE_API_ENABLED' => 'true', 'MOBILE_MERCHANT_API_ENABLED' => 'true',
         'MOBILE_V2_API_ENABLED' => 'true', 'MOBILE_V2_CASH_SLICE_ENABLED' => 'true',
         'MOBILE_V2_OFFLINE_SALES_ENABLED' => 'true',
-        'PAIRED_HTTP_NONCE' => bin2hex(random_bytes(24)), 'PAIRED_PRIVATE_DIR' => $dir, 'PAIRED_BACKEND_ROOT' => $root,
+        'PAIRED_HTTP_NONCE' => bin2hex(random_bytes(24)),
+        'PAIRED_PRIVATE_DIR' => $dir,
+        'PAIRED_BACKEND_ROOT' => $root,
+        'PAIRED_BACKEND_SHA' => $sha,
     ];
     $fixture = new Process([PHP_BINARY, __DIR__.'/fixture.php'], $root, $env);
     $fixture->setTimeout(120)->mustRun();
@@ -61,6 +69,7 @@ try {
     $android = dirname(__DIR__, 2);
     $gradleEnv = array_filter([
         'SMALL_TRADER_FINANCIAL_PILOT_HANDOFF' => $dir.'/handoff.json',
+        'PAIRED_BACKEND_SHA' => $sha,
         'JAVA_HOME' => getenv('JAVA_HOME') ?: null,
         'ANDROID_HOME' => getenv('ANDROID_HOME') ?: null,
     ], static fn ($value): bool => is_string($value) && $value !== '');
