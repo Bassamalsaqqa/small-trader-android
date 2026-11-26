@@ -39,6 +39,6 @@ Approval & Distribution: <Owner decision and private channel>
 
 ## 4. Current Release Limits
 
-- **No deployment occurred** and backend database **restore is NOT VERIFIED**.
+- The Account web release is live from `main`; a current off-host snapshot restored and migrated successfully in isolation. Historical and independent key-loss recovery remain unverified.
 - Mobile API & offline capture remain **OFF** by default; **mobile document discounts are NOT implemented** (future proposal only; nonzero discounts rejected in production); shift-close submission remains **blocked**; physical device/KVM acceptance remains **unverified**.
 - References: [Android versioning](https://developer.android.com/studio/publish/versioning), [App signing](https://developer.android.com/studio/publish/app-signing), [apksigner](https://developer.android.com/tools/apksigner).
