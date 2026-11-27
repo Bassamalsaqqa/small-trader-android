@@ -2192,6 +2192,12 @@ fun CustomerPaymentCollectionDialog(
     val effectiveOperationId = if (!operationId.isNullOrBlank()) operationId else localFallbackOperationId
     val effectiveSubmitting = isSubmitting || localSubmitting
 
+    LaunchedEffect(Unit) {
+        if (inlineError == null) {
+            localInlineError = null
+        }
+    }
+
     LaunchedEffect(inlineError) {
         if (inlineError != null) {
             localInlineError = inlineError

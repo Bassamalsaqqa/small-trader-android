@@ -141,6 +141,12 @@ fun PaySupplierDialog(
     var payInlineError by rememberSaveable(supplier.id) { mutableStateOf<String?>(null) }
     val effectiveSubmitting = isSubmitting || isSubmittingPay
 
+    LaunchedEffect(Unit) {
+        if (inlineError == null) {
+            payInlineError = null
+        }
+    }
+
     LaunchedEffect(inlineError) {
         if (inlineError != null) {
             payInlineError = inlineError

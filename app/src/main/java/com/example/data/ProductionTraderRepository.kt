@@ -332,9 +332,12 @@ class ProductionTraderRepository(
 
             val err = postResult.exceptionOrNull()
             val errMsg = err?.message ?: "Command execution failed"
-            val httpStatus = (err as? com.example.data.mobile.readclient.http.HttpTransportException)?.httpStatusCode
-            val isDefinitiveFailure = (httpStatus != null && httpStatus in setOf(400, 403, 404, 422)) ||
-                (httpStatus == null && (errMsg.contains("HTTP 4") || errMsg.contains("VALIDATION_FAILED") || errMsg.contains("FORBIDDEN")))
+            val httpErr = err as? com.example.data.mobile.readclient.http.HttpTransportException
+            val isDefinitiveFailure = isValidatedAuthoritativeRejection(
+                err = httpErr,
+                expectedCompanyId = scopeAfter.companyId.value,
+                expectedIdempotencyKey = idempotencyKey
+            )
 
             if (!isDefinitiveFailure && isReceiptStatusChecked) {
                 val statusAfterError = checkReceiptStatusOnServer(scopeAfter.companyId, idempotencyKey, commandId, validateResponse)
@@ -360,6 +363,30 @@ class ProductionTraderRepository(
             }
             inFlightCommands.remove(admissionKey)
         }
+    }
+
+    private fun isValidatedAuthoritativeRejection(
+        err: com.example.data.mobile.readclient.http.HttpTransportException?,
+        expectedCompanyId: String,
+        expectedIdempotencyKey: String
+    ): Boolean {
+        if (err == null) return false
+        if (err.category != com.example.data.mobile.readclient.http.HttpTransportException.CATEGORY_SERVER_ERROR) {
+            return false
+        }
+        val status = err.httpStatusCode ?: return false
+        val code = err.authoritativeErrorCode ?: return false
+        if (err.companyId != expectedCompanyId || err.idempotencyKey != expectedIdempotencyKey) {
+            return false
+        }
+        val allowedCodes = when (status) {
+            400 -> setOf("BAD_REQUEST", "INVALID_JSON", "MISSING_IDEMPOTENCY_KEY")
+            403 -> setOf("FORBIDDEN", "FORBIDDEN_TENANT_MISMATCH", "MOBILE_MERCHANT_DISABLED")
+            404 -> setOf("NOT_FOUND")
+            422 -> setOf("VALIDATION_FAILED", "INVALID_JSON", "MISSING_IDEMPOTENCY_KEY")
+            else -> emptySet()
+        }
+        return code in allowedCodes
     }
 
     private fun checkReceiptStatusOnServer(
@@ -4200,7 +4227,9 @@ class ProductionTraderRepository(
     override fun isDraftRecovering(formType: String): Boolean {
         val scope = authScopeProvider?.invoke() ?: return false
         val record = commandStore.getActiveDraftRecord(scope.companyId.value, scope.actorId.value, scope.deviceId.value, formType) ?: return false
-        return record.status == CommandStatus.SUBMITTED || record.status == CommandStatus.UNKNOWN_ACK
+        return record.status == CommandStatus.PENDING ||
+            record.status == CommandStatus.SUBMITTED ||
+            record.status == CommandStatus.UNKNOWN_ACK
     }
 
     override suspend fun loadCustomerDetail(customerId: String): Result<Customer> = getCustomerDetail(customerId)

@@ -20,14 +20,19 @@ import com.example.data.mobile.readclient.CustomerDirectoryResponse
 import com.example.data.mobile.readclient.HttpMethod
 import com.example.data.mobile.readclient.ProductCatalogItem
 import com.example.data.mobile.readclient.ProductCatalogResponse
+import com.example.data.mobile.readclient.ReadClientErrorResponse
 import com.example.data.mobile.readclient.ReadClientTransport
 import com.example.data.mobile.readclient.TransportRequest
+import com.example.data.mobile.readclient.TransportResponse
 import com.example.data.mobile.readclient.http.HttpTransportException
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.UUID
 import com.example.model.PaymentAllocationInput
 import com.example.model.WesternFormatters
+
+private val MOBILE_COMPANY_PATH_REGEX = Regex("^/api/mobile/v[12]/companies/([0-7][0-9A-HJKMNP-TV-Z]{25})(?:/|\$)")
+private val SAFE_AUTHORITATIVE_ERROR_CODE_REGEX = Regex("^[A-Z0-9_]{1,64}\$")
 
 /**
  * Typed client for native Mobile V1 and V2 merchant domain endpoints.
@@ -80,17 +85,95 @@ class MobileMerchantApiClient(
                     }
                 }
             } else {
-                val errorMsg = parseErrorMessage(response.body, response.statusCode)
+                val requestCompanyId = extractCompanyIdFromPath(path)
+                val rejection = parseAuthoritativeRejection(
+                    response = response,
+                    requestCompanyId = requestCompanyId,
+                    requestIdempotencyKey = idempotencyKey
+                )
+                val errorMsg = rejection?.message ?: parseErrorMessage(response.body, response.statusCode)
                 Result.failure(
                     HttpTransportException(
                         category = HttpTransportException.CATEGORY_SERVER_ERROR,
                         message = errorMsg,
-                        httpStatusCode = response.statusCode
+                        httpStatusCode = response.statusCode,
+                        authoritativeErrorCode = rejection?.code,
+                        companyId = rejection?.companyId ?: requestCompanyId,
+                        idempotencyKey = rejection?.idempotencyKey ?: idempotencyKey
                     )
                 )
             }
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    private data class ParsedAuthoritativeRejection(
+        val code: String,
+        val message: String,
+        val companyId: String?,
+        val idempotencyKey: String?
+    )
+
+    private fun extractCompanyIdFromPath(path: String): String? =
+        MOBILE_COMPANY_PATH_REGEX.find(path)?.groupValues?.getOrNull(1)
+
+    private fun headerIgnoreCase(headers: Map<String, String>, name: String): String? =
+        headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
+
+    private fun isJsonMediaType(contentTypeHeader: String?): Boolean {
+        if (contentTypeHeader == null) return true
+        if (contentTypeHeader.isBlank()) return false
+        val mediaType = contentTypeHeader.substringBefore(';').trim().lowercase()
+        return mediaType == "application/json" ||
+            mediaType == "application/problem+json" ||
+            (mediaType.startsWith("application/") && mediaType.endsWith("+json"))
+    }
+
+    private fun parseAuthoritativeRejection(
+        response: TransportResponse,
+        requestCompanyId: String?,
+        requestIdempotencyKey: String?
+    ): ParsedAuthoritativeRejection? {
+        if (!isJsonMediaType(headerIgnoreCase(response.headers, "Content-Type"))) {
+            return null
+        }
+        val headerCompanyId = headerIgnoreCase(response.headers, "X-Company-Id")?.trim()?.takeIf { it.isNotEmpty() }
+            ?: headerIgnoreCase(response.headers, "Company-Id")?.trim()?.takeIf { it.isNotEmpty() }
+        if (headerCompanyId != null && requestCompanyId != null && headerCompanyId != requestCompanyId) {
+            return null
+        }
+        val headerKey = headerIgnoreCase(response.headers, "Idempotency-Key")?.trim()?.takeIf { it.isNotEmpty() }
+            ?: headerIgnoreCase(response.headers, "X-Idempotency-Key")?.trim()?.takeIf { it.isNotEmpty() }
+        if (headerKey != null && requestIdempotencyKey != null && headerKey != requestIdempotencyKey) {
+            return null
+        }
+        if (response.body.isBlank()) {
+            return null
+        }
+        return try {
+            val rootObj = StrictJsonParser.parseObject(response.body)
+            val errResp = ReadClientErrorResponse.fromStrictJson(rootObj)
+            if (!SAFE_AUTHORITATIVE_ERROR_CODE_REGEX.matches(errResp.code)) {
+                return null
+            }
+            val detailsObj = errResp.details as? StrictJsonObject
+            val detailsCompanyId = (detailsObj?.properties?.get("company_id") as? StrictJsonString)?.value
+            if (detailsCompanyId != null && requestCompanyId != null && detailsCompanyId != requestCompanyId) {
+                return null
+            }
+            val detailsKey = (detailsObj?.properties?.get("idempotency_key") as? StrictJsonString)?.value
+            if (detailsKey != null && requestIdempotencyKey != null && detailsKey != requestIdempotencyKey) {
+                return null
+            }
+            ParsedAuthoritativeRejection(
+                code = errResp.code,
+                message = errResp.message,
+                companyId = detailsCompanyId ?: headerCompanyId ?: requestCompanyId,
+                idempotencyKey = detailsKey ?: headerKey ?: requestIdempotencyKey
+            )
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -731,7 +814,30 @@ class MobileMerchantApiClient(
                     val obj = StrictJsonParser.parseObject(response.body)
                     ReceiptStatusResult.Found(obj)
                 }
-                404 -> ReceiptStatusResult.NotFound
+                404 -> {
+                    val contentType = headerIgnoreCase(response.headers, "Content-Type")
+                    val isJsonBodyValid = isJsonMediaType(contentType) &&
+                        (response.body.isBlank() || try {
+                            StrictJsonParser.parseObject(response.body)
+                            true
+                        } catch (_: Exception) {
+                            false
+                        })
+                    if (isJsonBodyValid) {
+                        ReceiptStatusResult.NotFound
+                    } else {
+                        ReceiptStatusResult.Error(
+                            HttpTransportException(
+                                category = HttpTransportException.CATEGORY_SERVER_ERROR,
+                                message = "Unstructured HTTP 404 from receipt status endpoint",
+                                httpStatusCode = 404,
+                                authoritativeErrorCode = null,
+                                companyId = companyId.value,
+                                idempotencyKey = idempotencyKey
+                            )
+                        )
+                    }
+                }
                 else -> {
                     val errorMsg = parseErrorMessage(response.body, response.statusCode)
                     ReceiptStatusResult.Error(

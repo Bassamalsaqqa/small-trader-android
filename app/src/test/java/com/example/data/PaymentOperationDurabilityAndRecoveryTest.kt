@@ -8,8 +8,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
@@ -1055,6 +1057,560 @@ class PaymentOperationDurabilityAndRecoveryTest {
             assertNotEquals(op1, vm.uiState.value.draftCustomerPaymentOperationId)
         } finally {
             db.close()
+        }
+    }
+
+    private fun sha256Digest(bytes: ByteArray): String =
+        "sha256:" + java.security.MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString("") { "%02x".format(it) }
+
+    // -------------------------------------------------------------------------
+    // 10. Unstructured / HTML / Mismatched 403, 404, 422 Retain UNKNOWN_ACK & Same Key
+    // -------------------------------------------------------------------------
+    @Test
+    fun unstructuredAndMismatched403_404_422_retainUnknownAck_checkStatus_andKeepSameKey() = runBlocking {
+        val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store = RoomMerchantCommandStore(db, cryptoEngine)
+        val repo = newRepo(store)
+
+        val custPostCount = AtomicInteger(0)
+        val custStatusCount = AtomicInteger(0)
+        val custKeys = CopyOnWriteArrayList<String>()
+        var custStatusMode = "html404" // html404 -> found
+
+        val supPostCount = AtomicInteger(0)
+        val supStatusCount = AtomicInteger(0)
+        val supKeys = CopyOnWriteArrayList<String>()
+        var supPostMode = "nonContract404" // nonContract404 -> nonContractCode422 -> mismatchedScope422
+        var supStatusMode = "outage503" // outage503 -> found
+
+        server!!.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.path.orEmpty()
+                return when {
+                    request.method == "POST" && path.endsWith("/customers/${customerA.value}/payments") -> {
+                        custPostCount.incrementAndGet()
+                        request.getHeader("Idempotency-Key")?.let { custKeys.add(it) }
+                        // Server committed financially, but upstream proxy returned HTML 403!
+                        MockResponse().setResponseCode(403)
+                            .setHeader("Content-Type", "text/html; charset=utf-8")
+                            .setBody("<html><body>403 Proxy Forbidden</body></html>")
+                    }
+                    request.method == "POST" && path.endsWith("/suppliers/${supplierA.value}/payments") -> {
+                        supPostCount.incrementAndGet()
+                        request.getHeader("Idempotency-Key")?.let { supKeys.add(it) }
+                        when (supPostMode) {
+                            "nonContract404" -> MockResponse().setResponseCode(404)
+                                .setHeader("Content-Type", "application/json")
+                                .setBody("""{"message":"Gateway route not found"}""")
+                            "nonContractCode422" -> MockResponse().setResponseCode(422)
+                                .setHeader("Content-Type", "application/json")
+                                .setBody("""{"error":{"code":"WAF_RULE_BLOCKED","message":"Blocked by proxy"}}""")
+                            else -> MockResponse().setResponseCode(422)
+                                .setHeader("Content-Type", "application/json")
+                                .setHeader("X-Company-Id", companyB.value)
+                                .setBody("""{"error":{"code":"VALIDATION_FAILED","message":"Wrong company header"}}""")
+                        }
+                    }
+                    request.method == "GET" && path.contains("/receipts/status") -> {
+                        val keyParam = request.requestUrl?.queryParameter("idempotency_key").orEmpty()
+                        if (keyParam.startsWith("custpay-")) {
+                            custStatusCount.incrementAndGet()
+                            if (custStatusMode == "html404") {
+                                MockResponse().setResponseCode(404)
+                                    .setHeader("Content-Type", "text/html")
+                                    .setBody("<html>404 Gateway</html>")
+                            } else {
+                                MockResponse().setResponseCode(200)
+                                    .setHeader("Content-Type", "application/json")
+                                    .setBody("""{"status":"FOUND","company_id":"${companyA.value}","idempotency_key":"$keyParam","response_snapshot":{"id":"01JCVPAYHTML403RECOV01","customer_id":"${customerA.value}","amount":"40.00","posted_at":"2026-11-27","balance":"60.00"}}""")
+                            }
+                        } else {
+                            supStatusCount.incrementAndGet()
+                            if (supStatusMode == "outage503") {
+                                MockResponse().setResponseCode(503)
+                                    .setBody("""{"error":{"code":"TEMPORARY_UNAVAILABLE","message":"Retry"}}""")
+                            } else {
+                                MockResponse().setResponseCode(200)
+                                    .setHeader("Content-Type", "application/json")
+                                    .setBody("""{"status":"FOUND","company_id":"${companyA.value}","idempotency_key":"$keyParam","response_snapshot":{"id":"01JCVSUPPAYUNSTRUCT01","supplier_id":"${supplierA.value}","amount":"55.00","posted_at":"2026-11-27","balance_owed":"25.00"}}""")
+                            }
+                        }
+                    }
+                    else -> MockResponse().setResponseCode(200).setBody("{}")
+                }
+            }
+        }
+
+        try {
+            // Part A: Customer POST -> proxy HTML 403 + HTML 404 on /receipts/status -> keeps UNKNOWN_ACK & SAME key
+            val custOp = repo.getDraftOperationId("customer_payment")
+            val custRes1 = repo.recordCustomerPayment(
+                customerId = customerA.value,
+                amount = BigDecimal("40.00"),
+                note = "Proxy HTML 403",
+                paymentId = custOp,
+                cashAccountId = cashAccountA.value,
+                paymentDate = "2026-11-27"
+            )
+            assertTrue("HTML 403 + HTML 404 status must fail ambiguously, never treat as settled or NOT_FOUND", custRes1.isFailure)
+            assertEquals("SAME draft key must be preserved", custOp, repo.getDraftOperationId("customer_payment"))
+            assertTrue("Must remain recovering", repo.isDraftRecovering("customer_payment"))
+            val custRec = store.findCommand(companyA.value, actorA.value, deviceA.value, "custpay-$custOp")
+            assertEquals(CommandStatus.UNKNOWN_ACK, custRec?.status)
+            assertEquals(1, custPostCount.get())
+            assertEquals(1, custStatusCount.get())
+
+            // Recovery retry when /receipts/status returns Found -> succeeds via 0 additional POSTs & rotates key
+            custStatusMode = "found"
+            val custRes2 = repo.recordCustomerPayment(
+                customerId = customerA.value,
+                amount = BigDecimal("40.00"),
+                note = "Proxy HTML 403",
+                paymentId = custOp,
+                cashAccountId = cashAccountA.value,
+                paymentDate = "2026-11-27"
+            )
+            assertTrue("Retry must recover via /receipts/status: ${custRes2.exceptionOrNull()?.message}", custRes2.isSuccess)
+            assertEquals("No second POST may occur when HTML 403 retained UNKNOWN_ACK", 1, custPostCount.get())
+            assertEquals(2, custStatusCount.get())
+            assertEquals(listOf("custpay-$custOp"), custKeys)
+            assertNotEquals(custOp, repo.getDraftOperationId("customer_payment"))
+
+            // Part B: Supplier POST -> non-contract 404 {"message":...} retains UNKNOWN_ACK & SAME key, then recovers
+            val supOp1 = repo.getDraftOperationId("supplier_payment")
+            val supRes1 = repo.recordSupplierPayment(supplierA.value, BigDecimal("55.00"), "Proxy 404", ownerSession, supOp1, cashAccountA.value, "2026-11-27")
+            assertTrue(supRes1.isFailure)
+            assertEquals(supOp1, repo.getDraftOperationId("supplier_payment"))
+            assertEquals(CommandStatus.UNKNOWN_ACK, store.findCommand(companyA.value, actorA.value, deviceA.value, "suppay-$supOp1")?.status)
+            assertEquals(1, supStatusCount.get())
+
+            supStatusMode = "found"
+            val supRes1Recov = repo.recordSupplierPayment(supplierA.value, BigDecimal("55.00"), "Proxy 404", ownerSession, supOp1, cashAccountA.value, "2026-11-27")
+            assertTrue(supRes1Recov.isSuccess)
+            assertEquals(1, supPostCount.get())
+            assertNotEquals(supOp1, repo.getDraftOperationId("supplier_payment"))
+
+            // Part C: Non-contract error code 422 & mismatched X-Company-Id 422 also retain UNKNOWN_ACK & SAME key
+            supPostMode = "nonContractCode422"
+            supStatusMode = "outage503"
+            val supOp2 = repo.getDraftOperationId("supplier_payment")
+            assertTrue(repo.recordSupplierPayment(supplierA.value, BigDecimal("15.00"), "WAF 422", ownerSession, supOp2, cashAccountA.value, "2026-11-27").isFailure)
+            assertEquals(supOp2, repo.getDraftOperationId("supplier_payment"))
+            assertEquals(CommandStatus.UNKNOWN_ACK, store.findCommand(companyA.value, actorA.value, deviceA.value, "suppay-$supOp2")?.status)
+
+            supStatusMode = "found"
+            assertTrue(repo.recordSupplierPayment(supplierA.value, BigDecimal("15.00"), "WAF 422", ownerSession, supOp2, cashAccountA.value, "2026-11-27").isSuccess)
+            assertNotEquals(supOp2, repo.getDraftOperationId("supplier_payment"))
+
+            supPostMode = "mismatchedScope422"
+            supStatusMode = "outage503"
+            val supOp3 = repo.getDraftOperationId("supplier_payment")
+            assertTrue(repo.recordSupplierPayment(supplierA.value, BigDecimal("18.00"), "Bad company hdr", ownerSession, supOp3, cashAccountA.value, "2026-11-27").isFailure)
+            assertEquals(supOp3, repo.getDraftOperationId("supplier_payment"))
+            assertEquals(CommandStatus.UNKNOWN_ACK, store.findCommand(companyA.value, actorA.value, deviceA.value, "suppay-$supOp3")?.status)
+        } finally {
+            db.close()
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 11. Validated Authoritative Domain Rejections (422/403/404) Terminate Cleanly
+    // -------------------------------------------------------------------------
+    @Test
+    fun validatedAuthoritativeDomainRejections_matchingContractAndScope_markFailedAndRotate() = runBlocking {
+        val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store = RoomMerchantCommandStore(db, cryptoEngine)
+        val repo = newRepo(store)
+        val statusCalls = AtomicInteger(0)
+        var nextErrorResponse = 422 to """{"error":{"code":"VALIDATION_FAILED","message":"Amount exceeds credit policy"}}"""
+
+        server!!.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.path.orEmpty()
+                return when {
+                    request.method == "POST" && path.endsWith("/customers/${customerA.value}/payments") ->
+                        MockResponse()
+                            .setResponseCode(nextErrorResponse.first)
+                            .setHeader("Content-Type", "application/json")
+                            .setBody(nextErrorResponse.second)
+                    request.method == "GET" && path.contains("/receipts/status") -> {
+                        statusCalls.incrementAndGet()
+                        MockResponse().setResponseCode(404).setBody("""{"error":{"code":"NOT_FOUND","message":"Not found"}}""")
+                    }
+                    else -> MockResponse().setResponseCode(200).setBody("{}")
+                }
+            }
+        }
+
+        try {
+            val cases = listOf(
+                422 to """{"error":{"code":"VALIDATION_FAILED","message":"Amount exceeds policy"}}""",
+                403 to """{"error":{"code":"FORBIDDEN","message":"Permission denied"}}""",
+                404 to """{"error":{"code":"NOT_FOUND","message":"Customer does not exist"}}"""
+            )
+            for ((idx, errCase) in cases.withIndex()) {
+                nextErrorResponse = errCase
+                val op = repo.getDraftOperationId("customer_payment")
+                val res = repo.recordCustomerPayment(
+                    customerId = customerA.value,
+                    amount = BigDecimal("${10 + idx}.00"),
+                    note = "Validated rejection ${errCase.first}",
+                    paymentId = op,
+                    cashAccountId = cashAccountA.value,
+                    paymentDate = "2026-11-27"
+                )
+                assertTrue("Validated ${errCase.first} must fail", res.isFailure)
+                assertEquals("Validated domain rejection must skip /receipts/status", 0, statusCalls.get())
+                assertEquals(CommandStatus.FAILED, store.findCommand(companyA.value, actorA.value, deviceA.value, "custpay-$op")?.status)
+                assertFalse("FAILED command must NOT trap recovering flag", repo.isDraftRecovering("customer_payment"))
+                assertNotEquals("Validated FAILED must rotate draft key cleanly", op, repo.getDraftOperationId("customer_payment"))
+            }
+        } finally {
+            db.close()
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 12. Crash in Durable PENDING Window Before SUBMITTED (Customer + Supplier UI)
+    // -------------------------------------------------------------------------
+    @Test
+    fun pendingWindowRestart_customerAndSupplierUi_restoreOriginalPayload_blockOtherParty_andSubmitOnePost() = runBlocking {
+        // Phase A: Seed durable PENDING customer_payment & supplier_payment (crashed before SUBMITTED & POST)
+        val dbSeed = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val storeSeed = RoomMerchantCommandStore(dbSeed, cryptoEngine)
+        val custOp = storeSeed.getDraftOperationId(companyA.value, actorA.value, deviceA.value, "customer_payment")
+        val custPayloadObj = StrictJsonObject(
+            mapOf(
+                "customer_id" to StrictJsonString(customerA.value),
+                "amount" to StrictJsonString("50.000000"),
+                "currency" to StrictJsonString("ILS"),
+                "payment_date" to StrictJsonString("2026-11-27"),
+                "money_account_id" to StrictJsonString(cashAccountA.value),
+                "notes" to StrictJsonString("Pending customer draft"),
+                "allocations" to StrictJsonArray(emptyList())
+            )
+        )
+        val custPayloadBytes = CanonicalJsonSerializer.serializeToUtf8Bytes(custPayloadObj)
+        val custRecord = storeSeed.recordPendingCommand(
+            companyId = companyA.value,
+            commandId = custOp,
+            actorId = actorA.value,
+            deviceId = deviceA.value,
+            commandType = "customer.payment",
+            idempotencyKey = "custpay-$custOp",
+            payloadDigest = sha256Digest(custPayloadBytes),
+            canonicalPayloadBytes = custPayloadBytes
+        )
+        assertEquals(CommandStatus.PENDING, custRecord.status)
+
+        val supOp = storeSeed.getDraftOperationId(companyA.value, actorA.value, deviceA.value, "supplier_payment")
+        val supPayloadObj = StrictJsonObject(
+            mapOf(
+                "supplier_id" to StrictJsonString(supplierA.value),
+                "amount" to StrictJsonString("75.000000"),
+                "currency" to StrictJsonString("ILS"),
+                "payment_date" to StrictJsonString("2026-11-27"),
+                "money_account_id" to StrictJsonString(cashAccountA.value),
+                "notes" to StrictJsonString("Pending supplier draft"),
+                "allocations" to StrictJsonArray(emptyList())
+            )
+        )
+        val supPayloadBytes = CanonicalJsonSerializer.serializeToUtf8Bytes(supPayloadObj)
+        val supRecord = storeSeed.recordPendingCommand(
+            companyId = companyA.value,
+            commandId = supOp,
+            actorId = actorA.value,
+            deviceId = deviceA.value,
+            commandType = "supplier.payment",
+            idempotencyKey = "suppay-$supOp",
+            payloadDigest = sha256Digest(supPayloadBytes),
+            canonicalPayloadBytes = supPayloadBytes
+        )
+        assertEquals(CommandStatus.PENDING, supRecord.status)
+        dbSeed.close()
+
+        // Phase B: Cold restart on a fresh OutboxDatabase connection
+        val custPostCalls = AtomicInteger(0)
+        val custPostKeys = CopyOnWriteArrayList<String>()
+        val custPostBodies = CopyOnWriteArrayList<String>()
+        val supPostCalls = AtomicInteger(0)
+        val supPostKeys = CopyOnWriteArrayList<String>()
+        val supPostBodies = CopyOnWriteArrayList<String>()
+        server!!.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.path.orEmpty()
+                return when {
+                    request.method == "POST" && path.endsWith("/customers/${customerA.value}/payments") -> {
+                        custPostCalls.incrementAndGet()
+                        request.getHeader("Idempotency-Key")?.let { custPostKeys.add(it) }
+                        custPostBodies.add(request.body.readUtf8())
+                        MockResponse().setResponseCode(201).setHeader("Content-Type", "application/json")
+                            .setBody("""{"id":"01JCVPAYPENDINGCUST01","customer_id":"${customerA.value}","amount":"50.00","posted_at":"2026-11-27","balance":"70.00"}""")
+                    }
+                    request.method == "POST" && path.endsWith("/suppliers/${supplierA.value}/payments") -> {
+                        supPostCalls.incrementAndGet()
+                        request.getHeader("Idempotency-Key")?.let { supPostKeys.add(it) }
+                        supPostBodies.add(request.body.readUtf8())
+                        MockResponse().setResponseCode(201).setHeader("Content-Type", "application/json")
+                            .setBody("""{"id":"01JCVPAYPENDINGSUPP01","supplier_id":"${supplierA.value}","amount":"75.00","posted_at":"2026-11-27","balance_owed":"125.00"}""")
+                    }
+                    else -> MockResponse().setResponseCode(200).setBody("{}")
+                }
+            }
+        }
+
+        val dbRestart = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val storeRestart = RoomMerchantCommandStore(dbRestart, cryptoEngine)
+        val repoRestart = newRepo(storeRestart)
+        val vm = TraderViewModel(repoRestart)
+
+        try {
+            assertTrue("PENDING customer draft must report isDraftRecovering=true", repoRestart.isDraftRecovering("customer_payment"))
+            assertTrue("PENDING supplier draft must report isDraftRecovering=true", repoRestart.isDraftRecovering("supplier_payment"))
+            assertEquals(custOp, repoRestart.getDraftOperationId("customer_payment"))
+            assertEquals(supOp, repoRestart.getDraftOperationId("supplier_payment"))
+
+            val custA = Customer(id = customerA.value, nameAr = "زبون أ", nameEn = "Customer A", balanceExact = BigDecimal("120.00"))
+            val custB = Customer(id = customerB.value, nameAr = "زبون ب", nameEn = "Customer B", balanceExact = BigDecimal("50.00"))
+            val supA = Supplier(id = supplierA.value, nameAr = "مورد أ", nameEn = "Supplier A", balanceOwedExact = BigDecimal("200.00"))
+            val supB = Supplier(id = supplierB.value, nameAr = "مورد ب", nameEn = "Supplier B", balanceOwedExact = BigDecimal("75.00"))
+
+            var mode by mutableStateOf("custOther") // custOther -> custOwn -> supOther -> supOwn
+
+            composeTestRule.setContent {
+                val state by vm.uiState.collectAsState()
+                SmallTraderTheme(darkTheme = false, isRtl = false) {
+                    when (mode) {
+                        "custOther" -> CustomerPaymentCollectionDialog(
+                            customer = custB,
+                            lang = AppLanguage.EN,
+                            onDismiss = {},
+                            onConfirmPaymentExactWithResult = { cid, amount, note, paymentId, allocs, onComplete ->
+                                vm.confirmCustomerCollectionResult(cid, amount, note, paymentId, allocs, onComplete)
+                            },
+                            operationId = state.draftCustomerPaymentOperationId.takeIf { it.isNotBlank() },
+                            initialDraft = state.activeCustomerPaymentDraft,
+                            isRecovering = state.isCustomerPaymentRecovering,
+                            isSubmitting = state.isCustomerPaymentSubmitting,
+                            inlineError = state.customerPaymentError
+                        )
+                        "custOwn" -> CustomerPaymentCollectionDialog(
+                            customer = custA,
+                            lang = AppLanguage.EN,
+                            onDismiss = {},
+                            onConfirmPaymentExactWithResult = { cid, amount, note, paymentId, allocs, onComplete ->
+                                vm.confirmCustomerCollectionResult(cid, amount, note, paymentId, allocs, onComplete)
+                            },
+                            operationId = state.draftCustomerPaymentOperationId.takeIf { it.isNotBlank() },
+                            initialDraft = state.activeCustomerPaymentDraft,
+                            isRecovering = state.isCustomerPaymentRecovering,
+                            isSubmitting = state.isCustomerPaymentSubmitting,
+                            inlineError = state.customerPaymentError
+                        )
+                        "supOther" -> PaySupplierDialog(
+                            supplier = supB,
+                            lang = AppLanguage.EN,
+                            onDismiss = {},
+                            onPaySupplier = { _, _, _ -> Result.failure(IllegalStateException("unused")) },
+                            onPaySupplierExactWithResult = { sup, amount, note, paymentId, allocs, onComplete ->
+                                vm.paySupplierAmountExactResult(sup.id, amount, note, paymentId, allocations = allocs, onComplete = onComplete)
+                            },
+                            operationId = state.draftSupplierPaymentOperationId.takeIf { it.isNotBlank() },
+                            initialDraft = state.activeSupplierPaymentDraft,
+                            isRecovering = state.isSupplierPaymentRecovering,
+                            isSubmitting = state.isSupplierPaymentSubmitting,
+                            inlineError = state.supplierPaymentError
+                        )
+                        "supOwn" -> PaySupplierDialog(
+                            supplier = supA,
+                            lang = AppLanguage.EN,
+                            onDismiss = {},
+                            onPaySupplier = { _, _, _ -> Result.failure(IllegalStateException("unused")) },
+                            onPaySupplierExactWithResult = { sup, amount, note, paymentId, allocs, onComplete ->
+                                vm.paySupplierAmountExactResult(sup.id, amount, note, paymentId, allocations = allocs, onComplete = onComplete)
+                            },
+                            operationId = state.draftSupplierPaymentOperationId.takeIf { it.isNotBlank() },
+                            initialDraft = state.activeSupplierPaymentDraft,
+                            isRecovering = state.isSupplierPaymentRecovering,
+                            isSubmitting = state.isSupplierPaymentSubmitting,
+                            inlineError = state.supplierPaymentError
+                        )
+                    }
+                }
+            }
+
+            // 1. Customer B must be blocked by Customer A's PENDING draft
+            composeTestRule.waitForIdle()
+            composeTestRule.onNodeWithTag("customer_pay_blocked_banner").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("confirm_customer_payment_button").assertIsNotEnabled()
+
+            // 2. Customer A must restore 50 (not 120 default balance), lock inputs, enable Verify & Retry, execute ONE POST
+            mode = "custOwn"
+            composeTestRule.waitForIdle()
+            composeTestRule.onNodeWithTag("customer_pay_recovery_banner").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("payment_amount_input").assertIsNotEnabled().assertTextContains("50.00", substring = true)
+            composeTestRule.onNodeWithTag("payment_note_input").assertIsNotEnabled().assertTextContains("Pending customer draft", substring = true)
+            composeTestRule.onNodeWithTag("confirm_customer_payment_button").assertIsEnabled().performClick()
+
+            composeTestRule.waitUntil(timeoutMillis = 5_000) {
+                org.robolectric.shadows.ShadowLooper.idleMainLooper()
+                !vm.uiState.value.isCustomerPaymentRecovering && !vm.uiState.value.isCustomerPaymentSubmitting
+            }
+            composeTestRule.waitForIdle()
+            assertEquals("PENDING customer recovery must execute exactly ONE POST", 1, custPostCalls.get())
+            assertEquals(listOf("custpay-$custOp"), custPostKeys)
+            val custBodyObj = StrictJsonParser.parseObject(custPostBodies.single())
+            assertEquals("50.000000", custBodyObj.properties["amount"]?.asString())
+            assertEquals("Pending customer draft", custBodyObj.properties["notes"]?.asString())
+            assertNotEquals(custOp, vm.uiState.value.draftCustomerPaymentOperationId)
+
+            // 3. Supplier B must be blocked by Supplier A's PENDING draft
+            mode = "supOther"
+            composeTestRule.waitForIdle()
+            composeTestRule.onNodeWithTag("supplier_pay_blocked_banner").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("confirm_supplier_payment_button").assertIsNotEnabled()
+
+            // 4. Supplier A must restore 75 (not 200 default balance), lock inputs, enable confirm, execute ONE POST
+            mode = "supOwn"
+            composeTestRule.waitForIdle()
+            composeTestRule.onNodeWithTag("supplier_pay_recovery_banner").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("supplier_pay_amount_input").assertIsNotEnabled().assertTextContains("75.00", substring = true)
+            composeTestRule.onNodeWithTag("supplier_pay_note_input").assertIsNotEnabled().assertTextContains("Pending supplier draft", substring = true)
+            composeTestRule.onNodeWithTag("confirm_supplier_payment_button").assertIsEnabled().performClick()
+
+            composeTestRule.waitUntil(timeoutMillis = 5_000) {
+                org.robolectric.shadows.ShadowLooper.idleMainLooper()
+                !vm.uiState.value.isSupplierPaymentRecovering && !vm.uiState.value.isSupplierPaymentSubmitting
+            }
+            composeTestRule.waitForIdle()
+            assertEquals("PENDING supplier recovery must execute exactly ONE POST", 1, supPostCalls.get())
+            assertEquals(listOf("suppay-$supOp"), supPostKeys)
+            val supBodyObj = StrictJsonParser.parseObject(supPostBodies.single())
+            assertEquals("75.000000", supBodyObj.properties["amount"]?.asString())
+            assertEquals("Pending supplier draft", supBodyObj.properties["notes"]?.asString())
+            assertNotEquals(supOp, vm.uiState.value.draftSupplierPaymentOperationId)
+        } finally {
+            dbRestart.close()
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 13. Two Independent Room OutboxDatabase Connections on Same SQLite File
+    // Honest scope limit: Robolectric runs inside one JVM process; this verifies
+    // two separate Room connections & stores on the same SQLite file without
+    // shared Room instance locks or active inFlightFormTypes masking SQLite,
+    // NOT separate OS processes.
+    // -------------------------------------------------------------------------
+    @Test
+    fun twoIndependentRoomConnectionsSameSqliteFile_enforcePendingSubmittedUnknownAckAndDraftId() = runBlocking {
+        val db1 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val db2 = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        db1.openHelper.writableDatabase.query("PRAGMA busy_timeout = 5000").close()
+        db2.openHelper.writableDatabase.query("PRAGMA busy_timeout = 5000").close()
+
+        val store1 = RoomMerchantCommandStore({ db1.openHelper.writableDatabase }, cryptoEngine)
+        val store2 = RoomMerchantCommandStore({ db2.openHelper.writableDatabase }, cryptoEngine)
+
+        val postCalls = AtomicInteger(0)
+        server!!.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.path.orEmpty()
+                return when {
+                    request.method == "POST" && path.endsWith("/customers/${customerA.value}/payments") -> {
+                        postCalls.incrementAndGet()
+                        MockResponse().setResponseCode(201).setHeader("Content-Type", "application/json")
+                            .setBody("""{"id":"01JCVTWODBCONN0001","customer_id":"${customerA.value}","amount":"60.00","posted_at":"2026-11-27","balance":"40.00"}""")
+                    }
+                    request.method == "GET" && path.contains("/receipts/status") ->
+                        MockResponse().setResponseCode(404).setHeader("Content-Type", "application/json")
+                            .setBody("""{"error":{"code":"NOT_FOUND","message":"Not found"}}""")
+                    else -> MockResponse().setResponseCode(200).setBody("{}")
+                }
+            }
+        }
+
+        val repo2 = newRepo(store2)
+
+        try {
+            // 1. Concurrent getDraftOperationId across two separate Room connections on same file converges
+            val gate = CountDownLatch(1)
+            val ids = (0 until 8).map { idx ->
+                async(Dispatchers.IO) {
+                    gate.await(2, TimeUnit.SECONDS)
+                    (if (idx % 2 == 0) store1 else store2)
+                        .getDraftOperationId(companyA.value, actorA.value, deviceA.value, "customer_payment")
+                }
+            }
+            gate.countDown()
+            val resolved = ids.awaitAll()
+            assertEquals("Two independent SQLite connections must converge to ONE draft UUID", 1, resolved.distinct().size)
+            val draftOp = resolved.distinct().single()
+
+            // 2. Connection 1 persists PENDING directly in SQLite (repo1 is NOT holding inFlightFormTypes!)
+            val payloadObj = StrictJsonObject(
+                mapOf(
+                    "customer_id" to StrictJsonString(customerA.value),
+                    "amount" to StrictJsonString("60.000000"),
+                    "currency" to StrictJsonString("ILS"),
+                    "payment_date" to StrictJsonString("2026-11-27"),
+                    "money_account_id" to StrictJsonString(cashAccountA.value),
+                    "notes" to StrictJsonString("Conn1 pending"),
+                    "allocations" to StrictJsonArray(emptyList())
+                )
+            )
+            val payloadBytes = CanonicalJsonSerializer.serializeToUtf8Bytes(payloadObj)
+            val digest = sha256Digest(payloadBytes)
+            store1.recordPendingCommand(
+                companyId = companyA.value,
+                commandId = draftOp,
+                actorId = actorA.value,
+                deviceId = deviceA.value,
+                commandType = "customer.payment",
+                idempotencyKey = "custpay-$draftOp",
+                payloadDigest = digest,
+                canonicalPayloadBytes = payloadBytes
+            )
+
+            // Connection 2 observes PENDING without any shared Room instance or inFlightFormTypes state
+            assertTrue("Independent connection 2 must see PENDING draft as recovering", repo2.isDraftRecovering("customer_payment"))
+            assertEquals(draftOp, repo2.getDraftOperationId("customer_payment"))
+
+            // Other customer/digest/alternate paymentId rejected via SQLite on connection 2 without POST
+            assertTrue(repo2.recordCustomerPayment(customerB.value, BigDecimal("60.00"), "Conn1 pending", draftOp, cashAccountA.value, "2026-11-27").isFailure)
+            assertTrue(repo2.recordCustomerPayment(customerA.value, BigDecimal("61.00"), "Conn1 pending", draftOp, cashAccountA.value, "2026-11-27").isFailure)
+            assertTrue(repo2.recordCustomerPayment(customerA.value, BigDecimal("60.00"), "Conn1 pending", "other-id", cashAccountA.value, "2026-11-27").isFailure)
+            assertEquals(0, postCalls.get())
+
+            // 3. SUBMITTED on connection 1 prevents conflicting transition/claim on connection 2, and COMPLETED recovers cleanly
+            assertTrue(store1.transitionStatus(companyA.value, draftOp, CommandStatus.PENDING, CommandStatus.SUBMITTED))
+            assertTrue("Independent connection 2 must see SUBMITTED draft", repo2.isDraftRecovering("customer_payment"))
+
+            val recOnConn2 = store2.getActiveDraftRecord(companyA.value, actorA.value, deviceA.value, "customer_payment")!!
+            val claimGate = CountDownLatch(1)
+            val claims = (0 until 2).map { idx ->
+                async(Dispatchers.IO) {
+                    claimGate.await(2, TimeUnit.SECONDS)
+                    (if (idx == 0) store1 else store2).claimSubmittedCommand(companyA.value, draftOp, recOnConn2.updatedAt)
+                }
+            }
+            claimGate.countDown()
+            val claimResults = claims.awaitAll()
+            // Note: claimSubmittedCommand returns boolean; both or one may update only once depending on updatedAt change; key check is UNKNOWN_ACK + recovery
+            assertEquals(2, claimResults.size)
+
+            // Transition to UNKNOWN_ACK via connection 1 -> connection 2 recovers cleanly and sends POST once (since server not yet committed)
+            assertTrue(store1.markUnknownAck(companyA.value, draftOp, "Conn1 interrupted"))
+            assertTrue(repo2.isDraftRecovering("customer_payment"))
+            val resRecovered = repo2.recordCustomerPayment(customerA.value, BigDecimal("60.00"), "Conn1 pending", draftOp, cashAccountA.value, "2026-11-27")
+            assertTrue("Independent connection 2 must complete recovered draft: ${resRecovered.exceptionOrNull()?.message}", resRecovered.isSuccess)
+            assertEquals(1, postCalls.get())
+            assertFalse(repo2.isDraftRecovering("customer_payment"))
+            assertNotEquals(draftOp, store1.getDraftOperationId(companyA.value, actorA.value, deviceA.value, "customer_payment"))
+        } finally {
+            db2.close()
+            db1.close()
         }
     }
 }

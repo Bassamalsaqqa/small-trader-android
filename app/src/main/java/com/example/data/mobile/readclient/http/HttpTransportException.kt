@@ -12,7 +12,10 @@ package com.example.data.mobile.readclient.http
 class HttpTransportException(
     val category: String,
     message: String,
-    val httpStatusCode: Int? = null
+    val httpStatusCode: Int? = null,
+    val authoritativeErrorCode: String? = null,
+    val companyId: String? = null,
+    val idempotencyKey: String? = null
 ) : RuntimeException(message) {
 
     override fun toString(): String =
