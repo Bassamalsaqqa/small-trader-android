@@ -193,6 +193,15 @@ class ProductionTraderRepository(
         if (offlineScopeValidator != null) offlineScopeValidator.invoke() else requireActiveScope()
     }
 
+    override fun isScopeActive(): Boolean {
+        val provider = authScopeProvider ?: return true
+        val current = provider.invoke() ?: return false
+        return current.companyId == companyId &&
+            current.actorId == actorId &&
+            current.deviceId == deviceId &&
+            current.generation == retainedGeneration
+    }
+
     private fun requireActiveScope(): CurrentAuthScope {
         val current = authScopeProvider?.invoke() ?: throw SecurityException("Authenticated scope is not active")
         if (current.companyId != companyId || current.actorId != actorId || current.deviceId != deviceId || current.generation != retainedGeneration) {
@@ -741,8 +750,7 @@ class ProductionTraderRepository(
     }
 
     override suspend fun searchCustomers(query: String): Result<List<Customer>> = withContext(ioDispatcher) {
-        val currentScope = authScopeProvider?.invoke()
-        if (authScopeProvider != null && (currentScope == null || currentScope.companyId != companyId || currentScope.actorId != actorId || currentScope.deviceId != deviceId)) {
+        if (authScopeProvider != null && !isScopeActive()) {
             return@withContext Result.failure(SecurityException("Scope validation failed: current session is superseded or revoked."))
         }
         val before = requireActiveScope()
@@ -784,8 +792,7 @@ class ProductionTraderRepository(
     }
 
     override suspend fun searchProductsOnServer(query: String, limit: Int): Result<List<Product>> = withContext(ioDispatcher) {
-        val currentScope = authScopeProvider?.invoke()
-        if (authScopeProvider != null && (currentScope == null || currentScope.companyId != companyId || currentScope.actorId != actorId || currentScope.deviceId != deviceId)) {
+        if (authScopeProvider != null && !isScopeActive()) {
             return@withContext Result.failure(SecurityException("Scope validation failed: current session is superseded or revoked."))
         }
         val before = requireActiveScope()
@@ -811,8 +818,7 @@ class ProductionTraderRepository(
     }
 
     override suspend fun refreshSuppliers(search: String?): Result<Unit> = withContext(ioDispatcher) {
-        val currentScope = authScopeProvider?.invoke()
-        if (authScopeProvider != null && (currentScope == null || currentScope.companyId != companyId || currentScope.actorId != actorId || currentScope.deviceId != deviceId)) {
+        if (authScopeProvider != null && !isScopeActive()) {
             return@withContext Result.failure(SecurityException("Scope validation failed: current session is superseded or revoked."))
         }
         val before = requireActiveScope()
@@ -830,29 +836,7 @@ class ProductionTraderRepository(
                 if (dataElem is com.example.data.mobile.contract.StrictJsonArray) {
                     val list = (0 until dataElem.size).mapNotNull { i ->
                         val obj = dataElem[i] as? com.example.data.mobile.contract.StrictJsonObject ?: return@mapNotNull null
-                        val id = obj.properties["id"].toNullableString() ?: return@mapNotNull null
-                        val name = obj.properties["name"].toNullableString()
-                            ?: obj.properties["name_ar"].toNullableString()
-                            ?: obj.properties["name_en"].toNullableString()
-                            ?: return@mapNotNull null
-                        val company = obj.properties["company_name"].toNullableString() ?: obj.properties["company"].toNullableString()
-                        val phone = obj.properties["phone"].toNullableString()
-                        val balanceStr = obj.properties["balance_owed"].toNullableString()
-                            ?: obj.properties["owed"].toNullableString()
-                            ?: obj.properties["balance"].toNullableString()
-                        val balanceExact = balanceStr?.let { try { BigDecimal(it) } catch (_: Exception) { null } }
-                        val advancesStr = obj.properties["advances"].toNullableString()
-                        val advancesExact = advancesStr?.let { try { BigDecimal(it) } catch (_: Exception) { null } }
-                        Supplier(
-                            id = id,
-                            nameAr = name,
-                            nameEn = name,
-                            companyAr = company,
-                            companyEn = company,
-                            phone = phone,
-                            balanceOwedExact = balanceExact,
-                            advancesExact = advancesExact
-                        )
+                        parseSupplier(obj)
                     }
                     if (search.isNullOrBlank()) {
                         _suppliersHasMoreFlow.value = hasMore
@@ -875,8 +859,7 @@ class ProductionTraderRepository(
     override suspend fun refreshSuppliers(): Result<Unit> = refreshSuppliers(null)
 
     override suspend fun searchSuppliers(query: String): Result<List<Supplier>> = withContext(ioDispatcher) {
-        val currentScope = authScopeProvider?.invoke()
-        if (authScopeProvider != null && (currentScope == null || currentScope.companyId != companyId || currentScope.actorId != actorId || currentScope.deviceId != deviceId)) {
+        if (authScopeProvider != null && !isScopeActive()) {
             return@withContext Result.failure(SecurityException("Scope validation failed: current session is superseded or revoked."))
         }
         val before = requireActiveScope()
@@ -1216,6 +1199,9 @@ class ProductionTraderRepository(
         productId: String,
         limit: Int
     ): Result<ProductHistoryResponse> = withContext(ioDispatcher) {
+        if (authScopeProvider != null && !isScopeActive()) {
+            return@withContext Result.failure(SecurityException("Authenticated scope is superseded or revoked."))
+        }
         val client = merchantReadClient ?: return@withContext Result.failure(IllegalStateException("MerchantReadClient not configured"))
         val ulid = try {
             ServerUlid.parse(productId)
@@ -1224,11 +1210,18 @@ class ProductionTraderRepository(
         }
         try {
             val res = client.getProductHistory(companyId, ulid, limit, retainedGeneration = retainedGeneration)
+            kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { if (!it.isActive) throw kotlinx.coroutines.CancellationException() }
+            if (authScopeProvider != null && !isScopeActive()) {
+                return@withContext Result.failure(SecurityException("Authenticated scope is superseded or revoked."))
+            }
             when (res) {
                 is MerchantReadResult.Success -> {
                     val history = res.value
                     val mapped = history.movements.map { item ->
                         MerchantReadAdapter.toDomainStockMovement(item, productId)
+                    }
+                    if (authScopeProvider != null && !isScopeActive()) {
+                        throw SecurityException("Authenticated scope changed")
                     }
                     _stockMovementsFlow.update { current ->
                         val others = current.filter { it.productId != productId }
@@ -1243,6 +1236,8 @@ class ProductionTraderRepository(
                 is MerchantReadResult.SchemaError -> Result.failure(IllegalStateException("Schema error parsing product movements: ${res.message}"))
                 else -> Result.failure(RuntimeException("Failed to load product stock history: $res"))
             }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -3147,6 +3142,9 @@ class ProductionTraderRepository(
         fromDate: String?,
         toDate: String?
     ): Result<CustomerStatementResponse> = withContext(ioDispatcher) {
+        if (authScopeProvider != null && !isScopeActive()) {
+            return@withContext Result.failure(SecurityException("Authenticated scope is superseded or revoked."))
+        }
         val client = merchantReadClient ?: return@withContext Result.failure(IllegalStateException("MerchantReadClient not configured"))
         val ulid = try {
             ServerUlid.parse(customerId)
@@ -3155,6 +3153,10 @@ class ProductionTraderRepository(
         }
         try {
             val res = client.getCustomerStatement(companyId, ulid, fromDate, toDate, retainedGeneration = retainedGeneration)
+            kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { if (!it.isActive) throw kotlinx.coroutines.CancellationException() }
+            if (authScopeProvider != null && !isScopeActive()) {
+                return@withContext Result.failure(SecurityException("Authenticated scope is superseded or revoked."))
+            }
             when (res) {
                 is MerchantReadResult.Success -> {
                     val statement = res.value
@@ -3162,6 +3164,9 @@ class ProductionTraderRepository(
                     if (summary != null) {
                         val mapped = summary.entries.map { entry ->
                             MerchantReadAdapter.toDomainCustomerTransaction(entry, customerId)
+                        }
+                        if (authScopeProvider != null && !isScopeActive()) {
+                            throw SecurityException("Authenticated scope changed")
                         }
                         _customerTransactionsFlow.update { current ->
                             val others = current.filter { it.customerId != customerId }
@@ -3177,6 +3182,8 @@ class ProductionTraderRepository(
                 is MerchantReadResult.SchemaError -> Result.failure(IllegalStateException("Schema error in customer statement: ${res.message}"))
                 else -> Result.failure(RuntimeException("Failed to load customer statement: $res"))
             }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             Result.failure(e)
         }

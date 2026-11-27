@@ -15,6 +15,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import com.example.ui.navigation.*
 import com.example.ui.shell.QuickActionSheet
+import com.example.ui.shell.QuickPartyPickerDialog
 import com.example.ui.screens.PeopleHubScreen
 import com.example.ui.screens.PurchasesScreen
 import androidx.compose.foundation.layout.heightIn
@@ -176,21 +177,25 @@ fun SmallTraderApp(
                                 CustomersScreen(state, traderViewModel::selectCustomerForDetail,
                                 { traderViewModel.openAddCustomerDialog(true) },
                                 { customer -> traderViewModel.assignCustomerToSale(customer); traderViewModel.navigateTo(TraderScreen.NEW_SALE) },
-                                traderViewModel::openPaymentCollectionForCustomer, traderViewModel::dismissCustomerFeedback,
+                                if (MerchantAction.COLLECT.allowed(state.currentSession)) { cust -> traderViewModel.openPaymentCollectionForCustomer(cust) } else null,
+                                traderViewModel::dismissCustomerFeedback,
                                 onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.CUSTOMERS, retry = true) },
                                 onSearchCustomers = traderViewModel::searchCustomers) },
-                            suppliers = { SuppliersScreen(
-                                state = state,
-                                onSupplierClick = traderViewModel::selectSupplierForDetail,
-                                onOpenReceivePurchaseDialog = { traderViewModel.openReceivePurchaseDialog(true) },
-                                onDismissFeedback = traderViewModel::dismissSupplierFeedback,
-                                onSaveSupplier = traderViewModel::saveSupplier,
-                                onSaveSupplierWithResult = { sid, name, comp, phone, onComplete ->
-                                    traderViewModel.saveSupplier(sid, name, comp, phone, onComplete)
-                                },
-                                onSearchSuppliers = traderViewModel::searchSuppliers,
-                                onPrepareSupplierCreateDraft = traderViewModel::prepareSupplierCreateDraft
-                            ) })
+                            suppliers = {
+                                androidx.compose.runtime.LaunchedEffect(traderViewModel) { traderViewModel.loadScreen(TraderScreen.SUPPLIERS) }
+                                SuppliersScreen(
+                                    state = state,
+                                    onSupplierClick = traderViewModel::selectSupplierForDetail,
+                                    onOpenReceivePurchaseDialog = { traderViewModel.openReceivePurchaseDialog(true) },
+                                    onDismissFeedback = traderViewModel::dismissSupplierFeedback,
+                                    onSaveSupplier = traderViewModel::saveSupplier,
+                                    onSaveSupplierWithResult = { sid, name, comp, phone, onComplete ->
+                                        traderViewModel.saveSupplier(sid, name, comp, phone, onComplete)
+                                    },
+                                    onSearchSuppliers = traderViewModel::searchSuppliers,
+                                    onPrepareSupplierCreateDraft = traderViewModel::prepareSupplierCreateDraft,
+                                    onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.SUPPLIERS, retry = true) }
+                                ) })
                         TraderScreen.PURCHASES -> PurchasesScreen(
                             state = state,
                             onNewPurchase = { traderViewModel.openReceivePurchaseDialog(true) },
@@ -409,7 +414,8 @@ fun SmallTraderApp(
                                         expiryDate = expiry,
                                         isWeightedDisplayOnly = isWeighted
                                     )
-                                }
+                                },
+                                onRetryHistory = { pid -> traderViewModel.loadProductStockHistory(pid) }
                             )
                         }
 
@@ -423,9 +429,9 @@ fun SmallTraderApp(
                                     traderViewModel.assignCustomerToSale(cust)
                                     traderViewModel.navigateTo(TraderScreen.NEW_SALE)
                                 },
-                                onQuickCollectPayment = { cust ->
-                                    traderViewModel.openPaymentCollectionForCustomer(cust)
-                                },
+                                onQuickCollectPayment = if (MerchantAction.COLLECT.allowed(state.currentSession)) {
+                                    { cust -> traderViewModel.openPaymentCollectionForCustomer(cust) }
+                                } else null,
                                 onDismissFeedback = traderViewModel::dismissCustomerFeedback,
                                 onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.CUSTOMERS, retry = true) },
                                 onSearchCustomers = traderViewModel::searchCustomers
@@ -453,14 +459,16 @@ fun SmallTraderApp(
                                     traderViewModel.updateCustomer(cid, name, phone, addr, upPhone, upAddr, upLimit, limitExact, onComplete)
                                 },
                                 onFormatStatementText = { cid ->
-                                    state.customers.firstOrNull { it.id == cid }?.let {
+                                    (state.customers.firstOrNull { it.id == cid } ?: state.selectedCustomerForDetail?.takeIf { it.id == cid })?.let {
                                         traderViewModel.formatCustomerStatementText(it)
                                     } ?: ""
-                                }
+                                },
+                                onRetryStatement = { cid -> traderViewModel.loadCustomerStatement(cid) }
                             )
                         }
 
                         TraderScreen.SUPPLIERS -> {
+                            androidx.compose.runtime.LaunchedEffect(traderViewModel) { traderViewModel.loadScreen(TraderScreen.SUPPLIERS) }
                             SuppliersScreen(
                                 state = state,
                                 onSupplierClick = traderViewModel::selectSupplierForDetail,
@@ -473,7 +481,8 @@ fun SmallTraderApp(
                                 onSearchSuppliers = traderViewModel::searchSuppliers,
                                 onPrepareSupplierCreateDraft = traderViewModel::prepareSupplierCreateDraft,
                                 launchCreate = state.pendingAction == MerchantAction.SUPPLIER,
-                                onLaunchConsumed = traderViewModel::consumeAction
+                                onLaunchConsumed = traderViewModel::consumeAction,
+                                onRetryRefresh = { traderViewModel.loadScreen(TraderScreen.SUPPLIERS, retry = true) }
                             )
                         }
 
@@ -562,76 +571,43 @@ fun SmallTraderApp(
                 }
                 if (state.isQuickActionOpen) QuickActionSheet(state,
                     { traderViewModel.setQuickActionOpen(false) }, traderViewModel::openMerchantAction)
-                if (state.pendingAction == MerchantAction.COLLECT || state.pendingAction == MerchantAction.PAY && state.currentScreen != TraderScreen.SUPPLIER_DETAIL) {
-                    androidx.compose.material3.AlertDialog(
-                        onDismissRequest = traderViewModel::consumeAction,
-                        title = { androidx.compose.material3.Text(state.language.tr("اختار الحساب", "Choose account")) },
-                        text = { androidx.compose.foundation.lazy.LazyColumn {
-                            if (state.pendingAction == MerchantAction.COLLECT) {
-                                if (state.customers.isEmpty()) {
-                                    item {
-                                        androidx.compose.material3.Text(
-                                            text = state.language.tr("لا يوجد زبائن مسجلون", "No registered customers"),
-                                            style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
-                                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        if (MerchantAction.CUSTOMER.allowed(state.currentSession)) {
-                                            androidx.compose.material3.TextButton(
-                                                onClick = {
-                                                    traderViewModel.consumeAction()
-                                                    traderViewModel.openMerchantAction(MerchantAction.CUSTOMER)
-                                                },
-                                                modifier = androidx.compose.ui.Modifier.heightIn(min = 48.dp)
-                                            ) {
-                                                androidx.compose.material3.Text(state.language.tr("إضافة زبون جديد", "Add new customer"))
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    items(state.customers.size) { index ->
-                                        val customer = state.customers[index]
-                                        androidx.compose.material3.TextButton(
-                                            onClick = {
-                                                traderViewModel.consumeAction()
-                                                traderViewModel.openPaymentCollectionForCustomer(customer)
-                                            },
-                                            modifier = androidx.compose.ui.Modifier.heightIn(min = 48.dp)
-                                        ) { androidx.compose.material3.Text(customer.name(state.language)) }
-                                    }
-                                }
-                            } else if (state.currentSession.canManageSuppliers()) {
-                                if (state.suppliers.isEmpty()) {
-                                    item {
-                                        androidx.compose.material3.Text(
-                                            text = state.language.tr("لا يوجد موردون مسجلون", "No registered suppliers"),
-                                            style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
-                                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        androidx.compose.material3.TextButton(
-                                            onClick = {
-                                                traderViewModel.consumeAction()
-                                                traderViewModel.openMerchantAction(MerchantAction.SUPPLIER)
-                                            },
-                                            modifier = androidx.compose.ui.Modifier.heightIn(min = 48.dp)
-                                        ) {
-                                            androidx.compose.material3.Text(state.language.tr("إضافة مورد جديد", "Add new supplier"))
-                                        }
-                                    }
-                                } else {
-                                    items(state.suppliers.size) { index ->
-                                        val supplier = state.suppliers[index]
-                                        androidx.compose.material3.TextButton(
-                                            onClick = { traderViewModel.openSupplierPayment(supplier) },
-                                            modifier = androidx.compose.ui.Modifier.heightIn(min = 48.dp)
-                                        ) {
-                                            androidx.compose.material3.Text(supplier.name(state.language))
-                                        }
-                                    }
-                                }
+                val showQuickCollectPicker = state.pendingAction == MerchantAction.COLLECT &&
+                    MerchantAction.COLLECT.allowed(state.currentSession)
+                val showQuickPayPicker = state.pendingAction == MerchantAction.PAY &&
+                    state.currentScreen != TraderScreen.SUPPLIER_DETAIL &&
+                    MerchantAction.PAY.allowed(state.currentSession)
+                if (showQuickCollectPicker || showQuickPayPicker) {
+                    val pickerAction = if (showQuickCollectPicker) MerchantAction.COLLECT else MerchantAction.PAY
+                    QuickPartyPickerDialog(
+                        state = state,
+                        action = pickerAction,
+                        onDismiss = traderViewModel::consumeAction,
+                        onSearchCustomers = traderViewModel::searchCustomers,
+                        onSearchSuppliers = traderViewModel::searchSuppliers,
+                        onSelectCustomer = { customer ->
+                            traderViewModel.consumeAction()
+                            traderViewModel.openPaymentCollectionForCustomer(customer)
+                        },
+                        onSelectSupplier = { supplier ->
+                            traderViewModel.openSupplierPayment(supplier)
+                        },
+                        onCreateCustomer = if (MerchantAction.CUSTOMER.allowed(state.currentSession)) {
+                            {
+                                traderViewModel.consumeAction()
+                                traderViewModel.openMerchantAction(MerchantAction.CUSTOMER)
                             }
-                        } }, confirmButton = {}, dismissButton = {
-                            androidx.compose.material3.TextButton(onClick = traderViewModel::consumeAction) { androidx.compose.material3.Text(state.language.tr("إلغاء", "Cancel")) }
-                        })
+                        } else null,
+                        onCreateSupplier = if (MerchantAction.SUPPLIER.allowed(state.currentSession)) {
+                            {
+                                traderViewModel.consumeAction()
+                                traderViewModel.openMerchantAction(MerchantAction.SUPPLIER)
+                            }
+                        } else null,
+                        onRetryDirectory = {
+                            val dirScreen = if (pickerAction == MerchantAction.COLLECT) TraderScreen.CUSTOMERS else TraderScreen.SUPPLIERS
+                            traderViewModel.loadScreen(dirScreen, retry = true)
+                        }
+                    )
                 }
                 // Simulated Barcode Scanner Bottom Sheet
                 if (state.isScannerSheetOpen) {

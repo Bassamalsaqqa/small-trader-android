@@ -114,6 +114,7 @@ class TraderViewModel(
         }
         viewModelScope.launch {
             repository.productsFlow.collect { list ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current ->
                     current.copy(
                         products = list,
@@ -126,6 +127,7 @@ class TraderViewModel(
         }
         viewModelScope.launch {
             repository.customersFlow.collect { list ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current ->
                     current.copy(
                         customers = list,
@@ -138,6 +140,7 @@ class TraderViewModel(
         }
         viewModelScope.launch {
             repository.suppliersFlow.collect { list ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current ->
                     current.copy(
                         suppliers = list,
@@ -150,21 +153,25 @@ class TraderViewModel(
         }
         viewModelScope.launch {
             repository.suppliersHasMoreFlow.collect { hasMore ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current -> current.copy(suppliersHasMore = hasMore) }
             }
         }
         viewModelScope.launch {
             repository.productsHasMoreFlow.collect { hasMore ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current -> current.copy(productsHasMore = hasMore) }
             }
         }
         viewModelScope.launch {
             repository.customersHasMoreFlow.collect { hasMore ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current -> current.copy(customersHasMore = hasMore) }
             }
         }
         viewModelScope.launch {
             repository.purchasesFlow.collect { list ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current ->
                     current.copy(
                         purchaseBills = list
@@ -174,11 +181,13 @@ class TraderViewModel(
         }
         viewModelScope.launch {
             repository.expensesFlow.collect { list ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current -> current.copy(expenses = list) }
             }
         }
         viewModelScope.launch {
             repository.invoicesFlow.collect { list ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current ->
                     current.copy(
                         invoices = list,
@@ -191,23 +200,27 @@ class TraderViewModel(
         }
         viewModelScope.launch {
             repository.stockMovementsFlow.collect { list ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current -> current.copy(stockMovements = list) }
             }
         }
         viewModelScope.launch {
             repository.customerTransactionsFlow.collect { list ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current -> current.copy(customerTransactions = list) }
             }
         }
         viewModelScope.launch {
             repository.supplierPaymentsFlow.collect { list ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current -> current.copy(supplierPayments = list) }
             }
         }
         viewModelScope.launch {
             try {
+                if (!ensureActiveScope()) return@launch
                 val cats = repository.getServerExpenseCategories()
-                if (cats.isNotEmpty()) {
+                if (ensureActiveScope() && cats.isNotEmpty()) {
                     _uiState.update { current -> current.copy(serverExpenseCategories = cats) }
                 }
             } catch (_: Exception) {}
@@ -217,7 +230,109 @@ class TraderViewModel(
 
     private var printJob: Job? = null
     private var bannerJob: Job? = null
+    private var customerDetailJob: Job? = null
+    private var customerDetailGeneration = 0L
+    private var customerStatementJob: Job? = null
+    private var customerStatementGeneration = 0L
+    private var productHistoryJob: Job? = null
+    private var productHistoryGeneration = 0L
     private var customItemCounter = 1
+
+    private fun ensureActiveScope(): Boolean {
+        if (repository.isScopeActive()) return true
+        invalidateForInactiveScope()
+        return false
+    }
+
+    private fun invalidateForInactiveScope() {
+        productSearchJob?.cancel()
+        productSearchGeneration++
+        customerSearchJob?.cancel()
+        customerSearchGeneration++
+        supplierSearchJob?.cancel()
+        supplierSearchGeneration++
+        customerStatementJob?.cancel()
+        customerStatementGeneration++
+        customerDetailJob?.cancel()
+        customerDetailGeneration++
+        productHistoryJob?.cancel()
+        productHistoryGeneration++
+        customerSettlementJob?.cancel()
+        customerSettlementGeneration++
+        supplierSettlementJob?.cancel()
+        supplierSettlementGeneration++
+        _uiState.update { state ->
+            state.copy(
+                isScopeInvalidated = true,
+                products = emptyList(),
+                stockMovements = emptyList(),
+                customers = emptyList(),
+                customerTransactions = emptyList(),
+                suppliers = emptyList(),
+                purchaseBills = emptyList(),
+                supplierPayments = emptyList(),
+                expenses = emptyList(),
+                invoices = emptyList(),
+                basket = emptyList(),
+                selectedCustomerId = null,
+                selectedProductForDetail = null,
+                selectedProductHistory = null,
+                isLoadingProductHistory = false,
+                productHistoryError = null,
+                selectedCustomerForDetail = null,
+                selectedCustomerStatement = null,
+                isLoadingCustomerStatement = false,
+                customerStatementError = null,
+                selectedSupplierForDetail = null,
+                activeReceipt = null,
+                selectedInvoiceDetail = null,
+                pendingAction = null,
+                isQuickActionOpen = false,
+                isPaymentCollectionDialogOpen = false,
+                isAddCustomerDialogOpen = false,
+                isAddExpenseDialogOpen = false,
+                isReceivePurchaseDialogOpen = false,
+                productSearchQuery = "",
+                productSearchResults = null,
+                isSearchingProducts = false,
+                productSearchError = null,
+                customerSearchQuery = "",
+                customerSearchResults = null,
+                isSearchingCustomers = false,
+                customerSearchError = null,
+                supplierSearchQuery = "",
+                supplierSearchResults = null,
+                isSearchingSuppliers = false,
+                supplierSearchError = null,
+                customerSettlementTargets = emptyList(),
+                isLoadingCustomerSettlementTargets = false,
+                customerSettlementTargetsError = null,
+                customerSettlementTargetsHasMore = false,
+                customerSettlementTargetsNextCursor = null,
+                supplierSettlementTargets = emptyList(),
+                isLoadingSupplierSettlementTargets = false,
+                supplierSettlementTargetsError = null,
+                supplierSettlementTargetsHasMore = false,
+                supplierSettlementTargetsNextCursor = null
+            )
+        }
+    }
+
+    private fun mapSafeDetailReadError(ex: Throwable?, subjectAr: String, subjectEn: String): String {
+        val raw = ex?.message.orEmpty()
+        return when {
+            ex is NoSuchElementException ->
+                "تعذر العثور على $subjectAr على الخادم | Not found: $subjectEn is unavailable"
+            ex is SecurityException && (raw.startsWith("Forbidden:", ignoreCase = true) || raw.contains("403")) ->
+                "غير مصرح: لا تملك صلاحية عرض $subjectAr | Permission denied: insufficient access to view $subjectEn"
+            ex is SecurityException ->
+                "انتهت صلاحية الجلسة أو يلزم إعادة الدخول لعرض $subjectAr | Authentication expired or revoked while loading $subjectEn"
+            ex is java.io.IOException ->
+                "تعذر الاتصال بالخادم أثناء تحميل $subjectAr | Network error while loading $subjectEn"
+            else ->
+                "تعذر تحميل $subjectAr. يرجى المحاولة مرة أخرى. | Failed to load $subjectEn. Please try again."
+        }
+    }
 
     private fun syncProductsAndInventory() {
         val updatedProducts = repository.getProducts()
@@ -314,19 +429,132 @@ class TraderViewModel(
     }
 
     fun switchUserSession(user: UserSession) {
+        if (!ensureActiveScope()) return
+        productSearchJob?.cancel()
+        productSearchGeneration++
+        customerSearchJob?.cancel()
+        customerSearchGeneration++
+        supplierSearchJob?.cancel()
+        supplierSearchGeneration++
+        customerStatementJob?.cancel()
+        customerStatementGeneration++
+        customerDetailJob?.cancel()
+        customerDetailGeneration++
+        productHistoryJob?.cancel()
+        productHistoryGeneration++
+        customerSettlementJob?.cancel()
+        customerSettlementGeneration++
+        supplierSettlementJob?.cancel()
+        supplierSettlementGeneration++
+
         _uiState.update { state ->
             val safe = TraderNavigationPolicy.allows(user, state.currentScreen)
-            state.copy(currentSession = user, currentScreen = if (safe) state.currentScreen else TraderScreen.HOME,
+            val nextScreen = if (safe) state.currentScreen else TraderScreen.HOME
+            val allowCustomerDetail = TraderNavigationPolicy.allows(user, TraderScreen.CUSTOMER_DETAIL) &&
+                (user.permissions == null || "customers.view" in user.permissions)
+            val allowProductDetail = TraderNavigationPolicy.allows(user, TraderScreen.PRODUCT_DETAIL)
+            state.copy(
+                currentSession = user,
+                currentScreen = nextScreen,
                 selectedRoot = if (safe) state.selectedRoot else TraderScreen.HOME,
                 screenHistory = state.screenHistory.filter { TraderNavigationPolicy.allows(user, it) },
-                pendingAction = null, isQuickActionOpen = false, isReceivePurchaseDialogOpen = false,
-                isAddExpenseDialogOpen = false, selectedSupplierForDetail = null)
+                searchQuery = when (nextScreen) {
+                    TraderScreen.PRODUCTS_CATALOG -> state.inventorySearchQuery
+                    TraderScreen.NEW_SALE -> state.saleSearchQuery
+                    else -> state.searchQuery
+                },
+                selectedCategory = when (nextScreen) {
+                    TraderScreen.PRODUCTS_CATALOG -> state.inventoryCategory
+                    TraderScreen.NEW_SALE -> state.saleCategory
+                    else -> state.selectedCategory
+                },
+                pendingAction = null,
+                isQuickActionOpen = false,
+                isPaymentCollectionDialogOpen = false,
+                isReceivePurchaseDialogOpen = false,
+                isAddExpenseDialogOpen = false,
+                selectedSupplierForDetail = null,
+                selectedCustomerForDetail = if (allowCustomerDetail) state.selectedCustomerForDetail else null,
+                selectedCustomerStatement = null,
+                isLoadingCustomerStatement = false,
+                customerStatementError = null,
+                selectedProductForDetail = if (allowProductDetail) state.selectedProductForDetail else null,
+                selectedProductHistory = null,
+                isLoadingProductHistory = false,
+                productHistoryError = null,
+                productSearchQuery = "",
+                productSearchResults = null,
+                isSearchingProducts = false,
+                productSearchError = null,
+                customerSearchQuery = "",
+                customerSearchResults = null,
+                isSearchingCustomers = false,
+                customerSearchError = null,
+                supplierSearchQuery = "",
+                supplierSearchResults = null,
+                isSearchingSuppliers = false,
+                supplierSearchError = null,
+                customerSettlementTargets = emptyList(),
+                isLoadingCustomerSettlementTargets = false,
+                customerSettlementTargetsError = null,
+                customerSettlementTargetsHasMore = false,
+                customerSettlementTargetsNextCursor = null,
+                supplierSettlementTargets = emptyList(),
+                isLoadingSupplierSettlementTargets = false,
+                supplierSettlementTargetsError = null,
+                supplierSettlementTargetsHasMore = false,
+                supplierSettlementTargetsNextCursor = null
+            )
+        }
+        val after = _uiState.value
+        syncProductSearchForScreen(after.currentScreen)
+        if (repository !is OfflineDemoTraderRepository && !after.currentSession.isDemoSession) {
+            if (after.currentScreen == TraderScreen.CUSTOMER_DETAIL) {
+                after.selectedCustomerForDetail?.let { loadCustomerStatement(it.id) }
+            } else if (after.currentScreen == TraderScreen.PRODUCT_DETAIL) {
+                after.selectedProductForDetail?.let { loadProductStockHistory(it.id) }
+            }
         }
     }
 
-    fun setQuickActionOpen(open: Boolean) { _uiState.update { it.copy(isQuickActionOpen = open) } }
-    fun consumeAction() { _uiState.update { it.copy(pendingAction = null) } }
+    fun setQuickActionOpen(open: Boolean) {
+        if (open && !ensureActiveScope()) return
+        _uiState.update { it.copy(isQuickActionOpen = open) }
+    }
+
+    fun consumeAction() {
+        val currentAction = _uiState.value.pendingAction
+        if (currentAction == MerchantAction.COLLECT) {
+            customerSearchJob?.cancel()
+            customerSearchGeneration++
+            _uiState.update {
+                it.copy(
+                    pendingAction = null,
+                    customerSearchQuery = "",
+                    customerSearchResults = null,
+                    isSearchingCustomers = false,
+                    customerSearchError = null
+                )
+            }
+        } else if (currentAction == MerchantAction.PAY) {
+            supplierSearchJob?.cancel()
+            supplierSearchGeneration++
+            _uiState.update {
+                it.copy(
+                    pendingAction = null,
+                    supplierSearchQuery = "",
+                    supplierSearchResults = null,
+                    isSearchingSuppliers = false,
+                    supplierSearchError = null
+                )
+            }
+        } else {
+            _uiState.update { it.copy(pendingAction = null) }
+        }
+    }
+
     fun openMerchantAction(action: MerchantAction) {
+        if (!ensureActiveScope()) return
         if (!action.allowed(_uiState.value.currentSession)) return
         _uiState.update { it.copy(pendingAction = null, isQuickActionOpen = false) }
         when (action) {
@@ -334,8 +562,41 @@ class TraderViewModel(
             MerchantAction.PURCHASE -> { navigateTo(TraderScreen.PURCHASES); openReceivePurchaseDialog(true) }
             MerchantAction.CUSTOMER -> { navigateTo(TraderScreen.CUSTOMERS); openAddCustomerDialog(true) }
             MerchantAction.EXPENSE -> { navigateTo(TraderScreen.EXPENSES); openAddExpenseDialog(true) }
-            MerchantAction.COLLECT, MerchantAction.PAY -> {
-                _uiState.update { it.copy(pendingAction = action) }
+            MerchantAction.COLLECT -> {
+                customerSearchJob?.cancel()
+                customerSearchGeneration++
+                _uiState.update {
+                    it.copy(
+                        pendingAction = MerchantAction.COLLECT,
+                        customerSearchQuery = "",
+                        customerSearchResults = null,
+                        isSearchingCustomers = false,
+                        customerSearchError = null
+                    )
+                }
+                val snap = _uiState.value
+                if (!snap.currentSession.isDemoSession &&
+                    (snap.customers.isEmpty() || snap.readStatus[TraderScreen.CUSTOMERS] == ReadStatus.FAILED)) {
+                    loadScreen(TraderScreen.CUSTOMERS, retry = true)
+                }
+            }
+            MerchantAction.PAY -> {
+                supplierSearchJob?.cancel()
+                supplierSearchGeneration++
+                _uiState.update {
+                    it.copy(
+                        pendingAction = MerchantAction.PAY,
+                        supplierSearchQuery = "",
+                        supplierSearchResults = null,
+                        isSearchingSuppliers = false,
+                        supplierSearchError = null
+                    )
+                }
+                val snap = _uiState.value
+                if (!snap.currentSession.isDemoSession &&
+                    (snap.suppliers.isEmpty() || snap.readStatus[TraderScreen.SUPPLIERS] == ReadStatus.FAILED)) {
+                    loadScreen(TraderScreen.SUPPLIERS, retry = true)
+                }
             }
             else -> {
                 navigateTo(when (action) {
@@ -348,10 +609,12 @@ class TraderViewModel(
     }
 
     fun navigateTo(target: TraderScreen) {
+        if (!ensureActiveScope()) return
         if (!TraderNavigationPolicy.allows(_uiState.value.currentSession, target)) return
         val currentNavState = _uiState.value
         if (currentNavState.isPaymentUnverifiedHold && (target == TraderScreen.INVOICE_REVIEW || target == TraderScreen.NEW_SALE)) {
             _uiState.update { it.copy(currentScreen = TraderScreen.CASH_PAYMENT) }
+            syncProductSearchForScreen(TraderScreen.CASH_PAYMENT)
             return
         }
         if (target == TraderScreen.CASH_PAYMENT && currentNavState.isNetworkOffline &&
@@ -376,6 +639,7 @@ class TraderViewModel(
             showBanner(ar = ar, en = en, isError = true)
             return
         }
+        val movedScreen = currentNavState.currentScreen != target
         _uiState.update { state ->
             if (state.currentScreen == target) {
                 state
@@ -411,9 +675,13 @@ class TraderViewModel(
                 )
             }
         }
+        if (movedScreen) {
+            syncProductSearchForScreen(target)
+        }
     }
 
     fun navigateBack(): Boolean {
+        val activeScope = ensureActiveScope()
         val current = _uiState.value
         if (current.isQuickActionOpen) { setQuickActionOpen(false); return true }
         if (current.pendingAction != null) { consumeAction(); return true }
@@ -430,7 +698,7 @@ class TraderViewModel(
             return true
         }
         if (current.isPaymentCollectionDialogOpen) {
-            _uiState.update { it.copy(isPaymentCollectionDialogOpen = false) }
+            openPaymentCollectionDialog(false)
             return true
         }
         if (current.isAddCustomerDialogOpen) {
@@ -451,6 +719,16 @@ class TraderViewModel(
         }
         if (current.currentScreen == TraderScreen.HOME) return false
         val previous = current.screenHistory.lastOrNull() ?: TraderScreen.HOME
+        if (current.currentScreen == TraderScreen.CUSTOMER_DETAIL && previous != TraderScreen.CUSTOMER_DETAIL) {
+            customerDetailJob?.cancel()
+            customerDetailGeneration++
+            customerStatementJob?.cancel()
+            customerStatementGeneration++
+        }
+        if (current.currentScreen == TraderScreen.PRODUCT_DETAIL && previous != TraderScreen.PRODUCT_DETAIL) {
+            productHistoryJob?.cancel()
+            productHistoryGeneration++
+        }
         _uiState.update { state ->
             state.copy(
                 currentScreen = previous,
@@ -465,14 +743,30 @@ class TraderViewModel(
                     else -> state.selectedCategory
                 },
                 selectedRoot = if (previous in TraderUiState.ROOT_DESTINATIONS) previous else state.selectedRoot,
-                screenHistory = state.screenHistory.dropLast(1)
+                screenHistory = state.screenHistory.dropLast(1),
+                isLoadingCustomerStatement = if (previous == TraderScreen.CUSTOMER_DETAIL) state.isLoadingCustomerStatement else false,
+                isLoadingProductHistory = if (previous == TraderScreen.PRODUCT_DETAIL) state.isLoadingProductHistory else false
             )
+        }
+        if (activeScope) {
+            syncProductSearchForScreen(previous)
+            val updated = _uiState.value
+            if (repository !is OfflineDemoTraderRepository && !updated.currentSession.isDemoSession) {
+                if (previous == TraderScreen.CUSTOMER_DETAIL && updated.selectedCustomerForDetail != null &&
+                    updated.selectedCustomerStatement == null && !updated.isLoadingCustomerStatement) {
+                    loadCustomerStatement(updated.selectedCustomerForDetail.id)
+                } else if (previous == TraderScreen.PRODUCT_DETAIL && updated.selectedProductForDetail != null &&
+                    updated.selectedProductHistory == null && !updated.isLoadingProductHistory) {
+                    loadProductStockHistory(updated.selectedProductForDetail.id)
+                }
+            }
         }
         return true
     }
 
     // Product Catalog & Inventory
     fun updateSearchQuery(query: String) {
+        if (!ensureActiveScope()) return
         _uiState.update { it.copy(searchQuery = query,
             saleSearchQuery = if (it.currentScreen == TraderScreen.NEW_SALE) query else it.saleSearchQuery,
             inventorySearchQuery = if (it.currentScreen == TraderScreen.PRODUCTS_CATALOG) query else it.inventorySearchQuery) }
@@ -483,11 +777,74 @@ class TraderViewModel(
         updateSearchQuery("")
     }
 
+    private fun syncProductSearchForScreen(target: TraderScreen) {
+        if (!ensureActiveScope()) return
+        val state = _uiState.value
+        if (target != TraderScreen.NEW_SALE && target != TraderScreen.PRODUCTS_CATALOG) {
+            productSearchJob?.cancel()
+            productSearchGeneration++
+            _uiState.update {
+                it.copy(
+                    isSearchingProducts = false,
+                    productSearchError = null
+                )
+            }
+            return
+        }
+        val restored = state.searchQuery
+        if (restored.isBlank()) {
+            productSearchJob?.cancel()
+            productSearchGeneration++
+            _uiState.update {
+                it.copy(
+                    productSearchQuery = "",
+                    productSearchResults = null,
+                    isSearchingProducts = false,
+                    productSearchError = null
+                )
+            }
+            return
+        }
+        if (state.currentSession.isDemoSession) {
+            productSearchJob?.cancel()
+            productSearchGeneration++
+            _uiState.update {
+                it.copy(
+                    productSearchQuery = restored,
+                    productSearchResults = null,
+                    isSearchingProducts = false,
+                    productSearchError = null
+                )
+            }
+            return
+        }
+        val alreadyMatchesCommitted =
+            state.productSearchQuery.trim().equals(restored.trim(), ignoreCase = true) &&
+                state.productSearchResults != null &&
+                state.productSearchError == null &&
+                !state.isSearchingProducts
+        if (!alreadyMatchesCommitted) {
+            productSearchJob?.cancel()
+            productSearchGeneration++
+            _uiState.update {
+                it.copy(
+                    productSearchQuery = "",
+                    productSearchResults = null,
+                    isSearchingProducts = false,
+                    productSearchError = null
+                )
+            }
+            searchProductsOnServer(restored)
+        }
+    }
+
     fun openLowStockInventory() {
+        if (!ensureActiveScope()) return
         navigateTo(TraderScreen.PRODUCTS_CATALOG)
         _uiState.update { it.copy(inventoryLowStockRequested = true,
             inventorySearchQuery = "", searchQuery = "",
             inventoryCategory = ProductCategory.ALL, selectedCategory = ProductCategory.ALL) }
+        syncProductSearchForScreen(TraderScreen.PRODUCTS_CATALOG)
     }
 
     fun consumeLowStockRequest() {
@@ -495,18 +852,27 @@ class TraderViewModel(
     }
 
     fun selectCategory(category: ProductCategory) {
+        if (!ensureActiveScope()) return
         _uiState.update { state -> state.copy(selectedCategory = category,
             saleCategory = if (state.currentScreen == TraderScreen.NEW_SALE) category else state.saleCategory,
             inventoryCategory = if (state.currentScreen == TraderScreen.PRODUCTS_CATALOG) category else state.inventoryCategory) }
     }
 
     fun selectProductForDetail(product: Product) {
-        if (repository !is OfflineDemoTraderRepository) loadProductStockHistory(product.id)
+        if (!ensureActiveScope()) return
+        val freshProduct = _uiState.value.products.firstOrNull { it.id == product.id } ?: product
+        val isLive = repository !is OfflineDemoTraderRepository
+        productHistoryJob?.cancel()
+        productHistoryGeneration++
+        productSearchJob?.cancel()
+        productSearchGeneration++
         _uiState.update { state ->
-            val freshProduct = state.products.firstOrNull { it.id == product.id } ?: product
             state.copy(
                 selectedProductForDetail = freshProduct,
                 selectedProductHistory = null,
+                isLoadingProductHistory = isLive,
+                productHistoryError = null,
+                isSearchingProducts = false,
                 lastInventoryActionMessageAr = null,
                 lastInventoryActionMessageEn = null,
                 isInventoryActionError = false,
@@ -514,6 +880,7 @@ class TraderViewModel(
                 screenHistory = (state.screenHistory + state.currentScreen).takeLast(8)
             )
         }
+        if (isLive) loadProductStockHistory(freshProduct.id)
     }
 
     fun dismissInventoryFeedback() {
@@ -529,6 +896,7 @@ class TraderViewModel(
     init {
         viewModelScope.launch {
             repository.homeMetricsFlow.collect { home ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current ->
                     current.copy(
                         liveHomeMetrics = home?.let { com.example.data.mobile.merchantread.MerchantReadAdapter.toLiveHomeMetrics(it) }
@@ -538,6 +906,7 @@ class TraderViewModel(
         }
         viewModelScope.launch {
             repository.shiftSummaryFlow.collect { shift ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current ->
                     current.copy(
                         liveShiftSummary = shift?.let { com.example.data.mobile.merchantread.MerchantReadAdapter.toLiveShiftSummary(it) }
@@ -547,6 +916,7 @@ class TraderViewModel(
         }
         viewModelScope.launch {
             repository.shiftCloseSuccessFlow.collect { closeSnap ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current ->
                     current.copy(
                         shiftCloseSuccessSnapshot = closeSnap,
@@ -557,6 +927,7 @@ class TraderViewModel(
         }
         viewModelScope.launch {
             repository.treasuryReportFlow.collect { treasury ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current ->
                     current.copy(
                         liveTreasurySummary = treasury?.let { com.example.data.mobile.merchantread.MerchantReadAdapter.toLiveTreasurySummary(it) }
@@ -566,6 +937,7 @@ class TraderViewModel(
         }
         viewModelScope.launch {
             repository.invoicesHasMoreFlow.collect { hasMore ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current ->
                     current.copy(
                         liveInvoicesHasMore = hasMore,
@@ -576,33 +948,63 @@ class TraderViewModel(
         }
         viewModelScope.launch {
             repository.invoicesNextCursorFlow.collect { cursor ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current -> current.copy(liveInvoicesNextCursor = cursor) }
             }
         }
         viewModelScope.launch {
             repository.isInvoicesLoadingFlow.collect { loading ->
+                if (!ensureActiveScope()) return@collect
                 _uiState.update { current -> current.copy(isLiveInvoicesLoading = loading) }
             }
         }
     }
 
     fun loadMoreInvoices(onComplete: ((Boolean) -> Unit)? = null) {
+        if (!ensureActiveScope()) {
+            onComplete?.invoke(false)
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val result = repository.loadMoreInvoices()
             withContext(Dispatchers.Main) {
+                if (!ensureActiveScope()) {
+                    onComplete?.invoke(false)
+                    return@withContext
+                }
                 onComplete?.invoke(result.isSuccess)
             }
         }
     }
 
     fun loadCustomerStatement(customerId: String, fromDate: String? = null, toDate: String? = null, onComplete: ((Boolean) -> Unit)? = null) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val result = repository.getCustomerStatement(customerId, fromDate, toDate)
-            withContext(Dispatchers.Main) {
+        if (!ensureActiveScope()) {
+            onComplete?.invoke(false)
+            return
+        }
+        customerStatementJob?.cancel()
+        val generation = ++customerStatementGeneration
+        _uiState.update { current ->
+            current.copy(
+                isLoadingCustomerStatement = true,
+                customerStatementError = null
+            )
+        }
+        customerStatementJob = viewModelScope.launch {
+            try {
+                val result = repository.getCustomerStatement(customerId, fromDate, toDate)
+                if (!ensureActiveScope()) {
+                    onComplete?.invoke(false)
+                    return@launch
+                }
+                if (generation != customerStatementGeneration) {
+                    onComplete?.invoke(false)
+                    return@launch
+                }
                 result.onSuccess { statement ->
                     _uiState.update { current ->
                         if (current.selectedCustomerForDetail?.id != customerId) {
-                            current
+                            current.copy(isLoadingCustomerStatement = false)
                         } else {
                             current.copy(
                                 selectedCustomerStatement = com.example.data.mobile.merchantread.LiveCustomerStatement(
@@ -611,12 +1013,52 @@ class TraderViewModel(
                                     fromDate = statement.fromDate,
                                     toDate = statement.toDate,
                                     currencies = statement.currencies
-                                )
+                                ),
+                                isLoadingCustomerStatement = false,
+                                customerStatementError = null
                             )
                         }
                     }
                     onComplete?.invoke(true)
-                }.onFailure {
+                }.onFailure { err ->
+                    if (!ensureActiveScope()) {
+                        onComplete?.invoke(false)
+                        return@onFailure
+                    }
+                    val safeMsg = mapSafeDetailReadError(err, "كشف حساب الزبون", "customer statement")
+                    _uiState.update { current ->
+                        if (current.selectedCustomerForDetail?.id != customerId) {
+                            current.copy(isLoadingCustomerStatement = false)
+                        } else {
+                            current.copy(
+                                selectedCustomerStatement = null,
+                                isLoadingCustomerStatement = false,
+                                customerStatementError = safeMsg
+                            )
+                        }
+                    }
+                    onComplete?.invoke(false)
+                }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                if (!ensureActiveScope()) {
+                    onComplete?.invoke(false)
+                    return@launch
+                }
+                if (generation == customerStatementGeneration) {
+                    val safeMsg = mapSafeDetailReadError(e, "كشف حساب الزبون", "customer statement")
+                    _uiState.update { current ->
+                        if (current.selectedCustomerForDetail?.id != customerId) {
+                            current.copy(isLoadingCustomerStatement = false)
+                        } else {
+                            current.copy(
+                                selectedCustomerStatement = null,
+                                isLoadingCustomerStatement = false,
+                                customerStatementError = safeMsg
+                            )
+                        }
+                    }
                     onComplete?.invoke(false)
                 }
             }
@@ -624,24 +1066,84 @@ class TraderViewModel(
     }
 
     fun loadProductStockHistory(productId: String, limit: Int = 50, onComplete: ((Boolean) -> Unit)? = null) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val result = repository.getProductStockHistory(productId, limit)
-            withContext(Dispatchers.Main) {
+        if (!ensureActiveScope()) {
+            onComplete?.invoke(false)
+            return
+        }
+        productHistoryJob?.cancel()
+        val generation = ++productHistoryGeneration
+        _uiState.update { current ->
+            current.copy(
+                isLoadingProductHistory = true,
+                productHistoryError = null
+            )
+        }
+        productHistoryJob = viewModelScope.launch {
+            try {
+                val result = repository.getProductStockHistory(productId, limit)
+                if (!ensureActiveScope()) {
+                    onComplete?.invoke(false)
+                    return@launch
+                }
+                if (generation != productHistoryGeneration) {
+                    onComplete?.invoke(false)
+                    return@launch
+                }
                 result.onSuccess { history ->
                     _uiState.update { current ->
                         if (current.selectedProductForDetail?.id != productId) {
-                            current
+                            current.copy(isLoadingProductHistory = false)
                         } else {
                             current.copy(
                                 selectedProductHistory = com.example.data.mobile.merchantread.LiveStockMovementHistory(
                                     productId = history.productId.value,
                                     movements = history.movements
-                                )
+                                ),
+                                isLoadingProductHistory = false,
+                                productHistoryError = null
                             )
                         }
                     }
                     onComplete?.invoke(true)
-                }.onFailure {
+                }.onFailure { err ->
+                    if (!ensureActiveScope()) {
+                        onComplete?.invoke(false)
+                        return@onFailure
+                    }
+                    val safeMsg = mapSafeDetailReadError(err, "حركات المخزون", "stock movement history")
+                    _uiState.update { current ->
+                        if (current.selectedProductForDetail?.id != productId) {
+                            current.copy(isLoadingProductHistory = false)
+                        } else {
+                            current.copy(
+                                selectedProductHistory = null,
+                                isLoadingProductHistory = false,
+                                productHistoryError = safeMsg
+                            )
+                        }
+                    }
+                    onComplete?.invoke(false)
+                }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                if (!ensureActiveScope()) {
+                    onComplete?.invoke(false)
+                    return@launch
+                }
+                if (generation == productHistoryGeneration) {
+                    val safeMsg = mapSafeDetailReadError(e, "حركات المخزون", "stock movement history")
+                    _uiState.update { current ->
+                        if (current.selectedProductForDetail?.id != productId) {
+                            current.copy(isLoadingProductHistory = false)
+                        } else {
+                            current.copy(
+                                selectedProductHistory = null,
+                                isLoadingProductHistory = false,
+                                productHistoryError = safeMsg
+                            )
+                        }
+                    }
                     onComplete?.invoke(false)
                 }
             }
@@ -649,9 +1151,17 @@ class TraderViewModel(
     }
 
     fun loadInvoiceDetail(invoicePublicId: String, onComplete: ((Boolean) -> Unit)? = null) {
+        if (!ensureActiveScope()) {
+            onComplete?.invoke(false)
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val result = repository.getSalesInvoiceDetail(invoicePublicId)
             withContext(Dispatchers.Main) {
+                if (!ensureActiveScope()) {
+                    onComplete?.invoke(false)
+                    return@withContext
+                }
                 result.onSuccess { detail ->
                     _uiState.update { current ->
                         val currentActive = current.activeReceipt
@@ -673,6 +1183,7 @@ class TraderViewModel(
     }
 
     fun refreshLiveMerchantReads() {
+        if (!ensureActiveScope()) return
         viewModelScope.launch(Dispatchers.IO) {
             repository.refreshInvoices()
             repository.refreshHomeMetrics()
@@ -682,6 +1193,7 @@ class TraderViewModel(
     }
 
     fun loadScreen(screen: TraderScreen, retry: Boolean = false) {
+        if (!ensureActiveScope()) return
         val state = _uiState.value
         if (state.currentSession.isDemoSession) return
         val previous = state.readStatus[screen]
@@ -692,8 +1204,16 @@ class TraderViewModel(
                 TraderScreen.HOME -> repository.refreshHomeMetrics()
                 TraderScreen.PRODUCTS_CATALOG -> repository.refreshProducts()
                 TraderScreen.CUSTOMERS -> repository.refreshCustomers()
+                TraderScreen.SUPPLIERS -> {
+                    if (state.currentSession.canManageSuppliers()) {
+                        repository.refreshSuppliers()
+                    } else {
+                        Result.success(Unit)
+                    }
+                }
                 else -> error("Unsupported read screen")
             }
+            if (!ensureActiveScope()) return@launch
             val status = if (result.isSuccess) ReadStatus.READY else ReadStatus.FAILED
             _uiState.update { it.copy(readStatus = it.readStatus + (screen to status)) }
         }
@@ -914,11 +1434,13 @@ class TraderViewModel(
 
     // POS Basket with Overselling Prevention Safeguard
     fun addProductToBasket(product: Product, count: Int = 1) {
+        if (!ensureActiveScope()) return
         if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         addProductToBasket(product, BigDecimal(count))
     }
 
     fun addProductToBasket(product: Product, count: BigDecimal) {
+        if (!ensureActiveScope()) return
         if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         if (count <= BigDecimal.ZERO) return
         _uiState.update { state ->
@@ -968,6 +1490,7 @@ class TraderViewModel(
     }
 
     fun decrementProductInBasket(productId: String) {
+        if (!ensureActiveScope()) return
         if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         _uiState.update { state ->
             val updatedBasket = state.basket.mapNotNull { item ->
@@ -982,6 +1505,7 @@ class TraderViewModel(
     }
 
     fun removeProductFromBasket(productId: String) {
+        if (!ensureActiveScope()) return
         if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         _uiState.update { state ->
             state.copy(basket = state.basket.filterNot { it.product.id == productId })
@@ -1185,6 +1709,7 @@ class TraderViewModel(
     }
 
     fun assignCustomerToSale(customer: Customer?) {
+        if (!ensureActiveScope()) return
         if (_uiState.value.isPaymentUnverifiedHold || _uiState.value.isSubmittingSale) return
         _uiState.update { state ->
             val currentNote = state.customerNote.trim()
@@ -1348,8 +1873,10 @@ class TraderViewModel(
 
     // Final Sale Posting via Repository
     fun completeCashSale(asCreditDebt: Boolean = false) {
+        if (!ensureActiveScope()) return
         val state = _uiState.value
         if (state.basket.isEmpty() || state.isSubmittingSale || state.isActionBusy) return
+        val currency = state.businessInfo.defaultCurrency
         if (state.isPaymentUnverifiedHold) {
             val ar = "العملية قيد التحقق — يرجى الانتظار لتأكيد الدفع"
             val en = "Payment pending verification — awaiting confirmation"
@@ -1393,8 +1920,8 @@ class TraderViewModel(
 
         // Safeguard 1: Cash sale requires sufficient cash tendered (no partial cash accepted)
         if (!asCreditDebt && !state.isCashSufficient) {
-            val shortfall = WesternFormatters.formatIls(state.remainingUnpaidExact)
-            val totalFormatted = WesternFormatters.formatIls(state.basketNetTotalExact)
+            val shortfall = WesternFormatters.formatCurrency(state.remainingUnpaidExact, currency)
+            val totalFormatted = WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)
             val ar = "النقد المستلم ناقص بمقدار $shortfall — استلم كامل المبلغ ($totalFormatted) أو اختر الترحيل الآجل لزبون مسجل"
             val en = "Cash received is short by $shortfall — collect full $totalFormatted or post on a customer account"
             _uiState.update {
@@ -1437,7 +1964,7 @@ class TraderViewModel(
 
         // Safeguard 4: Credit sale blocked if credit would exceed limit
         if (asCreditDebt && state.wouldCreditExceedCustomerLimit) {
-            val excess = WesternFormatters.formatIls(state.creditCeilingExcessExact)
+            val excess = WesternFormatters.formatCurrency(state.creditCeilingExcessExact, currency)
             val ar = "متوقف لتجاوز سقف الدين بمقدار $excess"
             val en = "Credit blocked: Over limit by $excess"
             _uiState.update {
@@ -1818,50 +2345,67 @@ class TraderViewModel(
 
     // Customer Ledger & Debt Collections
     fun selectCustomerForDetail(customer: Customer) {
-        if (repository !is OfflineDemoTraderRepository) {
-            loadCustomerStatement(customer.id)
-            viewModelScope.launch {
-                try {
-                    val detailRes = repository.getCustomerDetail(customer.id)
-                    if (detailRes.isSuccess) {
-                        val detail = detailRes.getOrNull()
-                        if (detail != null) {
-                            _uiState.update { current ->
-                                if (current.selectedCustomerForDetail?.id == customer.id) {
-                                    current.copy(selectedCustomerForDetail = detail)
-                                } else current
-                            }
-                        }
-                    }
-                } catch (_: Exception) {}
-            }
-        }
+        if (!ensureActiveScope()) return
+        val freshCustomer = _uiState.value.customers.firstOrNull { it.id == customer.id } ?: customer
+        val isLive = repository !is OfflineDemoTraderRepository
+        customerDetailJob?.cancel()
+        customerStatementJob?.cancel()
+        val detailGen = ++customerDetailGeneration
         _uiState.update { state ->
-            val freshCustomer = state.customers.firstOrNull { it.id == customer.id } ?: customer
             state.copy(
                 selectedCustomerForDetail = freshCustomer,
                 selectedCustomerStatement = null,
+                isLoadingCustomerStatement = isLive,
+                customerStatementError = null,
                 lastCustomerPaymentMessageAr = null,
                 lastCustomerPaymentMessageEn = null,
                 currentScreen = TraderScreen.CUSTOMER_DETAIL,
                 screenHistory = (state.screenHistory + state.currentScreen).takeLast(8)
             )
         }
+        if (isLive) {
+            loadCustomerStatement(freshCustomer.id)
+            customerDetailJob = viewModelScope.launch {
+                try {
+                    val detailRes = repository.getCustomerDetail(freshCustomer.id)
+                    if (!ensureActiveScope()) return@launch
+                    if (detailGen == customerDetailGeneration && detailRes.isSuccess) {
+                        val detail = detailRes.getOrNull()
+                        if (detail != null) {
+                            _uiState.update { current ->
+                                if (current.selectedCustomerForDetail?.id == freshCustomer.id) {
+                                    current.copy(selectedCustomerForDetail = detail)
+                                } else current
+                            }
+                        }
+                    }
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    throw ce
+                } catch (_: Exception) {
+                    if (!repository.isScopeActive()) ensureActiveScope()
+                }
+            }
+        }
     }
 
     fun openPaymentCollectionDialog(open: Boolean) {
         if (!open) {
             resetCustomerSettlementTargets()
-        } else {
-            val customer = _uiState.value.selectedCustomerForDetail
-            if (customer != null) {
-                loadCustomerSettlementTargets(customer.id, resetPagination = true)
-            }
+            _uiState.update { it.copy(isPaymentCollectionDialogOpen = false) }
+            return
         }
-        _uiState.update { it.copy(isPaymentCollectionDialogOpen = open) }
+        if (!ensureActiveScope()) return
+        if (!MerchantAction.COLLECT.allowed(_uiState.value.currentSession)) return
+        val customer = _uiState.value.selectedCustomerForDetail
+        if (customer != null) {
+            loadCustomerSettlementTargets(customer.id, resetPagination = true)
+        }
+        _uiState.update { it.copy(isPaymentCollectionDialogOpen = true) }
     }
 
     fun openPaymentCollectionForCustomer(customer: Customer) {
+        if (!ensureActiveScope()) return
+        if (!MerchantAction.COLLECT.allowed(_uiState.value.currentSession)) return
         loadCustomerSettlementTargets(customer.id, resetPagination = true)
         _uiState.update { state ->
             val freshCustomer = state.customers.firstOrNull { it.id == customer.id } ?: customer
@@ -1889,6 +2433,10 @@ class TraderViewModel(
         allocations: List<PaymentAllocationInput> = emptyList(),
         onComplete: (Boolean) -> Unit = {}
     ): Boolean {
+        if (!ensureActiveScope() || !MerchantAction.COLLECT.allowed(_uiState.value.currentSession)) {
+            onComplete(false)
+            return false
+        }
         val saved = recordCustomerPayment(
             customerId = customerId,
             amount = amount,
@@ -1899,7 +2447,12 @@ class TraderViewModel(
             allocations = allocations
         ) { res ->
             val success = res.isSuccess
-            if (success) navigateTo(TraderScreen.CUSTOMER_DETAIL)
+            if (success) {
+                navigateTo(TraderScreen.CUSTOMER_DETAIL)
+                if (repository !is OfflineDemoTraderRepository && !_uiState.value.currentSession.isDemoSession) {
+                    loadCustomerStatement(customerId)
+                }
+            }
             onComplete(success)
         }
         if (saved) navigateTo(TraderScreen.CUSTOMER_DETAIL)
@@ -1982,32 +2535,40 @@ class TraderViewModel(
                     )
                 }
                 if (result.isSuccess) {
+                    val tx = result.getOrNull()
                     syncCustomers()
                     _uiState.update { state ->
-                        val updatedCust = state.customers.firstOrNull { it.id == customerId }
-                        val paidStr = WesternFormatters.formatIls(amountExact)
-                        val isBalKnown = updatedCust?.balanceExact != null && updatedCust?.balanceIls?.isNaN() == false
-                        val newBal = updatedCust?.balanceIls ?: Double.NaN
+                        val currency = state.businessInfo.defaultCurrency
+                        val inDirectory = state.customers.firstOrNull { it.id == customerId }
+                        val fallbackCust = state.selectedCustomerForDetail?.takeIf { it.id == customerId }
+                            ?: state.customerSearchResults?.firstOrNull { it.id == customerId }
+                        val updatedCust = inDirectory ?: fallbackCust?.copy(
+                            balanceExact = if (tx != null) tx.runningBalanceExact else fallbackCust.balanceExact
+                        )
+                        val paidStr = WesternFormatters.formatCurrency(amountExact, currency)
+                        val balExact = updatedCust?.balanceExact
+                        val isBalKnown = balExact != null
                         val hasAllocs = allocations.isNotEmpty()
                         val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
-                        val allocStr = WesternFormatters.formatIls(totalAllocExact)
+                        val allocStr = WesternFormatters.formatCurrency(totalAllocExact, currency)
+                        val eps = BigDecimal("0.005")
 
                         val msgAr = when {
                             !hasAllocs -> {
                                 when {
-                                    !isBalKnown -> "تم قبض $paidStr نقداً (دفعة مقدمة غير مخصصة) — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
-                                    newBal > 0.005 -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري المتبقي: ${WesternFormatters.formatIls(newBal)}"
-                                    newBal < -0.005 -> "تم قبض $paidStr نقداً — رصيد الزبون المقدم (دفعة غير مخصصة): ${WesternFormatters.formatIls(-newBal)}"
-                                    else -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري: 0.00 ₪"
+                                    balExact == null -> "تم قبض $paidStr نقداً (دفعة مقدمة غير مخصصة) — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
+                                    balExact > eps -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري المتبقي: ${WesternFormatters.formatCurrency(balExact, currency)}"
+                                    balExact < eps.negate() -> "تم قبض $paidStr نقداً — رصيد الزبون المقدم (دفعة غير مخصصة): ${WesternFormatters.formatCurrency(balExact.negate(), currency)}"
+                                    else -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}"
                                 }
                             }
                             else -> {
                                 val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                                val unallocStr = WesternFormatters.formatIls(unallocExact)
+                                val unallocStr = WesternFormatters.formatCurrency(unallocExact, currency)
                                 if (unallocExact > BigDecimal.ZERO) {
-                                    "تم قبض $paidStr نقداً (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد الدفتري: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "غير متاح"}"
+                                    "تم قبض $paidStr نقداً (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد الدفتري: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "غير متاح"}"
                                 } else {
-                                    "تم قبض $paidStr نقداً وتخصيصها للذمم المحددة — الرصيد الدفتري المتبقي: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "غير متاح"}"
+                                    "تم قبض $paidStr نقداً وتخصيصها للذمم المحددة — الرصيد الدفتري المتبقي: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "غير متاح"}"
                                 }
                             }
                         }
@@ -2015,19 +2576,19 @@ class TraderViewModel(
                         val msgEn = when {
                             !hasAllocs -> {
                                 when {
-                                    !isBalKnown -> "Collected $paidStr in cash (unapplied advance) — Current balance unavailable (statement refresh required)"
-                                    newBal > 0.005 -> "Collected $paidStr in cash (unapplied advance) — Remaining ledger balance: ${WesternFormatters.formatIls(newBal)}"
-                                    newBal < -0.005 -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatIls(-newBal)}"
-                                    else -> "Collected $paidStr in cash (unapplied advance) — Ledger balance: 0.00 ₪"
+                                    balExact == null -> "Collected $paidStr in cash (unapplied advance) — Current balance unavailable (statement refresh required)"
+                                    balExact > eps -> "Collected $paidStr in cash (unapplied advance) — Remaining ledger balance: ${WesternFormatters.formatCurrency(balExact, currency)}"
+                                    balExact < eps.negate() -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatCurrency(balExact.negate(), currency)}"
+                                    else -> "Collected $paidStr in cash (unapplied advance) — Ledger balance: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}"
                                 }
                             }
                             else -> {
                                 val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                                val unallocStr = WesternFormatters.formatIls(unallocExact)
+                                val unallocStr = WesternFormatters.formatCurrency(unallocExact, currency)
                                 if (unallocExact > BigDecimal.ZERO) {
-                                    "Collected $paidStr in cash (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "unavailable"}"
+                                    "Collected $paidStr in cash (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "unavailable"}"
                                 } else {
-                                    "Collected $paidStr in cash applied to selected targets — Remaining ledger balance: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "unavailable"}"
+                                    "Collected $paidStr in cash applied to selected targets — Remaining ledger balance: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "unavailable"}"
                                 }
                             }
                         }
@@ -2065,32 +2626,40 @@ class TraderViewModel(
                     )
                 }
                 if (result.isSuccess) {
+                    val tx = result.getOrNull()
                     syncCustomers()
                     _uiState.update { state ->
-                        val updatedCust = state.customers.firstOrNull { it.id == customerId }
-                        val paidStr = WesternFormatters.formatIls(amountExact)
-                        val isBalKnown = updatedCust?.balanceExact != null && updatedCust?.balanceIls?.isNaN() == false
-                        val newBal = updatedCust?.balanceIls ?: Double.NaN
+                        val currency = state.businessInfo.defaultCurrency
+                        val inDirectory = state.customers.firstOrNull { it.id == customerId }
+                        val fallbackCust = state.selectedCustomerForDetail?.takeIf { it.id == customerId }
+                            ?: state.customerSearchResults?.firstOrNull { it.id == customerId }
+                        val updatedCust = inDirectory ?: fallbackCust?.copy(
+                            balanceExact = if (tx != null) tx.runningBalanceExact else fallbackCust.balanceExact
+                        )
+                        val paidStr = WesternFormatters.formatCurrency(amountExact, currency)
+                        val balExact = updatedCust?.balanceExact
+                        val isBalKnown = balExact != null
                         val hasAllocs = allocations.isNotEmpty()
                         val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
-                        val allocStr = WesternFormatters.formatIls(totalAllocExact)
+                        val allocStr = WesternFormatters.formatCurrency(totalAllocExact, currency)
+                        val eps = BigDecimal("0.005")
 
                         val msgAr = when {
                             !hasAllocs -> {
                                 when {
-                                    !isBalKnown -> "تم قبض $paidStr نقداً (دفعة مقدمة غير مخصصة) — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
-                                    newBal > 0.005 -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري المتبقي: ${WesternFormatters.formatIls(newBal)}"
-                                    newBal < -0.005 -> "تم قبض $paidStr نقداً — رصيد الزبون المقدم (دفعة غير مخصصة): ${WesternFormatters.formatIls(-newBal)}"
-                                    else -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري: 0.00 ₪"
+                                    balExact == null -> "تم قبض $paidStr نقداً (دفعة مقدمة غير مخصصة) — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
+                                    balExact > eps -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري المتبقي: ${WesternFormatters.formatCurrency(balExact, currency)}"
+                                    balExact < eps.negate() -> "تم قبض $paidStr نقداً — رصيد الزبون المقدم (دفعة غير مخصصة): ${WesternFormatters.formatCurrency(balExact.negate(), currency)}"
+                                    else -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}"
                                 }
                             }
                             else -> {
                                 val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                                val unallocStr = WesternFormatters.formatIls(unallocExact)
+                                val unallocStr = WesternFormatters.formatCurrency(unallocExact, currency)
                                 if (unallocExact > BigDecimal.ZERO) {
-                                    "تم قبض $paidStr نقداً (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد الدفتري: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "غير متاح"}"
+                                    "تم قبض $paidStr نقداً (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد الدفتري: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "غير متاح"}"
                                 } else {
-                                    "تم قبض $paidStr نقداً وتخصيصها للذمم المحددة — الرصيد الدفتري المتبقي: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "غير متاح"}"
+                                    "تم قبض $paidStr نقداً وتخصيصها للذمم المحددة — الرصيد الدفتري المتبقي: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "غير متاح"}"
                                 }
                             }
                         }
@@ -2098,19 +2667,19 @@ class TraderViewModel(
                         val msgEn = when {
                             !hasAllocs -> {
                                 when {
-                                    !isBalKnown -> "Collected $paidStr in cash (unapplied advance) — Current balance unavailable (statement refresh required)"
-                                    newBal > 0.005 -> "Collected $paidStr in cash (unapplied advance) — Remaining ledger balance: ${WesternFormatters.formatIls(newBal)}"
-                                    newBal < -0.005 -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatIls(-newBal)}"
-                                    else -> "Collected $paidStr in cash (unapplied advance) — Ledger balance: 0.00 ₪"
+                                    balExact == null -> "Collected $paidStr in cash (unapplied advance) — Current balance unavailable (statement refresh required)"
+                                    balExact > eps -> "Collected $paidStr in cash (unapplied advance) — Remaining ledger balance: ${WesternFormatters.formatCurrency(balExact, currency)}"
+                                    balExact < eps.negate() -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatCurrency(balExact.negate(), currency)}"
+                                    else -> "Collected $paidStr in cash (unapplied advance) — Ledger balance: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}"
                                 }
                             }
                             else -> {
                                 val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                                val unallocStr = WesternFormatters.formatIls(unallocExact)
+                                val unallocStr = WesternFormatters.formatCurrency(unallocExact, currency)
                                 if (unallocExact > BigDecimal.ZERO) {
-                                    "Collected $paidStr in cash (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "unavailable"}"
+                                    "Collected $paidStr in cash (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "unavailable"}"
                                 } else {
-                                    "Collected $paidStr in cash applied to selected targets — Remaining ledger balance: ${if (isBalKnown) WesternFormatters.formatIls(newBal) else "unavailable"}"
+                                    "Collected $paidStr in cash applied to selected targets — Remaining ledger balance: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "unavailable"}"
                                 }
                             }
                         }
@@ -2248,12 +2817,26 @@ class TraderViewModel(
 
     // Suppliers & Purchasing Operations
     fun openSupplierPayment(supplier: Supplier) {
-        if (!_uiState.value.currentSession.canManageSuppliers()) return
+        if (!ensureActiveScope()) return
+        if (!MerchantAction.PAY.allowed(_uiState.value.currentSession)) return
+        supplierSearchJob?.cancel()
+        supplierSearchGeneration++
         selectSupplierForDetail(supplier)
-        _uiState.update { it.copy(pendingAction = MerchantAction.PAY) }
+        if (_uiState.value.currentScreen == TraderScreen.SUPPLIER_DETAIL) {
+            _uiState.update {
+                it.copy(
+                    pendingAction = MerchantAction.PAY,
+                    supplierSearchQuery = "",
+                    supplierSearchResults = null,
+                    isSearchingSuppliers = false,
+                    supplierSearchError = null
+                )
+            }
+        }
     }
 
     fun selectSupplierForDetail(supplier: Supplier) {
+        if (!ensureActiveScope()) return
         if (!_uiState.value.currentSession.canManageSuppliers()) return
         _uiState.update { state ->
             val freshSupplier = state.suppliers.firstOrNull { it.id == supplier.id } ?: supplier
@@ -3785,19 +4368,14 @@ class TraderViewModel(
     private var supplierSearchGeneration = 0L
 
     fun searchSuppliers(query: String) {
+        if (!ensureActiveScope()) return
         supplierSearchJob?.cancel()
         val trimmed = query.trim()
         val generation = ++supplierSearchGeneration
-        _uiState.update {
-            it.copy(
-                supplierSearchQuery = query,
-                isSearchingSuppliers = trimmed.isNotBlank(),
-                supplierSearchError = null
-            )
-        }
         if (trimmed.isBlank()) {
             _uiState.update {
                 it.copy(
+                    supplierSearchQuery = query,
                     supplierSearchResults = null,
                     isSearchingSuppliers = false,
                     supplierSearchError = null
@@ -3805,10 +4383,20 @@ class TraderViewModel(
             }
             return
         }
+        _uiState.update {
+            it.copy(
+                supplierSearchQuery = query,
+                supplierSearchResults = null,
+                isSearchingSuppliers = true,
+                supplierSearchError = null
+            )
+        }
         supplierSearchJob = viewModelScope.launch {
             delay(250)
+            if (!ensureActiveScope()) return@launch
             try {
                 val res = repository.searchSuppliers(trimmed)
+                if (!ensureActiveScope()) return@launch
                 if (generation == supplierSearchGeneration) {
                     if (res.isSuccess) {
                         _uiState.update {
@@ -3832,6 +4420,7 @@ class TraderViewModel(
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 throw ce
             } catch (e: Exception) {
+                if (!ensureActiveScope()) return@launch
                 if (generation == supplierSearchGeneration) {
                     _uiState.update {
                         it.copy(
@@ -3849,19 +4438,14 @@ class TraderViewModel(
     private var customerSearchGeneration = 0L
 
     fun searchCustomers(query: String) {
+        if (!ensureActiveScope()) return
         customerSearchJob?.cancel()
         val trimmed = query.trim()
         val generation = ++customerSearchGeneration
-        _uiState.update {
-            it.copy(
-                customerSearchQuery = query,
-                isSearchingCustomers = trimmed.isNotBlank(),
-                customerSearchError = null
-            )
-        }
         if (trimmed.isBlank()) {
             _uiState.update {
                 it.copy(
+                    customerSearchQuery = query,
                     customerSearchResults = null,
                     isSearchingCustomers = false,
                     customerSearchError = null
@@ -3869,10 +4453,20 @@ class TraderViewModel(
             }
             return
         }
+        _uiState.update {
+            it.copy(
+                customerSearchQuery = query,
+                customerSearchResults = null,
+                isSearchingCustomers = true,
+                customerSearchError = null
+            )
+        }
         customerSearchJob = viewModelScope.launch {
             delay(250)
+            if (!ensureActiveScope()) return@launch
             try {
                 val res = repository.searchCustomers(trimmed)
+                if (!ensureActiveScope()) return@launch
                 if (generation == customerSearchGeneration) {
                     if (res.isSuccess) {
                         _uiState.update {
@@ -3896,6 +4490,7 @@ class TraderViewModel(
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 throw ce
             } catch (e: Exception) {
+                if (!ensureActiveScope()) return@launch
                 if (generation == customerSearchGeneration) {
                     _uiState.update {
                         it.copy(
@@ -3913,9 +4508,11 @@ class TraderViewModel(
     private var productSearchGeneration = 0L
 
     fun searchProductsOnServer(query: String) {
+        if (!ensureActiveScope()) return
         val session = _uiState.value.currentSession
         if (session.isDemoSession) {
             productSearchJob?.cancel()
+            productSearchGeneration++
             _uiState.update {
                 it.copy(
                     productSearchQuery = query,
@@ -3929,16 +4526,10 @@ class TraderViewModel(
         productSearchJob?.cancel()
         val trimmed = query.trim()
         val generation = ++productSearchGeneration
-        _uiState.update {
-            it.copy(
-                productSearchQuery = query,
-                isSearchingProducts = trimmed.isNotBlank(),
-                productSearchError = null
-            )
-        }
         if (trimmed.isBlank()) {
             _uiState.update {
                 it.copy(
+                    productSearchQuery = "",
                     productSearchResults = null,
                     isSearchingProducts = false,
                     productSearchError = null
@@ -3946,14 +4537,30 @@ class TraderViewModel(
             }
             return
         }
+        _uiState.update { state ->
+            val committed = state.productSearchQuery.trim()
+            val canKeepDuringDebounce = state.productSearchResults != null &&
+                committed.isNotEmpty() &&
+                (trimmed.startsWith(committed, ignoreCase = true) ||
+                    committed.startsWith(trimmed, ignoreCase = true))
+            state.copy(
+                productSearchQuery = if (canKeepDuringDebounce) state.productSearchQuery else "",
+                productSearchResults = if (canKeepDuringDebounce) state.productSearchResults else null,
+                isSearchingProducts = true,
+                productSearchError = null
+            )
+        }
         productSearchJob = viewModelScope.launch {
             delay(250)
+            if (!ensureActiveScope()) return@launch
             try {
                 val res = repository.searchProductsOnServer(trimmed, limit = 30)
+                if (!ensureActiveScope()) return@launch
                 if (generation == productSearchGeneration) {
                     if (res.isSuccess) {
                         _uiState.update {
                             it.copy(
+                                productSearchQuery = query,
                                 productSearchResults = res.getOrThrow(),
                                 isSearchingProducts = false,
                                 productSearchError = null
@@ -3963,6 +4570,7 @@ class TraderViewModel(
                         val errMsg = res.exceptionOrNull()?.message ?: "Product search failed"
                         _uiState.update {
                             it.copy(
+                                productSearchQuery = query,
                                 productSearchResults = emptyList(),
                                 isSearchingProducts = false,
                                 productSearchError = errMsg
@@ -3973,9 +4581,11 @@ class TraderViewModel(
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 throw ce
             } catch (e: Exception) {
+                if (!ensureActiveScope()) return@launch
                 if (generation == productSearchGeneration) {
                     _uiState.update {
                         it.copy(
+                            productSearchQuery = query,
                             productSearchResults = emptyList(),
                             isSearchingProducts = false,
                             productSearchError = e.message

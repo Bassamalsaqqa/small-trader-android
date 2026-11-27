@@ -103,6 +103,7 @@ import com.example.ui.components.SelectAllNumericOutlinedTextField
 import com.example.ui.components.StitchBadge
 import com.example.ui.components.StitchBadgeTone
 import com.example.ui.components.StitchBidiUtils
+import java.math.BigDecimal
 import com.example.ui.components.StitchCard
 import com.example.ui.components.StitchPrimaryButton
 import com.example.ui.components.StitchTonalButton
@@ -1800,6 +1801,8 @@ internal fun CustomerPickerModalSheet(
     val financial = TraderTheme.financial
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var searchQuery by rememberSaveable { mutableStateOf("") }
+    val currency = state?.businessInfo?.defaultCurrency ?: "ILS"
+    val netTotalExact = state?.basketNetTotalExact ?: BigDecimal(basketNetTotalIls.toString())
 
     val normalizedQuery = TraderUiState.normalizeForSearch(
         WesternFormatters.sanitizeWesternDigits(searchQuery.trim())
@@ -1981,9 +1984,15 @@ internal fun CustomerPickerModalSheet(
             ) {
                 items(filteredCustomers, key = { it.id }) { cust ->
                     val isCustSelected = cust.id == selectedCustomerId
-                    val isCustBalKnown = cust.balanceExact != null && !cust.balanceIls.isNaN()
-                    val projected = if (isCustBalKnown) cust.balanceIls + basketNetTotalIls else null
-                    val wouldExceed = if (projected != null && cust.creditLimitIls > 0.005) projected > cust.creditLimitIls else false
+                    val custBalExact = cust.balanceExact
+                    val isCustBalKnown = custBalExact != null
+                    val projectedExact = if (isCustBalKnown) custBalExact!!.add(netTotalExact) else null
+                    val limitExact = cust.creditLimitExact
+                    val wouldExceed = if (projectedExact != null && limitExact != null && limitExact > BigDecimal("0.005")) {
+                        projectedExact > limitExact
+                    } else {
+                        false
+                    }
 
                     Surface(
                         onClick = { onSelectCustomer(cust) },
@@ -2016,7 +2025,7 @@ internal fun CustomerPickerModalSheet(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "${cust.phone} • ${cust.address(lang)}",
+                                    text = "${cust.phone ?: "--"} • ${cust.address(lang)}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -2024,10 +2033,10 @@ internal fun CustomerPickerModalSheet(
 
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
-                                    text = if (isCustBalKnown) WesternFormatters.formatIls(cust.balanceIls) else "-- ₪",
+                                    text = WesternFormatters.formatCurrency(if (isCustBalKnown) custBalExact else null, currency),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (!isCustBalKnown) MaterialTheme.colorScheme.onSurfaceVariant else if (cust.balanceIls > 0) financial.debit else financial.income
+                                    color = if (!isCustBalKnown) MaterialTheme.colorScheme.onSurfaceVariant else if (custBalExact!! > BigDecimal.ZERO) financial.debit else financial.income
                                 )
                                 if (wouldExceed) {
                                     Text(

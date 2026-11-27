@@ -137,6 +137,10 @@ fun NewSaleScreen(
     val lang = state.language
     var isBasketExpanded by remember { mutableStateOf(false) }
     val showBarcodeInRows = state.searchQuery.any { it.isDigit() }
+    val isServerSearchEnabled = !state.currentSession.isDemoSession && !state.isScopeInvalidated
+    val isDebouncingOrSearching = isServerSearchEnabled && state.searchQuery.isNotBlank() && (
+        state.isSearchingProducts || (state.productSearchQuery.isNotBlank() && !state.productSearchQuery.trim().equals(state.searchQuery.trim(), ignoreCase = true))
+    )
 
     BoxWithConstraints(
         modifier = Modifier
@@ -155,6 +159,7 @@ fun NewSaleScreen(
                 ) {
                     PosSearchAndCategoryHeader(
                         state = state,
+                        isSearching = isDebouncingOrSearching,
                         onSearchQueryChange = onSearchQueryChange,
                         onSelectCategory = onSelectCategory,
                         onAddSingleFilteredProduct = onAddProduct,
@@ -167,115 +172,20 @@ fun NewSaleScreen(
                         color = MaterialTheme.colorScheme.outlineVariant
                     )
 
-                    val isServerSearchEnabled = !state.currentSession.isDemoSession
-                    val isDebouncingOrSearching = isServerSearchEnabled && state.searchQuery.isNotBlank() && (
-                        state.isSearchingProducts || (state.productSearchQuery.isNotBlank() && !state.productSearchQuery.trim().equals(state.searchQuery.trim(), ignoreCase = true))
+                    PosCatalogResultsBody(
+                        state = state,
+                        isDebouncingOrSearching = isDebouncingOrSearching,
+                        showBarcodeInRows = showBarcodeInRows,
+                        lang = lang,
+                        onSearchQueryChange = onSearchQueryChange,
+                        onSelectCategory = onSelectCategory,
+                        onAddProduct = onAddProduct,
+                        onDecrementProduct = onDecrementProduct,
+                        onOpenCustomItem = onOpenCustomItem,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
                     )
-
-                    if (isDebouncingOrSearching) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .testTag("product_search_progress"),
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Text(
-                                    text = lang.tr("جاري البحث في الأصناف...", "Searching products..."),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    } else if (state.searchQuery.isNotBlank() && state.productSearchError != null) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Warning,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(40.dp),
-                                    tint = MaterialTheme.colorScheme.error
-                                )
-                                Text(
-                                    text = lang.tr(
-                                        "فشل البحث في الأصناف: ${state.productSearchError}",
-                                        "Product search failed: ${state.productSearchError}"
-                                    ),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.error,
-                                    textAlign = TextAlign.Center
-                                )
-                                Button(
-                                    onClick = { onSearchQueryChange(state.searchQuery) },
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .heightIn(min = 48.dp)
-                                        .testTag("product_search_retry_button")
-                                ) {
-                                    Text(lang.tr("إعادة المحاولة", "Retry"))
-                                }
-                            }
-                        }
-                    } else if (state.filteredProducts.isEmpty()) {
-                        ZeroResultCatalogState(
-                            searchQuery = state.searchQuery,
-                            selectedCategory = state.selectedCategory,
-                            allCategoriesMatchCount = state.allCategoriesMatchCount,
-                            lang = lang,
-                            onShowAllCategories = { onSelectCategory(ProductCategory.ALL) },
-                            onClearSearch = {
-                                onSearchQueryChange("")
-                                if (state.selectedCategory != ProductCategory.ALL) {
-                                    onSelectCategory(ProductCategory.ALL)
-                                }
-                            },
-                            onOpenCustomItem = onOpenCustomItem,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                        )
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                                .testTag("product_catalog_list"),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(state.filteredProducts, key = { it.id }) { product ->
-                                val qtyInBasket = state.quantityInBasket(product.id)
-                                ProductSaleCatalogRow(
-                                    product = product,
-                                    lang = lang,
-                                    isDarkTheme = state.isDarkTheme,
-                                    quantityInBasket = qtyInBasket,
-                                    showBarcode = showBarcodeInRows,
-                                    onAdd = { onAddProduct(product) },
-                                    onDecrement = { onDecrementProduct(product.id) }
-                                )
-                            }
-                        }
-                    }
                 }
 
                 VerticalDivider(
@@ -304,6 +214,7 @@ fun NewSaleScreen(
             Column(modifier = Modifier.fillMaxSize()) {
                 PosSearchAndCategoryHeader(
                     state = state,
+                    isSearching = isDebouncingOrSearching,
                     onSearchQueryChange = onSearchQueryChange,
                     onSelectCategory = onSelectCategory,
                     onAddSingleFilteredProduct = onAddProduct,
@@ -316,115 +227,20 @@ fun NewSaleScreen(
                     color = MaterialTheme.colorScheme.outlineVariant
                 )
 
-                val isServerSearchEnabled = !state.currentSession.isDemoSession
-                val isDebouncingOrSearching = isServerSearchEnabled && state.searchQuery.isNotBlank() && (
-                    state.isSearchingProducts || (state.productSearchQuery.isNotBlank() && !state.productSearchQuery.trim().equals(state.searchQuery.trim(), ignoreCase = true))
+                PosCatalogResultsBody(
+                    state = state,
+                    isDebouncingOrSearching = isDebouncingOrSearching,
+                    showBarcodeInRows = showBarcodeInRows,
+                    lang = lang,
+                    onSearchQueryChange = onSearchQueryChange,
+                    onSelectCategory = onSelectCategory,
+                    onAddProduct = onAddProduct,
+                    onDecrementProduct = onDecrementProduct,
+                    onOpenCustomItem = onOpenCustomItem,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
                 )
-
-                if (isDebouncingOrSearching) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .testTag("product_search_progress"),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = lang.tr("جاري البحث في الأصناف...", "Searching products..."),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                } else if (state.searchQuery.isNotBlank() && state.productSearchError != null) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Warning,
-                                contentDescription = null,
-                                modifier = Modifier.size(40.dp),
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                            Text(
-                                text = lang.tr(
-                                    "فشل البحث في الأصناف: ${state.productSearchError}",
-                                    "Product search failed: ${state.productSearchError}"
-                                ),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.error,
-                                textAlign = TextAlign.Center
-                            )
-                            Button(
-                                onClick = { onSearchQueryChange(state.searchQuery) },
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .heightIn(min = 48.dp)
-                                    .testTag("product_search_retry_button")
-                            ) {
-                                Text(lang.tr("إعادة المحاولة", "Retry"))
-                            }
-                        }
-                    }
-                } else if (state.filteredProducts.isEmpty()) {
-                    ZeroResultCatalogState(
-                        searchQuery = state.searchQuery,
-                        selectedCategory = state.selectedCategory,
-                        allCategoriesMatchCount = state.allCategoriesMatchCount,
-                        lang = lang,
-                        onShowAllCategories = { onSelectCategory(ProductCategory.ALL) },
-                        onClearSearch = {
-                            onSearchQueryChange("")
-                            if (state.selectedCategory != ProductCategory.ALL) {
-                                onSelectCategory(ProductCategory.ALL)
-                            }
-                        },
-                        onOpenCustomItem = onOpenCustomItem,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                    )
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .testTag("product_catalog_list"),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(state.filteredProducts, key = { it.id }) { product ->
-                            val qtyInBasket = state.quantityInBasket(product.id)
-                            ProductSaleCatalogRow(
-                                product = product,
-                                lang = lang,
-                                isDarkTheme = state.isDarkTheme,
-                                quantityInBasket = qtyInBasket,
-                                showBarcode = showBarcodeInRows,
-                                onAdd = { onAddProduct(product) },
-                                onDecrement = { onDecrementProduct(product.id) }
-                            )
-                        }
-                    }
-                }
 
                 BasketStickyBottomSheet(
                     state = state,
@@ -445,6 +261,124 @@ fun NewSaleScreen(
     }
 }
 
+@Composable
+private fun PosCatalogResultsBody(
+    state: TraderUiState,
+    isDebouncingOrSearching: Boolean,
+    showBarcodeInRows: Boolean,
+    lang: AppLanguage,
+    onSearchQueryChange: (String) -> Unit,
+    onSelectCategory: (ProductCategory) -> Unit,
+    onAddProduct: (Product) -> Unit,
+    onDecrementProduct: (String) -> Unit,
+    onOpenCustomItem: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (state.isScopeInvalidated) {
+        Box(
+            modifier = modifier.padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = lang.tr("انتهت صلاحية الجلسة أو تغير نطاق الشركة", "Session expired or company scope changed"),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+        }
+    } else if (isDebouncingOrSearching && state.filteredProducts.isEmpty()) {
+        Box(
+            modifier = modifier.padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(32.dp),
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = lang.tr("جاري البحث في الأصناف...", "Searching products..."),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    } else if (!isDebouncingOrSearching && state.searchQuery.isNotBlank() && state.productSearchError != null) {
+        Box(
+            modifier = modifier.padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = MaterialTheme.colorScheme.error
+                )
+                Text(
+                    text = lang.tr(
+                        "فشل البحث في الأصناف: ${state.productSearchError}",
+                        "Product search failed: ${state.productSearchError}"
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    textAlign = TextAlign.Center
+                )
+                Button(
+                    onClick = { onSearchQueryChange(state.searchQuery) },
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("product_search_retry_button")
+                ) {
+                    Text(lang.tr("إعادة المحاولة", "Retry"))
+                }
+            }
+        }
+    } else if (state.filteredProducts.isEmpty()) {
+        ZeroResultCatalogState(
+            searchQuery = state.searchQuery,
+            selectedCategory = state.selectedCategory,
+            allCategoriesMatchCount = state.allCategoriesMatchCount,
+            lang = lang,
+            onShowAllCategories = { onSelectCategory(ProductCategory.ALL) },
+            onClearSearch = {
+                onSearchQueryChange("")
+                if (state.selectedCategory != ProductCategory.ALL) {
+                    onSelectCategory(ProductCategory.ALL)
+                }
+            },
+            onOpenCustomItem = onOpenCustomItem,
+            modifier = modifier
+        )
+    } else {
+        LazyColumn(
+            modifier = modifier.testTag("product_catalog_list"),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(state.filteredProducts, key = { it.id }) { product ->
+                val qtyInBasket = state.quantityInBasket(product.id)
+                ProductSaleCatalogRow(
+                    product = product,
+                    lang = lang,
+                    isDarkTheme = state.isDarkTheme,
+                    quantityInBasket = qtyInBasket,
+                    showBarcode = showBarcodeInRows,
+                    onAdd = { onAddProduct(product) },
+                    onDecrement = { onDecrementProduct(product.id) }
+                )
+            }
+        }
+    }
+}
+
 /**
  * ST-06 / ST-07 Unified POS Instrument Header:
  * - Search bar with Western digit normalization and clear query shortcut.
@@ -455,6 +389,7 @@ fun NewSaleScreen(
 @Composable
 private fun PosSearchAndCategoryHeader(
     state: TraderUiState,
+    isSearching: Boolean = false,
     onSearchQueryChange: (String) -> Unit,
     onSelectCategory: (ProductCategory) -> Unit,
     onAddSingleFilteredProduct: (Product) -> Unit,
@@ -629,6 +564,17 @@ private fun PosSearchAndCategoryHeader(
                     )
                 }
 
+                if (isSearching) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .padding(horizontal = 6.dp)
+                            .size(18.dp)
+                            .testTag("product_search_progress"),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
                 if (hasActiveQuery) {
                     IconButton(
                         onClick = { onSearchQueryChange("") },
@@ -715,8 +661,8 @@ private fun PosSearchAndCategoryHeader(
                     }
                 }
 
-                // Category Filter Pills
-                items(ProductCategory.entries.toTypedArray(), key = { it.name }) { category ->
+                // Category Filter Pills (hide unmapped categories in production when none can match)
+                items(state.visibleProductCategories, key = { it.name }) { category ->
                     val isSelected = state.selectedCategory == category
                     val pillBg = if (isSelected) {
                         MaterialTheme.colorScheme.primaryContainer

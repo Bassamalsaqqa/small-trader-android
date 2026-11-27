@@ -158,6 +158,10 @@ fun ProductsCatalogScreen(
             }
         }
     }
+    val isServerSearchEnabled = !state.currentSession.isDemoSession && !state.isScopeInvalidated
+    val isDebouncingOrSearching = isServerSearchEnabled && state.searchQuery.isNotBlank() && (
+        state.isSearchingProducts || (state.productSearchQuery.isNotBlank() && !state.productSearchQuery.trim().equals(state.searchQuery.trim(), ignoreCase = true))
+    )
 
     Column(
         modifier = Modifier
@@ -359,21 +363,29 @@ fun ProductsCatalogScreen(
                         )
                     },
                     trailingIcon = {
-                        if (state.isSearchingProducts) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        } else if (state.searchQuery.isNotEmpty()) {
-                            IconButton(
-                                onClick = { onSearchChange("") },
-                                modifier = Modifier.size(48.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Clear,
-                                    contentDescription = lang.tr("مسح البحث", "Clear search")
-                                )
+                        if (isDebouncingOrSearching || state.searchQuery.isNotEmpty()) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isDebouncingOrSearching) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier
+                                            .padding(horizontal = 6.dp)
+                                            .size(20.dp)
+                                            .testTag("product_search_progress"),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                if (state.searchQuery.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = { onSearchChange("") },
+                                        modifier = Modifier.size(48.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Clear,
+                                            contentDescription = lang.tr("مسح البحث", "Clear search")
+                                        )
+                                    }
+                                }
                             }
                         }
                     },
@@ -412,18 +424,21 @@ fun ProductsCatalogScreen(
                     }
                 }
 
-                // Category Browsing Filter Chips
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(ProductCategory.entries, key = { it.name }) { cat ->
-                        FilterChip(
-                            selected = state.selectedCategory == cat,
-                            onClick = { onCategorySelect(cat) },
-                            label = { Text(cat.label(lang)) },
-                            modifier = Modifier.testTag("catalog_category_${cat.name}")
-                        )
+                // Category Browsing Filter Chips (hide unmapped categories in production when none can match)
+                val visibleCategories = state.visibleProductCategories
+                if (state.currentSession.isDemoSession || visibleCategories.size > 1) {
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(visibleCategories, key = { it.name }) { cat ->
+                            FilterChip(
+                                selected = state.selectedCategory == cat,
+                                onClick = { onCategorySelect(cat) },
+                                label = { Text(cat.label(lang)) },
+                                modifier = Modifier.testTag("catalog_category_${cat.name}")
+                            )
+                        }
                     }
                 }
 
@@ -541,13 +556,23 @@ fun ProductsCatalogScreen(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
         )
 
-        val isServerSearchEnabled = !state.currentSession.isDemoSession
-        val isDebouncingOrSearching = isServerSearchEnabled && state.searchQuery.isNotBlank() && (
-            state.isSearchingProducts || (state.productSearchQuery.isNotBlank() && !state.productSearchQuery.trim().equals(state.searchQuery.trim(), ignoreCase = true))
-        )
-
-        // Scannable Product Directory List (Lower area preserved as approved)
-        if (isDebouncingOrSearching) {
+        // Scannable Product Directory List (Lower area preserved as approved; keeps matching results during debounce)
+        if (state.isScopeInvalidated) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = lang.tr("انتهت صلاحية الجلسة أو تغير نطاق الشركة", "Session expired or company scope changed"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
+        } else if (isDebouncingOrSearching && displayedProducts.isEmpty()) {
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -560,9 +585,7 @@ fun ProductsCatalogScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     CircularProgressIndicator(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .testTag("product_search_progress"),
+                        modifier = Modifier.size(32.dp),
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
@@ -572,7 +595,7 @@ fun ProductsCatalogScreen(
                     )
                 }
             }
-        } else if (state.searchQuery.isNotBlank() && state.productSearchError != null) {
+        } else if (!isDebouncingOrSearching && state.searchQuery.isNotBlank() && state.productSearchError != null) {
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -870,7 +893,8 @@ fun ProductDetailScreen(
     onDismissFeedback: (() -> Unit)? = null,
     onSaveProduct: ((productId: String?, nameAr: String, category: ProductCategory, unitAr: String, barcode: String, priceIls: Double, costIls: Double, minStockThreshold: Int, initialStock: Int, warehouseAr: String, lotBatchCode: String, expiryDate: String?, isWeightedDisplayOnly: Boolean) -> Unit)? = null,
     onUpdatePriceWithResult: ((productId: String, newPrice: Double, onComplete: (Boolean) -> Unit) -> Unit)? = null,
-    onAdjustStockWithResult: ((productId: String, delta: Int, reason: String, onComplete: (Boolean) -> Unit) -> Unit)? = null
+    onAdjustStockWithResult: ((productId: String, delta: Int, reason: String, onComplete: (Boolean) -> Unit) -> Unit)? = null,
+    onRetryHistory: ((String) -> Unit)? = null
 ) {
     val lang = state.language
     val product = state.selectedProductForDetail ?: return
@@ -879,7 +903,8 @@ fun ProductDetailScreen(
     val liveHistory = if (!isDemo && state.selectedProductHistory?.productId == product.id) {
         state.selectedProductHistory
     } else null
-    val isHistoryLoading = !isDemo && liveHistory == null
+    val historyError = if (!isDemo && liveHistory == null) state.productHistoryError else null
+    val isHistoryLoading = !isDemo && liveHistory == null && (state.isLoadingProductHistory || historyError == null)
 
     val movements = remember(state.stockMovements, product.id) {
         state.stockMovements.filter { it.productId == product.id }
@@ -1578,6 +1603,61 @@ fun ProductDetailScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                            }
+                        }
+                    }
+                } else if (!isDemo && historyError != null) {
+                    item {
+                        val localizedError = if (historyError.contains(" | ")) {
+                            lang.tr(historyError.substringBefore(" | "), historyError.substringAfter(" | "))
+                        } else {
+                            lang.tr(
+                                "تعذر تحميل حركات المخزون. يرجى المحاولة مرة أخرى.",
+                                "Could not load stock movements. Please try again."
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("product_stock_history_error")
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                                Text(
+                                    text = localizedError,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.error,
+                                    textAlign = TextAlign.Center
+                                )
+                                if (onRetryHistory != null) {
+                                    OutlinedButton(
+                                        onClick = { onRetryHistory(product.id) },
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier
+                                            .heightIn(min = 48.dp)
+                                            .testTag("product_stock_history_retry_button")
+                                    ) {
+                                        Text(
+                                            text = lang.tr("إعادة المحاولة", "Retry"),
+                                            color = MaterialTheme.colorScheme.error,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

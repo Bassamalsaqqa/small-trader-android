@@ -76,6 +76,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -99,7 +100,8 @@ import com.example.ui.components.StitchTonalButton
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
-import kotlin.math.abs
+import java.math.BigDecimal
+import java.math.RoundingMode
 
 enum class PaymentMode {
     CASH,
@@ -491,10 +493,15 @@ fun CashPaymentScreen(
                             },
                             singleLine = true,
                             label = {
-                                Text(lang.tr("المبلغ المستلم بالشيكل", "Tender Amount (ILS)"))
+                                Text(
+                                    lang.tr(
+                                        if (currency == "ILS") "المبلغ المستلم بالشيكل" else "المبلغ المستلم ($currency)",
+                                        "Tender Amount ($currency)"
+                                    )
+                                )
                             },
                             placeholder = {
-                                Text(WesternFormatters.formatNumber(state.basketNetTotalIls))
+                                Text(WesternFormatters.formatNumber(state.basketNetTotalExact))
                             },
                             leadingIcon = {
                                 Icon(
@@ -605,15 +612,17 @@ fun CashPaymentScreen(
                             }
                         }
 
-                        // Standard Bill Chips (10, 20, 50, 100, 200 ₪)
+                        // Standard Bill Chips (10, 20, 50, 100, 200)
                         val bills = listOf(10, 20, 50, 100, 200)
+                        val currencyShortTag = WesternFormatters.formatReceiptCurrencyTag(currency, lang)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             bills.forEach { bill ->
-                                val isSelectedBill = (state.cashTenderedIls - bill.toDouble()).let { abs(it) < 0.005 }
-                                val coversDue = bill.toDouble() + 0.005 >= state.basketNetTotalIls
+                                val billExact = BigDecimal(bill)
+                                val isSelectedBill = state.cashTenderedExact.subtract(billExact).abs() < BigDecimal("0.005")
+                                val coversDue = billExact.add(BigDecimal("0.005")) >= state.basketNetTotalExact
                                 Surface(
                                     onClick = {
                                         onSelectDenomination(bill)
@@ -658,7 +667,7 @@ fun CashPaymentScreen(
                                             }
                                         )
                                         Text(
-                                            text = "₪",
+                                            text = currencyShortTag,
                                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
                                             color = when {
                                                 isSelectedBill -> MaterialTheme.colorScheme.primary
@@ -727,7 +736,11 @@ fun CashPaymentScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-
+                                Text(
+                                    text = "${WesternFormatters.formatCurrency(state.cashTenderedExact, currency)} - ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
+                                    color = financial.income
+                                )
                                 StitchBadge(
                                     text = if (isExact) lang.tr("حساب متطابق", "Exact") else lang.tr("مكتمل", "Covered"),
                                     tone = StitchBadgeTone.SUCCESS
@@ -898,6 +911,7 @@ fun CashPaymentScreen(
                 }
 
                 // Quick secondary option: Convert to Credit Sale (ST-10 Section 4)
+                val convertToCreditLabel = lang.tr("تحويل إلى بيع آجل (على الحساب)", "Convert to Credit Sale")
                 Surface(
                     onClick = {
                         paymentMode = PaymentMode.CREDIT
@@ -909,6 +923,11 @@ fun CashPaymentScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp)
+                        .semantics {
+                            role = Role.Button
+                            contentDescription = convertToCreditLabel
+                        }
+                        .testTag("convert_to_credit_sale_button")
                 ) {
                     Row(
                         modifier = Modifier
@@ -924,7 +943,13 @@ fun CashPaymentScreen(
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-
+                        Text(
+                            text = convertToCreditLabel,
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = financial.debit,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             } else {
@@ -1047,21 +1072,23 @@ fun CashPaymentScreen(
                                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    val isCustBalKnown = state.isCustomerBalanceKnown && selectedCustomer.balanceExact != null && !selectedCustomer.balanceIls.isNaN()
+                                    val custBalanceExact = selectedCustomer.balanceExact
+                                    val isCustBalKnown = state.isCustomerBalanceKnown && custBalanceExact != null
+                                    val hasPositiveDebt = isCustBalKnown && custBalanceExact!! > BigDecimal.ZERO
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
                                         Text(
-                                            text = if (isCustBalKnown) WesternFormatters.formatIls(selectedCustomer.balanceIls) else "-- ₪",
+                                            text = WesternFormatters.formatCurrency(if (isCustBalKnown) custBalanceExact else null, currency),
                                             style = MaterialTheme.typography.titleMedium.copy(
                                                 fontWeight = FontWeight.Bold,
                                                 fontFamily = MonoFontFamily
                                             ),
-                                            color = if (!isCustBalKnown) MaterialTheme.colorScheme.onSurfaceVariant else if (selectedCustomer.balanceIls > 0.0) financial.debit else MaterialTheme.colorScheme.onSurface
+                                            color = if (!isCustBalKnown) MaterialTheme.colorScheme.onSurfaceVariant else if (hasPositiveDebt) financial.debit else MaterialTheme.colorScheme.onSurface
                                         )
-                                        if (isCustBalKnown && selectedCustomer.balanceIls > 0.0) {
+                                        if (hasPositiveDebt) {
                                             StitchBadge(
                                                 text = lang.tr("ذمة سابقة", "Owed"),
                                                 tone = StitchBadgeTone.WARNING
@@ -1091,7 +1118,7 @@ fun CashPaymentScreen(
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
                                         text = if (selectedCustomer.creditLimitExact != null) {
-                                            WesternFormatters.formatIls(selectedCustomer.creditLimitIls)
+                                            WesternFormatters.formatCurrency(selectedCustomer.creditLimitExact, currency)
                                         } else {
                                             lang.tr("غير محدد", "Not set")
                                         },
@@ -1105,23 +1132,28 @@ fun CashPaymentScreen(
                             }
 
                             // Credit Limit Meter & Projection
-                            val isCustBalKnown = state.isCustomerBalanceKnown && selectedCustomer.balanceExact != null && !selectedCustomer.balanceIls.isNaN()
-                            val projectedBalance = state.projectedCustomerBalanceIfCreditIls ?: (if (isCustBalKnown) selectedCustomer.balanceIls + state.basketNetTotalIls else null)
+                            val custBalanceExact = selectedCustomer.balanceExact
+                            val isCustBalKnown = state.isCustomerBalanceKnown && custBalanceExact != null
+                            val creditLimitExact = selectedCustomer.creditLimitExact
+                            val projectedBalanceExact = state.projectedCustomerBalanceIfCreditExact ?: if (isCustBalKnown) custBalanceExact?.add(state.basketNetTotalExact) else null
                             val overLimit = state.wouldCreditExceedCustomerLimit
 
-                            if (isCustBalKnown && projectedBalance != null) {
-                                if (selectedCustomer.creditLimitExact == null) {
+                            if (isCustBalKnown && projectedBalanceExact != null) {
+                                if (creditLimitExact == null) {
+                                    val projectedFormatted = WesternFormatters.formatCurrency(projectedBalanceExact, currency)
                                     Text(
                                         text = lang.tr(
-                                            "سقف الائتمان غير محدد لهذا الزبون (إرشادي) — الرصيد المتوقع بعد العملية: ${WesternFormatters.formatIls(projectedBalance)}",
-                                            "No credit limit set for customer (advisory) — Projected balance after sale: ${WesternFormatters.formatIls(projectedBalance)}"
+                                            "سقف الائتمان غير محدد لهذا الزبون (إرشادي) — الرصيد المتوقع بعد العملية: $projectedFormatted",
+                                            "No credit limit set for customer (advisory) — Projected balance after sale: $projectedFormatted"
                                         ),
                                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 } else {
-                                    val consumptionRatio = if (selectedCustomer.creditLimitIls > 0.0) {
-                                        (projectedBalance / selectedCustomer.creditLimitIls).toFloat().coerceIn(0f, 1f)
+                                    val consumptionRatio = if (creditLimitExact > BigDecimal.ZERO) {
+                                        projectedBalanceExact.divide(creditLimitExact, 4, RoundingMode.HALF_UP)
+                                            .toFloat()
+                                            .coerceIn(0f, 1f)
                                     } else 1f
 
                                     Column(
@@ -1160,11 +1192,12 @@ fun CashPaymentScreen(
                                         )
 
                                         if (!overLimit) {
-                                            val safeRemaining = (selectedCustomer.creditLimitIls - projectedBalance).coerceAtLeast(0.0)
+                                            val safeRemainingExact = creditLimitExact.subtract(projectedBalanceExact).coerceAtLeast(BigDecimal.ZERO)
+                                            val safeRemainingFormatted = WesternFormatters.formatCurrency(safeRemainingExact, currency)
                                             Text(
                                                 text = lang.tr(
-                                                    "ضمن الحد الائتماني الآمن (متبقي ${WesternFormatters.formatIls(safeRemaining)} متاح)",
-                                                    "Within safe credit ceiling (${WesternFormatters.formatIls(safeRemaining)} available)"
+                                                    "ضمن الحد الائتماني الآمن (متبقي $safeRemainingFormatted متاح)",
+                                                    "Within safe credit ceiling ($safeRemainingFormatted available)"
                                                 ),
                                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
                                                 color = financial.income
@@ -1204,8 +1237,7 @@ fun CashPaymentScreen(
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
-                                            text = if (isCustBalKnown) "${WesternFormatters.formatIls(selectedCustomer.balanceIls)} + ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}"
-                                                   else "-- ₪ + ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}",
+                                            text = "${WesternFormatters.formatCurrency(if (isCustBalKnown) custBalanceExact else null, currency)} + ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}",
                                             style = MaterialTheme.typography.bodySmall.copy(
                                                 fontSize = 12.sp,
                                                 fontFamily = MonoFontFamily
@@ -1215,7 +1247,7 @@ fun CashPaymentScreen(
                                     }
 
                                     Text(
-                                        text = if (isCustBalKnown && projectedBalance != null) WesternFormatters.formatIls(projectedBalance) else "-- ₪",
+                                        text = WesternFormatters.formatCurrency(if (isCustBalKnown) projectedBalanceExact else null, currency),
                                         style = MaterialTheme.typography.titleMedium.copy(
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = MonoFontFamily
@@ -1360,8 +1392,8 @@ fun CashPaymentScreen(
                             )
                             Text(
                                 text = lang.tr(
-                                    "سيسجل المبلغ كاملاً (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}) كذمة مستحقة على حساب الزبون. المقبوض نقداً: 0.00 ₪.",
-                                    "Full amount (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}) will be debited to customer account. Cash received: 0.00 ₪."
+                                    "سيسجل المبلغ كاملاً (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}) كذمة مستحقة على حساب الزبون. المقبوض نقداً: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}.",
+                                    "Full amount (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}) will be debited to customer account. Cash received: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}."
                                 ),
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1479,8 +1511,8 @@ fun CashPaymentScreen(
                                 "Credit limit unset (advisory) • Debit: ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}"
                             )
                             else -> lang.tr(
-                                "قيد على الحساب: ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)} • الصندوق: 0.00 ₪",
-                                "Account Debit: ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)} • Cash: 0.00 ₪"
+                                "قيد على الحساب: ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)} • الصندوق: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}",
+                                "Account Debit: ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)} • Cash: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}"
                             )
                         },
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),

@@ -101,6 +101,8 @@ import com.example.ui.components.StitchBadge
 import com.example.ui.components.StitchBadgeTone
 import com.example.ui.components.StitchBidiUtils
 import com.example.ui.components.StitchCard
+import com.example.ui.navigation.MerchantAction
+import com.example.ui.navigation.allowed
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
 import com.example.viewmodel.TraderUiState
@@ -643,6 +645,7 @@ fun CustomersScreen(
                 }
             }
         } else {
+            val canCollectPayment = MerchantAction.COLLECT.allowed(state.currentSession)
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
@@ -656,7 +659,7 @@ fun CustomersScreen(
                         customer = customer,
                         lang = lang,
                         onClick = { onCustomerClick(customer) },
-                        onQuickCollect = if (onQuickCollectPayment != null && customer.balanceIls > 0.005) {
+                        onQuickCollect = if (onQuickCollectPayment != null && canCollectPayment && customer.balanceIls > 0.005) {
                             { onQuickCollectPayment(customer) }
                         } else null
                     )
@@ -851,12 +854,13 @@ fun CustomerDetailScreen(
     onUpdateCustomer: ((customerId: String, name: String, phone: String, address: String, creditLimitIls: Double) -> Unit)? = null,
     onUpdateCustomerWithResult: ((customerId: String, name: String, phone: String, address: String, creditLimitIls: Double, onComplete: (Boolean) -> Unit) -> Unit)? = null,
     onUpdateCustomerWithDetails: ((customerId: String, name: String, phone: String, address: String, updatePhone: Boolean, updateAddress: Boolean, updateCreditLimit: Boolean, creditLimit: BigDecimal?, onComplete: (Boolean) -> Unit) -> Unit)? = null,
-    onFormatStatementText: ((String) -> String)? = null
+    onFormatStatementText: ((String) -> String)? = null,
+    onRetryStatement: ((String) -> Unit)? = null
 ) {
     val lang = state.language
     val financial = TraderTheme.financial
     val customerId = state.selectedCustomerForDetail?.id ?: return
-    val customer = state.customers.firstOrNull { it.id == customerId } ?: return
+    val customer = state.customers.firstOrNull { it.id == customerId } ?: state.selectedCustomerForDetail ?: return
     val transactions = remember(state.customerTransactions, customer.id) {
         state.customerTransactions.filter { it.customerId == customer.id }
     }
@@ -867,7 +871,8 @@ fun CustomerDetailScreen(
     val liveStatement = if (!isDemo && state.selectedCustomerStatement?.customerId == customer.id) {
         state.selectedCustomerStatement
     } else null
-    val isStatementLoading = !isDemo && liveStatement == null
+    val statementError = if (!isDemo && liveStatement == null) state.customerStatementError else null
+    val isStatementLoading = !isDemo && liveStatement == null && (state.isLoadingCustomerStatement || statementError == null)
 
     val isDebtor = customer.balanceIls > 0.005
     val isAdvance = customer.balanceIls < -0.005
@@ -1028,6 +1033,59 @@ fun CustomerDetailScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+                    }
+                } else if (!isDemo && statementError != null) {
+                    val localizedStatementError = if (statementError.contains(" | ")) {
+                        lang.tr(statementError.substringBefore(" | "), statementError.substringAfter(" | "))
+                    } else {
+                        lang.tr(
+                            "تعذر تحميل كشف حساب الزبون. يرجى المحاولة مرة أخرى.",
+                            "Could not load customer statement. Please try again."
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("customer_statement_error")
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(28.dp)
+                            )
+                            Text(
+                                text = localizedStatementError,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error,
+                                textAlign = TextAlign.Center
+                            )
+                            if (onRetryStatement != null) {
+                                OutlinedButton(
+                                    onClick = { onRetryStatement(customer.id) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .heightIn(min = 48.dp)
+                                        .testTag("customer_statement_retry_button")
+                                ) {
+                                    Text(
+                                        text = lang.tr("إعادة المحاولة", "Retry"),
+                                        color = MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
                         }
                     }
                 } else if (liveStatement != null) {
@@ -1274,25 +1332,27 @@ fun CustomerDetailScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Button(
-                        onClick = onOpenPaymentDialog,
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 48.dp)
-                            .testTag("collect_payment_button")
-                    ) {
-                        Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isDebtor) lang.tr("قبض دفعة", "Collect Payment")
-                            else lang.tr("تسجيل دفعة أمانة", "Record Deposit"),
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
-                        )
+                    if (MerchantAction.COLLECT.allowed(state.currentSession)) {
+                        Button(
+                            onClick = onOpenPaymentDialog,
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp)
+                                .testTag("collect_payment_button")
+                        ) {
+                            Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isDebtor) lang.tr("قبض دفعة", "Collect Payment")
+                                else lang.tr("تسجيل دفعة أمانة", "Record Deposit"),
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
                     }
 
                     OutlinedButton(
@@ -1378,7 +1438,11 @@ fun CustomerDetailScreen(
                         )
                         val entryCount = if (!isDemo && liveStatement != null) {
                             liveStatement.currencies.values.sumOf { it.entries.size }
-                        } else transactions.size
+                        } else if (isDemo) {
+                            transactions.size
+                        } else {
+                            0
+                        }
                         StitchBadge(
                             text = "${WesternFormatters.formatInt(entryCount)} ${lang.tr("حركة", "entries")}",
                             tone = StitchBadgeTone.NEUTRAL,
@@ -1392,6 +1456,47 @@ fun CustomerDetailScreen(
                 item {
                     Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    }
+                }
+            } else if (!isDemo && statementError != null) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = lang.tr(
+                                    "تعذر تحميل سجل الحركات من الخادم",
+                                    "Could not load transaction history"
+                                ),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (onRetryStatement != null) {
+                                TextButton(
+                                    onClick = { onRetryStatement(customer.id) },
+                                    modifier = Modifier
+                                        .heightIn(min = 48.dp)
+                                        .testTag("customer_statement_history_retry_button")
+                                ) {
+                                    Text(
+                                        text = lang.tr("إعادة المحاولة", "Retry"),
+                                        color = MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             } else if (!isDemo && liveStatement != null) {

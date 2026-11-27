@@ -78,6 +78,7 @@ import com.example.model.StockMovement
 import com.example.model.Supplier
 import com.example.model.SupplierPayment
 import com.example.model.PaymentAllocationInput
+import com.example.model.TraderScreen
 import com.example.model.WesternFormatters
 import com.example.ui.components.StitchBadge
 import com.example.ui.components.StitchBadgeTone
@@ -85,6 +86,7 @@ import com.example.ui.components.StitchBidiUtils
 import com.example.ui.components.StitchCard
 import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.TraderTheme
+import com.example.viewmodel.ReadStatus
 import com.example.viewmodel.TraderUiState
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -122,11 +124,13 @@ fun SuppliersScreen(
     onSearchSuppliers: ((String) -> Unit)? = null,
     launchCreate: Boolean = false,
     onLaunchConsumed: () -> Unit = {},
-    onPrepareSupplierCreateDraft: (() -> Unit)? = null
+    onPrepareSupplierCreateDraft: (() -> Unit)? = null,
+    onRetryRefresh: (() -> Unit)? = null
 ) {
     val createDraft = rememberSaveableStateHolder()
     val lang = state.language
     val canManageSuppliers = state.currentSession.canManageSuppliers()
+    val readStatus = state.readStatusFor(TraderScreen.SUPPLIERS)
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(SupplierBalanceFilter.ALL) }
     var isAddSupplierOpen by rememberSaveable { mutableStateOf(false) }
@@ -602,34 +606,82 @@ fun SuppliersScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Store,
-                        contentDescription = null,
-                        modifier = Modifier.size(42.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                    )
-                    Text(
-                        text = if (searchQuery.isNotBlank() || selectedFilter != SupplierBalanceFilter.ALL) {
-                            lang.tr("لا يوجد موردين مطابقين للبحث أو التصفية", "No matching suppliers found")
-                        } else {
-                            lang.tr("لا يوجد موردين مسجلين حالياً", "No registered suppliers yet")
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    if (searchQuery.isNotBlank() || selectedFilter != SupplierBalanceFilter.ALL) {
-                        TextButton(
-                            onClick = {
-                                searchQuery = ""
-                                selectedFilter = SupplierBalanceFilter.ALL
+                    if (!state.currentSession.isDemoSession &&
+                        searchQuery.isBlank() &&
+                        selectedFilter == SupplierBalanceFilter.ALL &&
+                        state.suppliers.isEmpty() &&
+                        readStatus == ReadStatus.LOADING
+                    ) {
+                        CircularProgressIndicator()
+                        Text(
+                            text = lang.tr("جارٍ تحميل الموردين...", "Loading suppliers..."),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else if (!state.currentSession.isDemoSession &&
+                        searchQuery.isBlank() &&
+                        selectedFilter == SupplierBalanceFilter.ALL &&
+                        state.suppliers.isEmpty() &&
+                        readStatus == ReadStatus.FAILED
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Text(
+                            text = lang.tr("تعذر تحديث الموردين من الخادم", "Could not refresh suppliers from server"),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            textAlign = TextAlign.Center
+                        )
+                        if (onRetryRefresh != null) {
+                            OutlinedButton(
+                                onClick = onRetryRefresh,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("suppliers_directory_retry_button")
+                            ) {
+                                Text(
+                                    text = lang.tr("إعادة المحاولة", "Retry"),
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Store,
+                            contentDescription = null,
+                            modifier = Modifier.size(42.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        )
+                        Text(
+                            text = if (searchQuery.isNotBlank() || selectedFilter != SupplierBalanceFilter.ALL) {
+                                lang.tr("لا يوجد موردين مطابقين للبحث أو التصفية", "No matching suppliers found")
+                            } else {
+                                lang.tr("لا يوجد موردين مسجلين حالياً", "No registered suppliers yet")
                             },
-                            modifier = Modifier.heightIn(min = 48.dp)
-                        ) {
-                            Text(
-                                text = lang.tr("عرض كل الموردين", "Show All Suppliers"),
-                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
-                            )
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (searchQuery.isNotBlank() || selectedFilter != SupplierBalanceFilter.ALL) {
+                            TextButton(
+                                onClick = {
+                                    searchQuery = ""
+                                    onSearchSuppliers?.invoke("")
+                                    selectedFilter = SupplierBalanceFilter.ALL
+                                },
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            ) {
+                                Text(
+                                    text = lang.tr("عرض كل الموردين", "Show All Suppliers"),
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
                         }
                     }
                 }

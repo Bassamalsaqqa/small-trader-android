@@ -60,9 +60,14 @@ data class TraderUiState(
     val liveInvoicesNextCursor: String? = null,
     val isLiveInvoicesLoading: Boolean = false,
     val selectedCustomerStatement: com.example.data.mobile.merchantread.LiveCustomerStatement? = null,
+    val isLoadingCustomerStatement: Boolean = false,
+    val customerStatementError: String? = null,
     val selectedProductHistory: com.example.data.mobile.merchantread.LiveStockMovementHistory? = null,
+    val isLoadingProductHistory: Boolean = false,
+    val productHistoryError: String? = null,
     val selectedInvoiceDetail: com.example.data.mobile.merchantread.LiveInvoiceRecord? = null,
     val readStatus: Map<TraderScreen, ReadStatus> = emptyMap(),
+    val isScopeInvalidated: Boolean = false,
 
     val language: AppLanguage = AppLanguage.AR,
     val isDarkTheme: Boolean = false,
@@ -235,6 +240,32 @@ data class TraderUiState(
         return ProductSearch.computeScore(product, normalizedQuery) > 0
     }
 
+    val visibleProductCategories: List<ProductCategory>
+        get() {
+            if (currentSession.isDemoSession) return ProductCategory.entries
+            val nonAllPresent = buildSet {
+                products.forEach { if (it.category != ProductCategory.ALL) add(it.category) }
+                productSearchResults?.forEach { if (it.category != ProductCategory.ALL) add(it.category) }
+            }
+            return ProductCategory.entries.filter { it == ProductCategory.ALL || it in nonAllPresent }
+        }
+
+    private fun effectiveProductSearchSource(currentQuery: String): List<Product> {
+        if (isScopeInvalidated) return emptyList()
+        val trimmedCurrent = currentQuery.trim()
+        if (trimmedCurrent.isBlank()) return products
+        val committedQuery = productSearchQuery.trim()
+        val serverResults = productSearchResults
+        return when {
+            serverResults != null && committedQuery.equals(trimmedCurrent, ignoreCase = true) -> serverResults
+            isSearchingProducts && serverResults != null && committedQuery.isNotEmpty() &&
+                (trimmedCurrent.startsWith(committedQuery, ignoreCase = true) ||
+                    committedQuery.startsWith(trimmedCurrent, ignoreCase = true)) ->
+                (products + serverResults).distinctBy { it.id }
+            else -> products
+        }
+    }
+
     @Volatile
     private var cachedFilteredQuery: String? = null
     @Volatile
@@ -242,22 +273,24 @@ data class TraderUiState(
     @Volatile
     private var cachedFilteredProductsRef: List<Product>? = null
     @Volatile
+    private var cachedFilteredScopeInvalidated: Boolean = false
+    @Volatile
     private var cachedFilteredResult: List<Product>? = null
 
     val filteredProducts: List<Product>
         get() {
+            if (isScopeInvalidated) return emptyList()
             val currentQuery = searchQuery
-            val currentCategory = selectedCategory
-            val sourceProducts = if (currentQuery.isNotBlank() &&
-                productSearchQuery.trim().equals(currentQuery.trim(), ignoreCase = true) &&
-                productSearchResults != null
-            ) {
-                productSearchResults!!
+            val rawCategory = selectedCategory
+            val currentCategory = if (!currentSession.isDemoSession && rawCategory !in visibleProductCategories) {
+                ProductCategory.ALL
             } else {
-                products
+                rawCategory
             }
+            val sourceProducts = effectiveProductSearchSource(currentQuery)
             val cachedResult = cachedFilteredResult
             if (cachedResult != null &&
+                !cachedFilteredScopeInvalidated &&
                 cachedFilteredQuery == currentQuery &&
                 cachedFilteredCategory == currentCategory &&
                 cachedFilteredProductsRef === sourceProducts
@@ -274,6 +307,7 @@ data class TraderUiState(
             cachedFilteredQuery = currentQuery
             cachedFilteredCategory = currentCategory
             cachedFilteredProductsRef = sourceProducts
+            cachedFilteredScopeInvalidated = isScopeInvalidated
             cachedFilteredResult = result
             return result
         }
@@ -283,21 +317,18 @@ data class TraderUiState(
     @Volatile
     private var cachedCountProductsRef: List<Product>? = null
     @Volatile
+    private var cachedCountScopeInvalidated: Boolean = false
+    @Volatile
     private var cachedCountResult: Int? = null
 
     val allCategoriesMatchCount: Int
         get() {
+            if (isScopeInvalidated) return 0
             val currentQuery = searchQuery
-            val sourceProducts = if (currentQuery.isNotBlank() &&
-                productSearchQuery.trim().equals(currentQuery.trim(), ignoreCase = true) &&
-                productSearchResults != null
-            ) {
-                productSearchResults!!
-            } else {
-                products
-            }
+            val sourceProducts = effectiveProductSearchSource(currentQuery)
             val cachedCount = cachedCountResult
             if (cachedCount != null &&
+                !cachedCountScopeInvalidated &&
                 cachedCountQuery == currentQuery &&
                 cachedCountProductsRef === sourceProducts
             ) {
@@ -311,6 +342,7 @@ data class TraderUiState(
             )
             cachedCountQuery = currentQuery
             cachedCountProductsRef = sourceProducts
+            cachedCountScopeInvalidated = isScopeInvalidated
             cachedCountResult = count
             return count
         }

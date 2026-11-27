@@ -51,6 +51,7 @@ import java.util.UUID
 interface TraderRepository {
     fun getCurrentSession(): UserSession
     fun getBusinessInfo(): BusinessInfo
+    fun isScopeActive(): Boolean = true
 
     // Reactive StateFlow domain streams
     val productsFlow: StateFlow<List<Product>>
@@ -147,8 +148,17 @@ interface TraderRepository {
         updateCreditLimit: Boolean = false
     ): Result<Customer>
     suspend fun updateCustomer(customerId: String, name: String, phone: String, address: String, creditLimitIls: Double): Result<Customer>
-    suspend fun searchCustomers(query: String): Result<List<Customer>> =
-        Result.success(getCustomers().filter { it.nameAr.contains(query, ignoreCase = true) || it.nameEn.contains(query, ignoreCase = true) || (it.phone?.contains(query) ?: false) })
+    suspend fun searchCustomers(query: String): Result<List<Customer>> {
+        val q = ProductSearch.normalize(query)
+        if (q.isEmpty()) return Result.success(getCustomers())
+        return Result.success(getCustomers().filter {
+            ProductSearch.normalize(it.nameAr).contains(q) ||
+                ProductSearch.normalize(it.nameEn).contains(q) ||
+                (it.code?.lowercase()?.contains(q) ?: false) ||
+                (it.phone?.replace("-", "")?.contains(q.replace("-", "")) ?: false) ||
+                (it.phone?.contains(q) ?: false)
+        })
+    }
     suspend fun getCustomerDetail(customerId: String): Result<Customer> =
         getCustomers().firstOrNull { it.id == customerId }?.let { Result.success(it) }
             ?: Result.failure(NoSuchElementException("Customer not found: "))
@@ -956,14 +966,17 @@ class OfflineDemoTraderRepository(
     override suspend fun refreshSuppliers(): Result<Unit> = Result.success(Unit)
 
     override suspend fun searchSuppliers(query: String): Result<List<Supplier>> {
-        val q = query.trim().lowercase()
+        val q = ProductSearch.normalize(query)
         return Result.success(
-            if (q.isBlank()) suppliers.toList()
+            if (q.isEmpty()) suppliers.toList()
             else suppliers.filter {
-                it.nameAr.lowercase().contains(q) ||
-                it.nameEn.lowercase().contains(q) ||
-                (it.companyAr ?: "").lowercase().contains(q) ||
-                (it.phone ?: "").contains(q)
+                ProductSearch.normalize(it.nameAr).contains(q) ||
+                ProductSearch.normalize(it.nameEn).contains(q) ||
+                ProductSearch.normalize(it.companyAr ?: "").contains(q) ||
+                ProductSearch.normalize(it.companyEn ?: "").contains(q) ||
+                (it.code?.lowercase()?.contains(q) ?: false) ||
+                (it.phone?.replace("-", "")?.contains(q.replace("-", "")) ?: false) ||
+                (it.phone?.contains(q) ?: false)
             }
         )
     }
