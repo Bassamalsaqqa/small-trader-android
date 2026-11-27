@@ -2630,33 +2630,34 @@ class TraderViewModel(
                         val inDirectory = state.customers.firstOrNull { it.id == customerId }
                         val fallbackCust = state.selectedCustomerForDetail?.takeIf { it.id == customerId }
                             ?: state.customerSearchResults?.firstOrNull { it.id == customerId }
-                        val updatedCust = inDirectory ?: fallbackCust?.copy(
-                            balanceExact = if (tx != null) tx.runningBalanceExact else fallbackCust.balanceExact
-                        )
-                        val paidStr = WesternFormatters.formatCurrency(amountExact, currency)
-                        val balExact = updatedCust?.balanceExact
+                        val updatedCust = (inDirectory ?: fallbackCust)?.let { cust ->
+                            if (tx?.runningBalanceExact != null) cust.copy(balanceExact = tx.runningBalanceExact) else cust
+                        }
+                        val lang = state.language
+                        val paidStr = WesternFormatters.formatHumanMoney2dp(amountExact, currency, lang)
+                        val balExact = tx?.runningBalanceExact ?: updatedCust?.balanceExact
                         val isBalKnown = balExact != null
                         val hasAllocs = allocations.isNotEmpty()
                         val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
-                        val allocStr = WesternFormatters.formatCurrency(totalAllocExact, currency)
-                        val eps = BigDecimal("0.005")
+                        val allocStr = WesternFormatters.formatHumanMoney2dp(totalAllocExact, currency, lang)
 
                         val msgAr = when {
                             !hasAllocs -> {
                                 when {
                                     balExact == null -> "تم قبض $paidStr نقداً (دفعة مقدمة غير مخصصة) — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
-                                    balExact > eps -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري المتبقي: ${WesternFormatters.formatCurrency(balExact, currency)}"
-                                    balExact < eps.negate() -> "تم قبض $paidStr نقداً — رصيد الزبون المقدم (دفعة غير مخصصة): ${WesternFormatters.formatCurrency(balExact.negate(), currency)}"
-                                    else -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}"
+                                    balExact > BigDecimal.ZERO -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري المتبقي: ${WesternFormatters.formatHumanMoney2dp(balExact, currency, lang)}"
+                                    balExact < BigDecimal.ZERO -> "تم قبض $paidStr نقداً — رصيد الزبون المقدم (دفعة غير مخصصة): ${WesternFormatters.formatHumanMoney2dp(balExact.negate(), currency, lang)}"
+                                    else -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري: ${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}"
                                 }
                             }
                             else -> {
                                 val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                                val unallocStr = WesternFormatters.formatCurrency(unallocExact, currency)
+                                val unallocStr = WesternFormatters.formatHumanMoney2dp(unallocExact, currency, lang)
+                                val balDisplay = if (balExact == null) "غير متاح" else if (balExact < BigDecimal.ZERO) "رصيد مقدم ${WesternFormatters.formatHumanMoney2dp(balExact.abs(), currency, lang)}" else WesternFormatters.formatHumanMoney2dp(balExact, currency, lang)
                                 if (unallocExact > BigDecimal.ZERO) {
-                                    "تم قبض $paidStr نقداً (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد الدفتري: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "غير متاح"}"
+                                    "تم قبض $paidStr نقداً (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد الدفتري: $balDisplay"
                                 } else {
-                                    "تم قبض $paidStr نقداً وتخصيصها للذمم المحددة — الرصيد الدفتري المتبقي: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "غير متاح"}"
+                                    "تم قبض $paidStr نقداً وتخصيصها للذمم المحددة — الرصيد الدفتري المتبقي: $balDisplay"
                                 }
                             }
                         }
@@ -2665,18 +2666,19 @@ class TraderViewModel(
                             !hasAllocs -> {
                                 when {
                                     balExact == null -> "Collected $paidStr in cash (unapplied advance) — Current balance unavailable (statement refresh required)"
-                                    balExact > eps -> "Collected $paidStr in cash (unapplied advance) — Remaining ledger balance: ${WesternFormatters.formatCurrency(balExact, currency)}"
-                                    balExact < eps.negate() -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatCurrency(balExact.negate(), currency)}"
-                                    else -> "Collected $paidStr in cash (unapplied advance) — Ledger balance: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}"
+                                    balExact > BigDecimal.ZERO -> "Collected $paidStr in cash (unapplied advance) — Remaining ledger balance: ${WesternFormatters.formatHumanMoney2dp(balExact, currency, lang)}"
+                                    balExact < BigDecimal.ZERO -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatHumanMoney2dp(balExact.negate(), currency, lang)}"
+                                    else -> "Collected $paidStr in cash (unapplied advance) — Ledger balance: ${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}"
                                 }
                             }
                             else -> {
                                 val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                                val unallocStr = WesternFormatters.formatCurrency(unallocExact, currency)
+                                val unallocStr = WesternFormatters.formatHumanMoney2dp(unallocExact, currency, lang)
+                                val balDisplay = if (!isBalKnown) "unavailable" else if (balExact!! < BigDecimal.ZERO) "advance credit ${WesternFormatters.formatHumanMoney2dp(balExact.abs(), currency, lang)}" else WesternFormatters.formatHumanMoney2dp(balExact, currency, lang)
                                 if (unallocExact > BigDecimal.ZERO) {
-                                    "Collected $paidStr in cash (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "unavailable"}"
+                                    "Collected $paidStr in cash (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: $balDisplay"
                                 } else {
-                                    "Collected $paidStr in cash applied to selected targets — Remaining ledger balance: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "unavailable"}"
+                                    "Collected $paidStr in cash applied to selected targets — Remaining ledger balance: $balDisplay"
                                 }
                             }
                         }
@@ -2739,33 +2741,34 @@ class TraderViewModel(
                         val inDirectory = state.customers.firstOrNull { it.id == customerId }
                         val fallbackCust = state.selectedCustomerForDetail?.takeIf { it.id == customerId }
                             ?: state.customerSearchResults?.firstOrNull { it.id == customerId }
-                        val updatedCust = inDirectory ?: fallbackCust?.copy(
-                            balanceExact = if (tx != null) tx.runningBalanceExact else fallbackCust.balanceExact
-                        )
-                        val paidStr = WesternFormatters.formatCurrency(amountExact, currency)
-                        val balExact = updatedCust?.balanceExact
+                        val updatedCust = (inDirectory ?: fallbackCust)?.let { cust ->
+                            if (tx?.runningBalanceExact != null) cust.copy(balanceExact = tx.runningBalanceExact) else cust
+                        }
+                        val lang = state.language
+                        val paidStr = WesternFormatters.formatHumanMoney2dp(amountExact, currency, lang)
+                        val balExact = tx?.runningBalanceExact ?: updatedCust?.balanceExact
                         val isBalKnown = balExact != null
                         val hasAllocs = allocations.isNotEmpty()
                         val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
-                        val allocStr = WesternFormatters.formatCurrency(totalAllocExact, currency)
-                        val eps = BigDecimal("0.005")
+                        val allocStr = WesternFormatters.formatHumanMoney2dp(totalAllocExact, currency, lang)
 
                         val msgAr = when {
                             !hasAllocs -> {
                                 when {
                                     balExact == null -> "تم قبض $paidStr نقداً (دفعة مقدمة غير مخصصة) — الرصيد الحالي غير متاح (يتطلب تحديث كشف الحساب)"
-                                    balExact > eps -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري المتبقي: ${WesternFormatters.formatCurrency(balExact, currency)}"
-                                    balExact < eps.negate() -> "تم قبض $paidStr نقداً — رصيد الزبون المقدم (دفعة غير مخصصة): ${WesternFormatters.formatCurrency(balExact.negate(), currency)}"
-                                    else -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}"
+                                    balExact > BigDecimal.ZERO -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري المتبقي: ${WesternFormatters.formatHumanMoney2dp(balExact, currency, lang)}"
+                                    balExact < BigDecimal.ZERO -> "تم قبض $paidStr نقداً — رصيد الزبون المقدم (دفعة غير مخصصة): ${WesternFormatters.formatHumanMoney2dp(balExact.negate(), currency, lang)}"
+                                    else -> "تم قبض $paidStr نقداً (دفعة غير مخصصة) — الرصيد الدفتري: ${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}"
                                 }
                             }
                             else -> {
                                 val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                                val unallocStr = WesternFormatters.formatCurrency(unallocExact, currency)
+                                val unallocStr = WesternFormatters.formatHumanMoney2dp(unallocExact, currency, lang)
+                                val balDisplay = if (balExact == null) "غير متاح" else if (balExact < BigDecimal.ZERO) "رصيد مقدم ${WesternFormatters.formatHumanMoney2dp(balExact.abs(), currency, lang)}" else WesternFormatters.formatHumanMoney2dp(balExact, currency, lang)
                                 if (unallocExact > BigDecimal.ZERO) {
-                                    "تم قبض $paidStr نقداً (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد الدفتري: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "غير متاح"}"
+                                    "تم قبض $paidStr نقداً (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد الدفتري: $balDisplay"
                                 } else {
-                                    "تم قبض $paidStr نقداً وتخصيصها للذمم المحددة — الرصيد الدفتري المتبقي: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "غير متاح"}"
+                                    "تم قبض $paidStr نقداً وتخصيصها للذمم المحددة — الرصيد الدفتري المتبقي: $balDisplay"
                                 }
                             }
                         }
@@ -2774,18 +2777,19 @@ class TraderViewModel(
                             !hasAllocs -> {
                                 when {
                                     balExact == null -> "Collected $paidStr in cash (unapplied advance) — Current balance unavailable (statement refresh required)"
-                                    balExact > eps -> "Collected $paidStr in cash (unapplied advance) — Remaining ledger balance: ${WesternFormatters.formatCurrency(balExact, currency)}"
-                                    balExact < eps.negate() -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatCurrency(balExact.negate(), currency)}"
-                                    else -> "Collected $paidStr in cash (unapplied advance) — Ledger balance: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}"
+                                    balExact > BigDecimal.ZERO -> "Collected $paidStr in cash (unapplied advance) — Remaining ledger balance: ${WesternFormatters.formatHumanMoney2dp(balExact, currency, lang)}"
+                                    balExact < BigDecimal.ZERO -> "Collected $paidStr in cash — Customer advance credit: ${WesternFormatters.formatHumanMoney2dp(balExact.negate(), currency, lang)}"
+                                    else -> "Collected $paidStr in cash (unapplied advance) — Ledger balance: ${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}"
                                 }
                             }
                             else -> {
                                 val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                                val unallocStr = WesternFormatters.formatCurrency(unallocExact, currency)
+                                val unallocStr = WesternFormatters.formatHumanMoney2dp(unallocExact, currency, lang)
+                                val balDisplay = if (!isBalKnown) "unavailable" else if (balExact!! < BigDecimal.ZERO) "advance credit ${WesternFormatters.formatHumanMoney2dp(balExact.abs(), currency, lang)}" else WesternFormatters.formatHumanMoney2dp(balExact, currency, lang)
                                 if (unallocExact > BigDecimal.ZERO) {
-                                    "Collected $paidStr in cash (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "unavailable"}"
+                                    "Collected $paidStr in cash (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: $balDisplay"
                                 } else {
-                                    "Collected $paidStr in cash applied to selected targets — Remaining ledger balance: ${if (isBalKnown) WesternFormatters.formatCurrency(balExact, currency) else "unavailable"}"
+                                    "Collected $paidStr in cash applied to selected targets — Remaining ledger balance: $balDisplay"
                                 }
                             }
                         }
@@ -3077,7 +3081,7 @@ class TraderViewModel(
                     syncSuppliersAndPurchases()
                     _uiState.update { state ->
                         val billCode = bill?.let { WesternFormatters.formatBillCode(it.billNumber) } ?: ""
-                        val remStr = bill?.let { WesternFormatters.formatIls(it.remainingPayableIls) } ?: ""
+                        val remStr = bill?.let { WesternFormatters.formatHumanMoney2dp(it.remainingPayableExact, it.currency, state.language) } ?: ""
                         val stockNoteAr = if (expectedProductId != null && expectedQuantity > 0) {
                             " — مسجل بانتظار استلام (${WesternFormatters.formatInt(expectedQuantity)} وحدة) مخزنياً"
                         } else {
@@ -3137,7 +3141,7 @@ class TraderViewModel(
                     syncSuppliersAndPurchases()
                     _uiState.update { state ->
                         val billCode = bill?.let { WesternFormatters.formatBillCode(it.billNumber) } ?: ""
-                        val remStr = bill?.let { WesternFormatters.formatIls(it.remainingPayableIls) } ?: ""
+                        val remStr = bill?.let { WesternFormatters.formatHumanMoney2dp(it.remainingPayableExact, it.currency, state.language) } ?: ""
                         val stockNoteAr = if (expectedProductId != null && expectedQuantity > 0) {
                             " — مسجل بانتظار استلام (${WesternFormatters.formatInt(expectedQuantity)} وحدة) مخزنياً"
                         } else {
@@ -3404,29 +3408,41 @@ class TraderViewModel(
                     val updatedBills = repository.getPurchaseBills()
                     val updatedPayments = repository.getSupplierPayments()
                     val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
-                    val paidStr = WesternFormatters.formatIls(amountExact)
-                    val isOwedKnown = updatedSup?.balanceOwedExact != null && updatedSup?.balanceOwedIls?.isNaN() == false
-                    val newOwed = updatedSup?.balanceOwedIls ?: Double.NaN
+                    val currency = _uiState.value.businessInfo.defaultCurrency
+                    val lang = _uiState.value.language
+                    val paidStr = WesternFormatters.formatHumanMoney2dp(amountExact, currency, lang)
+                    val owedExact = updatedSup?.balanceOwedExact
+                    val advExact = updatedSup?.advancesExact
+                    val effectiveAdvanceExact = when {
+                        advExact != null && advExact > BigDecimal.ZERO -> advExact
+                        owedExact != null && owedExact < BigDecimal.ZERO -> owedExact.abs()
+                        else -> null
+                    }
                     val hasAllocs = allocations.isNotEmpty()
                     val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
-                    val allocStr = WesternFormatters.formatIls(totalAllocExact)
+                    val allocStr = WesternFormatters.formatHumanMoney2dp(totalAllocExact, currency, lang)
 
                     val msgAr = when {
                         !hasAllocs -> {
                             when {
-                                !isOwedKnown -> "تم صرف $paidStr للمورد — الرصيد الحالي غير متاح (يتطلب تحديث البيانات)"
-                                newOwed > 0.005 -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatIls(newOwed)}"
-                                newOwed < -0.005 -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatIls(-newOwed)}"
-                                else -> "تم صرف $paidStr للمورد (دفعة غير مخصصة) — الرصيد الدفتري: 0.00 ₪"
+                                effectiveAdvanceExact != null -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatHumanMoney2dp(effectiveAdvanceExact, currency, lang)}"
+                                owedExact == null -> "تم صرف $paidStr للمورد — الرصيد الحالي غير متاح (يتطلب تحديث البيانات)"
+                                owedExact > BigDecimal.ZERO -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatHumanMoney2dp(owedExact, currency, lang)}"
+                                else -> "تم صرف $paidStr للمورد (دفعة غير مخصصة) — الرصيد الدفتري: ${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}"
                             }
                         }
                         else -> {
                             val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                            val unallocStr = WesternFormatters.formatIls(unallocExact)
+                            val unallocStr = WesternFormatters.formatHumanMoney2dp(unallocExact, currency, lang)
+                            val balDisplay = when {
+                                effectiveAdvanceExact != null -> "رصيد مقدم لنا ${WesternFormatters.formatHumanMoney2dp(effectiveAdvanceExact, currency, lang)}"
+                                owedExact == null -> "غير متاح"
+                                else -> WesternFormatters.formatHumanMoney2dp(owedExact, currency, lang)
+                            }
                             if (unallocExact > BigDecimal.ZERO) {
-                                "تم صرف $paidStr للمورد (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "غير متاح"}"
+                                "تم صرف $paidStr للمورد (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد: $balDisplay"
                             } else {
-                                "تم صرف $paidStr للمورد وتخصيصها للذمم المحددة — الرصيد المتبقي له: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "غير متاح"}"
+                                "تم صرف $paidStr للمورد وتخصيصها للذمم المحددة — الرصيد المتبقي له: $balDisplay"
                             }
                         }
                     }
@@ -3434,19 +3450,24 @@ class TraderViewModel(
                     val msgEn = when {
                         !hasAllocs -> {
                             when {
-                                !isOwedKnown -> "Paid $paidStr to supplier — Current balance unavailable"
-                                newOwed > 0.005 -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatIls(newOwed)}"
-                                newOwed < -0.005 -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatIls(-newOwed)}"
-                                else -> "Paid $paidStr to supplier (unapplied advance) — Ledger balance: 0.00 ₪"
+                                effectiveAdvanceExact != null -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatHumanMoney2dp(effectiveAdvanceExact, currency, lang)}"
+                                owedExact == null -> "Paid $paidStr to supplier — Current balance unavailable"
+                                owedExact > BigDecimal.ZERO -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatHumanMoney2dp(owedExact, currency, lang)}"
+                                else -> "Paid $paidStr to supplier (unapplied advance) — Ledger balance: ${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}"
                             }
                         }
                         else -> {
                             val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                            val unallocStr = WesternFormatters.formatIls(unallocExact)
+                            val unallocStr = WesternFormatters.formatHumanMoney2dp(unallocExact, currency, lang)
+                            val balDisplay = when {
+                                effectiveAdvanceExact != null -> "store advance credit ${WesternFormatters.formatHumanMoney2dp(effectiveAdvanceExact, currency, lang)}"
+                                owedExact == null -> "unavailable"
+                                else -> WesternFormatters.formatHumanMoney2dp(owedExact, currency, lang)
+                            }
                             if (unallocExact > BigDecimal.ZERO) {
-                                "Paid $paidStr to supplier (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "unavailable"}"
+                                "Paid $paidStr to supplier (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: $balDisplay"
                             } else {
-                                "Paid $paidStr to supplier applied to selected targets — Remaining payable: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "unavailable"}"
+                                "Paid $paidStr to supplier applied to selected targets — Remaining payable: $balDisplay"
                             }
                         }
                     }
@@ -3517,29 +3538,41 @@ class TraderViewModel(
                     val updatedBills = repository.getPurchaseBills()
                     val updatedPayments = repository.getSupplierPayments()
                     val updatedSup = updatedSuppliers.firstOrNull { it.id == supplierId }
-                    val paidStr = WesternFormatters.formatIls(amountExact)
-                    val isOwedKnown = updatedSup?.balanceOwedExact != null && updatedSup?.balanceOwedIls?.isNaN() == false
-                    val newOwed = updatedSup?.balanceOwedIls ?: Double.NaN
+                    val currency = _uiState.value.businessInfo.defaultCurrency
+                    val lang = _uiState.value.language
+                    val paidStr = WesternFormatters.formatHumanMoney2dp(amountExact, currency, lang)
+                    val owedExact = updatedSup?.balanceOwedExact
+                    val advExact = updatedSup?.advancesExact
+                    val effectiveAdvanceExact = when {
+                        advExact != null && advExact > BigDecimal.ZERO -> advExact
+                        owedExact != null && owedExact < BigDecimal.ZERO -> owedExact.abs()
+                        else -> null
+                    }
                     val hasAllocs = allocations.isNotEmpty()
                     val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
-                    val allocStr = WesternFormatters.formatIls(totalAllocExact)
+                    val allocStr = WesternFormatters.formatHumanMoney2dp(totalAllocExact, currency, lang)
 
                     val msgAr = when {
                         !hasAllocs -> {
                             when {
-                                !isOwedKnown -> "تم صرف $paidStr للمورد — الرصيد الحالي غير متاح (يتطلب تحديث البيانات)"
-                                newOwed > 0.005 -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatIls(newOwed)}"
-                                newOwed < -0.005 -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatIls(-newOwed)}"
-                                else -> "تم صرف $paidStr للمورد (دفعة غير مخصصة) — الرصيد الدفتري: 0.00 ₪"
+                                effectiveAdvanceExact != null -> "تم صرف $paidStr للمورد — أصبح لنا دفعة مقدمة عنده: ${WesternFormatters.formatHumanMoney2dp(effectiveAdvanceExact, currency, lang)}"
+                                owedExact == null -> "تم صرف $paidStr للمورد — الرصيد الحالي غير متاح (يتطلب تحديث البيانات)"
+                                owedExact > BigDecimal.ZERO -> "تم صرف $paidStr للمورد — المتبقي له علينا: ${WesternFormatters.formatHumanMoney2dp(owedExact, currency, lang)}"
+                                else -> "تم صرف $paidStr للمورد (دفعة غير مخصصة) — الرصيد الدفتري: ${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}"
                             }
                         }
                         else -> {
                             val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                            val unallocStr = WesternFormatters.formatIls(unallocExact)
+                            val unallocStr = WesternFormatters.formatHumanMoney2dp(unallocExact, currency, lang)
+                            val balDisplay = when {
+                                effectiveAdvanceExact != null -> "رصيد مقدم لنا ${WesternFormatters.formatHumanMoney2dp(effectiveAdvanceExact, currency, lang)}"
+                                owedExact == null -> "غير متاح"
+                                else -> WesternFormatters.formatHumanMoney2dp(owedExact, currency, lang)
+                            }
                             if (unallocExact > BigDecimal.ZERO) {
-                                "تم صرف $paidStr للمورد (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "غير متاح"}"
+                                "تم صرف $paidStr للمورد (مخصص: $allocStr، دفعة مقدمة غير مخصصة: $unallocStr) — الرصيد: $balDisplay"
                             } else {
-                                "تم صرف $paidStr للمورد وتخصيصها للذمم المحددة — الرصيد المتبقي له: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "غير متاح"}"
+                                "تم صرف $paidStr للمورد وتخصيصها للذمم المحددة — الرصيد المتبقي له: $balDisplay"
                             }
                         }
                     }
@@ -3547,19 +3580,24 @@ class TraderViewModel(
                     val msgEn = when {
                         !hasAllocs -> {
                             when {
-                                !isOwedKnown -> "Paid $paidStr to supplier — Current balance unavailable"
-                                newOwed > 0.005 -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatIls(newOwed)}"
-                                newOwed < -0.005 -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatIls(-newOwed)}"
-                                else -> "Paid $paidStr to supplier (unapplied advance) — Ledger balance: 0.00 ₪"
+                                effectiveAdvanceExact != null -> "Paid $paidStr to supplier — Store prepayment credit: ${WesternFormatters.formatHumanMoney2dp(effectiveAdvanceExact, currency, lang)}"
+                                owedExact == null -> "Paid $paidStr to supplier — Current balance unavailable"
+                                owedExact > BigDecimal.ZERO -> "Paid $paidStr to supplier — Remaining payable: ${WesternFormatters.formatHumanMoney2dp(owedExact, currency, lang)}"
+                                else -> "Paid $paidStr to supplier (unapplied advance) — Ledger balance: ${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}"
                             }
                         }
                         else -> {
                             val unallocExact = amountExact.subtract(totalAllocExact).coerceAtLeast(BigDecimal.ZERO)
-                            val unallocStr = WesternFormatters.formatIls(unallocExact)
+                            val unallocStr = WesternFormatters.formatHumanMoney2dp(unallocExact, currency, lang)
+                            val balDisplay = when {
+                                effectiveAdvanceExact != null -> "store advance credit ${WesternFormatters.formatHumanMoney2dp(effectiveAdvanceExact, currency, lang)}"
+                                owedExact == null -> "unavailable"
+                                else -> WesternFormatters.formatHumanMoney2dp(owedExact, currency, lang)
+                            }
                             if (unallocExact > BigDecimal.ZERO) {
-                                "Paid $paidStr to supplier (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "unavailable"}"
+                                "Paid $paidStr to supplier (Allocated: $allocStr, Unapplied advance: $unallocStr) — Ledger balance: $balDisplay"
                             } else {
-                                "Paid $paidStr to supplier applied to selected targets — Remaining payable: ${if (isOwedKnown) WesternFormatters.formatIls(newOwed) else "unavailable"}"
+                                "Paid $paidStr to supplier applied to selected targets — Remaining payable: $balDisplay"
                             }
                         }
                     }
@@ -4378,8 +4416,9 @@ class TraderViewModel(
                     val updated = result.getOrNull()
                     syncFromRepository()
                     _uiState.update { state ->
+                        val currency = state.businessInfo.defaultCurrency
                         val limitDesc = if (updateCreditLimit) {
-                            creditLimit?.let { " (${WesternFormatters.formatIls(it)})" } ?: " (غير محدد)"
+                            creditLimit?.let { " (${WesternFormatters.formatHumanMoney2dp(it, currency, state.language)})" } ?: " (${state.language.tr("غير محدد", "Not set")})"
                         } else ""
                         state.copy(
                             selectedCustomerForDetail = updated ?: state.selectedCustomerForDetail,
@@ -4418,8 +4457,9 @@ class TraderViewModel(
                     val updated = result.getOrNull()
                     syncFromRepository()
                     _uiState.update { state ->
+                        val currency = state.businessInfo.defaultCurrency
                         val limitDesc = if (updateCreditLimit) {
-                            creditLimit?.let { " (${WesternFormatters.formatIls(it)})" } ?: " (غير محدد)"
+                            creditLimit?.let { " (${WesternFormatters.formatHumanMoney2dp(it, currency, state.language)})" } ?: " (${state.language.tr("غير محدد", "Not set")})"
                         } else ""
                         state.copy(
                             selectedCustomerForDetail = updated ?: state.selectedCustomerForDetail,
@@ -4457,31 +4497,46 @@ class TraderViewModel(
         sb.appendLine(lang.tr("كشف حساب زبون تفصيلي", "Customer Account Statement"))
         sb.appendLine("${lang.tr("الزبون", "Customer")}: ${customer.name(lang)} (${customer.phone})")
         sb.appendLine("${lang.tr("تاريخ الكشف", "Statement Date")}: ${WesternFormatters.currentTimestamp()}")
-        val isBalKnown = customer.balanceExact != null && !customer.balanceIls.isNaN()
+        val currency = b.defaultCurrency
+        val balExact = customer.balanceExact
         val balStr = when {
-            !isBalKnown -> lang.tr("غير متاح (يتطلب تحديث كشف الحساب)", "Unavailable (statement refresh required)")
-            customer.balanceIls > 0.005 -> lang.tr("ذمة مستحقة للمتجر: ${WesternFormatters.formatIls(customer.balanceIls)}", "Balance Due to Store: ${WesternFormatters.formatIls(customer.balanceIls)}")
-            customer.balanceIls < -0.005 -> lang.tr("رصيد مقدم للزبون: ${WesternFormatters.formatIls(-customer.balanceIls)}", "Customer Advance Credit: ${WesternFormatters.formatIls(-customer.balanceIls)}")
-            else -> lang.tr("الحساب خالص (0.00 ₪)", "Settled Account (0.00 ₪)")
+            balExact == null -> lang.tr("غير متاح (يتطلب تحديث كشف الحساب)", "Unavailable (statement refresh required)")
+            balExact > BigDecimal.ZERO -> lang.tr(
+                "ذمة مستحقة للمتجر: ${WesternFormatters.formatHumanMoney2dp(balExact, currency, lang)}",
+                "Balance Due to Store: ${WesternFormatters.formatHumanMoney2dp(balExact, currency, lang)}"
+            )
+            balExact < BigDecimal.ZERO -> lang.tr(
+                "رصيد مقدم للزبون: ${WesternFormatters.formatHumanMoney2dp(balExact.abs(), currency, lang)}",
+                "Customer Advance Credit: ${WesternFormatters.formatHumanMoney2dp(balExact.abs(), currency, lang)}"
+            )
+            else -> lang.tr(
+                "الحساب خالص (${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)})",
+                "Settled Account (${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)})"
+            )
         }
         sb.appendLine("${lang.tr("الرصيد الحالي", "Current Balance")}: $balStr")
-        sb.appendLine("${lang.tr("سقف الائتمان", "Credit Limit")}: ${WesternFormatters.formatIls(customer.creditLimitIls)}")
+        val limitDisplay = customer.creditLimitExact?.let { WesternFormatters.formatHumanMoney2dp(it, currency, lang) }
+            ?: lang.tr("غير محدد", "Not set")
+        sb.appendLine("${lang.tr("سقف الائتمان", "Credit Limit")}: $limitDisplay")
         sb.appendLine("--------------------------------")
         txs.take(10).forEach { tx ->
-            val mov = if (tx.debitIls > 0 && tx.creditIls == 0.0) {
-                "+${WesternFormatters.formatIls(tx.debitIls)}"
-            } else if (tx.creditIls > 0 && tx.debitIls == 0.0) {
-                "-${WesternFormatters.formatIls(tx.creditIls)}"
-            } else if (tx.debitIls > 0 && tx.creditIls > 0 && tx.debitIls > tx.creditIls + 0.005) {
-                val netDebit = tx.debitIls - tx.creditIls
+            val txCurr = tx.currency
+            val mov = if (tx.debitExact > BigDecimal.ZERO && tx.creditExact <= BigDecimal.ZERO) {
+                "+${WesternFormatters.formatHumanMoney2dp(tx.debitExact, txCurr, lang)}"
+            } else if (tx.creditExact > BigDecimal.ZERO && tx.debitExact <= BigDecimal.ZERO) {
+                "-${WesternFormatters.formatHumanMoney2dp(tx.creditExact, txCurr, lang)}"
+            } else if (tx.debitExact > BigDecimal.ZERO && tx.creditExact > BigDecimal.ZERO && tx.debitExact > tx.creditExact) {
+                val netDebit = tx.debitExact.subtract(tx.creditExact)
                 lang.tr(
-                    "إجمالي ${WesternFormatters.formatIls(tx.debitIls)} / مدفوع ${WesternFormatters.formatIls(tx.creditIls)} / متبقي +${WesternFormatters.formatIls(netDebit)}",
-                    "Total ${WesternFormatters.formatIls(tx.debitIls)} / Paid ${WesternFormatters.formatIls(tx.creditIls)} / Rem +${WesternFormatters.formatIls(netDebit)}"
+                    "إجمالي ${WesternFormatters.formatHumanMoney2dp(tx.debitExact, txCurr, lang)} / مدفوع ${WesternFormatters.formatHumanMoney2dp(tx.creditExact, txCurr, lang)} / متبقي +${WesternFormatters.formatHumanMoney2dp(netDebit, txCurr, lang)}",
+                    "Total ${WesternFormatters.formatHumanMoney2dp(tx.debitExact, txCurr, lang)} / Paid ${WesternFormatters.formatHumanMoney2dp(tx.creditExact, txCurr, lang)} / Rem +${WesternFormatters.formatHumanMoney2dp(netDebit, txCurr, lang)}"
                 )
             } else {
-                WesternFormatters.formatIls(tx.debitIls)
+                WesternFormatters.formatHumanMoney2dp(tx.debitExact, txCurr, lang)
             }
-            sb.appendLine("${tx.date} | ${tx.type(lang)} | $mov | ${lang.tr("الرصيد", "Bal")}: ${(tx.runningBalanceExact?.toPlainString() ?: "—")}")
+            val runBalStr = tx.runningBalanceExact?.let { WesternFormatters.formatHumanMoney2dp(it, txCurr, lang) }
+                ?: lang.tr("غير متاح", "Unavailable")
+            sb.appendLine("${tx.date} | ${tx.type(lang)} | $mov | ${lang.tr("الرصيد", "Bal")}: $runBalStr")
         }
         return sb.toString().trim()
     }

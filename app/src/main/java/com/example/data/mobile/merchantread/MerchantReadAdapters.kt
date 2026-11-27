@@ -271,7 +271,8 @@ object MerchantReadAdapter {
      */
     fun toDomainCustomerTransaction(
         entry: CustomerStatementEntry,
-        customerId: String
+        customerId: String,
+        currency: String = "ILS"
     ): CustomerTransaction {
         val typeLower = entry.type.lowercase(Locale.ROOT)
         val typeAr = when (typeLower) {
@@ -292,7 +293,8 @@ object MerchantReadAdapter {
             debitExact = entry.debit,
             creditExact = entry.credit,
             runningBalanceExact = entry.balance,
-            note = entry.description
+            note = entry.description,
+            currency = currency
         )
     }
 

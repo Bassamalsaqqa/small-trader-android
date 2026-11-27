@@ -671,6 +671,30 @@ data class TraderUiState(
         return values.filterNotNull().filter { it.signum() == sign }
             .fold(BigDecimal.ZERO) { sum, value -> sum.add(value.abs()) }.toDouble()
     }
+    private fun directoryTotalExact(values: List<BigDecimal?>, sign: Int): BigDecimal? {
+        if (values.any { it == null }) return null
+        return values.filterNotNull().filter { it.signum() == sign }
+            .fold(BigDecimal.ZERO) { sum, value -> sum.add(value.abs()) }
+    }
+    val totalCustomerDebtsExact: BigDecimal?
+        get() = if (customersHasMore) null else directoryTotalExact(customers.map { it.balanceExact }, 1)
+    val totalCustomerAdvancesExact: BigDecimal?
+        get() = if (customersHasMore) null else directoryTotalExact(customers.map { it.balanceExact }, -1)
+    val totalSupplierPayablesExact: BigDecimal?
+        get() = if (suppliersHasMore) null else directoryTotalExact(suppliers.map { it.balanceOwedExact }, 1)
+    val totalSupplierAdvancesExact: BigDecimal?
+        get() {
+            if (suppliersHasMore) return null
+            val effectiveAdvances = suppliers.map { s ->
+                when {
+                    s.advancesExact != null -> s.advancesExact
+                    s.balanceOwedExact != null && s.balanceOwedExact < BigDecimal.ZERO -> s.balanceOwedExact.abs()
+                    s.balanceOwedExact != null -> BigDecimal.ZERO
+                    else -> null
+                }
+            }
+            return directoryTotalExact(effectiveAdvances, 1)
+        }
     val totalCustomerDebtsIls: Double get() = directoryTotal(customers.map { it.balanceExact }, 1)
     val totalCustomerAdvancesIls: Double get() = directoryTotal(customers.map { it.balanceExact }, -1)
     val totalSupplierPayablesIls: Double

@@ -1173,6 +1173,44 @@ object WesternFormatters {
         return DecimalFormat("#,##0.00", usSymbols).format(safe)
     }
 
+    private val humanSubCentThreshold = BigDecimal("0.01")
+
+    /**
+     * Authoritative human 2dp money formatter preserving exact sign awareness for sub-cent
+     * nonzero balances (`0 < abs(amount) < 0.01` renders `< 0.01 CCY` without 3dp or Settled lie).
+     */
+    fun formatHumanMoney2dp(
+        amount: BigDecimal?,
+        currency: String?,
+        unavailableLabel: String = "--",
+        unavailableCurrencyLabel: String = "Currency unavailable"
+    ): String {
+        if (amount == null) return unavailableLabel
+        val cleanCurrency = currency?.trim()?.takeIf { it.isNotEmpty() }?.uppercase(Locale.US)
+        val tag = when (cleanCurrency) {
+            null -> "($unavailableCurrencyLabel)"
+            "ILS" -> "₪"
+            else -> cleanCurrency
+        }
+        val absVal = amount.abs()
+        if (absVal.signum() > 0 && absVal < humanSubCentThreshold) {
+            val sign = if (amount.signum() < 0) "-" else ""
+            return "$sign< 0.01 $tag"
+        }
+        return "${formatHumanDecimal2dp(amount)} $tag"
+    }
+
+    fun formatHumanMoney2dp(
+        amount: BigDecimal?,
+        currency: String?,
+        lang: AppLanguage
+    ): String = formatHumanMoney2dp(
+        amount = amount,
+        currency = currency,
+        unavailableLabel = lang.tr("غير متاح", "Unavailable"),
+        unavailableCurrencyLabel = lang.tr("العملة غير متاحة", "Currency unavailable")
+    )
+
     /**
      * Formats receipt/transaction money using the record's frozen transaction currency at 2dp.
      * Never falls back to ILS/₪ when currency is missing/unknown; surfaces unavailable currency truthfully.

@@ -180,9 +180,11 @@ fun InvoiceReviewScreen(
                     CustomerAndAccountImpactCard(
                         selectedCustomer = state.selectedCustomer,
                         projectedBalanceIfCreditIls = state.projectedCustomerBalanceIfCreditIls,
+                        projectedBalanceIfCreditExact = state.projectedCustomerBalanceIfCreditExact,
                         wouldCreditExceedLimit = state.wouldCreditExceedCustomerLimit,
                         customerNote = state.customerNote,
                         totalCustomersCount = state.customers.size,
+                        currency = state.businessInfo.defaultCurrency,
                         lang = lang,
                         onOpenCustomerPicker = { isCustomerPickerOpen = true },
                         onClearCustomer = { onAssignCustomer(null) },
@@ -379,9 +381,11 @@ private fun EmptyReviewBasketState(
 private fun CustomerAndAccountImpactCard(
     selectedCustomer: Customer?,
     projectedBalanceIfCreditIls: Double?,
+    projectedBalanceIfCreditExact: BigDecimal? = null,
     wouldCreditExceedLimit: Boolean,
     customerNote: String,
     totalCustomersCount: Int,
+    currency: String = "ILS",
     lang: AppLanguage,
     onOpenCustomerPicker: () -> Unit,
     onClearCustomer: () -> Unit,
@@ -474,12 +478,8 @@ private fun CustomerAndAccountImpactCard(
                             text = if (selectedCustomer == null) {
                                 lang.tr("بيع نقدي مباشر", "Direct cash sale")
                             } else {
-                                val balanceText = if (selectedCustomer.balanceExact == null || selectedCustomer.balanceIls.isNaN()) {
-                                    "-- ₪"
-                                } else {
-                                    WesternFormatters.formatIls(selectedCustomer.balanceIls)
-                                }
-                                "$balanceText • ${selectedCustomer.phone}"
+                                val balanceText = WesternFormatters.formatHumanMoney2dp(selectedCustomer.balanceExact, currency, lang)
+                                "$balanceText • ${selectedCustomer.phone ?: "--"}"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = if (selectedCustomer != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
@@ -560,15 +560,18 @@ private fun CustomerAndAccountImpactCard(
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    val isBalKnown = selectedCustomer.balanceExact != null && !selectedCustomer.balanceIls.isNaN()
+                                    val custBalExact = selectedCustomer.balanceExact
+                                    val isBalKnown = custBalExact != null
                                     Text(
-                                        text = if (isBalKnown) WesternFormatters.formatIls(selectedCustomer.balanceIls) else "-- ₪",
+                                        text = WesternFormatters.formatHumanMoney2dp(custBalExact, currency, lang),
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = if (!isBalKnown) MaterialTheme.colorScheme.onSurfaceVariant else if (selectedCustomer.balanceIls > 0) financial.debit else financial.income
+                                        color = if (!isBalKnown) MaterialTheme.colorScheme.onSurfaceVariant else if (custBalExact!! > BigDecimal.ZERO) financial.debit else financial.income
                                     )
                                 }
 
-                                if (projectedBalanceIfCreditIls != null) {
+                                val projectedExact = projectedBalanceIfCreditExact
+                                    ?: projectedBalanceIfCreditIls?.takeIf { !it.isNaN() && !it.isInfinite() }?.let { BigDecimal(it.toString()) }
+                                if (projectedExact != null) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -580,7 +583,7 @@ private fun CustomerAndAccountImpactCard(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         Text(
-                                            text = WesternFormatters.formatIls(projectedBalanceIfCreditIls),
+                                            text = WesternFormatters.formatHumanMoney2dp(projectedExact, currency, lang),
                                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                             color = if (wouldCreditExceedLimit) financial.debit else MaterialTheme.colorScheme.onSurface
                                         )
@@ -590,8 +593,8 @@ private fun CustomerAndAccountImpactCard(
                                 if (wouldCreditExceedLimit) {
                                     StitchBadge(
                                         text = lang.tr(
-                                            "تحذير: سيتجاوز سقف الائتمان (${WesternFormatters.formatIls(selectedCustomer.creditLimitIls)})",
-                                            "Warning: Exceeds credit limit (${WesternFormatters.formatIls(selectedCustomer.creditLimitIls)})"
+                                            "تحذير: سيتجاوز سقف الائتمان (${WesternFormatters.formatHumanMoney2dp(selectedCustomer.creditLimitExact, currency, lang)})",
+                                            "Warning: Exceeds credit limit (${WesternFormatters.formatHumanMoney2dp(selectedCustomer.creditLimitExact, currency, lang)})"
                                         ),
                                         tone = StitchBadgeTone.DANGER
                                     )
@@ -1988,7 +1991,7 @@ internal fun CustomerPickerModalSheet(
                     val isCustBalKnown = custBalExact != null
                     val projectedExact = if (isCustBalKnown) custBalExact!!.add(netTotalExact) else null
                     val limitExact = cust.creditLimitExact
-                    val wouldExceed = if (projectedExact != null && limitExact != null && limitExact > BigDecimal("0.005")) {
+                    val wouldExceed = if (projectedExact != null && limitExact != null && limitExact > BigDecimal.ZERO) {
                         projectedExact > limitExact
                     } else {
                         false
@@ -2033,7 +2036,7 @@ internal fun CustomerPickerModalSheet(
 
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
-                                    text = WesternFormatters.formatCurrency(if (isCustBalKnown) custBalExact else null, currency),
+                                    text = WesternFormatters.formatHumanMoney2dp(if (isCustBalKnown) custBalExact else null, currency, lang),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = if (!isCustBalKnown) MaterialTheme.colorScheme.onSurfaceVariant else if (custBalExact!! > BigDecimal.ZERO) financial.debit else financial.income

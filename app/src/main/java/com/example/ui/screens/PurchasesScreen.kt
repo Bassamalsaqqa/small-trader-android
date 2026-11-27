@@ -176,10 +176,10 @@ private fun PurchasesListView(
         state.purchaseBills.count { !it.isReceived && it.expectedProductId != null && it.expectedQuantity > 0 }
     }
     val countUnpaid = remember(state.purchaseBills) {
-        state.purchaseBills.count { it.paidIls <= 0.005 }
+        state.purchaseBills.count { it.paidExact <= BigDecimal.ZERO }
     }
     val countPartiallyPaid = remember(state.purchaseBills) {
-        state.purchaseBills.count { it.paidIls > 0.005 && it.remainingPayableIls > 0.005 }
+        state.purchaseBills.count { it.paidExact > BigDecimal.ZERO && it.remainingPayableExact > BigDecimal.ZERO }
     }
     val countReceived = remember(state.purchaseBills) {
         state.purchaseBills.count { it.isReceived }
@@ -333,7 +333,7 @@ private fun PurchasesListView(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = StitchBidiUtils.formatIls(totalOpenPayablesExact),
+                                text = StitchBidiUtils.formatHumanMoney2dp(totalOpenPayablesExact, state.businessInfo.defaultCurrency, lang),
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = if (totalOpenPayablesExact > BigDecimal.ZERO) TraderTheme.financial.debit else MaterialTheme.colorScheme.onSurface
                             )
@@ -579,7 +579,7 @@ private fun PurchaseBillLedgerCard(
 
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = StitchBidiUtils.formatCurrency(bill.totalExact, bill.currency, bill.currencyMinorUnits),
+                        text = StitchBidiUtils.formatHumanMoney2dp(bill.totalExact, bill.currency, lang),
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -669,12 +669,12 @@ private fun PurchaseBillLedgerCard(
                     val (financialText, financialTone) = when {
                         bill.remainingPayableExact <= BigDecimal.ZERO -> lang.tr("مدفوعة بالكامل", "Fully Paid") to StitchBadgeTone.SUCCESS
                         bill.paidExact > BigDecimal.ZERO -> lang.tr(
-                            "سداد جزئي (مدفوع ${StitchBidiUtils.formatCurrency(bill.paidExact, bill.currency, bill.currencyMinorUnits)} • متبقي ${StitchBidiUtils.formatCurrency(bill.remainingPayableExact, bill.currency, bill.currencyMinorUnits)})",
-                            "Partial (Paid ${StitchBidiUtils.formatCurrency(bill.paidExact, bill.currency, bill.currencyMinorUnits)} • Rem: ${StitchBidiUtils.formatCurrency(bill.remainingPayableExact, bill.currency, bill.currencyMinorUnits)})"
+                            "سداد جزئي (مدفوع ${StitchBidiUtils.formatHumanMoney2dp(bill.paidExact, bill.currency, lang)} • متبقي ${StitchBidiUtils.formatHumanMoney2dp(bill.remainingPayableExact, bill.currency, lang)})",
+                            "Partial (Paid ${StitchBidiUtils.formatHumanMoney2dp(bill.paidExact, bill.currency, lang)} • Rem: ${StitchBidiUtils.formatHumanMoney2dp(bill.remainingPayableExact, bill.currency, lang)})"
                         ) to StitchBadgeTone.PRIMARY
                         else -> lang.tr(
-                            "غير مدفوعة (ذمة: ${StitchBidiUtils.formatCurrency(bill.remainingPayableExact, bill.currency, bill.currencyMinorUnits)})",
-                            "Unpaid (Due: ${StitchBidiUtils.formatCurrency(bill.remainingPayableExact, bill.currency, bill.currencyMinorUnits)})"
+                            "غير مدفوعة (ذمة: ${StitchBidiUtils.formatHumanMoney2dp(bill.remainingPayableExact, bill.currency, lang)})",
+                            "Unpaid (Due: ${StitchBidiUtils.formatHumanMoney2dp(bill.remainingPayableExact, bill.currency, lang)})"
                         ) to StitchBadgeTone.DANGER
                     }
                     StitchBadge(
@@ -880,13 +880,18 @@ private fun PurchaseBillDetailView(
                         )
                         Text(
                             text = if (supplier != null) {
-                                if (supplier.balanceOwedExact != null) {
-                                    StitchBidiUtils.formatIls(supplier.balanceOwedExact)
-                                } else {
-                                    lang.tr("الرصيد غير متاح", "Balance unavailable")
+                                val supAdvExact = when {
+                                    supplier.advancesExact != null && supplier.advancesExact > BigDecimal.ZERO -> supplier.advancesExact
+                                    supplier.balanceOwedExact != null && supplier.balanceOwedExact < BigDecimal.ZERO -> supplier.balanceOwedExact.abs()
+                                    else -> null
+                                }
+                                when {
+                                    supAdvExact != null -> "${lang.tr("رصيد مقدم:", "Advance:")} ${StitchBidiUtils.formatHumanMoney2dp(supAdvExact, state.businessInfo.defaultCurrency, lang)}"
+                                    supplier.balanceOwedExact != null -> StitchBidiUtils.formatHumanMoney2dp(supplier.balanceOwedExact, state.businessInfo.defaultCurrency, lang)
+                                    else -> lang.tr("الرصيد غير متاح", "Balance unavailable")
                                 }
                             } else {
-                                StitchBidiUtils.formatCurrency(bill.remainingPayableExact, bill.currency, bill.currencyMinorUnits)
+                                StitchBidiUtils.formatHumanMoney2dp(bill.remainingPayableExact, bill.currency, lang)
                             },
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                             color = if ((supplier?.balanceOwedExact ?: bill.remainingPayableExact) > BigDecimal.ZERO) TraderTheme.financial.debit else MaterialTheme.colorScheme.onSurface
@@ -917,8 +922,8 @@ private fun PurchaseBillDetailView(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         val (pillText, pillTone) = when {
-                            bill.remainingPayableIls <= 0.005 -> lang.tr("مدفوعة بالكامل", "Paid") to StitchBadgeTone.SUCCESS
-                            bill.paidIls > 0.005 -> lang.tr("سداد جزئي", "Partial") to StitchBadgeTone.PRIMARY
+                            bill.remainingPayableExact <= BigDecimal.ZERO -> lang.tr("مدفوعة بالكامل", "Paid") to StitchBadgeTone.SUCCESS
+                            bill.paidExact > BigDecimal.ZERO -> lang.tr("سداد جزئي", "Partial") to StitchBadgeTone.PRIMARY
                             else -> lang.tr("غير مدفوعة", "Unpaid") to StitchBadgeTone.DANGER
                         }
                         StitchBadge(text = pillText, tone = pillTone)
@@ -947,7 +952,7 @@ private fun PurchaseBillDetailView(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = StitchBidiUtils.formatCurrency(bill.totalExact, bill.currency, bill.currencyMinorUnits),
+                                    text = StitchBidiUtils.formatHumanMoney2dp(bill.totalExact, bill.currency, lang),
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
@@ -972,7 +977,7 @@ private fun PurchaseBillDetailView(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = StitchBidiUtils.formatCurrency(bill.paidExact, bill.currency, bill.currencyMinorUnits),
+                                    text = StitchBidiUtils.formatHumanMoney2dp(bill.paidExact, bill.currency, lang),
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                     color = if (bill.paidExact > BigDecimal.ZERO) TraderTheme.financial.income else MaterialTheme.colorScheme.onSurface
                                 )
@@ -997,7 +1002,7 @@ private fun PurchaseBillDetailView(
                                     color = if (bill.remainingPayableExact > BigDecimal.ZERO) TraderTheme.financial.debit else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = StitchBidiUtils.formatCurrency(bill.remainingPayableExact, bill.currency, bill.currencyMinorUnits),
+                                    text = StitchBidiUtils.formatHumanMoney2dp(bill.remainingPayableExact, bill.currency, lang),
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                     color = if (bill.remainingPayableExact > BigDecimal.ZERO) TraderTheme.financial.debit else MaterialTheme.colorScheme.onSurface
                                 )
@@ -1024,7 +1029,7 @@ private fun PurchaseBillDetailView(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = if (bill.remainingPayableIls > 0.005) {
+                                text = if (bill.remainingPayableExact > BigDecimal.ZERO) {
                                     lang.tr("أجل (ذمم دائنة للمورد)", "Credit (Supplier Payable)")
                                 } else {
                                     lang.tr("نقدي مسدد بالكامل", "Cash (Fully Settled)")
@@ -1130,7 +1135,7 @@ private fun PurchaseBillDetailView(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Text(
-                                        text = StitchBidiUtils.formatCurrency(bill.totalExact, bill.currency, bill.currencyMinorUnits),
+                                        text = StitchBidiUtils.formatHumanMoney2dp(bill.totalExact, bill.currency, lang),
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.primary
                                     )

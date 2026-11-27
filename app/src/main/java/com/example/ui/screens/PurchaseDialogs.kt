@@ -308,8 +308,8 @@ fun PaySupplierDialog(
                                 )
                                 Text(
                                     text = lang.tr(
-                                        "إجمالي المخصص للفواتير والذمم: ${StitchBidiUtils.formatCurrency(totalAllocatedExact, currency)}",
-                                        "Total allocated to targets: ${StitchBidiUtils.formatCurrency(totalAllocatedExact, currency)}"
+                                        "إجمالي المخصص للفواتير والذمم: ${StitchBidiUtils.formatHumanMoney2dp(totalAllocatedExact, currency, lang)}",
+                                        "Total allocated to targets: ${StitchBidiUtils.formatHumanMoney2dp(totalAllocatedExact, currency, lang)}"
                                     ),
                                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                     color = if (isOverAllocated) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
@@ -318,8 +318,8 @@ fun PaySupplierDialog(
                             if (unallocatedSurplus > BigDecimal.ZERO) {
                                 Text(
                                     text = lang.tr(
-                                        "المتبقي كدفعة مقدمة غير مخصصة: ${StitchBidiUtils.formatCurrency(unallocatedSurplus, currency)}",
-                                        "Unallocated advance remainder: ${StitchBidiUtils.formatCurrency(unallocatedSurplus, currency)}"
+                                        "المتبقي كدفعة مقدمة غير مخصصة: ${StitchBidiUtils.formatHumanMoney2dp(unallocatedSurplus, currency, lang)}",
+                                        "Unallocated advance remainder: ${StitchBidiUtils.formatHumanMoney2dp(unallocatedSurplus, currency, lang)}"
                                     ),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -384,21 +384,26 @@ fun PaySupplierDialog(
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                        val supAdvExact = when {
+                            supplier.advancesExact != null && supplier.advancesExact > BigDecimal.ZERO -> supplier.advancesExact
+                            supplier.balanceOwedExact != null && supplier.balanceOwedExact < BigDecimal.ZERO -> supplier.balanceOwedExact.abs()
+                            else -> null
+                        }
                         Text(
                             text = when {
+                                supAdvExact != null -> "${lang.tr("له رصيد مقدم حالياً:", "Advance credit balance:")} ${StitchBidiUtils.formatHumanMoney2dp(supAdvExact, currency, lang)}"
                                 supplier.balanceOwedExact == null -> lang.tr("الرصيد غير متاح", "Balance unavailable")
-                                supplier.balanceOwedExact > BigDecimal.ZERO -> "${lang.tr("الرصيد المستحق:", "Balance Due:")} ${StitchBidiUtils.formatCurrency(supplier.balanceOwedExact, currency)}"
-                                supplier.balanceOwedExact < BigDecimal.ZERO -> "${lang.tr("له رصيد مقدم حالياً:", "Advance credit balance:")} ${StitchBidiUtils.formatCurrency(supplier.balanceOwedExact.negate(), currency)}"
+                                supplier.balanceOwedExact > BigDecimal.ZERO -> "${lang.tr("الرصيد المستحق:", "Balance Due:")} ${StitchBidiUtils.formatHumanMoney2dp(supplier.balanceOwedExact, currency, lang)}"
                                 else -> {
-                                    val zeroStr = StitchBidiUtils.formatCurrency(BigDecimal.ZERO, currency)
+                                    val zeroStr = StitchBidiUtils.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)
                                     lang.tr("الرصيد المستحق: خالص ($zeroStr)", "Balance Due: Settled ($zeroStr)")
                                 }
                             },
                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                             color = when {
+                                supAdvExact != null -> TraderTheme.financial.income
                                 supplier.balanceOwedExact == null -> MaterialTheme.colorScheme.onSurfaceVariant
                                 supplier.balanceOwedExact > BigDecimal.ZERO -> TraderTheme.financial.debit
-                                supplier.balanceOwedExact < BigDecimal.ZERO -> TraderTheme.financial.income
                                 else -> MaterialTheme.colorScheme.onSurfaceVariant
                             }
                         )
@@ -586,8 +591,8 @@ fun PaySupplierDialog(
                                                     }
                                                     Text(
                                                         text = lang.tr(
-                                                            "المتبقي: ${StitchBidiUtils.formatCurrency(target.remainingAmountExact, currency)}",
-                                                            "Remaining: ${StitchBidiUtils.formatCurrency(target.remainingAmountExact, currency)}"
+                                                            "المتبقي: ${StitchBidiUtils.formatHumanMoney2dp(target.remainingAmountExact, currency, lang)}",
+                                                            "Remaining: ${StitchBidiUtils.formatHumanMoney2dp(target.remainingAmountExact, currency, lang)}"
                                                         ),
                                                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
                                                     )
@@ -679,8 +684,8 @@ fun PaySupplierDialog(
                                     label = {
                                         Text(
                                             text = lang.tr(
-                                                "مجموع المخصص (${StitchBidiUtils.formatCurrency(totalAllocatedExact, currency)})",
-                                                "Total Alloc (${StitchBidiUtils.formatCurrency(totalAllocatedExact, currency)})"
+                                                "مجموع المخصص (${StitchBidiUtils.formatHumanMoney2dp(totalAllocatedExact, currency, lang)})",
+                                                "Total Alloc (${StitchBidiUtils.formatHumanMoney2dp(totalAllocatedExact, currency, lang)})"
                                             ),
                                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                                         )
@@ -700,7 +705,7 @@ fun PaySupplierDialog(
                         item {
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
                                 FilterChip(
-                                    selected = payAmountText == fullStr,
+                                    selected = fullStr != null && payAmountText == fullStr,
                                     enabled = !effectiveSubmitting && !isRecovering && fullStr != null,
                                     onClick = {
                                         payInlineError = null
@@ -709,8 +714,8 @@ fun PaySupplierDialog(
                                     label = {
                                         Text(
                                             text = lang.tr(
-                                                "كامل الدين (${StitchBidiUtils.formatCurrency(supplier.balanceOwedExact!!, currency)})",
-                                                "Full Debt (${StitchBidiUtils.formatCurrency(supplier.balanceOwedExact!!, currency)})"
+                                                "كامل الدين (${StitchBidiUtils.formatHumanMoney2dp(supplier.balanceOwedExact!!, currency, lang)})",
+                                                "Full Debt (${StitchBidiUtils.formatHumanMoney2dp(supplier.balanceOwedExact!!, currency, lang)})"
                                             ),
                                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                                         )
@@ -745,6 +750,23 @@ fun PaySupplierDialog(
                     }
                 }
 
+                val supplierDebtExact = supplier.balanceOwedExact
+                if (supplierDebtExact != null && supplierDebtExact > BigDecimal.ZERO &&
+                    PaymentDecimalConsistency.cashEntryText(supplierDebtExact, minorUnits) == null
+                ) {
+                    Text(
+                        text = lang.tr(
+                            "خيار «كامل الدين» غير متاح لأن المستحق الدقيق (${StitchBidiUtils.formatHumanMoney2dp(supplierDebtExact, currency, lang)}) لا يُمثَّل بخانتين عشريتين للإدخال النقدي.",
+                            "Full Debt shortcut is unavailable because exact payable (${StitchBidiUtils.formatHumanMoney2dp(supplierDebtExact, currency, lang)}) cannot be entered at 2 decimals."
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("supplier_full_debt_unrepresentable_note")
+                    )
+                }
+
                 // Live Settlement Projection Card
                 if (validEnteredAmountExact > BigDecimal.ZERO) {
                     Surface(
@@ -762,21 +784,21 @@ fun PaySupplierDialog(
                                     supplier.balanceOwedExact == null || projectedOwed == null -> lang.tr("الرصيد غير متاح", "Balance unavailable")
                                     projectedOwed > BigDecimal.ZERO -> if (hasAllocations) {
                                         lang.tr(
-                                            "الرصيد الدفتري المتبقي: ${StitchBidiUtils.formatCurrency(projectedOwed, currency)}",
-                                            "Remaining book balance: ${StitchBidiUtils.formatCurrency(projectedOwed, currency)}"
+                                            "الرصيد الدفتري المتبقي: ${StitchBidiUtils.formatHumanMoney2dp(projectedOwed, currency, lang)}",
+                                            "Remaining book balance: ${StitchBidiUtils.formatHumanMoney2dp(projectedOwed, currency, lang)}"
                                         )
                                     } else {
                                         lang.tr(
-                                            "الرصيد الدفتري المتبقي: ${StitchBidiUtils.formatCurrency(projectedOwed, currency)} (دفعة غير مخصصة)",
-                                            "Remaining book balance: ${StitchBidiUtils.formatCurrency(projectedOwed, currency)} (Unapplied advance)"
+                                            "الرصيد الدفتري المتبقي: ${StitchBidiUtils.formatHumanMoney2dp(projectedOwed, currency, lang)} (دفعة غير مخصصة)",
+                                            "Remaining book balance: ${StitchBidiUtils.formatHumanMoney2dp(projectedOwed, currency, lang)} (Unapplied advance)"
                                         )
                                     }
                                     projectedOwed < BigDecimal.ZERO -> lang.tr(
-                                        "دفعة مقدمة للمتجر (أمانة): ${StitchBidiUtils.formatCurrency(projectedOwed.negate(), currency)}",
-                                        "Store unapplied advance credit: ${StitchBidiUtils.formatCurrency(projectedOwed.negate(), currency)}"
+                                        "دفعة مقدمة للمتجر (أمانة): ${StitchBidiUtils.formatHumanMoney2dp(projectedOwed.negate(), currency, lang)}",
+                                        "Store unapplied advance credit: ${StitchBidiUtils.formatHumanMoney2dp(projectedOwed.negate(), currency, lang)}"
                                     )
                                     else -> {
-                                        val zeroStr = StitchBidiUtils.formatCurrency(BigDecimal.ZERO, currency)
+                                        val zeroStr = StitchBidiUtils.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)
                                         if (hasAllocations) {
                                             lang.tr(
                                                 "الرصيد بعد الصرف: رصيد خالص ($zeroStr)",
@@ -913,13 +935,13 @@ fun PaySupplierDialog(
                         isRecoveringCurrentSupplier -> lang.tr("التحقق من حالة السند", "Verify Status & Retry")
                         validEnteredAmountExact > BigDecimal.ZERO -> if (hasAllocations) {
                             lang.tr(
-                                "تأكيد صرف ${StitchBidiUtils.formatCurrency(validEnteredAmountExact, currency)} (مخصص ${StitchBidiUtils.formatCurrency(totalAllocatedExact, currency)})",
-                                "Confirm ${StitchBidiUtils.formatCurrency(validEnteredAmountExact, currency)} (${StitchBidiUtils.formatCurrency(totalAllocatedExact, currency)} allocated)"
+                                "تأكيد صرف ${StitchBidiUtils.formatHumanMoney2dp(validEnteredAmountExact, currency, lang)} (مخصص ${StitchBidiUtils.formatHumanMoney2dp(totalAllocatedExact, currency, lang)})",
+                                "Confirm ${StitchBidiUtils.formatHumanMoney2dp(validEnteredAmountExact, currency, lang)} (${StitchBidiUtils.formatHumanMoney2dp(totalAllocatedExact, currency, lang)} allocated)"
                             )
                         } else {
                             lang.tr(
-                                "تأكيد صرف ${StitchBidiUtils.formatCurrency(validEnteredAmountExact, currency)} للمورد",
-                                "Confirm ${StitchBidiUtils.formatCurrency(validEnteredAmountExact, currency)} Payment"
+                                "تأكيد صرف ${StitchBidiUtils.formatHumanMoney2dp(validEnteredAmountExact, currency, lang)} للمورد",
+                                "Confirm ${StitchBidiUtils.formatHumanMoney2dp(validEnteredAmountExact, currency, lang)} Payment"
                             )
                         }
                         else -> lang.tr("تأكيد الصرف", "Confirm Payment")
@@ -2576,17 +2598,17 @@ fun PurchaseBillRow(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${lang.tr("القيمة:", "Total:")} ${StitchBidiUtils.formatCurrency(bill.totalExact, bill.currency, bill.currencyMinorUnits)}",
+                    text = "${lang.tr("القيمة:", "Total:")} ${StitchBidiUtils.formatHumanMoney2dp(bill.totalExact, bill.currency, lang)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "${lang.tr("دُفع نقداً:", "Paid Cash:")} ${StitchBidiUtils.formatCurrency(bill.paidExact, bill.currency, bill.currencyMinorUnits)}",
+                    text = "${lang.tr("دُفع نقداً:", "Paid Cash:")} ${StitchBidiUtils.formatHumanMoney2dp(bill.paidExact, bill.currency, lang)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (bill.paidExact > BigDecimal.ZERO) TraderTheme.financial.income else MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "${lang.tr("ذمة للمورد:", "Payable:")} ${StitchBidiUtils.formatCurrency(bill.remainingPayableExact, bill.currency, bill.currencyMinorUnits)}",
+                    text = "${lang.tr("ذمة للمورد:", "Payable:")} ${StitchBidiUtils.formatHumanMoney2dp(bill.remainingPayableExact, bill.currency, lang)}",
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontWeight = FontWeight.Bold
                     ),
@@ -2684,7 +2706,7 @@ fun SupplierPaymentRow(
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
-                    text = WesternFormatters.formatIls(payment.amountIls),
+                    text = StitchBidiUtils.formatHumanMoney2dp(payment.amountExact, payment.currency, lang),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold
                     ),

@@ -2670,8 +2670,8 @@ class ProductionTraderRepository(
             }
 
             // Authoritative customer detail from server with strict session recheck
-            val snapshotBalance = snapshot.properties["balance"].toNullableBigDecimal(currencyMinorUnits)
-                ?: snapshot.properties["running_balance"].toNullableBigDecimal(currencyMinorUnits)
+            val snapshotBalance = snapshot.properties["balance"].toNullableBigDecimal()
+                ?: snapshot.properties["running_balance"].toNullableBigDecimal()
 
             val getCustomerRes = if (snapshotBalance == null) {
                 val beforeFollowup = requireActiveScope()
@@ -2689,8 +2689,8 @@ class ProductionTraderRepository(
                 val currentRevision = getCustomerRevision(customerId)
                 val isLatest = (currentRevision == postPaymentRevision) || (inFlightCounter.get() == 1 && currentRevision <= postPaymentRevision)
                 val authBalance = snapshotBalance
-                    ?: serverCustomerObj?.properties?.get("balance").toNullableBigDecimal(currencyMinorUnits)
-                    ?: serverCustomerObj?.properties?.get("balance_ils").toNullableBigDecimal(currencyMinorUnits)
+                    ?: serverCustomerObj?.properties?.get("balance").toNullableBigDecimal()
+                    ?: serverCustomerObj?.properties?.get("balance_ils").toNullableBigDecimal()
 
                 if (isLatest) {
                     incrementCustomerRevision(customerId)
@@ -2704,7 +2704,7 @@ class ProductionTraderRepository(
                     } else {
                         val existingCust = _customersFlow.value.firstOrNull { it.id == customerId }
                         val newBalance = authBalance
-                            ?: existingCust?.balanceExact?.subtract(officialAmount)?.setScale(currencyMinorUnits, RoundingMode.HALF_UP)
+                            ?: existingCust?.balanceExact?.subtract(officialAmount)
                             ?: existingCust?.balanceExact
                         if (newBalance != null) {
                             _customersFlow.update { list ->
@@ -2735,7 +2735,7 @@ class ProductionTraderRepository(
                 allocatedAmountExact = allocatedAmount,
                 unallocatedAmountExact = unallocatedAmount,
                 allocations = parsedAllocations,
-                currency = baseCurrency
+                currency = snapshot.properties["currency"].toNullableString() ?: baseCurrency
             )
             _customerTransactionsFlow.update { listOf(tx) + it }
             Result.success(tx)
@@ -3214,7 +3214,7 @@ class ProductionTraderRepository(
                     val summary = statement.currencies[baseCurrency] ?: statement.currencies.values.firstOrNull()
                     if (summary != null) {
                         val mapped = summary.entries.map { entry ->
-                            MerchantReadAdapter.toDomainCustomerTransaction(entry, customerId)
+                            MerchantReadAdapter.toDomainCustomerTransaction(entry, customerId, currency = summary.currency)
                         }
                         if (authScopeProvider != null && !isScopeActive()) {
                             throw SecurityException("Authenticated scope changed")
@@ -3952,10 +3952,10 @@ class ProductionTraderRepository(
             }
 
             // Authoritative supplier detail from server (unknown balance remains null) with strict session recheck
-            val snapshotBalanceOwed: BigDecimal? = snapshot.properties["balance_owed"].toNullableBigDecimal(currencyMinorUnits)
-                ?: snapshot.properties["owed"].toNullableBigDecimal(currencyMinorUnits)
-                ?: snapshot.properties["balance"].toNullableBigDecimal(currencyMinorUnits)
-            val snapshotAdvances: BigDecimal? = snapshot.properties["advances"].toNullableBigDecimal(currencyMinorUnits)
+            val snapshotBalanceOwed: BigDecimal? = snapshot.properties["balance_owed"].toNullableBigDecimal()
+                ?: snapshot.properties["owed"].toNullableBigDecimal()
+                ?: snapshot.properties["balance"].toNullableBigDecimal()
+            val snapshotAdvances: BigDecimal? = snapshot.properties["advances"].toNullableBigDecimal()
 
             val getSupplierRes = if (snapshotBalanceOwed == null && snapshotAdvances == null) {
                 val beforeFollowup = requireActiveScope()
@@ -3969,11 +3969,11 @@ class ProductionTraderRepository(
             val refreshFailed = getSupplierRes != null && getSupplierRes.isFailure
             val serverSupplierObj = getSupplierRes?.getOrNull()
             val authoritativeBalanceExact: BigDecimal? = snapshotBalanceOwed
-                ?: serverSupplierObj?.properties?.get("balance_owed").toNullableBigDecimal(currencyMinorUnits)
-                ?: serverSupplierObj?.properties?.get("owed").toNullableBigDecimal(currencyMinorUnits)
-                ?: serverSupplierObj?.properties?.get("balance").toNullableBigDecimal(currencyMinorUnits)
+                ?: serverSupplierObj?.properties?.get("balance_owed").toNullableBigDecimal()
+                ?: serverSupplierObj?.properties?.get("owed").toNullableBigDecimal()
+                ?: serverSupplierObj?.properties?.get("balance").toNullableBigDecimal()
             val authoritativeAdvancesExact: BigDecimal? = snapshotAdvances
-                ?: serverSupplierObj?.properties?.get("advances").toNullableBigDecimal(currencyMinorUnits)
+                ?: serverSupplierObj?.properties?.get("advances").toNullableBigDecimal()
 
             synchronized(getSupplierLock(supplierId)) {
                 val currentRevision = getSupplierRevision(supplierId)
@@ -4011,7 +4011,7 @@ class ProductionTraderRepository(
                 allocatedAmountExact = allocatedAmount,
                 unallocatedAmountExact = unallocatedAmount,
                 allocations = parsedAllocations,
-                currency = baseCurrency
+                currency = snapshot.properties["currency"].toNullableString() ?: baseCurrency
             )
             _supplierPaymentsFlow.update { listOf(payment) + it }
             Result.success(payment)

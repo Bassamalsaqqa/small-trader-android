@@ -214,6 +214,9 @@ fun SuppliersScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val dirCurrency = state.businessInfo.defaultCurrency
+                    val payablesExact = state.totalSupplierPayablesExact
+                    val advancesExact = state.totalSupplierAdvancesExact
                     Row(
                         modifier = Modifier.weight(1f),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -226,7 +229,11 @@ fun SuppliersScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = if (state.suppliersHasMore) lang.tr("غير متاح (دليل جزئي)", "Unavailable (partial)") else if (state.totalSupplierPayablesIls.isNaN()) lang.tr("غير متاح", "Unavailable") else StitchBidiUtils.formatIls(state.totalSupplierPayablesIls),
+                                text = when {
+                                    state.suppliersHasMore -> lang.tr("غير متاح (دليل جزئي)", "Unavailable (partial)")
+                                    payablesExact == null -> lang.tr("غير متاح", "Unavailable")
+                                    else -> StitchBidiUtils.formatHumanMoney2dp(payablesExact, dirCurrency, lang)
+                                },
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
@@ -242,11 +249,15 @@ fun SuppliersScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = if (state.suppliersHasMore) lang.tr("غير متاح (دليل جزئي)", "Unavailable (partial)") else if (state.totalSupplierAdvancesIls.isNaN()) lang.tr("غير متاح", "Unavailable") else StitchBidiUtils.formatIls(state.totalSupplierAdvancesIls),
+                                text = when {
+                                    state.suppliersHasMore -> lang.tr("غير متاح (دليل جزئي)", "Unavailable (partial)")
+                                    advancesExact == null -> lang.tr("غير متاح", "Unavailable")
+                                    else -> StitchBidiUtils.formatHumanMoney2dp(advancesExact, dirCurrency, lang)
+                                },
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
-                                color = if (!state.totalSupplierAdvancesIls.isNaN() && state.totalSupplierAdvancesIls > 0.005) {
+                                color = if (advancesExact != null && advancesExact > BigDecimal.ZERO) {
                                     TraderTheme.financial.income
                                 } else {
                                     MaterialTheme.colorScheme.onSurfaceVariant
@@ -699,6 +710,7 @@ fun SuppliersScreen(
                     SupplierDirectoryRow(
                         supplier = supplier,
                         lang = lang,
+                        currency = state.businessInfo.defaultCurrency,
                         onClick = { onSupplierClick(supplier) }
                     )
                 }
@@ -773,28 +785,30 @@ fun SuppliersScreen(
 private fun SupplierDirectoryRow(
     supplier: Supplier,
     lang: AppLanguage,
+    currency: String = "ILS",
     onClick: () -> Unit
 ) {
-    val isPayableOwed = supplier.balanceOwedExact != null && supplier.balanceOwedExact > BigDecimal.ZERO
-    val hasAdvance = (supplier.advancesExact != null && supplier.advancesExact > BigDecimal.ZERO) || (supplier.balanceOwedExact != null && supplier.balanceOwedExact < BigDecimal.ZERO)
+    val owedExact = supplier.balanceOwedExact
+    val advExact = supplier.advancesExact
+    val effectiveAdvanceExact: BigDecimal? = when {
+        advExact != null && advExact > BigDecimal.ZERO -> advExact
+        owedExact != null && owedExact < BigDecimal.ZERO -> owedExact.abs()
+        else -> null
+    }
+    val hasAdvance = effectiveAdvanceExact != null
+    val isPayableOwed = !hasAdvance && owedExact != null && owedExact > BigDecimal.ZERO
 
     val statusBadgeTone = when {
         hasAdvance -> StitchBadgeTone.SUCCESS
         isPayableOwed -> StitchBadgeTone.WARNING
-        supplier.balanceOwedExact == null -> StitchBadgeTone.NEUTRAL
+        owedExact == null -> StitchBadgeTone.NEUTRAL
         else -> StitchBadgeTone.NEUTRAL
     }
 
-    val advanceAmountIls = if (supplier.advancesExact != null && supplier.advancesExact > BigDecimal.ZERO) {
-        supplier.advancesIls
-    } else if (supplier.balanceOwedIls < -0.005) {
-        -supplier.balanceOwedIls
-    } else 0.0
-
     val statusLabel = when {
-        hasAdvance -> "${lang.tr("لنا رصيد مقدم", "Store Advance")} ${StitchBidiUtils.formatIls(advanceAmountIls)}"
-        isPayableOwed -> "${lang.tr("مستحق للمورد", "Owed to Supplier")} ${StitchBidiUtils.formatIls(supplier.balanceOwedIls)}"
-        supplier.balanceOwedExact == null -> lang.tr("الرصيد غير متاح", "Balance unavailable")
+        hasAdvance -> "${lang.tr("لنا رصيد مقدم", "Store Advance")} ${StitchBidiUtils.formatHumanMoney2dp(effectiveAdvanceExact, currency, lang)}"
+        isPayableOwed -> "${lang.tr("مستحق للمورد", "Owed to Supplier")} ${StitchBidiUtils.formatHumanMoney2dp(owedExact, currency, lang)}"
+        owedExact == null -> lang.tr("الرصيد غير متاح", "Balance unavailable")
         else -> lang.tr("خالص", "Settled")
     }
 
@@ -947,8 +961,16 @@ fun SupplierDetailScreen(
     var isPurchaseReturnPreviewOpen by rememberSaveable(supplier.id) { mutableStateOf(false) }
     var activeBillForGrn by remember(supplier.id) { mutableStateOf<PurchaseBill?>(null) }
 
-    val isPayableOwed = supplier.balanceOwedIls > 0.005
-    val isStoreAdvance = supplier.balanceOwedIls < -0.005
+    val currency = state.businessInfo.defaultCurrency
+    val owedExact = supplier.balanceOwedExact
+    val advExact = supplier.advancesExact
+    val effectiveAdvanceExact: BigDecimal? = when {
+        advExact != null && advExact > BigDecimal.ZERO -> advExact
+        owedExact != null && owedExact < BigDecimal.ZERO -> owedExact.abs()
+        else -> null
+    }
+    val isStoreAdvance = effectiveAdvanceExact != null
+    val isPayableOwed = !isStoreAdvance && owedExact != null && owedExact > BigDecimal.ZERO
 
     val feedbackMessage = lang.tr(
         state.lastSupplierActionMessageAr ?: "",
@@ -1110,17 +1132,16 @@ fun SupplierDetailScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            val hasAdvanceBadge = (supplier.advancesExact != null && supplier.advancesExact > BigDecimal.ZERO) || (supplier.balanceOwedExact != null && supplier.balanceOwedExact < BigDecimal.ZERO)
                             StitchBadge(
                                 text = when {
-                                    hasAdvanceBadge -> lang.tr("دفعة مقدمة لنا", "Store Advance")
-                                    supplier.balanceOwedExact == null -> lang.tr("غير متاح", "Unavailable")
+                                    isStoreAdvance -> lang.tr("دفعة مقدمة لنا", "Store Advance")
+                                    owedExact == null -> lang.tr("غير متاح", "Unavailable")
                                     isPayableOwed -> lang.tr("قيد الاستحقاق", "Payable Due")
                                     else -> lang.tr("خالص", "Settled")
                                 },
                                 tone = when {
-                                    hasAdvanceBadge -> StitchBadgeTone.SUCCESS
-                                    supplier.balanceOwedExact == null -> StitchBadgeTone.NEUTRAL
+                                    isStoreAdvance -> StitchBadgeTone.SUCCESS
+                                    owedExact == null -> StitchBadgeTone.NEUTRAL
                                     isPayableOwed -> StitchBadgeTone.WARNING
                                     else -> StitchBadgeTone.NEUTRAL
                                 },
@@ -1128,26 +1149,19 @@ fun SupplierDetailScreen(
                             )
                         }
 
-                        // Big Dominant Amount (e.g. 850.00 ₪)
-                        val hasAdvance = (supplier.advancesExact != null && supplier.advancesExact > BigDecimal.ZERO) || (supplier.balanceOwedExact != null && supplier.balanceOwedExact < BigDecimal.ZERO)
-                        val advanceAmountIls = if (supplier.advancesExact != null && supplier.advancesExact > BigDecimal.ZERO) {
-                            supplier.advancesIls
-                        } else if (supplier.balanceOwedIls < -0.005) {
-                            -supplier.balanceOwedIls
-                        } else 0.0
-
+                        // Big Dominant Amount
                         Text(
                             text = when {
-                                hasAdvance -> StitchBidiUtils.formatIls(advanceAmountIls)
-                                supplier.balanceOwedExact == null -> lang.tr("غير متاح", "Unavailable")
-                                else -> StitchBidiUtils.formatIls(supplier.balanceOwedIls)
+                                isStoreAdvance -> StitchBidiUtils.formatHumanMoney2dp(effectiveAdvanceExact, currency, lang)
+                                owedExact == null -> lang.tr("غير متاح", "Unavailable")
+                                else -> StitchBidiUtils.formatHumanMoney2dp(owedExact, currency, lang)
                             },
                             style = MaterialTheme.typography.displayLarge.copy(
                                 fontWeight = FontWeight.Bold
                             ),
                             color = when {
-                                hasAdvance -> TraderTheme.financial.income
-                                supplier.balanceOwedExact == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                                isStoreAdvance -> TraderTheme.financial.income
+                                owedExact == null -> MaterialTheme.colorScheme.onSurfaceVariant
                                 isPayableOwed -> TraderTheme.financial.warning
                                 else -> MaterialTheme.colorScheme.onSurface
                             },

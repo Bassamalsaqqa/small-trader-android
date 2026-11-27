@@ -307,7 +307,7 @@ fun CashPaymentScreen(
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Text(
-                                text = WesternFormatters.formatCurrency(state.basketNetTotalExact, currency),
+                                text = WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang),
                                 style = MaterialTheme.typography.displayMedium.copy(
                                     fontSize = 28.sp,
                                     fontWeight = FontWeight.Bold
@@ -477,7 +477,7 @@ fun CashPaymentScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = WesternFormatters.formatCurrency(state.cashTenderedExact, currency),
+                                text = WesternFormatters.formatHumanMoney2dp(state.cashTenderedExact, currency, lang),
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.testTag("payment_cash_received_text")
@@ -501,7 +501,7 @@ fun CashPaymentScreen(
                                 )
                             },
                             placeholder = {
-                                Text(WesternFormatters.formatNumber(state.basketNetTotalExact))
+                                Text(WesternFormatters.formatHumanDecimal2dp(state.basketNetTotalExact))
                             },
                             leadingIcon = {
                                 Icon(
@@ -602,7 +602,7 @@ fun CashPaymentScreen(
                                     )
                                 }
                                 Text(
-                                    text = WesternFormatters.formatCurrency(state.basketNetTotalExact, currency),
+                                    text = WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang),
                                     style = MaterialTheme.typography.titleSmall.copy(
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = MonoFontFamily
@@ -621,8 +621,8 @@ fun CashPaymentScreen(
                         ) {
                             bills.forEach { bill ->
                                 val billExact = BigDecimal(bill)
-                                val isSelectedBill = state.cashTenderedExact.subtract(billExact).abs() < BigDecimal("0.005")
-                                val coversDue = billExact.add(BigDecimal("0.005")) >= state.basketNetTotalExact
+                                val isSelectedBill = state.cashTenderedExact.compareTo(billExact) == 0
+                                val coversDue = billExact >= state.basketNetTotalExact
                                 Surface(
                                     onClick = {
                                         onSelectDenomination(bill)
@@ -719,7 +719,7 @@ fun CashPaymentScreen(
                                 }
 
                                 Text(
-                                    text = WesternFormatters.formatCurrency(state.changeDueExact, currency),
+                                    text = WesternFormatters.formatHumanMoney2dp(state.changeDueExact, currency, lang),
                                     style = MaterialTheme.typography.displayMedium.copy(
                                         fontSize = 26.sp,
                                         fontWeight = FontWeight.Bold
@@ -737,7 +737,7 @@ fun CashPaymentScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "${WesternFormatters.formatCurrency(state.cashTenderedExact, currency)} - ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}",
+                                    text = "${WesternFormatters.formatHumanMoney2dp(state.cashTenderedExact, currency, lang)} - ${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)}",
                                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
                                     color = financial.income
                                 )
@@ -784,7 +784,7 @@ fun CashPaymentScreen(
                                 }
 
                                 Text(
-                                    text = WesternFormatters.formatCurrency(state.remainingUnpaidExact, currency),
+                                    text = WesternFormatters.formatHumanMoney2dp(state.remainingUnpaidExact, currency, lang),
                                     style = MaterialTheme.typography.displayMedium.copy(
                                         fontSize = 24.sp,
                                         fontWeight = FontWeight.Bold
@@ -1081,7 +1081,7 @@ fun CashPaymentScreen(
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
                                         Text(
-                                            text = WesternFormatters.formatCurrency(if (isCustBalKnown) custBalanceExact else null, currency),
+                                            text = WesternFormatters.formatHumanMoney2dp(if (isCustBalKnown) custBalanceExact else null, currency, lang),
                                             style = MaterialTheme.typography.titleMedium.copy(
                                                 fontWeight = FontWeight.Bold,
                                                 fontFamily = MonoFontFamily
@@ -1118,7 +1118,7 @@ fun CashPaymentScreen(
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
                                         text = if (selectedCustomer.creditLimitExact != null) {
-                                            WesternFormatters.formatCurrency(selectedCustomer.creditLimitExact, currency)
+                                            WesternFormatters.formatHumanMoney2dp(selectedCustomer.creditLimitExact, currency, lang)
                                         } else {
                                             lang.tr("غير محدد", "Not set")
                                         },
@@ -1140,7 +1140,7 @@ fun CashPaymentScreen(
 
                             if (isCustBalKnown && projectedBalanceExact != null) {
                                 if (creditLimitExact == null) {
-                                    val projectedFormatted = WesternFormatters.formatCurrency(projectedBalanceExact, currency)
+                                    val projectedFormatted = WesternFormatters.formatHumanMoney2dp(projectedBalanceExact, currency, lang)
                                     Text(
                                         text = lang.tr(
                                             "سقف الائتمان غير محدد لهذا الزبون (إرشادي) — الرصيد المتوقع بعد العملية: $projectedFormatted",
@@ -1193,7 +1193,7 @@ fun CashPaymentScreen(
 
                                         if (!overLimit) {
                                             val safeRemainingExact = creditLimitExact.subtract(projectedBalanceExact).coerceAtLeast(BigDecimal.ZERO)
-                                            val safeRemainingFormatted = WesternFormatters.formatCurrency(safeRemainingExact, currency)
+                                            val safeRemainingFormatted = WesternFormatters.formatHumanMoney2dp(safeRemainingExact, currency, lang)
                                             Text(
                                                 text = lang.tr(
                                                     "ضمن الحد الائتماني الآمن (متبقي $safeRemainingFormatted متاح)",
@@ -1237,7 +1237,7 @@ fun CashPaymentScreen(
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
-                                            text = "${WesternFormatters.formatCurrency(if (isCustBalKnown) custBalanceExact else null, currency)} + ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}",
+                                            text = "${WesternFormatters.formatHumanMoney2dp(if (isCustBalKnown) custBalanceExact else null, currency, lang)} + ${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)}",
                                             style = MaterialTheme.typography.bodySmall.copy(
                                                 fontSize = 12.sp,
                                                 fontFamily = MonoFontFamily
@@ -1247,7 +1247,7 @@ fun CashPaymentScreen(
                                     }
 
                                     Text(
-                                        text = WesternFormatters.formatCurrency(if (isCustBalKnown) projectedBalanceExact else null, currency),
+                                        text = WesternFormatters.formatHumanMoney2dp(if (isCustBalKnown) projectedBalanceExact else null, currency, lang),
                                         style = MaterialTheme.typography.titleMedium.copy(
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = MonoFontFamily
@@ -1282,8 +1282,8 @@ fun CashPaymentScreen(
                                         )
                                         Text(
                                             text = lang.tr(
-                                                "يتجاوز سقف الدين المسموح بمقدار ${WesternFormatters.formatCurrency(state.creditCeilingExcessExact, currency)}. استلم الفاتورة نقداً، أو غيّر الزبون.",
-                                                "Exceeds credit ceiling by ${WesternFormatters.formatCurrency(state.creditCeilingExcessExact, currency)}. Collect cash or change customer."
+                                                "يتجاوز سقف الدين المسموح بمقدار ${WesternFormatters.formatHumanMoney2dp(state.creditCeilingExcessExact, currency, lang)}. استلم الفاتورة نقداً، أو غيّر الزبون.",
+                                                "Exceeds credit ceiling by ${WesternFormatters.formatHumanMoney2dp(state.creditCeilingExcessExact, currency, lang)}. Collect cash or change customer."
                                             ),
                                             style = MaterialTheme.typography.bodySmall.copy(
                                                 fontSize = 12.sp,
@@ -1392,8 +1392,8 @@ fun CashPaymentScreen(
                             )
                             Text(
                                 text = lang.tr(
-                                    "سيسجل المبلغ كاملاً (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}) كذمة مستحقة على حساب الزبون. المقبوض نقداً: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}.",
-                                    "Full amount (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}) will be debited to customer account. Cash received: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}."
+                                    "سيسجل المبلغ كاملاً (${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)}) كذمة مستحقة على حساب الزبون. المقبوض نقداً: ${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}.",
+                                    "Full amount (${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)}) will be debited to customer account. Cash received: ${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}."
                                 ),
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1433,16 +1433,16 @@ fun CashPaymentScreen(
                                 "Unpayable cash fractions — select credit sale or adjust basket."
                             )
                             !sufficient -> lang.tr(
-                                "المتبقي لإتمام البيع: ${WesternFormatters.formatCurrency(state.remainingUnpaidExact, currency)}",
-                                "Shortfall: ${WesternFormatters.formatCurrency(state.remainingUnpaidExact, currency)}"
+                                "المتبقي لإتمام البيع: ${WesternFormatters.formatHumanMoney2dp(state.remainingUnpaidExact, currency, lang)}",
+                                "Shortfall: ${WesternFormatters.formatHumanMoney2dp(state.remainingUnpaidExact, currency, lang)}"
                             )
                             state.changeDueExact > java.math.BigDecimal.ZERO -> lang.tr(
-                                "المقبوض: ${WesternFormatters.formatCurrency(state.cashTenderedExact, currency)} • الباقي: ${WesternFormatters.formatCurrency(state.changeDueExact, currency)}",
-                                "Received: ${WesternFormatters.formatCurrency(state.cashTenderedExact, currency)} • Change: ${WesternFormatters.formatCurrency(state.changeDueExact, currency)}"
+                                "المقبوض: ${WesternFormatters.formatHumanMoney2dp(state.cashTenderedExact, currency, lang)} • الباقي: ${WesternFormatters.formatHumanMoney2dp(state.changeDueExact, currency, lang)}",
+                                "Received: ${WesternFormatters.formatHumanMoney2dp(state.cashTenderedExact, currency, lang)} • Change: ${WesternFormatters.formatHumanMoney2dp(state.changeDueExact, currency, lang)}"
                             )
                             else -> lang.tr(
-                                "المقبوض: ${WesternFormatters.formatCurrency(state.cashTenderedExact, currency)} • بدون باقي (مطابق)",
-                                "Received: ${WesternFormatters.formatCurrency(state.cashTenderedExact, currency)} • Exact"
+                                "المقبوض: ${WesternFormatters.formatHumanMoney2dp(state.cashTenderedExact, currency, lang)} • بدون باقي (مطابق)",
+                                "Received: ${WesternFormatters.formatHumanMoney2dp(state.cashTenderedExact, currency, lang)} • Exact"
                             )
                         },
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
@@ -1475,8 +1475,8 @@ fun CashPaymentScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = lang.tr(
-                                "تأكيد واستلام النقد (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)})",
-                                "Confirm Cash Sale (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)})"
+                                "تأكيد واستلام النقد (${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)})",
+                                "Confirm Cash Sale (${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)})"
                             ),
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                         )
@@ -1503,16 +1503,16 @@ fun CashPaymentScreen(
                                 "Customer balance unknown for configured credit limit"
                             )
                             overLimit -> lang.tr(
-                                "يتجاوز سقف الدين بمقدار ${WesternFormatters.formatCurrency(state.creditCeilingExcessExact, currency)}",
-                                "Exceeds credit limit by ${WesternFormatters.formatCurrency(state.creditCeilingExcessExact, currency)}"
+                                "يتجاوز سقف الدين بمقدار ${WesternFormatters.formatHumanMoney2dp(state.creditCeilingExcessExact, currency, lang)}",
+                                "Exceeds credit limit by ${WesternFormatters.formatHumanMoney2dp(state.creditCeilingExcessExact, currency, lang)}"
                             )
                             selectedCustomer.creditLimitExact == null -> lang.tr(
-                                "سقف الائتمان غير محدد (إرشادي) • قيد على الحساب: ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}",
-                                "Credit limit unset (advisory) • Debit: ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)}"
+                                "سقف الائتمان غير محدد (إرشادي) • قيد على الحساب: ${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)}",
+                                "Credit limit unset (advisory) • Debit: ${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)}"
                             )
                             else -> lang.tr(
-                                "قيد على الحساب: ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)} • الصندوق: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}",
-                                "Account Debit: ${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)} • Cash: ${WesternFormatters.formatCurrency(BigDecimal.ZERO, currency)}"
+                                "قيد على الحساب: ${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)} • الصندوق: ${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}",
+                                "Account Debit: ${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)} • Cash: ${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}"
                             )
                         },
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
@@ -1564,8 +1564,8 @@ fun CashPaymentScreen(
                                     "Credit Blocked: Over Limit"
                                 )
                                 else -> lang.tr(
-                                    "تأكيد البيع على الحساب (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)})",
-                                    "Confirm Credit Sale (${WesternFormatters.formatCurrency(state.basketNetTotalExact, currency)})"
+                                    "تأكيد البيع على الحساب (${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)})",
+                                    "Confirm Credit Sale (${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)})"
                                 )
                             },
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)

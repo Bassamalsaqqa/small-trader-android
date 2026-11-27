@@ -34,6 +34,7 @@ import com.example.model.Customer
 import com.example.model.Supplier
 import com.example.model.TraderScreen
 import com.example.model.WesternFormatters
+import com.example.ui.components.StitchBidiUtils
 import com.example.ui.navigation.MerchantAction
 import com.example.ui.navigation.allowed
 import com.example.ui.theme.MonoFontFamily
@@ -780,7 +781,7 @@ fun QuickPartyPickerDialog(
                         if (isCollect) {
                             items(customers, key = { it.id }) { customer ->
                                 val bal = customer.balanceExact
-                                val balText = WesternFormatters.formatCurrency(bal, currency)
+                                val balText = StitchBidiUtils.formatHumanMoney2dp(bal, currency, lang)
                                 val balColor = when {
                                     bal == null -> MaterialTheme.colorScheme.onSurfaceVariant
                                     bal > BigDecimal.ZERO -> financial.debit
@@ -806,12 +807,17 @@ fun QuickPartyPickerDialog(
                             }
                         } else {
                             items(suppliers, key = { it.id }) { supplier ->
-                                val bal = supplier.balanceOwedExact
-                                val balText = WesternFormatters.formatCurrency(bal, currency)
+                                val advExact = supplier.advancesExact
+                                val owedExact = supplier.balanceOwedExact
+                                val effectiveBal = when {
+                                    advExact != null && advExact > BigDecimal.ZERO -> advExact.negate()
+                                    else -> owedExact
+                                }
+                                val balText = StitchBidiUtils.formatHumanMoney2dp(effectiveBal, currency, lang)
                                 val balColor = when {
-                                    bal == null -> MaterialTheme.colorScheme.onSurfaceVariant
-                                    bal > BigDecimal.ZERO -> financial.warning
-                                    bal < BigDecimal.ZERO -> financial.income
+                                    effectiveBal == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    effectiveBal > BigDecimal.ZERO -> financial.warning
+                                    effectiveBal < BigDecimal.ZERO -> financial.income
                                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 }
                                 val subParts = buildList {

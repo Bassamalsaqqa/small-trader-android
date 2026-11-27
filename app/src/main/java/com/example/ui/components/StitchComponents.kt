@@ -31,6 +31,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.example.model.AppLanguage
 import com.example.model.WesternFormatters
 import com.example.ui.theme.TraderTheme
 import java.util.Locale
@@ -89,6 +90,15 @@ object StitchBidiUtils {
 
     fun formatCurrency(amount: java.math.BigDecimal?, currency: String = "ILS", minorUnits: Int = 2): String {
         return "\u2066${WesternFormatters.formatCurrency(amount, currency, minorUnits)}\u2069"
+    }
+
+    fun formatHumanMoney2dp(
+        amount: java.math.BigDecimal?,
+        currency: String?,
+        lang: AppLanguage
+    ): String {
+        if (amount == null) return lang.tr("غير متاح", "Unavailable")
+        return "\u2066${WesternFormatters.formatHumanMoney2dp(amount, currency, lang)}\u2069"
     }
 }
 
