@@ -441,12 +441,45 @@ class EverydayUsabilityFixesRegressionTest {
             vm.updateSearchQuery("Olive")
             advanceTimeBy(300)
 
+            // Seed authorized Home projections while a read is pending, then invalidate its scope.
+            @Suppress("UNCHECKED_CAST")
+            val stateFlow = TraderViewModel::class.java.getDeclaredField("_uiState").apply {
+                isAccessible = true
+            }.get(vm) as MutableStateFlow<com.example.viewmodel.TraderUiState>
+            val zero = BigDecimal.ZERO
+            stateFlow.value = stateFlow.value.copy(
+                liveHomeMetrics = com.example.data.mobile.merchantread.LiveHomeMetrics(
+                    "2026-11-27", 1, zero, zero, 0, zero, zero, emptyList(),
+                    com.example.data.mobile.merchantread.HomeBusinessInfo("", "", "", "", "", "", "ILS", 2)
+                ),
+                liveTreasurySummary = com.example.data.mobile.merchantread.LiveTreasurySummary(
+                    emptyList(), emptyList(), zero, zero
+                ),
+                liveShiftSummary = com.example.data.mobile.merchantread.LiveShiftSummary(
+                    "2026-11-27", "ILS", 2, zero, zero, zero, zero, zero, zero, 1
+                ),
+                shiftClosedTimestamp = "2026-11-27T09:00:00Z",
+                shiftObservedTimestamp = "2026-11-27T09:00:00Z",
+                isShiftCloseDialogOpen = true,
+                shiftCloseCountedCashInput = "123.45",
+                shiftCloseNotesInput = "private shift note"
+            )
+
             // Company scope becomes inactive before search returns
             vmRepo.scopeActive = false
             delayedSearch.complete(Result.success(vmRepo.delegate.getProducts()))
             advanceUntilIdle()
 
             assertTrue(vm.uiState.value.isScopeInvalidated)
+            assertNull(vm.uiState.value.liveHomeMetrics)
+            assertNull(vm.uiState.value.liveTreasurySummary)
+            assertNull(vm.uiState.value.liveShiftSummary)
+            assertNull(vm.uiState.value.shiftCloseSuccessSnapshot)
+            assertNull(vm.uiState.value.shiftClosedTimestamp)
+            assertNull(vm.uiState.value.shiftObservedTimestamp)
+            assertFalse(vm.uiState.value.isShiftCloseDialogOpen)
+            assertEquals("", vm.uiState.value.shiftCloseCountedCashInput)
+            assertEquals("", vm.uiState.value.shiftCloseNotesInput)
             assertTrue(vm.uiState.value.filteredProducts.isEmpty())
             assertTrue(vm.uiState.value.products.isEmpty())
             assertNull(vm.uiState.value.productSearchResults)
