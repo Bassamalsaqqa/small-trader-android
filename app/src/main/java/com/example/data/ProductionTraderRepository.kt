@@ -224,6 +224,14 @@ class ProductionTraderRepository(
         if (!inFlightCommands.add(admissionKey)) {
             return Result.failure(IllegalStateException("Command is already being submitted"))
         }
+        val singleGroup = com.example.data.mobile.outbox.singleDraftFormGroup(commandType)
+        val formAdmissionKey = singleGroup?.let {
+            "${scopeBefore.companyId.value}:${scopeBefore.actorId.value}:${scopeBefore.deviceId.value}:$it"
+        }
+        if (formAdmissionKey != null && !inFlightFormTypes.add(formAdmissionKey)) {
+            inFlightCommands.remove(admissionKey)
+            return Result.failure(IllegalStateException("Resolve the existing $singleGroup operation before starting another"))
+        }
 
         try {
             val payloadDigest = com.example.data.mobile.contract.PayloadDigest("sha256:" + java.security.MessageDigest.getInstance("SHA-256").digest(canonicalPayloadBytes).joinToString("") { "%02x".format(it) })
@@ -288,7 +296,18 @@ class ProductionTraderRepository(
                 }
             }
 
-            val postResult = postAction(record.idempotencyKey)
+            val postResult = try {
+                postAction(record.idempotencyKey)
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                runCatching {
+                    commandStore.markUnknownAck(
+                        scopeBefore.companyId.value,
+                        commandId,
+                        ce.message ?: "Command submission interrupted"
+                    )
+                }
+                throw ce
+            }
 
             val scopeAfter = requireActiveScope()
             if (scopeAfter != scopeBefore) {
@@ -313,15 +332,21 @@ class ProductionTraderRepository(
 
             val err = postResult.exceptionOrNull()
             val errMsg = err?.message ?: "Command execution failed"
+            val httpStatus = (err as? com.example.data.mobile.readclient.http.HttpTransportException)?.httpStatusCode
+            val isDefinitiveFailure = (httpStatus != null && httpStatus in setOf(400, 403, 404, 422)) ||
+                (httpStatus == null && (errMsg.contains("HTTP 4") || errMsg.contains("VALIDATION_FAILED") || errMsg.contains("FORBIDDEN")))
 
-            if (isReceiptStatusChecked) {
+            if (!isDefinitiveFailure && isReceiptStatusChecked) {
                 val statusAfterError = checkReceiptStatusOnServer(scopeAfter.companyId, idempotencyKey, commandId, validateResponse)
                 if (statusAfterError != null) {
+                    if (statusAfterError.isFailure) {
+                        val lookupErr = statusAfterError.exceptionOrNull()?.message ?: errMsg
+                        commandStore.markUnknownAck(scopeAfter.companyId.value, commandId, lookupErr)
+                    }
                     return statusAfterError
                 }
             }
 
-            val isDefinitiveFailure = errMsg.contains("HTTP 4") || errMsg.contains("VALIDATION_FAILED") || errMsg.contains("FORBIDDEN")
             if (isDefinitiveFailure) {
                 commandStore.markFailed(scopeAfter.companyId.value, commandId, errMsg)
             } else {
@@ -330,6 +355,9 @@ class ProductionTraderRepository(
 
             return Result.failure(err ?: RuntimeException(errMsg))
         } finally {
+            if (formAdmissionKey != null) {
+                inFlightFormTypes.remove(formAdmissionKey)
+            }
             inFlightCommands.remove(admissionKey)
         }
     }
@@ -345,6 +373,18 @@ class ProductionTraderRepository(
         if (requireActiveScope() != before) throw SecurityException("Authenticated scope changed during status lookup")
         return when (status) {
             is MobileMerchantApiClient.ReceiptStatusResult.Found -> {
+                val respCompanyId = status.snapshot.properties["company_id"]?.asString()
+                if (respCompanyId != null && respCompanyId != companyId.value) {
+                    val secErr = SecurityException("Receipt status company mismatch: expected ${companyId.value}, got $respCompanyId")
+                    commandStore.markUnknownAck(companyId.value, commandId, secErr.message ?: "Receipt status company mismatch")
+                    return Result.failure(secErr)
+                }
+                val respIdempotencyKey = status.snapshot.properties["idempotency_key"]?.asString()
+                if (respIdempotencyKey != null && respIdempotencyKey != idempotencyKey) {
+                    val keyErr = SecurityException("Receipt status idempotency key mismatch: expected $idempotencyKey, got $respIdempotencyKey")
+                    commandStore.markUnknownAck(companyId.value, commandId, keyErr.message ?: "Receipt status key mismatch")
+                    return Result.failure(keyErr)
+                }
                 val snapshot = status.snapshot.properties["response_snapshot"]?.asObject()
                     ?: status.snapshot.properties["result"]?.asObject()
                     ?: return Result.failure(IllegalStateException("Receipt status omitted its authoritative result"))
@@ -2493,48 +2533,28 @@ class ProductionTraderRepository(
             return@withContext Result.failure(IllegalArgumentException("Allocations ($totalAllocated) exceed total payment amount ($amountExact)"))
         }
 
-        val effectivePaymentDate = paymentDate ?: WesternFormatters.currentDate()
-        val effectiveCashAccount = if (!cashAccountId.isNullOrBlank()) {
-            ServerUlid.parse(cashAccountId)
-        } else {
-            approvedCashAccount.id
-        }
-
-        val commandId = if (paymentId.isNotBlank()) paymentId else UUID.randomUUID().toString()
-        val idempotencyKey = "custpay-$commandId"
-
-        val activeDraft = commandStore.getActiveDraftRecord(before.companyId.value, before.actorId.value, before.deviceId.value, "customer_payment")
-
-        val allocElements = allocations.map { alloc ->
-            StrictJsonObject(
-                mapOf(
-                    "target_type" to StrictJsonString(alloc.targetType),
-                    "target_id" to StrictJsonString(alloc.targetId),
-                    "amount" to StrictJsonString(alloc.amountExact.setScale(6, RoundingMode.HALF_UP).toPlainString())
-                )
-            )
-        }
-        val payloadObj = StrictJsonObject(
-            mapOf(
-                "customer_id" to StrictJsonString(customerId),
-                "amount" to StrictJsonString(amountExact.setScale(6, RoundingMode.HALF_UP).toPlainString()),
-                "currency" to StrictJsonString(baseCurrency),
-                "payment_date" to StrictJsonString(effectivePaymentDate),
-                "money_account_id" to StrictJsonString(effectiveCashAccount.value),
-                "notes" to StrictJsonString(note),
-                "allocations" to StrictJsonArray(allocElements)
-            )
+        val preparedRes = prepareDurablePaymentSubmission(
+            scope = before,
+            formType = "customer_payment",
+            keyPrefix = "custpay",
+            partyFieldName = "customer_id",
+            partyId = customerId,
+            requestedPaymentId = paymentId,
+            amountExact = amountExact,
+            note = note,
+            cashAccountId = cashAccountId,
+            paymentDate = paymentDate,
+            allocations = allocations
         )
-        val payloadBytes = CanonicalJsonSerializer.serializeToUtf8Bytes(payloadObj)
-        val payloadDigest = "sha256:" + java.security.MessageDigest.getInstance("SHA-256").digest(payloadBytes).joinToString("") { "%02x".format(it) }
-
-        val existingCmd = commandStore.findCommand(before.companyId.value, before.actorId.value, before.deviceId.value, idempotencyKey)
-        if (existingCmd != null && existingCmd.payloadDigest != payloadDigest) {
-            return@withContext Result.failure(IllegalStateException("Idempotency key [$idempotencyKey] was previously committed with different parameters"))
+        if (preparedRes.isFailure) {
+            return@withContext Result.failure(preparedRes.exceptionOrNull() ?: IllegalStateException("Payment preparation failed"))
         }
-        if (activeDraft != null && activeDraft.commandId == commandId && activeDraft.payloadDigest != payloadDigest) {
-            return@withContext Result.failure(IllegalStateException("Draft command [$commandId] has different parameters"))
-        }
+        val prepared = preparedRes.getOrThrow()
+        val commandId = prepared.commandId
+        val idempotencyKey = prepared.idempotencyKey
+        val effectivePaymentDate = prepared.effectivePaymentDate
+        val effectiveCashAccount = prepared.effectiveCashAccount
+        val payloadBytes = prepared.payloadBytes
 
         val inFlightCounter = customerInFlightPayments.computeIfAbsent(customerId) { java.util.concurrent.atomic.AtomicInteger(0) }
         inFlightCounter.incrementAndGet()
@@ -2581,6 +2601,10 @@ class ProductionTraderRepository(
 
             if (durableRes.isFailure) {
                 return@withContext Result.failure(durableRes.exceptionOrNull() ?: RuntimeException("Customer payment failed"))
+            }
+
+            if (prepared.activeDraft != null || commandId == prepared.persistedDraftId) {
+                rotateDraftOperationId("customer_payment")
             }
 
             val snapshot = durableRes.getOrThrow()
@@ -3790,48 +3814,28 @@ class ProductionTraderRepository(
             return@withContext Result.failure(IllegalArgumentException("Allocations ($totalAllocated) exceed total payment amount ($amountExact)"))
         }
 
-        val effectivePaymentDate = paymentDate ?: WesternFormatters.currentDate()
-        val effectiveCashAccount = if (!cashAccountId.isNullOrBlank()) {
-            ServerUlid.parse(cashAccountId)
-        } else {
-            approvedCashAccount.id
-        }
-
-        val commandId = if (paymentId.isNotBlank()) paymentId else UUID.randomUUID().toString()
-        val idempotencyKey = "suppay-$commandId"
-
-        val activeDraft = commandStore.getActiveDraftRecord(before.companyId.value, before.actorId.value, before.deviceId.value, "supplier_payment")
-
-        val allocElements = allocations.map { alloc ->
-            StrictJsonObject(
-                mapOf(
-                    "target_type" to StrictJsonString(alloc.targetType),
-                    "target_id" to StrictJsonString(alloc.targetId),
-                    "amount" to StrictJsonString(alloc.amountExact.setScale(6, RoundingMode.HALF_UP).toPlainString())
-                )
-            )
-        }
-        val payloadObj = StrictJsonObject(
-            mapOf(
-                "supplier_id" to StrictJsonString(supplierId),
-                "amount" to StrictJsonString(amountExact.setScale(6, RoundingMode.HALF_UP).toPlainString()),
-                "currency" to StrictJsonString(baseCurrency),
-                "payment_date" to StrictJsonString(effectivePaymentDate),
-                "money_account_id" to StrictJsonString(effectiveCashAccount.value),
-                "notes" to StrictJsonString(note),
-                "allocations" to StrictJsonArray(allocElements)
-            )
+        val preparedRes = prepareDurablePaymentSubmission(
+            scope = before,
+            formType = "supplier_payment",
+            keyPrefix = "suppay",
+            partyFieldName = "supplier_id",
+            partyId = supplierId,
+            requestedPaymentId = paymentId,
+            amountExact = amountExact,
+            note = note,
+            cashAccountId = cashAccountId,
+            paymentDate = paymentDate,
+            allocations = allocations
         )
-        val payloadBytes = CanonicalJsonSerializer.serializeToUtf8Bytes(payloadObj)
-        val payloadDigest = "sha256:" + java.security.MessageDigest.getInstance("SHA-256").digest(payloadBytes).joinToString("") { "%02x".format(it) }
-
-        val existingCmd = commandStore.findCommand(before.companyId.value, before.actorId.value, before.deviceId.value, idempotencyKey)
-        if (existingCmd != null && existingCmd.payloadDigest != payloadDigest) {
-            return@withContext Result.failure(IllegalStateException("Idempotency key [$idempotencyKey] was previously committed with different parameters"))
+        if (preparedRes.isFailure) {
+            return@withContext Result.failure(preparedRes.exceptionOrNull() ?: IllegalStateException("Payment preparation failed"))
         }
-        if (activeDraft != null && activeDraft.commandId == commandId && activeDraft.payloadDigest != payloadDigest) {
-            return@withContext Result.failure(IllegalStateException("Draft command [$commandId] has different parameters"))
-        }
+        val prepared = preparedRes.getOrThrow()
+        val commandId = prepared.commandId
+        val idempotencyKey = prepared.idempotencyKey
+        val effectivePaymentDate = prepared.effectivePaymentDate
+        val effectiveCashAccount = prepared.effectiveCashAccount
+        val payloadBytes = prepared.payloadBytes
 
         val inFlightCounter = supplierInFlightPayments.computeIfAbsent(supplierId) { java.util.concurrent.atomic.AtomicInteger(0) }
         inFlightCounter.incrementAndGet()
@@ -3880,6 +3884,10 @@ class ProductionTraderRepository(
 
             if (durableRes.isFailure) {
                 return@withContext Result.failure(durableRes.exceptionOrNull() ?: RuntimeException("Supplier payment failed"))
+            }
+
+            if (prepared.activeDraft != null || commandId == prepared.persistedDraftId) {
+                rotateDraftOperationId("supplier_payment")
             }
 
             val snapshot = durableRes.getOrThrow()
@@ -4454,9 +4462,129 @@ class ProductionTraderRepository(
         }
     }
 
+    private data class ResolvedPaymentCommand(
+        val commandId: String,
+        val idempotencyKey: String,
+        val effectivePaymentDate: String,
+        val effectiveCashAccount: ServerUlid,
+        val activeDraft: MerchantCommandRecord?,
+        val persistedDraftId: String,
+        val payloadBytes: ByteArray,
+        val payloadDigest: String
+    )
+
+    private fun decryptDraftPayloadObject(record: MerchantCommandRecord?): StrictJsonObject? {
+        if (record == null) return null
+        return runCatching {
+            val bytes = commandStore.decryptPayload(record)
+            StrictJsonParser.parse(String(bytes, StandardCharsets.UTF_8)).asObject()
+        }.getOrNull()
+    }
+
+    private fun prepareDurablePaymentSubmission(
+        scope: CurrentAuthScope,
+        formType: String,
+        keyPrefix: String,
+        partyFieldName: String,
+        partyId: String,
+        requestedPaymentId: String,
+        amountExact: BigDecimal,
+        note: String,
+        cashAccountId: String?,
+        paymentDate: String?,
+        allocations: List<PaymentAllocationInput>
+    ): Result<ResolvedPaymentCommand> {
+        val persistedDraftId = getDraftOperationId(formType)
+        val activeDraft = commandStore.getActiveDraftRecord(
+            scope.companyId.value,
+            scope.actorId.value,
+            scope.deviceId.value,
+            formType
+        )
+        if (activeDraft != null && requestedPaymentId.isNotBlank() && requestedPaymentId != activeDraft.commandId) {
+            return Result.failure(
+                IllegalStateException(
+                    "Resolve the existing $formType [${activeDraft.commandId}] (${activeDraft.status}) before starting another"
+                )
+            )
+        }
+        val commandId = when {
+            activeDraft != null -> activeDraft.commandId
+            requestedPaymentId.isNotBlank() -> requestedPaymentId
+            else -> persistedDraftId
+        }
+        val idempotencyKey = "$keyPrefix-$commandId"
+        if (idempotencyKey.length > 128) {
+            return Result.failure(IllegalArgumentException("Idempotency key exceeds 128 characters: $idempotencyKey"))
+        }
+
+        val draftPayloadObj = decryptDraftPayloadObject(activeDraft)
+        val effectivePaymentDate = paymentDate
+            ?: draftPayloadObj?.properties?.get("payment_date")?.asString()
+            ?: WesternFormatters.currentDate()
+        val effectiveCashAccount = if (!cashAccountId.isNullOrBlank()) {
+            try {
+                ServerUlid.parse(cashAccountId)
+            } catch (e: IllegalArgumentException) {
+                return Result.failure(e)
+            }
+        } else {
+            draftPayloadObj?.properties?.get("money_account_id")?.asString()
+                ?.takeIf { ServerUlid.isValid(it) }
+                ?.let { ServerUlid.parse(it) }
+                ?: approvedCashAccount.id
+        }
+
+        val allocElements = allocations.map { alloc ->
+            StrictJsonObject(
+                mapOf(
+                    "target_type" to StrictJsonString(alloc.targetType),
+                    "target_id" to StrictJsonString(alloc.targetId),
+                    "amount" to StrictJsonString(alloc.amountExact.setScale(6, RoundingMode.HALF_UP).toPlainString())
+                )
+            )
+        }
+        val payloadObj = StrictJsonObject(
+            mapOf(
+                partyFieldName to StrictJsonString(partyId),
+                "amount" to StrictJsonString(amountExact.setScale(6, RoundingMode.HALF_UP).toPlainString()),
+                "currency" to StrictJsonString(baseCurrency),
+                "payment_date" to StrictJsonString(effectivePaymentDate),
+                "money_account_id" to StrictJsonString(effectiveCashAccount.value),
+                "notes" to StrictJsonString(note),
+                "allocations" to StrictJsonArray(allocElements)
+            )
+        )
+        val payloadBytes = CanonicalJsonSerializer.serializeToUtf8Bytes(payloadObj)
+        val payloadDigest = "sha256:" + java.security.MessageDigest.getInstance("SHA-256")
+            .digest(payloadBytes).joinToString("") { "%02x".format(it) }
+
+        val existingCmd = commandStore.findCommand(scope.companyId.value, scope.actorId.value, scope.deviceId.value, idempotencyKey)
+        if (existingCmd != null && existingCmd.payloadDigest != payloadDigest) {
+            return Result.failure(IllegalStateException("Idempotency key [$idempotencyKey] was previously committed with different parameters"))
+        }
+        if (activeDraft != null && activeDraft.commandId == commandId && activeDraft.payloadDigest != payloadDigest) {
+            return Result.failure(IllegalStateException("Draft command [$commandId] has different parameters"))
+        }
+
+        return Result.success(
+            ResolvedPaymentCommand(
+                commandId = commandId,
+                idempotencyKey = idempotencyKey,
+                effectivePaymentDate = effectivePaymentDate,
+                effectiveCashAccount = effectiveCashAccount,
+                activeDraft = activeDraft,
+                persistedDraftId = persistedDraftId,
+                payloadBytes = payloadBytes,
+                payloadDigest = payloadDigest
+            )
+        )
+    }
+
     companion object {
         // Atomic in-flight admission across coroutines and repository instances in the process
         private val inFlightCommands = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+        private val inFlightFormTypes = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
         fun isInFlight(companyId: String, actorId: String, deviceId: String, commandId: String): Boolean {
             return inFlightCommands.contains("$companyId:$actorId:$deviceId:$commandId")
@@ -4464,6 +4592,7 @@ class ProductionTraderRepository(
 
         internal fun clearInFlightForTest() {
             inFlightCommands.clear()
+            inFlightFormTypes.clear()
         }
 
         suspend fun fromReadReady(

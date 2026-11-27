@@ -81,7 +81,13 @@ class MobileMerchantApiClient(
                 }
             } else {
                 val errorMsg = parseErrorMessage(response.body, response.statusCode)
-                Result.failure(HttpTransportException(HttpTransportException.CATEGORY_SERVER_ERROR, errorMsg))
+                Result.failure(
+                    HttpTransportException(
+                        category = HttpTransportException.CATEGORY_SERVER_ERROR,
+                        message = errorMsg,
+                        httpStatusCode = response.statusCode
+                    )
+                )
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -728,7 +734,13 @@ class MobileMerchantApiClient(
                 404 -> ReceiptStatusResult.NotFound
                 else -> {
                     val errorMsg = parseErrorMessage(response.body, response.statusCode)
-                    ReceiptStatusResult.Error(HttpTransportException(HttpTransportException.CATEGORY_SERVER_ERROR, errorMsg))
+                    ReceiptStatusResult.Error(
+                        HttpTransportException(
+                            category = HttpTransportException.CATEGORY_SERVER_ERROR,
+                            message = errorMsg,
+                            httpStatusCode = response.statusCode
+                        )
+                    )
                 }
             }
         } catch (e: Exception) {

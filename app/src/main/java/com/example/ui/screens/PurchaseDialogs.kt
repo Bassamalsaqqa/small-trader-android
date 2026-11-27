@@ -114,21 +114,55 @@ fun PaySupplierDialog(
     onLoadMoreTargets: (() -> Unit)? = null,
     onRetryTargets: (() -> Unit)? = null,
     currency: String = "ILS",
-    minorUnits: Int = 2
+    minorUnits: Int = 2,
+    operationId: String? = null,
+    initialDraft: com.example.data.mobile.contract.StrictJsonObject? = null,
+    isRecovering: Boolean = false,
+    isSubmitting: Boolean = false,
+    inlineError: String? = null
 ) {
-    var submissionId by rememberSaveable(supplier.id) { mutableStateOf(UUID.randomUUID().toString()) }
+    val localSubmissionId by rememberSaveable(supplier.id) { mutableStateOf(UUID.randomUUID().toString()) }
+    val submissionId = if (!operationId.isNullOrBlank()) operationId else localSubmissionId
     val initialPayStr = if ((supplier.balanceOwedExact ?: BigDecimal.ZERO) > BigDecimal.ZERO) {
         PaymentDecimalConsistency.cashEntryText(supplier.balanceOwedExact!!, minorUnits).orEmpty()
     } else {
         ""
     }
-    var payAmountText by rememberSaveable(supplier.id) { mutableStateOf(initialPayStr) }
-    var payNoteText by rememberSaveable(supplier.id) { mutableStateOf("") }
+    val draftSupplierId = initialDraft?.properties?.get("supplier_id").toNullableString()
+    val isBlockedByOtherDraft = isRecovering && !draftSupplierId.isNullOrBlank() && draftSupplierId != supplier.id
+    val isRecoveringCurrentSupplier = isRecovering && (draftSupplierId.isNullOrBlank() || draftSupplierId == supplier.id)
+    val restoredDraft = remember(initialDraft, isRecoveringCurrentSupplier, minorUnits) {
+        if (isRecoveringCurrentSupplier) extractDraftPaymentValues(initialDraft, minorUnits) else null
+    }
+
+    var payAmountText by rememberSaveable(supplier.id) { mutableStateOf(restoredDraft?.first ?: initialPayStr) }
+    var payNoteText by rememberSaveable(supplier.id) { mutableStateOf(restoredDraft?.second ?: "") }
     var isSubmittingPay by rememberSaveable(supplier.id) { mutableStateOf(false) }
     var payInlineError by rememberSaveable(supplier.id) { mutableStateOf<String?>(null) }
+    val effectiveSubmitting = isSubmitting || isSubmittingPay
+
+    LaunchedEffect(inlineError) {
+        if (inlineError != null) {
+            payInlineError = inlineError
+        }
+    }
+    val displayedInlineError = payInlineError ?: inlineError
 
     // Map of targetKey ("${targetType}:${targetId}") -> allocation amount text
-    val selectedAllocations = remember { mutableStateMapOf<String, String>() }
+    val selectedAllocations = remember {
+        mutableStateMapOf<String, String>().apply {
+            restoredDraft?.third?.let { putAll(it) }
+        }
+    }
+
+    LaunchedEffect(isRecoveringCurrentSupplier, restoredDraft) {
+        if (isRecoveringCurrentSupplier && restoredDraft != null) {
+            payAmountText = restoredDraft.first
+            payNoteText = restoredDraft.second
+            selectedAllocations.clear()
+            selectedAllocations.putAll(restoredDraft.third)
+        }
+    }
 
     val totalAllocatedExact = remember(selectedAllocations.toMap()) {
         selectedAllocations.values.fold(BigDecimal.ZERO) { acc, s ->
@@ -169,7 +203,7 @@ fun PaySupplierDialog(
 
     AlertDialog(
         onDismissRequest = {
-            if (!isSubmittingPay) {
+            if (!effectiveSubmitting) {
                 onDismiss()
             }
         },
@@ -189,6 +223,43 @@ fun PaySupplierDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                if (isRecoveringCurrentSupplier) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("supplier_pay_recovery_banner")
+                    ) {
+                        Text(
+                            text = lang.tr(
+                                "توجد عملية صرف غير مؤكدة بنفس المعرّف. تم استعادة البيانات الأصلية للتحقق من حالة الخادم دون تكرار القيد.",
+                                "Recovering unverified supplier payment with same operation key. Confirm to verify receipt status without duplicate posting."
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+                } else if (isBlockedByOtherDraft) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("supplier_pay_blocked_banner")
+                    ) {
+                        Text(
+                            text = lang.tr(
+                                "توجد عملية صرف غير محسومة لمورد آخر. يجب إتمامها أو التحقق من حالتها أولاً قبل بدء دفعة جديدة.",
+                                "Another supplier payment has an unresolved status. Resolve or verify that payment before starting a new one."
+                            ),
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+                }
                 if (!hasAllocations) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
@@ -262,7 +333,7 @@ fun PaySupplierDialog(
                     }
                 }
 
-                if (payInlineError != null) {
+                if (displayedInlineError != null) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = MaterialTheme.colorScheme.errorContainer,
@@ -283,7 +354,7 @@ fun PaySupplierDialog(
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = payInlineError!!,
+                                text = displayedInlineError,
                                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.onErrorContainer
                             )
@@ -353,6 +424,7 @@ fun PaySupplierDialog(
                                 if (hasAllocations) {
                                     TextButton(
                                         onClick = { selectedAllocations.clear() },
+                                        enabled = !effectiveSubmitting && !isRecovering,
                                         modifier = Modifier.heightIn(min = 32.dp).testTag("clear_supplier_allocations_button")
                                     ) {
                                         Text(
@@ -464,7 +536,9 @@ fun PaySupplierDialog(
                                             ) {
                                                 Checkbox(
                                                     checked = isChecked,
+                                                    enabled = !effectiveSubmitting && !isRecovering,
                                                     onCheckedChange = { checked ->
+                                                        payInlineError = null
                                                         if (checked) {
                                                             val targetStr = PaymentDecimalConsistency.cashEntryText(target.remainingAmountExact, minorUnits)
                                                             selectedAllocations[key] = targetStr.orEmpty()
@@ -518,9 +592,11 @@ fun PaySupplierDialog(
                                                 SelectAllNumericOutlinedTextField(
                                                     value = selectedAllocations[key] ?: "",
                                                     onValueChange = { newVal ->
+                                                        payInlineError = null
                                                         val sanitized = WesternFormatters.sanitizeWesternDigits(newVal)
                                                         selectedAllocations[key] = sanitized
                                                     },
+                                                    enabled = !effectiveSubmitting && !isRecovering,
                                                     label = { Text(lang.tr("المخصص $currencySymbolOrCode", "Alloc $currencySymbolOrCode"), style = MaterialTheme.typography.labelSmall) },
                                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                                     singleLine = true,
@@ -555,6 +631,7 @@ fun PaySupplierDialog(
                         payAmountText = WesternFormatters.sanitizeWesternDigits(it)
                         payInlineError = null
                     },
+                    enabled = !effectiveSubmitting && !isRecovering,
                     label = { Text(lang.tr("المبلغ المصروف نقداً ($currencySymbolOrCode) *", "Cash Amount ($currencySymbolOrCode) *")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
@@ -588,8 +665,11 @@ fun PaySupplierDialog(
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
                                 FilterChip(
                                     selected = payAmountText == totalAllocatedStr,
-                                    enabled = totalAllocatedStr != null,
-                                    onClick = { totalAllocatedStr?.let { payAmountText = it } },
+                                    enabled = !effectiveSubmitting && !isRecovering && totalAllocatedStr != null,
+                                    onClick = {
+                                        payInlineError = null
+                                        totalAllocatedStr?.let { payAmountText = it }
+                                    },
                                     label = {
                                         Text(
                                             text = lang.tr(
@@ -615,8 +695,11 @@ fun PaySupplierDialog(
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
                                 FilterChip(
                                     selected = payAmountText == fullStr,
-                                    enabled = fullStr != null,
-                                    onClick = { fullStr?.let { payAmountText = it } },
+                                    enabled = !effectiveSubmitting && !isRecovering && fullStr != null,
+                                    onClick = {
+                                        payInlineError = null
+                                        fullStr?.let { payAmountText = it }
+                                    },
                                     label = {
                                         Text(
                                             text = lang.tr(
@@ -640,7 +723,11 @@ fun PaySupplierDialog(
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
                             FilterChip(
                                 selected = payAmountText == preset.toString(),
-                                onClick = { payAmountText = preset.toString() },
+                                enabled = !effectiveSubmitting && !isRecovering,
+                                onClick = {
+                                    payInlineError = null
+                                    payAmountText = preset.toString()
+                                },
                                 label = { Text("$preset $currencySymbolOrCode") },
                                 shape = RoundedCornerShape(10.dp),
                                 colors = FilterChipDefaults.filterChipColors(
@@ -712,6 +799,7 @@ fun PaySupplierDialog(
                 OutlinedTextField(
                     value = payNoteText,
                     onValueChange = { payNoteText = it },
+                    enabled = !effectiveSubmitting && !isRecovering,
                     label = { Text(lang.tr("البيان / ملاحظة السند (اختياري)", "Note (Optional)")) },
                     placeholder = { Text(lang.tr("مثال: صرف دفعة نقدية على الحساب", "e.g. Cash payment on account")) },
                     singleLine = true,
@@ -725,7 +813,7 @@ fun PaySupplierDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (!isSubmittingPay && validEnteredAmountExact > BigDecimal.ZERO && !isOverAllocated && isAmountPrecisionValid && areAllocationsValid) {
+                    if (!effectiveSubmitting && !isBlockedByOtherDraft && validEnteredAmountExact > BigDecimal.ZERO && !isOverAllocated && isAmountPrecisionValid && areAllocationsValid) {
                         isSubmittingPay = true
                         payInlineError = null
 
@@ -804,7 +892,7 @@ fun PaySupplierDialog(
                         }
                     }
                 },
-                enabled = !isSubmittingPay && validEnteredAmountExact > BigDecimal.ZERO && !isOverAllocated && isAmountPrecisionValid && areAllocationsValid,
+                enabled = !effectiveSubmitting && !isBlockedByOtherDraft && validEnteredAmountExact > BigDecimal.ZERO && !isOverAllocated && isAmountPrecisionValid && areAllocationsValid,
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -815,8 +903,9 @@ fun PaySupplierDialog(
                     .testTag("confirm_supplier_payment_button")
             ) {
                 Text(
-                    text = if (validEnteredAmountExact > BigDecimal.ZERO) {
-                        if (hasAllocations) {
+                    text = when {
+                        isRecoveringCurrentSupplier -> lang.tr("التحقق من حالة السند", "Verify Status & Retry")
+                        validEnteredAmountExact > BigDecimal.ZERO -> if (hasAllocations) {
                             lang.tr(
                                 "تأكيد صرف ${StitchBidiUtils.formatCurrency(validEnteredAmountExact, currency)} (مخصص ${StitchBidiUtils.formatCurrency(totalAllocatedExact, currency)})",
                                 "Confirm ${StitchBidiUtils.formatCurrency(validEnteredAmountExact, currency)} (${StitchBidiUtils.formatCurrency(totalAllocatedExact, currency)} allocated)"
@@ -827,8 +916,7 @@ fun PaySupplierDialog(
                                 "Confirm ${StitchBidiUtils.formatCurrency(validEnteredAmountExact, currency)} Payment"
                             )
                         }
-                    } else {
-                        lang.tr("تأكيد الصرف", "Confirm Payment")
+                        else -> lang.tr("تأكيد الصرف", "Confirm Payment")
                     },
                     style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                 )
@@ -837,11 +925,11 @@ fun PaySupplierDialog(
         dismissButton = {
             TextButton(
                 onClick = {
-                    if (!isSubmittingPay) {
+                    if (!effectiveSubmitting) {
                         onDismiss()
                     }
                 },
-                enabled = !isSubmittingPay,
+                enabled = !effectiveSubmitting,
                 modifier = Modifier.heightIn(min = 48.dp)
             ) {
                 Text(lang.tr("إلغاء", "Cancel"))
@@ -2210,10 +2298,11 @@ fun SupplierEditorDialog(
     var phone by rememberSaveable(initialSupplier?.id) {
         mutableStateOf(initialSupplier?.phone ?: initialDraft?.properties?.get("phone").toNullableString() ?: "")
     }
+    var isSubmitting by rememberSaveable(initialSupplier?.id) { mutableStateOf(false) }
     val isValid = name.isNotBlank() || isRecovering
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
         shape = RoundedCornerShape(12.dp),
         title = {
             Text(
@@ -2240,7 +2329,7 @@ fun SupplierEditorDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    enabled = !isRecovering,
+                    enabled = !isRecovering && !isSubmitting,
                     label = { Text(lang.tr("اسم المورد *", "Supplier Name *")) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
@@ -2249,7 +2338,7 @@ fun SupplierEditorDialog(
                         .testTag("supplier_name_input")
                 )
                 OutlinedTextField(
-                    enabled = companyEditable && !isRecovering,
+                    enabled = companyEditable && !isRecovering && !isSubmitting,
                     supportingText = { if (!companyEditable) Text(lang.tr("غير متاح (لا يُحفظ على الخادم)", "Unavailable (not saved on server)")) },
                     value = company,
                     onValueChange = { company = it },
@@ -2263,7 +2352,7 @@ fun SupplierEditorDialog(
                 OutlinedTextField(
                     value = phone,
                     onValueChange = { phone = WesternFormatters.sanitizeWesternDigits(it) },
-                    enabled = !isRecovering,
+                    enabled = !isRecovering && !isSubmitting,
                     label = { Text(lang.tr("رقم الهاتف", "Phone Number")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     singleLine = true,
@@ -2277,12 +2366,14 @@ fun SupplierEditorDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (isValid) {
+                    if (!isSubmitting && isValid) {
                         val trimmedName = name.trim()
                         val trimmedCompany = if (companyEditable) company.trim() else ""
                         val trimmedPhone = phone.trim()
                         if (onSaveWithResult != null) {
+                            isSubmitting = true
                             onSaveWithResult(trimmedName, trimmedCompany, trimmedPhone) { success ->
+                                isSubmitting = false
                                 if (success) {
                                     onDismiss()
                                 }
@@ -2292,7 +2383,7 @@ fun SupplierEditorDialog(
                         }
                     }
                 },
-                enabled = isValid,
+                enabled = !isSubmitting && isValid,
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier
                     .heightIn(min = 48.dp)
@@ -2303,7 +2394,8 @@ fun SupplierEditorDialog(
         },
         dismissButton = {
             TextButton(
-                onClick = onDismiss,
+                onClick = { if (!isSubmitting) onDismiss() },
+                enabled = !isSubmitting,
                 modifier = Modifier.heightIn(min = 48.dp)
             ) {
                 Text(lang.tr("إلغاء", "Cancel"))

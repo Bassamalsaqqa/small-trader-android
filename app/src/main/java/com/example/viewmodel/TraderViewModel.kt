@@ -85,6 +85,10 @@ class TraderViewModel(
             draftPurchaseOperationId = repository.getDraftOperationId("purchase"),
             draftSupplierPaymentOperationId = repository.getDraftOperationId("supplier_payment"),
             draftCustomerPaymentOperationId = repository.getDraftOperationId("customer_payment"),
+            activeCustomerPaymentDraft = repository.getActiveDraftPayload("customer_payment"),
+            isCustomerPaymentRecovering = repository.isDraftRecovering("customer_payment"),
+            activeSupplierPaymentDraft = repository.getActiveDraftPayload("supplier_payment"),
+            isSupplierPaymentRecovering = repository.isDraftRecovering("supplier_payment"),
             draftCustomerCreateOperationId = repository.getDraftOperationId("customer_create"),
             draftSupplierCreateOperationId = repository.getDraftOperationId("supplier_create"),
             draftGrnOperationId = repository.getDraftOperationId("goods_receipt_note"),
@@ -302,6 +306,10 @@ class TraderViewModel(
                 pendingAction = null,
                 isQuickActionOpen = false,
                 isPaymentCollectionDialogOpen = false,
+                isCustomerPaymentSubmitting = false,
+                customerPaymentError = null,
+                isSupplierPaymentSubmitting = false,
+                supplierPaymentError = null,
                 isAddCustomerDialogOpen = false,
                 isAddExpenseDialogOpen = false,
                 isReceivePurchaseDialogOpen = false,
@@ -2404,7 +2412,12 @@ class TraderViewModel(
     fun openPaymentCollectionDialog(open: Boolean) {
         if (!open) {
             resetCustomerSettlementTargets()
-            _uiState.update { it.copy(isPaymentCollectionDialogOpen = false) }
+            _uiState.update {
+                it.copy(
+                    isPaymentCollectionDialogOpen = false,
+                    customerPaymentError = null
+                )
+            }
             return
         }
         if (!ensureActiveScope()) return
@@ -2413,18 +2426,36 @@ class TraderViewModel(
         if (customer != null) {
             loadCustomerSettlementTargets(customer.id, resetPagination = true)
         }
-        _uiState.update { it.copy(isPaymentCollectionDialogOpen = true) }
+        val draftId = repository.getDraftOperationId("customer_payment")
+        val draftPayload = repository.getActiveDraftPayload("customer_payment")
+        val recovering = repository.isDraftRecovering("customer_payment")
+        _uiState.update {
+            it.copy(
+                isPaymentCollectionDialogOpen = true,
+                draftCustomerPaymentOperationId = draftId,
+                activeCustomerPaymentDraft = draftPayload,
+                isCustomerPaymentRecovering = recovering,
+                customerPaymentError = null
+            )
+        }
     }
 
     fun openPaymentCollectionForCustomer(customer: Customer) {
         if (!ensureActiveScope()) return
         if (!MerchantAction.COLLECT.allowed(_uiState.value.currentSession)) return
         loadCustomerSettlementTargets(customer.id, resetPagination = true)
+        val draftId = repository.getDraftOperationId("customer_payment")
+        val draftPayload = repository.getActiveDraftPayload("customer_payment")
+        val recovering = repository.isDraftRecovering("customer_payment")
         _uiState.update { state ->
             val freshCustomer = state.customers.firstOrNull { it.id == customer.id } ?: customer
             state.copy(
                 selectedCustomerForDetail = freshCustomer,
-                isPaymentCollectionDialogOpen = true
+                isPaymentCollectionDialogOpen = true,
+                draftCustomerPaymentOperationId = draftId,
+                activeCustomerPaymentDraft = draftPayload,
+                isCustomerPaymentRecovering = recovering,
+                customerPaymentError = null
             )
         }
     }
@@ -2445,12 +2476,29 @@ class TraderViewModel(
         paymentId: String,
         allocations: List<PaymentAllocationInput> = emptyList(),
         onComplete: (Boolean) -> Unit = {}
+    ): Boolean = confirmCustomerCollectionResult(
+        customerId = customerId,
+        amount = amount,
+        note = note,
+        paymentId = paymentId,
+        allocations = allocations
+    ) { res ->
+        onComplete(res.isSuccess)
+    }
+
+    fun confirmCustomerCollectionResult(
+        customerId: String,
+        amount: BigDecimal,
+        note: String,
+        paymentId: String,
+        allocations: List<PaymentAllocationInput> = emptyList(),
+        onComplete: (Result<CustomerTransaction>) -> Unit = {}
     ): Boolean {
         if (!ensureActiveScope() || !MerchantAction.COLLECT.allowed(_uiState.value.currentSession)) {
-            onComplete(false)
+            onComplete(Result.failure(SecurityException("Unauthorized or inactive session")))
             return false
         }
-        val saved = recordCustomerPayment(
+        return recordCustomerPayment(
             customerId = customerId,
             amount = amount,
             note = note,
@@ -2459,17 +2507,14 @@ class TraderViewModel(
             paymentDate = null,
             allocations = allocations
         ) { res ->
-            val success = res.isSuccess
-            if (success) {
+            if (res.isSuccess) {
                 navigateTo(TraderScreen.CUSTOMER_DETAIL)
                 if (repository !is OfflineDemoTraderRepository && !_uiState.value.currentSession.isDemoSession) {
                     loadCustomerStatement(customerId)
                 }
             }
-            onComplete(success)
+            onComplete(res)
         }
-        if (saved) navigateTo(TraderScreen.CUSTOMER_DETAIL)
-        return saved
     }
 
     fun confirmCustomerCollection(
@@ -2515,12 +2560,40 @@ class TraderViewModel(
         allocations: List<PaymentAllocationInput> = emptyList(),
         onComplete: (Result<CustomerTransaction>) -> Unit = {}
     ): Boolean {
+        if (repository is ProductionTraderRepository && !ensureActiveScope()) {
+            val err = Result.failure<CustomerTransaction>(SecurityException("Authenticated scope is inactive or revoked"))
+            onComplete(err)
+            return false
+        }
         if (!acquireActionLock()) {
             val err = Result.failure<CustomerTransaction>(IllegalStateException("Action in progress"))
             onComplete(err)
             return false
         }
-        val pid = if (paymentId.isNotBlank()) paymentId else _uiState.value.draftCustomerPaymentOperationId
+        val pid = if (repository is ProductionTraderRepository) {
+            val persistedDraftId = repository.getDraftOperationId("customer_payment")
+            if (paymentId.isNotBlank() && paymentId != persistedDraftId) {
+                releaseActionLock()
+                val currentLang = _uiState.value.language
+                val errEn = "Payment operation ID mismatch with persisted draft"
+                val errAr = "تعارض معرّف العملية مع المسودة المحفوظة"
+                val localized = currentLang.tr(errAr, errEn)
+                _uiState.update {
+                    it.copy(
+                        draftCustomerPaymentOperationId = persistedDraftId,
+                        activeCustomerPaymentDraft = repository.getActiveDraftPayload("customer_payment"),
+                        isCustomerPaymentRecovering = repository.isDraftRecovering("customer_payment"),
+                        customerPaymentError = localized
+                    )
+                }
+                showBanner(errAr, errEn, isError = true)
+                onComplete(Result.failure(IllegalStateException(errEn)))
+                return false
+            }
+            persistedDraftId
+        } else {
+            if (paymentId.isNotBlank()) paymentId else _uiState.value.draftCustomerPaymentOperationId
+        }
         val currencyMinorUnits = _uiState.value.businessInfo.defaultCurrencyMinorUnits
         val amountExact = try {
             amount.setScale(currencyMinorUnits, RoundingMode.UNNECESSARY)
@@ -2528,6 +2601,8 @@ class TraderViewModel(
             releaseActionLock()
             val errAr = "دقة المبلغ تتجاوز الحد المسموح ($currencyMinorUnits خانات)"
             val errEn = "Amount precision exceeds allowed limit ($currencyMinorUnits decimals)"
+            val localized = _uiState.value.language.tr(errAr, errEn)
+            _uiState.update { it.copy(customerPaymentError = localized) }
             showBanner(errAr, errEn, isError = true)
             val err = Result.failure<CustomerTransaction>(IllegalArgumentException(errEn))
             onComplete(err)
@@ -2609,6 +2684,8 @@ class TraderViewModel(
                         state.copy(
                             draftCustomerPaymentOperationId = repository.rotateDraftOperationId("customer_payment"),
                             isPaymentCollectionDialogOpen = false,
+                            isCustomerPaymentSubmitting = false,
+                            customerPaymentError = null,
                             selectedCustomerForDetail = updatedCust,
                             lastCustomerPaymentMessageAr = msgAr,
                             lastCustomerPaymentMessageEn = msgEn
@@ -2616,6 +2693,7 @@ class TraderViewModel(
                     }
                 } else {
                     val err = result.exceptionOrNull()?.message ?: "Payment rejected"
+                    _uiState.update { it.copy(isCustomerPaymentSubmitting = false, customerPaymentError = err) }
                     showBanner(err, err, isError = true)
                 }
                 onComplete(result)
@@ -2623,6 +2701,14 @@ class TraderViewModel(
             } finally {
                 releaseActionLock()
             }
+        }
+
+        _uiState.update {
+            it.copy(
+                isCustomerPaymentSubmitting = true,
+                customerPaymentError = null,
+                draftCustomerPaymentOperationId = pid
+            )
         }
 
         viewModelScope.launch {
@@ -2641,6 +2727,13 @@ class TraderViewModel(
                 if (result.isSuccess) {
                     val tx = result.getOrNull()
                     syncCustomers()
+                    val nextDraftId = if (repository is ProductionTraderRepository) {
+                        repository.getDraftOperationId("customer_payment")
+                    } else {
+                        repository.rotateDraftOperationId("customer_payment")
+                    }
+                    val nextActiveDraft = repository.getActiveDraftPayload("customer_payment")
+                    val nextRecovering = repository.isDraftRecovering("customer_payment")
                     _uiState.update { state ->
                         val currency = state.businessInfo.defaultCurrency
                         val inDirectory = state.customers.firstOrNull { it.id == customerId }
@@ -2698,7 +2791,11 @@ class TraderViewModel(
                         }
 
                         state.copy(
-                            draftCustomerPaymentOperationId = repository.rotateDraftOperationId("customer_payment"),
+                            draftCustomerPaymentOperationId = nextDraftId,
+                            activeCustomerPaymentDraft = nextActiveDraft,
+                            isCustomerPaymentRecovering = nextRecovering,
+                            isCustomerPaymentSubmitting = false,
+                            customerPaymentError = null,
                             isPaymentCollectionDialogOpen = false,
                             selectedCustomerForDetail = updatedCust,
                             lastCustomerPaymentMessageAr = msgAr,
@@ -2707,11 +2804,37 @@ class TraderViewModel(
                     }
                 } else {
                     val err = result.exceptionOrNull()?.message ?: "Payment rejected"
+                    val isScopeActive = repository.isScopeActive()
+                    val currentDraftId = if (isScopeActive) repository.getDraftOperationId("customer_payment") else _uiState.value.draftCustomerPaymentOperationId
+                    val activeDraft = if (isScopeActive) repository.getActiveDraftPayload("customer_payment") else null
+                    val stillRecovering = if (isScopeActive) repository.isDraftRecovering("customer_payment") else false
+                    _uiState.update {
+                        it.copy(
+                            draftCustomerPaymentOperationId = currentDraftId,
+                            activeCustomerPaymentDraft = activeDraft,
+                            isCustomerPaymentRecovering = stillRecovering,
+                            isCustomerPaymentSubmitting = false,
+                            customerPaymentError = err
+                        )
+                    }
                     showBanner(err, err, isError = true)
                 }
                 onComplete(result)
             } catch (e: Exception) {
                 val err = e.message ?: "Payment rejected"
+                val isScopeActive = repository.isScopeActive()
+                val currentDraftId = if (isScopeActive) repository.getDraftOperationId("customer_payment") else _uiState.value.draftCustomerPaymentOperationId
+                val activeDraft = if (isScopeActive) repository.getActiveDraftPayload("customer_payment") else null
+                val stillRecovering = if (isScopeActive) repository.isDraftRecovering("customer_payment") else false
+                _uiState.update {
+                    it.copy(
+                        draftCustomerPaymentOperationId = currentDraftId,
+                        activeCustomerPaymentDraft = activeDraft,
+                        isCustomerPaymentRecovering = stillRecovering,
+                        isCustomerPaymentSubmitting = false,
+                        customerPaymentError = err
+                    )
+                }
                 showBanner(err, err, isError = true)
                 onComplete(Result.failure(e))
             } finally {
@@ -2828,12 +2951,41 @@ class TraderViewModel(
         }
     }
 
+    fun prepareCustomerPaymentDraft() {
+        val draftId = repository.getDraftOperationId("customer_payment")
+        val payload = repository.getActiveDraftPayload("customer_payment")
+        val isRecovering = repository.isDraftRecovering("customer_payment")
+        _uiState.update {
+            it.copy(
+                draftCustomerPaymentOperationId = draftId,
+                activeCustomerPaymentDraft = payload,
+                isCustomerPaymentRecovering = isRecovering,
+                customerPaymentError = null
+            )
+        }
+    }
+
+    fun prepareSupplierPaymentDraft() {
+        val draftId = repository.getDraftOperationId("supplier_payment")
+        val payload = repository.getActiveDraftPayload("supplier_payment")
+        val isRecovering = repository.isDraftRecovering("supplier_payment")
+        _uiState.update {
+            it.copy(
+                draftSupplierPaymentOperationId = draftId,
+                activeSupplierPaymentDraft = payload,
+                isSupplierPaymentRecovering = isRecovering,
+                supplierPaymentError = null
+            )
+        }
+    }
+
     // Suppliers & Purchasing Operations
     fun openSupplierPayment(supplier: Supplier) {
         if (!ensureActiveScope()) return
         if (!MerchantAction.PAY.allowed(_uiState.value.currentSession)) return
         supplierSearchJob?.cancel()
         supplierSearchGeneration++
+        prepareSupplierPaymentDraft()
         selectSupplierForDetail(supplier)
         if (_uiState.value.currentScreen == TraderScreen.SUPPLIER_DETAIL) {
             _uiState.update {
@@ -3181,13 +3333,42 @@ class TraderViewModel(
         allocations: List<PaymentAllocationInput> = emptyList(),
         onComplete: (Result<SupplierPayment>) -> Unit = {}
     ): Result<SupplierPayment> {
+        if (repository is ProductionTraderRepository && !ensureActiveScope()) {
+            val err = Result.failure<SupplierPayment>(SecurityException("Authenticated scope is inactive or revoked"))
+            onComplete(err)
+            return err
+        }
         if (!acquireActionLock()) {
             val err = Result.failure<SupplierPayment>(IllegalStateException("Action in progress"))
             onComplete(err)
             return err
         }
 
-        val pid = if (paymentId.isNotBlank()) paymentId else _uiState.value.draftSupplierPaymentOperationId
+        val pid = if (repository is ProductionTraderRepository) {
+            val persistedDraftId = repository.getDraftOperationId("supplier_payment")
+            if (paymentId.isNotBlank() && paymentId != persistedDraftId) {
+                releaseActionLock()
+                val currentLang = _uiState.value.language
+                val errEn = "Supplier payment operation ID mismatch with persisted draft"
+                val errAr = "تعارض معرّف عملية الصرف مع المسودة المحفوظة"
+                val localized = currentLang.tr(errAr, errEn)
+                _uiState.update {
+                    it.copy(
+                        draftSupplierPaymentOperationId = persistedDraftId,
+                        activeSupplierPaymentDraft = repository.getActiveDraftPayload("supplier_payment"),
+                        isSupplierPaymentRecovering = repository.isDraftRecovering("supplier_payment"),
+                        supplierPaymentError = localized
+                    )
+                }
+                showBanner(errAr, errEn, isError = true)
+                val err = Result.failure<SupplierPayment>(IllegalStateException(errEn))
+                onComplete(err)
+                return err
+            }
+            persistedDraftId
+        } else {
+            if (paymentId.isNotBlank()) paymentId else _uiState.value.draftSupplierPaymentOperationId
+        }
         val session = _uiState.value.currentSession
         val currencyMinorUnits = _uiState.value.businessInfo.defaultCurrencyMinorUnits
         val amountExact = try {
@@ -3196,6 +3377,8 @@ class TraderViewModel(
             releaseActionLock()
             val errAr = "دقة المبلغ تتجاوز الحد المسموح ($currencyMinorUnits خانات)"
             val errEn = "Amount precision exceeds allowed limit ($currencyMinorUnits decimals)"
+            val localized = _uiState.value.language.tr(errAr, errEn)
+            _uiState.update { it.copy(supplierPaymentError = localized) }
             showBanner(errAr, errEn, isError = true)
             val err = Result.failure<SupplierPayment>(IllegalArgumentException(errEn))
             onComplete(err)
@@ -3271,6 +3454,8 @@ class TraderViewModel(
                     _uiState.update { state ->
                         state.copy(
                             draftSupplierPaymentOperationId = repository.rotateDraftOperationId("supplier_payment"),
+                            isSupplierPaymentSubmitting = false,
+                            supplierPaymentError = null,
                             suppliers = updatedSuppliers,
                             purchaseBills = updatedBills,
                             supplierPayments = updatedPayments,
@@ -3287,6 +3472,8 @@ class TraderViewModel(
                     val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
                     _uiState.update {
                         it.copy(
+                            isSupplierPaymentSubmitting = false,
+                            supplierPaymentError = it.language.tr(errAr, errEn),
                             lastSupplierActionMessageAr = errAr,
                             lastSupplierActionMessageEn = errEn,
                             isSupplierActionError = true
@@ -3300,6 +3487,14 @@ class TraderViewModel(
             } finally {
                 releaseActionLock()
             }
+        }
+
+        _uiState.update {
+            it.copy(
+                isSupplierPaymentSubmitting = true,
+                supplierPaymentError = null,
+                draftSupplierPaymentOperationId = pid
+            )
         }
 
         viewModelScope.launch {
@@ -3369,9 +3564,21 @@ class TraderViewModel(
                         }
                     }
 
+                    val nextDraftId = if (repository is ProductionTraderRepository) {
+                        repository.getDraftOperationId("supplier_payment")
+                    } else {
+                        repository.rotateDraftOperationId("supplier_payment")
+                    }
+                    val nextActiveDraft = repository.getActiveDraftPayload("supplier_payment")
+                    val nextRecovering = repository.isDraftRecovering("supplier_payment")
+
                     _uiState.update { state ->
                         state.copy(
-                            draftSupplierPaymentOperationId = repository.rotateDraftOperationId("supplier_payment"),
+                            draftSupplierPaymentOperationId = nextDraftId,
+                            activeSupplierPaymentDraft = nextActiveDraft,
+                            isSupplierPaymentRecovering = nextRecovering,
+                            isSupplierPaymentSubmitting = false,
+                            supplierPaymentError = null,
                             suppliers = updatedSuppliers,
                             purchaseBills = updatedBills,
                             supplierPayments = updatedPayments,
@@ -3386,8 +3593,17 @@ class TraderViewModel(
                     val parts = rawErr.split(" | ", limit = 2)
                     val errAr = parts.firstOrNull()?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
                     val errEn = parts.getOrNull(1)?.trim().takeUnless { it.isNullOrEmpty() } ?: rawErr
+                    val isScopeActive = repository.isScopeActive()
+                    val currentDraftId = if (isScopeActive) repository.getDraftOperationId("supplier_payment") else _uiState.value.draftSupplierPaymentOperationId
+                    val activeDraft = if (isScopeActive) repository.getActiveDraftPayload("supplier_payment") else null
+                    val stillRecovering = if (isScopeActive) repository.isDraftRecovering("supplier_payment") else false
                     _uiState.update {
                         it.copy(
+                            draftSupplierPaymentOperationId = currentDraftId,
+                            activeSupplierPaymentDraft = activeDraft,
+                            isSupplierPaymentRecovering = stillRecovering,
+                            isSupplierPaymentSubmitting = false,
+                            supplierPaymentError = it.language.tr(errAr, errEn),
                             lastSupplierActionMessageAr = errAr,
                             lastSupplierActionMessageEn = errEn,
                             isSupplierActionError = true
@@ -3399,6 +3615,19 @@ class TraderViewModel(
             } catch (e: Exception) {
                 val err = Result.failure<SupplierPayment>(e)
                 val msg = e.message ?: "Supplier payment rejected"
+                val isScopeActive = repository.isScopeActive()
+                val currentDraftId = if (isScopeActive) repository.getDraftOperationId("supplier_payment") else _uiState.value.draftSupplierPaymentOperationId
+                val activeDraft = if (isScopeActive) repository.getActiveDraftPayload("supplier_payment") else null
+                val stillRecovering = if (isScopeActive) repository.isDraftRecovering("supplier_payment") else false
+                _uiState.update {
+                    it.copy(
+                        draftSupplierPaymentOperationId = currentDraftId,
+                        activeSupplierPaymentDraft = activeDraft,
+                        isSupplierPaymentRecovering = stillRecovering,
+                        isSupplierPaymentSubmitting = false,
+                        supplierPaymentError = msg
+                    )
+                }
                 showBanner(msg, msg, isError = true)
                 completionResult = err
             } finally {

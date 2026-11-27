@@ -1,7 +1,11 @@
 package com.example.ui.screens
 
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import com.example.data.mobile.contract.StrictJsonArray
+import com.example.data.mobile.contract.StrictJsonObject
+import com.example.data.mobile.contract.toNullableBigDecimal
 import com.example.data.mobile.contract.toNullableString
 
 import java.math.BigDecimal
@@ -2117,6 +2121,34 @@ private fun CustomerStatementRow(
  * - Single prominent confirmation CTA: "تأكيد قبض [X] ₪ وإيداعها بالصندوق"
  * - Idempotency preserved: Uses stable operationId to protect against double-tap submits.
  */
+internal fun extractDraftPaymentValues(
+    initialDraft: StrictJsonObject?,
+    minorUnits: Int
+): Triple<String, String, Map<String, String>>? {
+    if (initialDraft == null) return null
+    val rawAmt = initialDraft.properties["amount"].toNullableBigDecimal(minorUnits)
+    val amtText = rawAmt?.let {
+        PaymentDecimalConsistency.cashEntryText(it, minorUnits) ?: it.stripTrailingZeros().toPlainString()
+    } ?: ""
+    val noteText = initialDraft.properties["notes"].toNullableString()
+        ?: initialDraft.properties["note"].toNullableString()
+        ?: ""
+    val allocMap = linkedMapOf<String, String>()
+    val allocArr = initialDraft.properties["allocations"] as? StrictJsonArray
+    if (allocArr != null) {
+        for (el in allocArr.elements) {
+            val obj = el as? StrictJsonObject ?: continue
+            val tType = obj.properties["target_type"].toNullableString() ?: continue
+            val tId = obj.properties["target_id"].toNullableString() ?: continue
+            val aBd = obj.properties["amount"].toNullableBigDecimal(6) ?: continue
+            val aText = PaymentDecimalConsistency.cashEntryText(aBd, minorUnits)
+                ?: aBd.stripTrailingZeros().toPlainString()
+            allocMap["$tType:$tId"] = aText
+        }
+    }
+    return Triple(amtText, noteText, allocMap)
+}
+
 @Composable
 fun CustomerPaymentCollectionDialog(
     customer: Customer,
@@ -2124,6 +2156,7 @@ fun CustomerPaymentCollectionDialog(
     onDismiss: () -> Unit,
     onConfirmPayment: ((customerId: String, amountIls: Double, note: String, paymentId: String) -> Unit)? = null,
     onConfirmPaymentExact: ((customerId: String, amount: BigDecimal, note: String, paymentId: String, allocations: List<PaymentAllocationInput>) -> Unit)? = null,
+    onConfirmPaymentExactWithResult: ((customerId: String, amount: BigDecimal, note: String, paymentId: String, allocations: List<PaymentAllocationInput>, onComplete: (Result<CustomerTransaction>) -> Unit) -> Unit)? = null,
     settlementTargets: List<SettlementTarget> = emptyList(),
     isLoadingTargets: Boolean = false,
     targetsError: String? = null,
@@ -2131,7 +2164,12 @@ fun CustomerPaymentCollectionDialog(
     onLoadMoreTargets: (() -> Unit)? = null,
     onRetryTargets: (() -> Unit)? = null,
     currency: String = "ILS",
-    minorUnits: Int = 2
+    minorUnits: Int = 2,
+    operationId: String? = null,
+    initialDraft: StrictJsonObject? = null,
+    isRecovering: Boolean = false,
+    isSubmitting: Boolean = false,
+    inlineError: String? = null
 ) {
     val financial = TraderTheme.financial
     val initialAmt = if ((customer.balanceExact ?: BigDecimal.ZERO) > BigDecimal.ZERO) {
@@ -2139,13 +2177,43 @@ fun CustomerPaymentCollectionDialog(
     } else {
         ""
     }
-    var payAmountText by rememberSaveable(customer.id) { mutableStateOf(initialAmt) }
-    var payNoteText by rememberSaveable(customer.id) { mutableStateOf("") }
-    // Deterministic operation ID per dialog session to prevent duplicate processing
-    val operationId = rememberSaveable(customer.id) { "cpay_${customer.id}_${System.currentTimeMillis()}" }
+    val draftCustomerId = initialDraft?.properties?.get("customer_id").toNullableString()
+    val isBlockedByOtherDraft = isRecovering && !draftCustomerId.isNullOrBlank() && draftCustomerId != customer.id
+    val isRecoveringCurrentCustomer = isRecovering && (draftCustomerId.isNullOrBlank() || draftCustomerId == customer.id)
+    val restoredDraft = remember(initialDraft, isRecoveringCurrentCustomer, minorUnits) {
+        if (isRecoveringCurrentCustomer) extractDraftPaymentValues(initialDraft, minorUnits) else null
+    }
+
+    var payAmountText by rememberSaveable(customer.id) { mutableStateOf(restoredDraft?.first ?: initialAmt) }
+    var payNoteText by rememberSaveable(customer.id) { mutableStateOf(restoredDraft?.second ?: "") }
+    var localSubmitting by rememberSaveable(customer.id) { mutableStateOf(false) }
+    var localInlineError by rememberSaveable(customer.id) { mutableStateOf<String?>(null) }
+    val localFallbackOperationId = rememberSaveable(customer.id) { "cpay_${customer.id}_${System.currentTimeMillis()}" }
+    val effectiveOperationId = if (!operationId.isNullOrBlank()) operationId else localFallbackOperationId
+    val effectiveSubmitting = isSubmitting || localSubmitting
+
+    LaunchedEffect(inlineError) {
+        if (inlineError != null) {
+            localInlineError = inlineError
+        }
+    }
+    val displayedInlineError = localInlineError ?: inlineError
 
     // Map of targetKey ("${targetType}:${targetId}") -> allocation amount text
-    val selectedAllocations = remember { mutableStateMapOf<String, String>() }
+    val selectedAllocations = remember {
+        mutableStateMapOf<String, String>().apply {
+            restoredDraft?.third?.let { putAll(it) }
+        }
+    }
+
+    LaunchedEffect(isRecoveringCurrentCustomer, restoredDraft) {
+        if (isRecoveringCurrentCustomer && restoredDraft != null) {
+            payAmountText = restoredDraft.first
+            payNoteText = restoredDraft.second
+            selectedAllocations.clear()
+            selectedAllocations.putAll(restoredDraft.third)
+        }
+    }
 
     val totalAllocatedExact = remember(selectedAllocations.toMap()) {
         selectedAllocations.values.fold(BigDecimal.ZERO) { acc, s ->
@@ -2185,7 +2253,11 @@ fun CustomerPaymentCollectionDialog(
     }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            if (!effectiveSubmitting) {
+                onDismiss()
+            }
+        },
         shape = RoundedCornerShape(12.dp),
         title = {
             Text(
@@ -2204,6 +2276,71 @@ fun CustomerPaymentCollectionDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                if (isRecoveringCurrentCustomer) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("customer_pay_recovery_banner")
+                    ) {
+                        Text(
+                            text = lang.tr(
+                                "توجد عملية قبض غير مؤكدة بنفس المعرّف. تم استعادة البيانات الأصلية للتحقق من حالة الخادم دون تكرار القيد.",
+                                "Recovering unverified collection with same operation key. Confirm to verify receipt status without duplicate posting."
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+                } else if (isBlockedByOtherDraft) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("customer_pay_blocked_banner")
+                    ) {
+                        Text(
+                            text = lang.tr(
+                                "توجد عملية قبض غير محسومة لزبون آخر. يجب إتمامها أو التحقق من حالتها أولاً قبل بدء دفعة جديدة.",
+                                "Another customer payment has an unresolved status. Resolve or verify that payment before starting a new one."
+                            ),
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+                }
+                if (displayedInlineError != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics(mergeDescendants = true) { }
+                            .testTag("customer_pay_inline_error")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = displayedInlineError,
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
                 // Notice: Unapplied advance payment banner or Allocated settlement summary
                 if (!hasAllocations) {
                     Surface(
@@ -2357,6 +2494,7 @@ fun CustomerPaymentCollectionDialog(
                                 if (hasAllocations) {
                                     TextButton(
                                         onClick = { selectedAllocations.clear() },
+                                        enabled = !effectiveSubmitting && !isRecovering,
                                         modifier = Modifier.heightIn(min = 32.dp).testTag("clear_customer_allocations_button")
                                     ) {
                                         Text(
@@ -2468,7 +2606,9 @@ fun CustomerPaymentCollectionDialog(
                                             ) {
                                                 Checkbox(
                                                     checked = isChecked,
+                                                    enabled = !effectiveSubmitting && !isRecovering,
                                                     onCheckedChange = { checked ->
+                                                        localInlineError = null
                                                         if (checked) {
                                                             val targetStr = PaymentDecimalConsistency.cashEntryText(target.remainingAmountExact, minorUnits)
                                                             selectedAllocations[key] = targetStr.orEmpty()
@@ -2522,9 +2662,11 @@ fun CustomerPaymentCollectionDialog(
                                                 SelectAllNumericOutlinedTextField(
                                                     value = selectedAllocations[key] ?: "",
                                                     onValueChange = { newVal ->
+                                                        localInlineError = null
                                                         val sanitized = WesternFormatters.sanitizeWesternDigits(newVal)
                                                         selectedAllocations[key] = sanitized
                                                     },
+                                                    enabled = !effectiveSubmitting && !isRecovering,
                                                     label = { Text(lang.tr("المخصص $currencySymbolOrCode", "Alloc $currencySymbolOrCode"), style = MaterialTheme.typography.labelSmall) },
                                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                                     singleLine = true,
@@ -2556,7 +2698,11 @@ fun CustomerPaymentCollectionDialog(
                 // Cash Amount Input (Large readable field with Western numbers)
                 SelectAllNumericOutlinedTextField(
                     value = payAmountText,
-                    onValueChange = { payAmountText = WesternFormatters.sanitizeWesternDigits(it) },
+                    onValueChange = {
+                        payAmountText = WesternFormatters.sanitizeWesternDigits(it)
+                        localInlineError = null
+                    },
+                    enabled = !effectiveSubmitting && !isRecovering,
                     label = { Text(lang.tr("المبلغ المقبوض نقداً ($currencySymbolOrCode) *", "Cash Collected ($currencySymbolOrCode) *")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
@@ -2594,8 +2740,11 @@ fun CustomerPaymentCollectionDialog(
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
                                 FilterChip(
                                     selected = payAmountText == totalAllocatedStr,
-                                    enabled = totalAllocatedStr != null,
-                                    onClick = { totalAllocatedStr?.let { payAmountText = it } },
+                                    enabled = !effectiveSubmitting && !isRecovering && totalAllocatedStr != null,
+                                    onClick = {
+                                        localInlineError = null
+                                        totalAllocatedStr?.let { payAmountText = it }
+                                    },
                                     label = {
                                         Text(
                                             text = lang.tr(
@@ -2621,8 +2770,11 @@ fun CustomerPaymentCollectionDialog(
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
                                 FilterChip(
                                     selected = payAmountText == fullStr || (enteredAmountExact != null && enteredAmountExact == customer.balanceExact),
-                                    enabled = fullStr != null,
-                                    onClick = { fullStr?.let { payAmountText = it } },
+                                    enabled = !effectiveSubmitting && !isRecovering && fullStr != null,
+                                    onClick = {
+                                        localInlineError = null
+                                        fullStr?.let { payAmountText = it }
+                                    },
                                     label = {
                                         Text(
                                             text = lang.tr(
@@ -2646,7 +2798,11 @@ fun CustomerPaymentCollectionDialog(
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
                             FilterChip(
                                 selected = payAmountText == preset.toString(),
-                                onClick = { payAmountText = preset.toString() },
+                                enabled = !effectiveSubmitting && !isRecovering,
+                                onClick = {
+                                    localInlineError = null
+                                    payAmountText = preset.toString()
+                                },
                                 label = { Text("$preset $currencySymbolOrCode") },
                                 shape = RoundedCornerShape(10.dp),
                                 colors = FilterChipDefaults.filterChipColors(
@@ -2751,6 +2907,7 @@ fun CustomerPaymentCollectionDialog(
                 OutlinedTextField(
                     value = payNoteText,
                     onValueChange = { payNoteText = it },
+                    enabled = !effectiveSubmitting && !isRecovering,
                     label = { Text(lang.tr("البيان / ملاحظة السند (اختياري)", "Note (Optional)")) },
                     placeholder = { Text(lang.tr("مثال: دفعة نقدية على الحساب", "e.g. Cash payment on account")) },
                     singleLine = true,
@@ -2764,32 +2921,44 @@ fun CustomerPaymentCollectionDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    val allocInputs = selectedAllocations.mapNotNull { (key, text) ->
-                        val amt = text.toBigDecimalOrNull() ?: return@mapNotNull null
-                        if (amt <= BigDecimal.ZERO) return@mapNotNull null
-                        val parts = key.split(":", limit = 2)
-                        if (parts.size == 2) {
-                            val scaledAmt = if (amt.scale() < minorUnits) {
-                                amt.setScale(minorUnits, RoundingMode.UNNECESSARY)
-                            } else {
-                                amt
+                    if (!effectiveSubmitting && !isBlockedByOtherDraft) {
+                        val allocInputs = selectedAllocations.mapNotNull { (key, text) ->
+                            val amt = text.toBigDecimalOrNull() ?: return@mapNotNull null
+                            if (amt <= BigDecimal.ZERO) return@mapNotNull null
+                            val parts = key.split(":", limit = 2)
+                            if (parts.size == 2) {
+                                val scaledAmt = if (amt.scale() < minorUnits) {
+                                    amt.setScale(minorUnits, RoundingMode.UNNECESSARY)
+                                } else {
+                                    amt
+                                }
+                                PaymentAllocationInput(parts[0], parts[1], scaledAmt)
+                            } else null
+                        }
+                        val finalAmount = if (validEnteredAmountExact.scale() < minorUnits) {
+                            validEnteredAmountExact.setScale(minorUnits, RoundingMode.UNNECESSARY)
+                        } else {
+                            validEnteredAmountExact
+                        }
+                        if (onConfirmPaymentExactWithResult != null) {
+                            localSubmitting = true
+                            localInlineError = null
+                            onConfirmPaymentExactWithResult(customer.id, finalAmount, payNoteText, effectiveOperationId, allocInputs) { res ->
+                                localSubmitting = false
+                                if (res.isFailure) {
+                                    localInlineError = res.exceptionOrNull()?.message
+                                }
                             }
-                            PaymentAllocationInput(parts[0], parts[1], scaledAmt)
-                        } else null
-                    }
-                    val finalAmount = if (validEnteredAmountExact.scale() < minorUnits) {
-                        validEnteredAmountExact.setScale(minorUnits, RoundingMode.UNNECESSARY)
-                    } else {
-                        validEnteredAmountExact
-                    }
-                    if (onConfirmPaymentExact != null) {
-                        onConfirmPaymentExact(customer.id, finalAmount, payNoteText, operationId, allocInputs)
-                    } else {
-                        onConfirmPayment?.invoke(customer.id, finalAmount.toDouble(), payNoteText, operationId)
+                        } else if (onConfirmPaymentExact != null) {
+                            onConfirmPaymentExact(customer.id, finalAmount, payNoteText, effectiveOperationId, allocInputs)
+                        } else {
+                            onConfirmPayment?.invoke(customer.id, finalAmount.toDouble(), payNoteText, effectiveOperationId)
+                        }
                     }
                 },
-                enabled = validEnteredAmountExact > BigDecimal.ZERO && !isOverAllocated && isAmountPrecisionValid && areAllocationsValid &&
-                    (onConfirmPaymentExact != null || onConfirmPayment != null),
+                enabled = !effectiveSubmitting && !isBlockedByOtherDraft &&
+                    validEnteredAmountExact > BigDecimal.ZERO && !isOverAllocated && isAmountPrecisionValid && areAllocationsValid &&
+                    (onConfirmPaymentExactWithResult != null || onConfirmPaymentExact != null || onConfirmPayment != null),
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -2800,8 +2969,9 @@ fun CustomerPaymentCollectionDialog(
                     .testTag("confirm_customer_payment_button")
             ) {
                 Text(
-                    text = if (validEnteredAmountExact > BigDecimal.ZERO) {
-                        if (hasAllocations) {
+                    text = when {
+                        isRecoveringCurrentCustomer -> lang.tr("التحقق من حالة السند", "Verify Status & Retry")
+                        validEnteredAmountExact > BigDecimal.ZERO -> if (hasAllocations) {
                             lang.tr(
                                 "تأكيد قبض ${StitchBidiUtils.formatCurrency(validEnteredAmountExact, currency)} (مخصص ${StitchBidiUtils.formatCurrency(totalAllocatedExact, currency)})",
                                 "Confirm ${StitchBidiUtils.formatCurrency(validEnteredAmountExact, currency)} (${StitchBidiUtils.formatCurrency(totalAllocatedExact, currency)} allocated)"
@@ -2812,8 +2982,7 @@ fun CustomerPaymentCollectionDialog(
                                 "Confirm ${StitchBidiUtils.formatCurrency(validEnteredAmountExact, currency)} Collection"
                             )
                         }
-                    } else {
-                        lang.tr("تأكيد القبض بالصندوق", "Confirm Collection")
+                        else -> lang.tr("تأكيد القبض بالصندوق", "Confirm Collection")
                     },
                     style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                 )
@@ -2821,7 +2990,8 @@ fun CustomerPaymentCollectionDialog(
         },
         dismissButton = {
             TextButton(
-                onClick = onDismiss,
+                onClick = { if (!effectiveSubmitting) onDismiss() },
+                enabled = !effectiveSubmitting,
                 modifier = Modifier.heightIn(min = 48.dp)
             ) {
                 Text(lang.tr("إلغاء", "Cancel"))

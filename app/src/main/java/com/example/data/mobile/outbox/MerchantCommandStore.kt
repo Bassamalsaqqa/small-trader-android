@@ -342,6 +342,17 @@ internal class MerchantCommandCipher internal constructor(private val engine: Se
     }
 }
 
+internal fun singleDraftFormGroup(commandType: String): String? {
+    return when (commandType) {
+        "customer_payment", "customer.payment" -> "customer_payment"
+        "supplier_payment", "supplier.payment" -> "supplier_payment"
+        "shift_close", "shift.close" -> "shift_close"
+        "customer_create", "customer.create" -> "customer_create"
+        "supplier_create", "supplier.create" -> "supplier_create"
+        else -> null
+    }
+}
+
 internal fun candidateCommandTypes(formType: String): List<String> {
     return when (formType) {
         "shift_close", "shift.close" -> listOf("shift.close", "shift_close")
@@ -401,6 +412,7 @@ class RoomMerchantCommandStore internal constructor(
 
             cursor.use { c ->
                 if (c.moveToFirst()) {
+                    val existingCommandId = c.getString(1)
                     val existingActorId = c.getString(2)
                     val existingDeviceId = c.getString(3)
                     val existingDigest = c.getString(6)
@@ -408,6 +420,10 @@ class RoomMerchantCommandStore internal constructor(
                     // Strict cross-scope denial
                     if (existingActorId != actorId || existingDeviceId != deviceId) {
                         throw SecurityException("Cross-actor or cross-device idempotency key replay denied")
+                    }
+
+                    if (existingCommandId != commandId) {
+                        throw IllegalStateException("Idempotency key [$idempotencyKey] is already bound to operation [$existingCommandId]")
                     }
 
                     // Strict payload equality check
@@ -418,7 +434,7 @@ class RoomMerchantCommandStore internal constructor(
                     val existingStatus = CommandStatus.valueOf(c.getString(8))
                     return MerchantCommandRecord(
                         companyId = c.getString(0),
-                        commandId = c.getString(1),
+                        commandId = existingCommandId,
                         actorId = existingActorId,
                         deviceId = existingDeviceId,
                         commandType = c.getString(4),
@@ -431,6 +447,29 @@ class RoomMerchantCommandStore internal constructor(
                         createdAt = c.getLong(11),
                         updatedAt = c.getLong(12)
                     )
+                }
+            }
+
+            // Enforce single active draft at SQLite transaction admission for single-draft commands
+            val singleGroup = singleDraftFormGroup(commandType)
+            if (singleGroup != null) {
+                val cmdTypes = candidateCommandTypes(commandType)
+                val placeholders = cmdTypes.joinToString(",") { "?" }
+                val activeArgs = arrayOf(companyId, actorId, deviceId) + cmdTypes.toTypedArray() + arrayOf(commandId)
+                val activeCursor = db.query(
+                    "SELECT command_id, status FROM merchant_commands " +
+                        "WHERE company_id = ? AND actor_id = ? AND device_id = ? AND command_type IN ($placeholders) " +
+                        "AND status IN ('PENDING', 'SUBMITTED', 'UNKNOWN_ACK') AND command_id != ? LIMIT 1",
+                    activeArgs
+                )
+                activeCursor.use { ac ->
+                    if (ac.moveToFirst()) {
+                        val activeId = ac.getString(0)
+                        val activeStatus = ac.getString(1)
+                        throw IllegalStateException(
+                            "Resolve the existing $singleGroup operation [$activeId] ($activeStatus) before starting another"
+                        )
+                    }
                 }
             }
 
@@ -699,51 +738,76 @@ class RoomMerchantCommandStore internal constructor(
         formType: String
     ): String {
         val db = dbProvider()
-        // 1. Check if an active uncompleted command exists for this form type
-        val cmdTypes = candidateCommandTypes(formType)
-        val placeholders = cmdTypes.joinToString(",") { "?" }
-        val queryArgs = arrayOf(companyId, actorId, deviceId) + cmdTypes.toTypedArray()
-        val c = db.query(
-            "SELECT command_id FROM merchant_commands " +
-                "WHERE company_id = ? AND actor_id = ? AND device_id = ? AND command_type IN ($placeholders) " +
-                "AND status IN ('PENDING', 'SUBMITTED', 'UNKNOWN_ACK') " +
-                "ORDER BY updated_at DESC LIMIT 1",
-            queryArgs
-        )
-        c.use {
-            if (it.moveToFirst()) {
-                return it.getString(0)
+        db.beginTransaction()
+        try {
+            // 1. Check if an active uncompleted command exists for this form type
+            val cmdTypes = candidateCommandTypes(formType)
+            val placeholders = cmdTypes.joinToString(",") { "?" }
+            val queryArgs = arrayOf(companyId, actorId, deviceId) + cmdTypes.toTypedArray()
+            val c = db.query(
+                "SELECT command_id FROM merchant_commands " +
+                    "WHERE company_id = ? AND actor_id = ? AND device_id = ? AND command_type IN ($placeholders) " +
+                    "AND status IN ('PENDING', 'SUBMITTED', 'UNKNOWN_ACK') " +
+                    "ORDER BY updated_at DESC LIMIT 1",
+                queryArgs
+            )
+            c.use {
+                if (it.moveToFirst()) {
+                    val activeId = it.getString(0)
+                    db.setTransactionSuccessful()
+                    return activeId
+                }
             }
-        }
 
-        // 2. Check if a draft intent is saved in merchant_form_intents
-        val cDraft = db.query(
-            "SELECT operation_id FROM merchant_form_intents " +
-                "WHERE company_id = ? AND actor_id = ? AND device_id = ? AND form_type = ?",
-            arrayOf(companyId, actorId, deviceId, formType)
-        )
-        cDraft.use {
-            if (it.moveToFirst()) {
-                return it.getString(0)
+            // 2. Check if a draft intent is saved in merchant_form_intents
+            var savedOpId: String? = null
+            val cDraft = db.query(
+                "SELECT operation_id FROM merchant_form_intents " +
+                    "WHERE company_id = ? AND actor_id = ? AND device_id = ? AND form_type = ?",
+                arrayOf(companyId, actorId, deviceId, formType)
+            )
+            cDraft.use {
+                if (it.moveToFirst()) {
+                    savedOpId = it.getString(0)
+                }
             }
-        }
 
-        // 3. Generate a fresh UUID and save it durably
-        val newOpId = java.util.UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
-        val stmt = db.compileStatement(
-            "INSERT OR REPLACE INTO merchant_form_intents " +
-                "(company_id, actor_id, device_id, form_type, operation_id, created_at) " +
-                "VALUES (?, ?, ?, ?, ?, ?)"
-        )
-        stmt.bindString(1, companyId)
-        stmt.bindString(2, actorId)
-        stmt.bindString(3, deviceId)
-        stmt.bindString(4, formType)
-        stmt.bindString(5, newOpId)
-        stmt.bindLong(6, now)
-        stmt.executeInsert()
-        return newOpId
+            if (savedOpId != null) {
+                // Guard against crash after terminal COMPLETED/FAILED status before intent rotation:
+                // never re-issue an already-finished command ID for a new form submission.
+                val statusCursor = db.query(
+                    "SELECT status FROM merchant_commands WHERE company_id = ? AND command_id = ? LIMIT 1",
+                    arrayOf(companyId, savedOpId!!)
+                )
+                val existingStatus = statusCursor.use { sc ->
+                    if (sc.moveToFirst()) sc.getString(0) else null
+                }
+                if (existingStatus != CommandStatus.COMPLETED.name && existingStatus != CommandStatus.FAILED.name) {
+                    db.setTransactionSuccessful()
+                    return savedOpId!!
+                }
+            }
+
+            // 3. Generate a fresh UUID and save it durably
+            val newOpId = java.util.UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
+            val stmt = db.compileStatement(
+                "INSERT OR REPLACE INTO merchant_form_intents " +
+                    "(company_id, actor_id, device_id, form_type, operation_id, created_at) " +
+                    "VALUES (?, ?, ?, ?, ?, ?)"
+            )
+            stmt.bindString(1, companyId)
+            stmt.bindString(2, actorId)
+            stmt.bindString(3, deviceId)
+            stmt.bindString(4, formType)
+            stmt.bindString(5, newOpId)
+            stmt.bindLong(6, now)
+            stmt.executeInsert()
+            db.setTransactionSuccessful()
+            return newOpId
+        } finally {
+            db.endTransaction()
+        }
     }
 
     override fun rotateDraftOperationId(
@@ -753,21 +817,45 @@ class RoomMerchantCommandStore internal constructor(
         formType: String
     ): String {
         val db = dbProvider()
-        val newOpId = java.util.UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
-        val stmt = db.compileStatement(
-            "INSERT OR REPLACE INTO merchant_form_intents " +
-                "(company_id, actor_id, device_id, form_type, operation_id, created_at) " +
-                "VALUES (?, ?, ?, ?, ?, ?)"
-        )
-        stmt.bindString(1, companyId)
-        stmt.bindString(2, actorId)
-        stmt.bindString(3, deviceId)
-        stmt.bindString(4, formType)
-        stmt.bindString(5, newOpId)
-        stmt.bindLong(6, now)
-        stmt.executeInsert()
-        return newOpId
+        db.beginTransaction()
+        try {
+            val cmdTypes = candidateCommandTypes(formType)
+            val placeholders = cmdTypes.joinToString(",") { "?" }
+            val queryArgs = arrayOf(companyId, actorId, deviceId) + cmdTypes.toTypedArray()
+            val activeCursor = db.query(
+                "SELECT command_id FROM merchant_commands " +
+                    "WHERE company_id = ? AND actor_id = ? AND device_id = ? AND command_type IN ($placeholders) " +
+                    "AND status IN ('PENDING', 'SUBMITTED', 'UNKNOWN_ACK') " +
+                    "ORDER BY updated_at DESC LIMIT 1",
+                queryArgs
+            )
+            activeCursor.use {
+                if (it.moveToFirst()) {
+                    val activeId = it.getString(0)
+                    db.setTransactionSuccessful()
+                    return activeId
+                }
+            }
+
+            val newOpId = java.util.UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
+            val stmt = db.compileStatement(
+                "INSERT OR REPLACE INTO merchant_form_intents " +
+                    "(company_id, actor_id, device_id, form_type, operation_id, created_at) " +
+                    "VALUES (?, ?, ?, ?, ?, ?)"
+            )
+            stmt.bindString(1, companyId)
+            stmt.bindString(2, actorId)
+            stmt.bindString(3, deviceId)
+            stmt.bindString(4, formType)
+            stmt.bindString(5, newOpId)
+            stmt.bindLong(6, now)
+            stmt.executeInsert()
+            db.setTransactionSuccessful()
+            return newOpId
+        } finally {
+            db.endTransaction()
+        }
     }
 
     override fun cancelDraftOperation(
@@ -922,10 +1010,28 @@ class InMemoryMerchantCommandStore : MerchantCommandStore {
             if (existing.actorId != actorId || existing.deviceId != deviceId) {
                 throw SecurityException("Cross-actor or cross-device idempotency key replay denied")
             }
+            if (existing.commandId != commandId) {
+                throw IllegalStateException("Idempotency key [$idempotencyKey] is already bound to operation [${existing.commandId}]")
+            }
             if (existing.payloadDigest != payloadDigest) {
                 throw IllegalStateException("Idempotency key [$idempotencyKey] was previously committed with different parameters")
             }
             return existing
+        }
+        val singleGroup = singleDraftFormGroup(commandType)
+        if (singleGroup != null) {
+            val cmdTypes = candidateCommandTypes(commandType)
+            val active = records.values.firstOrNull {
+                it.companyId == companyId && it.actorId == actorId && it.deviceId == deviceId &&
+                    it.commandType in cmdTypes &&
+                    (it.status == CommandStatus.PENDING || it.status == CommandStatus.SUBMITTED || it.status == CommandStatus.UNKNOWN_ACK) &&
+                    it.commandId != commandId
+            }
+            if (active != null) {
+                throw IllegalStateException(
+                    "Resolve the existing $singleGroup operation [${active.commandId}] (${active.status}) before starting another"
+                )
+            }
         }
         val now = System.currentTimeMillis()
         val record = MerchantCommandRecord(
@@ -1096,7 +1202,21 @@ class InMemoryMerchantCommandStore : MerchantCommandStore {
         if (active != null) return active.commandId
 
         val key = "$companyId:$actorId:$deviceId:$formType"
-        return draftIntents.computeIfAbsent(key) { java.util.UUID.randomUUID().toString() }
+        val existingOpId = draftIntents[key]
+        if (existingOpId != null) {
+            val existingRecord = records["id:$companyId:$existingOpId"]
+            if (existingRecord != null &&
+                (existingRecord.status == CommandStatus.COMPLETED || existingRecord.status == CommandStatus.FAILED)
+            ) {
+                val next = java.util.UUID.randomUUID().toString()
+                draftIntents[key] = next
+                return next
+            }
+            return existingOpId
+        }
+        val next = java.util.UUID.randomUUID().toString()
+        draftIntents[key] = next
+        return next
     }
 
     override fun rotateDraftOperationId(
@@ -1105,6 +1225,14 @@ class InMemoryMerchantCommandStore : MerchantCommandStore {
         deviceId: String,
         formType: String
     ): String = synchronized(lock) {
+        val cmdTypes = candidateCommandTypes(formType)
+        val active = records.values.firstOrNull {
+            it.companyId == companyId && it.actorId == actorId && it.deviceId == deviceId &&
+                it.commandType in cmdTypes &&
+                (it.status == CommandStatus.PENDING || it.status == CommandStatus.SUBMITTED || it.status == CommandStatus.UNKNOWN_ACK)
+        }
+        if (active != null) return active.commandId
+
         val key = "$companyId:$actorId:$deviceId:$formType"
         val next = java.util.UUID.randomUUID().toString()
         draftIntents[key] = next

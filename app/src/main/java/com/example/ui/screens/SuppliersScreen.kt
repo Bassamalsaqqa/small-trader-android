@@ -913,7 +913,8 @@ fun SupplierDetailScreen(
     onConfirmGoodsReceiptWithResult: ((billId: String, productId: String, receivedQty: Int, batchNote: String, operationId: String, lineId: String?, onComplete: (Result<StockMovement>) -> Unit) -> Unit)? = null,
     onPaySupplierExactWithResult: ((supplier: Supplier, amount: BigDecimal, note: String, paymentId: String, allocations: List<PaymentAllocationInput>, onComplete: (Result<SupplierPayment>) -> Unit) -> Unit)? = null,
     onLoadSupplierTargets: ((supplierId: String, resetPagination: Boolean) -> Unit)? = null,
-    onLoadMoreSupplierTargets: ((supplierId: String) -> Unit)? = null
+    onLoadMoreSupplierTargets: ((supplierId: String) -> Unit)? = null,
+    onPrepareSupplierPaymentDraft: (() -> Unit)? = null
 ) {
     val paymentDraft = rememberSaveableStateHolder()
     val lang = state.language
@@ -936,6 +937,7 @@ fun SupplierDetailScreen(
     }
     LaunchedEffect(isPayDialogOpen, supplier.id) {
         if (isPayDialogOpen && canManageSuppliers) {
+            onPrepareSupplierPaymentDraft?.invoke()
             onLoadSupplierTargets?.invoke(supplier.id, true)
         }
     }
@@ -1353,22 +1355,19 @@ fun SupplierDetailScreen(
 
     if (isEditSupplierOpen && (onSaveSupplierWithResult != null || onSaveSupplier != null)) {
         SupplierEditorDialog(
-                companyEditable = state.currentSession.isDemoSession,
+            companyEditable = state.currentSession.isDemoSession,
             initialSupplier = supplier,
             lang = lang,
             onDismiss = { isEditSupplierOpen = false },
             onSave = { name, company, phone ->
-                if (onSaveSupplierWithResult != null) {
-                    onSaveSupplierWithResult(supplier.id, name, company, phone) { success ->
-                        if (success) {
-                            isEditSupplierOpen = false
-                        }
-                    }
-                } else {
-                    onSaveSupplier?.invoke(supplier.id, name, company, phone)
-                    isEditSupplierOpen = false
+                onSaveSupplier?.invoke(supplier.id, name, company, phone)
+                isEditSupplierOpen = false
+            },
+            onSaveWithResult = if (onSaveSupplierWithResult != null) {
+                { name, company, phone, onComplete ->
+                    onSaveSupplierWithResult(supplier.id, name, company, phone, onComplete)
                 }
-            }
+            } else null
         )
     }
 
@@ -1480,7 +1479,12 @@ fun SupplierDetailScreen(
                 onLoadMoreTargets = { onLoadMoreSupplierTargets?.invoke(supplier.id) },
                 onRetryTargets = { onLoadSupplierTargets?.invoke(supplier.id, true) },
                 currency = state.businessInfo.defaultCurrency,
-                minorUnits = state.businessInfo.defaultCurrencyMinorUnits
+                minorUnits = state.businessInfo.defaultCurrencyMinorUnits,
+                operationId = state.draftSupplierPaymentOperationId.takeIf { it.isNotBlank() },
+                initialDraft = state.activeSupplierPaymentDraft,
+                isRecovering = state.isSupplierPaymentRecovering,
+                isSubmitting = state.isSupplierPaymentSubmitting,
+                inlineError = state.supplierPaymentError
             )
         }
     }

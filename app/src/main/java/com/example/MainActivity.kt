@@ -509,6 +509,7 @@ fun SmallTraderApp(
                                 onLoadMoreSupplierTargets = { supplierId ->
                                     traderViewModel.loadSupplierSettlementTargets(supplierId, resetPagination = false)
                                 },
+                                onPrepareSupplierPaymentDraft = traderViewModel::prepareSupplierPaymentDraft,
                                 onOpenReceivePurchaseDialog = { traderViewModel.openReceivePurchaseDialog(true) },
                                 onDismissFeedback = traderViewModel::dismissSupplierFeedback,
                                 onSaveSupplier = traderViewModel::saveSupplier,
@@ -669,6 +670,16 @@ fun SmallTraderApp(
                                 allocations = allocations
                             )
                         },
+                        onConfirmPaymentExactWithResult = { customerId, amount, note, paymentId, allocations, onComplete ->
+                            traderViewModel.confirmCustomerCollectionResult(
+                                customerId = customerId,
+                                amount = amount,
+                                note = note,
+                                paymentId = paymentId,
+                                allocations = allocations,
+                                onComplete = onComplete
+                            )
+                        },
                         settlementTargets = state.customerSettlementTargets,
                         isLoadingTargets = state.isLoadingCustomerSettlementTargets,
                         targetsError = state.customerSettlementTargetsError,
@@ -676,7 +687,12 @@ fun SmallTraderApp(
                         onLoadMoreTargets = { traderViewModel.loadCustomerSettlementTargets(cust.id) },
                         onRetryTargets = { traderViewModel.loadCustomerSettlementTargets(cust.id, resetPagination = true) },
                         currency = state.businessInfo.defaultCurrency,
-                        minorUnits = state.businessInfo.defaultCurrencyMinorUnits
+                        minorUnits = state.businessInfo.defaultCurrencyMinorUnits,
+                        operationId = state.draftCustomerPaymentOperationId.takeIf { it.isNotBlank() },
+                        initialDraft = state.activeCustomerPaymentDraft,
+                        isRecovering = state.isCustomerPaymentRecovering,
+                        isSubmitting = state.isCustomerPaymentSubmitting,
+                        inlineError = state.customerPaymentError
                     )
                     }
                 }
