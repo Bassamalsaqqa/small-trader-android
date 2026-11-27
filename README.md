@@ -4,13 +4,12 @@ Arabic-first (RTL) / English (LTR) Kotlin + Jetpack Compose (Material 3) POS, me
 
 ## Current Release & Verification Reality
 
-- **Release Identity:** **`v1.4.1` (`versionCode = 7`)** (superseding prior signed `v1.4` / `versionCode = 6` APK), `applicationId = "com.aistudio.smalltrader.psdukx"`, origin `https://account.palsync.net`. The signed APK artifact is stored in **private userdata (NOT published on GitHub)**.
+- **Release Identity:** **`v1.4.2` (`versionCode = 8`)** staged candidate (not distributed; physical hardware acceptance pending). The prior signed `v1.4.1` (`versionCode = 7`) APK remains the current physical-testing build unchanged, while `v1.4` (`versionCode = 6`) remains superseded. `applicationId = "com.aistudio.smalltrader.psdukx"`, origin `https://account.palsync.net`. Signed APK artifacts live in **private userdata (NOT published on GitHub)**.
 - **Critical Signing & Outbox Safety:** The release signing certificate is **incompatible** with debug builds (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`). **Preserve pending offline outbox records; NEVER uninstall an installation that has pending outbox data.**
 - **Default-OFF Flags (`gradle.properties` / `app/build.gradle.kts`):** `smalltrader.staffReadWorkspace=false`, `smalltrader.staffAllowHttpLoopback=false`, `smalltrader.offlineOwnerPilot=false`, `smalltrader.allowInsecureDebugSigningForRelease=false` (backend mobile & offline APIs also default **OFF**).
 - **Automated Verification:**
-  - Earlier baseline JVM/Robolectric suite (before the receipt/numeric-entry changes): **`945` passed / `6` skipped** (`951` total: skips 1 `@Ignore` `ExampleRobolectricTest`, 1 `SmallTraderReadPilotSmokeTest`, 4 `OutboxScaleBenchmarkHarnessTest`), plus **`5` targeted tests** (`4` `OutboxScaleBenchmarkHarnessTest` + online/offline UUID collision) passed separately.
-  - Paired real-HTTP harness ([`tools/paired/README.md`](tools/paired/README.md) + `PairedProductionSaleTest`): **`12` real sale vectors** across 3 companies + **`6` backend domain reconciliations** + foreign-tenant zero-leakage passed on the final code-7 implementation against the deployed backend source.
-  - Current release: affected receipt, recovery, migration, outbox, security and numeric-entry suites passed; all `21` visual checks passed individually. Four opt-in scale tests were skipped in the latest outbox run. The complete baseline suite was not rerun.
+  - Full offline JVM/Robolectric suite (`:app:testDebugUnitTest`): **`981` passed / `7` skipped** (`988` total across `84` test suites; skips 1 `@Ignore` `ExampleRobolectricTest`, 1 `SmallTraderReadPilotSmokeTest`, 1 `PairedProductionSaleTest`, 4 opt-in `OutboxScaleBenchmarkHarnessTest`), plus `:app:lintRelease` (`0` errors, `30` warnings) and release signing verification.
+  - Paired real-HTTP harness ([`tools/paired/README.md`](tools/paired/README.md) + `PairedProductionSaleTest`): **`12` real sale vectors** across 3 companies + **`6` backend domain reconciliations** + foreign-tenant zero-leakage passed on the earlier `v1.4.1` (`versionCode = 7`) baseline against deployed backend source (not re-run on the staged `v1.4.2` candidate).
   - Contract validator (`tools/validate-mobile-contract.py`): validates schemas, OpenAPI 3.1, fixtures, JCS vectors, and `manifest.sha256` parity in normal and `-O` modes.
 - **Blocked / Unverified / Proposals:**
   - **Physical device & KVM emulator:** **BLOCKED / UNVERIFIED** (no physical device/emulator for hardware `AndroidKeyStore`, `BOOT_COUNT`, TalkBack, IME, CameraX, or Bluetooth ESC/POS printing).
@@ -50,7 +49,7 @@ See [Release Playbook](docs/RELEASING.md) for signed release builds and [Paired 
 | Document | Scope |
 |---|---|
 | [AGENTS.md](AGENTS.md) | Posting authority, decimal/JCS/idempotency/Keystore invariants |
-| [Release Playbook](docs/RELEASING.md) | **Single authority** for `v1.4.1` (`versionCode 7`) signing, upgrades & outbox safety |
+| [Release Playbook](docs/RELEASING.md) | **Single authority** for `v1.4.2` (`versionCode 8`) signing, upgrades & outbox safety |
 | [Paired Financial Harness](tools/paired/README.md) | Real-HTTP Android <-> Laravel `tools/paired/` verification |
 | [Local Android Handoff](docs/LOCAL_ANDROID_HANDOFF.md) | Developer setup, build flags, and integration status |
 | [Surface Coverage Matrix](docs/SURFACE_COVERAGE.md) | Live-wired vs debug-demo vs simulated vs blocked surfaces |
