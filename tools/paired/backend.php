@@ -74,13 +74,13 @@ try {
         'PAIRED_BACKEND_SHA' => $sha,
         'JAVA_HOME' => getenv('JAVA_HOME') ?: null,
         'ANDROID_HOME' => getenv('ANDROID_HOME') ?: null,
-        'JAVA_TOOL_OPTIONS' => '-XX:ActiveProcessorCount=2',
+        'JAVA_TOOL_OPTIONS' => '-XX:ActiveProcessorCount=1 -XX:CICompilerCount=2 -XX:TieredStopAtLevel=1 -XX:+UseSerialGC -Xss512k',
         'GRADLE_OPTS' => '-Xmx1536m -Dorg.gradle.daemon=false',
     ], static fn ($value): bool => is_string($value) && $value !== '');
     $gradleCommand = [
         $android.'/gradlew', '--offline', '--no-daemon', '--max-workers=1',
         '-Dorg.gradle.workers.max=1', '-Dorg.gradle.parallel=false',
-        '-Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8',
+        '-Dorg.gradle.jvmargs=-Xmx1536m -XX:+UseSerialGC -Dfile.encoding=UTF-8',
         ':app:testDebugUnitTest', '--tests', 'com.example.data.PairedProductionSaleTest',
     ];
     if (is_executable('/usr/bin/taskset')) {
