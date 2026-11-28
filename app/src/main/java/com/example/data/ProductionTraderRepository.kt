@@ -247,7 +247,7 @@ class ProductionTraderRepository(
                 canonicalPayloadBytes = canonicalPayloadBytes
             )
 
-            if (record.status == CommandStatus.COMPLETED && record.responseSnapshot != null) {
+            if (record.status == CommandStatus.COMPLETED) {
                 val activeScope = requireActiveScope()
                 if (record.companyId != activeScope.companyId.value ||
                     record.actorId != activeScope.actorId.value ||
@@ -255,28 +255,22 @@ class ProductionTraderRepository(
                 ) {
                     throw SecurityException("Cached command belongs to different authenticated scope")
                 }
-                return try {
-                    val snapBytes = commandStore.decryptSnapshot(record)
-                        ?: throw IllegalStateException("Decrypted snapshot was null")
-                    val jsonStr = String(snapBytes, StandardCharsets.UTF_8)
-                    val parsed = StrictJsonParser.parse(jsonStr).asObject()
-                    if (validateResponse != null) {
-                        val valRes = validateResponse(parsed)
-                        if (valRes.isFailure) {
-                            val valErr = valRes.exceptionOrNull() ?: IllegalStateException("Authoritative response validation failed")
-                            commandStore.markUnknownAck(scopeBefore.companyId.value, commandId, valErr.message ?: "Authoritative response validation failed")
-                            return Result.failure(valErr)
-                        }
-                    }
-                    Result.success(parsed)
-                } catch (ex: Exception) {
-                    if (isReceiptStatusChecked) {
-                        checkReceiptStatusOnServer(scopeBefore.companyId, idempotencyKey, commandId, validateResponse)
-                            ?: Result.failure(IllegalStateException("Failed to parse cached command response: ${ex.message}"))
-                    } else {
-                        Result.failure(ex)
-                    }
+                val paymentForm = paymentFormType(commandType)
+                val parsed = runCatching { readCachedCommandResponse(record) }
+                val validation = parsed.fold(
+                    onSuccess = { validateResponse?.invoke(it) ?: Result.success(it) },
+                    onFailure = { Result.failure(it) }
+                )
+                val error = validation.exceptionOrNull() ?: return validation
+                if (paymentForm != null) {
+                    commandStore.reopenInvalidCompletedCommand(
+                        paymentForm, record, error.message ?: "Invalid cached payment response"
+                    )
+                } else if (parsed.isFailure && isReceiptStatusChecked && record.responseSnapshot != null) {
+                    return checkReceiptStatusOnServer(scopeBefore.companyId, idempotencyKey, commandId, validateResponse)
+                        ?: validation
                 }
+                return validation
             }
 
             if (isReceiptStatusChecked && (record.status == CommandStatus.UNKNOWN_ACK || record.status == CommandStatus.SUBMITTED)) {
@@ -2604,20 +2598,14 @@ class ProductionTraderRepository(
         }
 
         val validatePaymentResponse: (StrictJsonObject) -> Result<StrictJsonObject> = { snap ->
-            val id = snap.properties["id"]?.asString() ?: snap.properties["receipt_id"]?.asString()
-            if (id.isNullOrBlank()) {
-                Result.failure(IllegalStateException("Server response missing payment id"))
-            } else {
-                val respCustId = snap.properties["customer_id"]?.asString()
-                if (respCustId != null && respCustId != customerId) {
-                    Result.failure(IllegalStateException("Server returned payment for customer $respCustId, expected $customerId"))
-                } else {
-                    runCatching {
-                        parseCanonicalPaymentFields(snap, amountExact, totalAllocated, allocations.isEmpty())
-                        snap
-                    }
-                }
-            }
+            validatePaymentSnapshotObject(
+                snap = snap,
+                isSupplier = false,
+                expectedPartyId = customerId,
+                expectedAmount = amountExact,
+                expectedAllocated = totalAllocated,
+                defaultAdvance = allocations.isEmpty()
+            )
         }
 
         try {
@@ -2640,8 +2628,8 @@ class ProductionTraderRepository(
             }
 
             val snapshot = durableRes.getOrThrow()
-            val officialId = snapshot.properties["id"]?.asString()
-                ?: snapshot.properties["receipt_id"]?.asString()
+            val officialId = snapshot.properties["id"].toNullableString()
+                ?: snapshot.properties["receipt_id"].toNullableString()
                 ?: return@withContext Result.failure(IllegalStateException("Server did not return payment ID"))
             val parsedFields = parseCanonicalPaymentFields(
                 snapshot = snapshot,
@@ -2650,7 +2638,7 @@ class ProductionTraderRepository(
                 defaultAdvance = allocations.isEmpty()
             )
             val officialAmount = parsedFields.officialAmount
-            val postedAt = snapshot.properties["posted_at"]?.asString() ?: effectivePaymentDate
+            val postedAt = snapshot.properties["posted_at"].toNullableString() ?: effectivePaymentDate
 
             val isAdvance = parsedFields.isAdvance
             val allocatedAmount = parsedFields.allocatedAmount
@@ -2711,7 +2699,9 @@ class ProductionTraderRepository(
                 allocations = parsedAllocations,
                 currency = snapshot.properties["currency"].toNullableString() ?: baseCurrency
             )
-            _customerTransactionsFlow.update { listOf(tx) + it }
+            _customerTransactionsFlow.update { history ->
+                if (history.any { it.id == tx.id }) history else listOf(tx) + history
+            }
             Result.success(tx)
         } finally {
             inFlightCounter.decrementAndGet()
@@ -3858,22 +3848,14 @@ class ProductionTraderRepository(
         }
 
         val validatePaymentResponse: (StrictJsonObject) -> Result<StrictJsonObject> = { snap ->
-            val id = snap.properties["id"].toNullableString()
-                ?: snap.properties["voucher_id"].toNullableString()
-                ?: snap.properties["receipt_id"].toNullableString()
-            if (id.isNullOrBlank()) {
-                Result.failure(IllegalStateException("Server response missing payment id"))
-            } else {
-                val respSupId = snap.properties["supplier_id"].toNullableString()
-                if (respSupId != null && respSupId != supplierId) {
-                    Result.failure(IllegalStateException("Server returned payment for supplier $respSupId, expected $supplierId"))
-                } else {
-                    runCatching {
-                        parseCanonicalPaymentFields(snap, amountExact, totalAllocated, allocations.isEmpty())
-                        snap
-                    }
-                }
-            }
+            validatePaymentSnapshotObject(
+                snap = snap,
+                isSupplier = true,
+                expectedPartyId = supplierId,
+                expectedAmount = amountExact,
+                expectedAllocated = totalAllocated,
+                defaultAdvance = allocations.isEmpty()
+            )
         }
 
         try {
@@ -3970,7 +3952,9 @@ class ProductionTraderRepository(
                 allocations = parsedAllocations,
                 currency = snapshot.properties["currency"].toNullableString() ?: baseCurrency
             )
-            _supplierPaymentsFlow.update { listOf(payment) + it }
+            _supplierPaymentsFlow.update { history ->
+                if (history.any { it.id == payment.id }) history else listOf(payment) + history
+            }
             Result.success(payment)
         } finally {
             inFlightCounter.decrementAndGet()
@@ -3984,6 +3968,68 @@ class ProductionTraderRepository(
         val unallocatedAmount: BigDecimal,
         val allocations: List<PaymentAllocationResult>
     )
+
+    private fun validatePaymentSnapshotObject(
+        snap: StrictJsonObject,
+        isSupplier: Boolean,
+        expectedPartyId: String,
+        expectedAmount: BigDecimal,
+        expectedAllocated: BigDecimal,
+        defaultAdvance: Boolean
+    ): Result<StrictJsonObject> = runCatching {
+        val id = snap.properties["id"].toNullableString()
+            ?: (if (isSupplier) snap.properties["voucher_id"].toNullableString() else null)
+            ?: snap.properties["receipt_id"].toNullableString()
+        check(!id.isNullOrBlank()) { "Server response missing payment id" }
+        val partyField = if (isSupplier) "supplier_id" else "customer_id"
+        val party = snap.properties[partyField]
+        if (party != null && party != StrictJsonNull) {
+            check(party.asString() == expectedPartyId) { "Server returned payment for a different $partyField" }
+        }
+        parseCanonicalPaymentFields(snap, expectedAmount, expectedAllocated, defaultAdvance)
+        snap
+    }
+
+    private fun readCachedCommandResponse(record: MerchantCommandRecord): StrictJsonObject {
+        val bytes = checkNotNull(commandStore.decryptSnapshot(record)) { "Cached command missing response snapshot" }
+        return StrictJsonParser.parse(String(bytes, StandardCharsets.UTF_8)).asObject()
+    }
+
+    private fun paymentFormType(type: String): String? = when (type) {
+        "customer.payment", "customer_payment" -> "customer_payment"
+        "supplier.payment", "supplier_payment" -> "supplier_payment"
+        else -> null
+    }
+
+    private fun cachedPaymentValidation(formType: String): ((MerchantCommandRecord) -> String?)? {
+        val paymentForm = paymentFormType(formType) ?: return null
+        val isSupplier = paymentForm == "supplier_payment"
+        val partyField = if (isSupplier) "supplier_id" else "customer_id"
+        return { record ->
+            runCatching {
+                val payload = checkNotNull(decryptDraftPayloadObject(record)) { "Invalid cached payment payload" }
+                val partyId = checkNotNull(payload.properties[partyField]).asString()
+                val amount = checkNotNull(payload.properties["amount"].toNullableBigDecimal())
+                val allocations = payload.properties["allocations"]?.asArray()?.elements.orEmpty()
+                val allocated = allocations.fold(BigDecimal.ZERO) { total, allocation ->
+                    total + checkNotNull(allocation.asObject().properties["amount"].toNullableBigDecimal())
+                }
+                validatePaymentSnapshotObject(
+                    readCachedCommandResponse(record), isSupplier, partyId, amount, allocated, allocations.isEmpty()
+                ).getOrThrow()
+            }.exceptionOrNull()?.let { it.message ?: "Invalid cached payment response" }
+        }
+    }
+
+    private fun ensureCachedPaymentCompletionValidated(scope: CurrentAuthScope, formType: String) {
+        val validate = cachedPaymentValidation(formType) ?: return
+        requireActiveScope()
+        val completed = commandStore.peekCompletedCommandForDraft(
+            scope.companyId.value, scope.actorId.value, scope.deviceId.value, formType
+        ) ?: return
+        val error = validate(completed) ?: return
+        commandStore.reopenInvalidCompletedCommand(formType, completed, error)
+    }
 
     private fun parseCanonicalPaymentFields(
         snapshot: StrictJsonObject,
@@ -4184,26 +4230,31 @@ class ProductionTraderRepository(
 
     override fun getDraftOperationId(formType: String): String {
         val scope = requireActiveScope()
-        return commandStore.getDraftOperationId(scope.companyId.value, scope.actorId.value, scope.deviceId.value, formType)
+        return commandStore.getDraftOperationId(
+            scope.companyId.value, scope.actorId.value, scope.deviceId.value, formType, cachedPaymentValidation(formType)
+        )
     }
 
     override fun rotateDraftOperationId(formType: String): String {
         val scope = requireActiveScope()
-        return commandStore.rotateDraftOperationId(scope.companyId.value, scope.actorId.value, scope.deviceId.value, formType)
+        return commandStore.rotateDraftOperationId(
+            scope.companyId.value, scope.actorId.value, scope.deviceId.value, formType, cachedPaymentValidation(formType)
+        )
     }
 
     override fun cancelDraftOperation(formType: String) {
-        val scope = requireActiveScope()
-        commandStore.cancelDraftOperation(scope.companyId.value, scope.actorId.value, scope.deviceId.value, formType)
+        rotateDraftOperationId(formType)
     }
 
     override fun getActiveDraftPayload(formType: String): StrictJsonObject? {
         val scope = authScopeProvider?.invoke() ?: return null
+        ensureCachedPaymentCompletionValidated(scope, formType)
         return commandStore.getActiveDraftPayload(scope.companyId.value, scope.actorId.value, scope.deviceId.value, formType)
     }
 
     override fun getActiveDraftRecord(formType: String): MerchantCommandRecord? {
         val scope = authScopeProvider?.invoke() ?: return null
+        ensureCachedPaymentCompletionValidated(scope, formType)
         return commandStore.getActiveDraftRecord(scope.companyId.value, scope.actorId.value, scope.deviceId.value, formType)
     }
 
@@ -4252,6 +4303,7 @@ class ProductionTraderRepository(
 
     override fun isDraftRecovering(formType: String): Boolean {
         val scope = authScopeProvider?.invoke() ?: return false
+        ensureCachedPaymentCompletionValidated(scope, formType)
         val record = commandStore.getActiveDraftRecord(scope.companyId.value, scope.actorId.value, scope.deviceId.value, formType) ?: return false
         return record.status == CommandStatus.PENDING ||
             record.status == CommandStatus.SUBMITTED ||

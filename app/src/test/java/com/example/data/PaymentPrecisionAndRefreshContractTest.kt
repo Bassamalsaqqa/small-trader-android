@@ -382,12 +382,13 @@ class PaymentPrecisionAndRefreshContractTest {
     }
 
     @Test
-    fun cachedCompletedReplay_withMalformedPresentExactFields_rejectsWithZeroNetworkCalls() = runBlocking {
+    fun draftLookup_reopensMalformedCachedExactFields_withoutNetwork() = runBlocking {
         val malformedVariants = listOf(
             buildPaymentSnapshotWithExactRawTokens("01JCVPAYCACHEBAD00000001", supplier = false, amountExactToken = "null"),
             buildPaymentSnapshotWithExactRawTokens("01JCVPAYCACHEBAD00000002", supplier = false, allocatedExactToken = "\"\""),
             buildPaymentSnapshotWithExactRawTokens("01JCVPAYCACHEBAD00000003", supplier = false, unallocatedExactToken = "1.000000"),
-            buildPaymentSnapshotWithExactRawTokens("01JCVPAYCACHEBAD00000004", supplier = false, allocAllocatedExactToken = "\"invalid\"")
+            buildPaymentSnapshotWithExactRawTokens("01JCVPAYCACHEBAD00000004", supplier = false, allocAllocatedExactToken = "\"invalid\""),
+            buildPaymentSnapshotWithExactRawTokens("01JCVPAYCACHEBAD00000005", supplier = false, allocAmountExactToken = "false")
         )
         for (supplier in listOf(false, true)) {
             for ((idx, rawSnapshot) in malformedVariants.withIndex()) {
@@ -401,14 +402,12 @@ class PaymentPrecisionAndRefreshContractTest {
 
                 val posts = AtomicInteger(0)
                 val statusCalls = AtomicInteger(0)
-                var failInitially = true
                 val store = InMemoryMerchantCommandStore()
                 val repo = newRepo(object : ReadClientTransport {
                     override fun execute(request: TransportRequest): TransportResponse {
                         return if (request.method == HttpMethod.POST) {
                             posts.incrementAndGet()
-                            if (failInitially) TransportResponse(500, emptyMap(), """{"message":"timeout"}""")
-                            else TransportResponse(500, emptyMap(), """{"message":"unexpected replay POST"}""")
+                            TransportResponse(500, emptyMap(), """{"message":"timeout"}""")
                         } else {
                             statusCalls.incrementAndGet()
                             TransportResponse(503, emptyMap(), """{"message":"unavailable"}""")
@@ -445,18 +444,15 @@ class PaymentPrecisionAndRefreshContractTest {
                 // Record real canonical command payload via repository admission (UNKNOWN_ACK), then simulate a pre-fix cached COMPLETED snapshot
                 assertTrue(invokePayment().isFailure)
                 assertTrue(store.markCompleted(companyA.value, op, malformed.toByteArray(StandardCharsets.UTF_8)))
-                failInitially = false
                 posts.set(0)
                 statusCalls.set(0)
 
-                val replayRes = invokePayment()
-                assertTrue("Cached COMPLETED replay with malformed exact field must fail ($form #$idx)", replayRes.isFailure)
-                assertTrue(
-                    "Failure must come from canonical payment field validation, got: ${replayRes.exceptionOrNull()?.message}",
-                    replayRes.exceptionOrNull()?.message?.contains("Invalid canonical payment field") == true
-                )
-                assertEquals("Cached replay validation failure must not issue POST", 0, posts.get())
-                assertEquals("Cached replay validation failure must not issue receipt status probe", 0, statusCalls.get())
+                assertEquals(op, repo.getDraftOperationId(form))
+                val recovered = repo.getActiveDraftRecord(form)!!
+                assertEquals(CommandStatus.UNKNOWN_ACK, recovered.status)
+                assertTrue(recovered.errorMessage?.contains("Invalid canonical payment field") == true)
+                assertEquals("Draft lookup must not issue POST", 0, posts.get())
+                assertEquals("Draft lookup must not issue receipt status probe", 0, statusCalls.get())
                 if (supplier) {
                     assertTrue(repo.getSupplierPayments().isEmpty())
                     assertEquals(BigDecimal("10.00"), repo.getSuppliers().single().balanceOwedExact)

@@ -6,6 +6,7 @@ import com.example.data.mobile.client.MobileMerchantApiClient
 import com.example.data.mobile.contract.ClientUuid
 import com.example.data.mobile.contract.ServerUlid
 import com.example.data.mobile.outbox.CommandStatus
+import com.example.data.mobile.outbox.MerchantCommandStore
 import com.example.data.mobile.outbox.OutboxDatabase
 import com.example.data.mobile.outbox.RoomMerchantCommandStore
 import com.example.data.mobile.readclient.HttpMethod
@@ -13,12 +14,20 @@ import com.example.data.mobile.readclient.ReadClientTransport
 import com.example.data.mobile.readclient.TransportRequest
 import com.example.data.mobile.readclient.TransportResponse
 import com.example.data.mobile.session.JvmAesGcmCryptoEngine
+import com.example.model.PaymentAllocationInput
+import com.example.model.UserRole
+import com.example.model.UserSession
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -27,6 +36,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.math.BigDecimal
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicInteger
@@ -58,6 +68,235 @@ class DurableCommandConcurrencyAndAdmissionTest {
         ProductionTraderRepository.clearInFlightForTest()
         if (dbFile.exists()) {
             dbFile.delete()
+        }
+    }
+
+    private suspend fun withDatabase(block: suspend (OutboxDatabase) -> Unit) {
+        val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        try {
+            block(db)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun customerCachedCompletionRecoversBeforeFirstDraftLookupCanRotate() = runBlocking {
+        verifyCachedPaymentRecovery(supplier = false)
+    }
+
+    @Test
+    fun supplierCachedCompletionRecoversBeforeFirstDraftLookupCanRotate() = runBlocking {
+        verifyCachedPaymentRecovery(supplier = true)
+    }
+
+    private suspend fun verifyCachedPaymentRecovery(supplier: Boolean) {
+        val form = if (supplier) "supplier_payment" else "customer_payment"
+        val keyPrefix = if (supplier) "suppay" else "custpay"
+        val partyField = if (supplier) "supplier_id" else "customer_id"
+        val party = "01JCV8X9M2NQW3TYZ4R5S6789C"
+        val otherParty = "01JCV8X9M2NQW3TYZ4R5S6789D"
+        val cash = "01JCV8X9M2NQW3TYZ4R5S6789E"
+        val target = "01JCV8X9M2NQW3TYZ4R5S6789F"
+        val targetType = if (supplier) "purchase" else "invoice"
+        val balanceField = if (supplier) "balance_owed" else "balance"
+        val allocations = listOf(PaymentAllocationInput(targetType, target, BigDecimal("0.23")))
+        val operator = UserSession(actorId.value, "Owner", "owner", UserRole.OWNER, "فرع", "Branch", false)
+        val snapshot = """
+            {"id":"payment-1","$partyField":"$party","amount_exact":"1.234567",
+             "allocated_amount_exact":"0.234567","unallocated_amount_exact":"1.000000",
+             "$balanceField":"8.765433","is_advance":false,
+             "allocations":[{"target_type":"$targetType","target_id":"$target",
+                             "amount_exact":"0.234567","allocated_amount_exact":"0.234567"}]}
+        """.trimIndent()
+        val malformed = if (supplier) {
+            snapshot.replace("\"amount_exact\":\"0.234567\"", "\"amount_exact\":false")
+        } else {
+            snapshot.replace("\"unallocated_amount_exact\":\"1.000000\"", "\"unallocated_amount_exact\":1.000000")
+        }
+        val posts = mutableListOf<String>()
+        val lookups = mutableListOf<String>()
+        val transport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method == HttpMethod.POST) {
+                    val key = request.headers.getValue("Idempotency-Key")
+                    posts.add(key)
+                    val body = if (posts.size == 1) malformed else snapshot.replace("payment-1", "payment-2")
+                    return TransportResponse(201, emptyMap(), body)
+                }
+                assertTrue(request.path.endsWith("/receipts/status"))
+                val key = request.queryParams.getValue("idempotency_key")
+                lookups.add(key)
+                return TransportResponse(
+                    200,
+                    emptyMap(),
+                    """{"status":"completed","command_type":"$form","outcome":"replay","idempotency_key":"$key","result":$snapshot,"response_snapshot":$snapshot}"""
+                )
+            }
+        }
+
+        fun repository(store: MerchantCommandStore) = ProductionTraderRepository.forTesting(
+            apiClient = MobileMerchantApiClient(transport, "https://api.example.com", tokenProvider = { validToken }),
+            companyId = companyId,
+            actorId = actorId,
+            deviceId = deviceId,
+            commandStore = store,
+            authScopeProvider = { validScope }
+        )
+
+        suspend fun submit(
+            repo: ProductionTraderRepository,
+            id: String,
+            partyId: String = party,
+            amount: BigDecimal = BigDecimal("1.23")
+        ): Result<*> = if (supplier) {
+            repo.recordSupplierPayment(partyId, amount, "Test", operator, id, cash, "2026-11-28", allocations)
+        } else {
+            repo.recordCustomerPayment(partyId, amount, "Test", id, cash, "2026-11-28", allocations)
+        }
+
+        lateinit var operation: String
+        lateinit var originalBytes: ByteArray
+        lateinit var originalDigest: String
+        withDatabase { db ->
+            val store = RoomMerchantCommandStore(db, cryptoEngine)
+            val repo = repository(store)
+            try {
+                operation = repo.getDraftOperationId(form)
+                assertTrue(submit(repo, operation).isFailure)
+                val original = store.findCommand(companyId.value, actorId.value, deviceId.value, "$keyPrefix-$operation")!!
+                assertEquals(CommandStatus.UNKNOWN_ACK, original.status)
+                originalBytes = store.decryptPayload(original)
+                originalDigest = original.payloadDigest
+                assertTrue(store.markCompleted(companyId.value, operation, malformed.toByteArray()))
+                if (supplier) {
+                    // Simulate the previous client having already rotated an empty intent.
+                    assertNotEquals(operation, store.rotateDraftOperationId(companyId.value, actorId.value, deviceId.value, form))
+                }
+            } finally {
+                repo.close()
+            }
+        }
+        val key = "$keyPrefix-$operation"
+        withDatabase { db1 ->
+            withDatabase { db2 ->
+                val store1 = RoomMerchantCommandStore(db1, cryptoEngine)
+                val store2 = RoomMerchantCommandStore(db2, cryptoEngine)
+                val repo1 = repository(store1)
+                val repo2 = repository(store2)
+                try {
+                    val stale = store2.findCommand(companyId.value, actorId.value, deviceId.value, key)!!
+                    assertEquals(CommandStatus.COMPLETED, stale.status)
+                    coroutineScope {
+                        val first = async(Dispatchers.IO) { repo1.getDraftOperationId(form) }
+                        val second = async(Dispatchers.IO) { repo2.getDraftOperationId(form) }
+                        assertEquals(operation, first.await())
+                        assertEquals(operation, second.await())
+                    }
+                    val recovered = repo2.getActiveDraftRecord(form)!!
+                    assertEquals(CommandStatus.UNKNOWN_ACK, recovered.status)
+                    assertEquals(key, recovered.idempotencyKey)
+                    assertEquals(originalDigest, recovered.payloadDigest)
+                    assertArrayEquals(originalBytes, store2.decryptPayload(recovered))
+                    assertNull(recovered.responseSnapshot)
+                    assertEquals(operation, repo1.rotateDraftOperationId(form))
+                    repo1.cancelDraftOperation(form)
+                    assertEquals(operation, repo2.getDraftOperationId(form))
+
+                    assertTrue(submit(repo2, java.util.UUID.randomUUID().toString()).isFailure)
+                    assertTrue(submit(repo2, "", partyId = otherParty).isFailure)
+                    assertTrue(submit(repo1, operation, amount = BigDecimal("1.24")).isFailure)
+                    assertEquals(listOf(key), posts)
+                    assertTrue(lookups.isEmpty())
+
+                    val valid = submit(repo2, operation)
+                    assertTrue(valid.exceptionOrNull()?.message, valid.isSuccess)
+                    assertEquals(listOf(key), lookups)
+                    assertEquals(listOf(key), posts)
+                    assertFalse(store1.reopenInvalidCompletedCommand(form, stale, "Stale validator"))
+                    assertFalse(repo1.isDraftRecovering(form))
+
+                    val next = repo2.getDraftOperationId(form)
+                    assertNotEquals(operation, next)
+                    assertEquals(next, repo1.getDraftOperationId(form))
+                    assertTrue(submit(repo2, operation).isSuccess)
+                    assertEquals(next, repo2.getDraftOperationId(form))
+                    assertEquals(listOf(key), lookups)
+                    assertEquals(listOf(key), posts)
+                    if (supplier) {
+                        assertEquals(BigDecimal("1.234567"), repo2.getSupplierPayments().single().amountExact)
+                    } else {
+                        assertEquals(BigDecimal("1.234567"), repo2.getCustomerTransactions().single().creditExact)
+                    }
+                    assertTrue(submit(repo2, next).isSuccess)
+                    assertEquals(listOf(key, "$keyPrefix-$next"), posts)
+                } finally {
+                    repo1.close()
+                    repo2.close()
+                }
+            }
+        }
+    }
+
+    @Test
+    fun concurrentCompletionCasHasOneWinnerAndValidCompletionRotatesAfterRestart() = runBlocking {
+        val form = "customer_payment"
+        val repoCompany = companyId.value
+        val repoActor = actorId.value
+        val repoDevice = deviceId.value
+        val payload = """{"amount":"1.00","customer_id":"01JCV8X9M2NQW3TYZ4R5S6789C","notes":""}""".toByteArray()
+        val digest = "sha256:" + MessageDigest.getInstance("SHA-256").digest(payload).joinToString("") { "%02x".format(it) }
+        val valid = """{"id":"payment-crash","amount_exact":"1.000000"}""".toByteArray()
+
+        lateinit var operation: String
+        withDatabase { db1 ->
+            withDatabase { db2 ->
+                val store1 = RoomMerchantCommandStore(db1, cryptoEngine)
+                val store2 = RoomMerchantCommandStore(db2, cryptoEngine)
+                operation = store1.getDraftOperationId(repoCompany, repoActor, repoDevice, form)
+                store1.recordPendingCommand(repoCompany, operation, repoActor, repoDevice, "customer.payment", "custpay-$operation", digest, payload)
+                assertTrue(store1.markSubmitted(repoCompany, operation))
+                assertTrue(store1.markCompleted(repoCompany, operation, """{"amount_exact":null}""".toByteArray()))
+
+                val stale1 = store1.peekCompletedCommandForDraft(repoCompany, repoActor, repoDevice, form)!!
+                val stale2 = store2.peekCompletedCommandForDraft(repoCompany, repoActor, repoDevice, form)!!
+                val results = coroutineScope {
+                    val first = async(Dispatchers.IO) { store1.reopenInvalidCompletedCommand(form, stale1, "First") }
+                    val second = async(Dispatchers.IO) { store2.reopenInvalidCompletedCommand(form, stale2, "Second") }
+                    listOf(first.await(), second.await())
+                }
+                assertEquals(1, results.count { it })
+                assertEquals(CommandStatus.UNKNOWN_ACK, store2.getActiveDraftRecord(repoCompany, repoActor, repoDevice, form)?.status)
+                assertTrue(store2.markCompleted(repoCompany, operation, valid))
+                assertFalse(store1.reopenInvalidCompletedCommand(form, stale1, "Stale validator"))
+            }
+        }
+        withDatabase { db ->
+            val store = RoomMerchantCommandStore(db, cryptoEngine)
+            val repo = ProductionTraderRepository.forTesting(
+                apiClient = MobileMerchantApiClient(
+                    transport = object : ReadClientTransport {
+                        override fun execute(request: TransportRequest): TransportResponse = error("Unexpected network request")
+                    },
+                    baseOrigin = "https://api.example.com",
+                    tokenProvider = { validToken }
+                ),
+                companyId = companyId,
+                actorId = actorId,
+                deviceId = deviceId,
+                commandStore = store,
+                authScopeProvider = { validScope }
+            )
+            try {
+                val next = repo.getDraftOperationId(form)
+                assertNotEquals(operation, next)
+                assertEquals(next, repo.getDraftOperationId(form))
+                val completed = store.findCommand(repoCompany, repoActor, repoDevice, "custpay-$operation")!!
+                assertEquals(CommandStatus.COMPLETED, completed.status)
+                assertArrayEquals(valid, store.decryptSnapshot(completed))
+            } finally {
+                repo.close()
+            }
         }
     }
 

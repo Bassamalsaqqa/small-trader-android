@@ -120,14 +120,16 @@ interface MerchantCommandStore {
         companyId: String,
         actorId: String,
         deviceId: String,
-        formType: String
+        formType: String,
+        validateCompletion: ((MerchantCommandRecord) -> String?)? = null
     ): String
 
     fun rotateDraftOperationId(
         companyId: String,
         actorId: String,
         deviceId: String,
-        formType: String
+        formType: String,
+        validateCompletion: ((MerchantCommandRecord) -> String?)? = null
     ): String
 
     fun cancelDraftOperation(
@@ -157,6 +159,19 @@ interface MerchantCommandStore {
         deviceId: String,
         commandType: String
     ): MerchantCommandRecord?
+
+    fun peekCompletedCommandForDraft(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        formType: String
+    ): MerchantCommandRecord?
+
+    fun reopenInvalidCompletedCommand(
+        formType: String,
+        expected: MerchantCommandRecord,
+        error: String
+    ): Boolean
 
     fun decryptPayload(record: MerchantCommandRecord): ByteArray
     fun decryptSnapshot(record: MerchantCommandRecord): ByteArray?
@@ -735,7 +750,8 @@ class RoomMerchantCommandStore internal constructor(
         companyId: String,
         actorId: String,
         deviceId: String,
-        formType: String
+        formType: String,
+        validateCompletion: ((MerchantCommandRecord) -> String?)?
     ): String {
         val db = dbProvider()
         db.beginTransaction()
@@ -757,6 +773,11 @@ class RoomMerchantCommandStore internal constructor(
                     db.setTransactionSuccessful()
                     return activeId
                 }
+            }
+
+            recoverCompletion(db, companyId, actorId, deviceId, formType, validateCompletion)?.let {
+                db.setTransactionSuccessful()
+                return it
             }
 
             // 2. Check if a draft intent is saved in merchant_form_intents
@@ -814,7 +835,8 @@ class RoomMerchantCommandStore internal constructor(
         companyId: String,
         actorId: String,
         deviceId: String,
-        formType: String
+        formType: String,
+        validateCompletion: ((MerchantCommandRecord) -> String?)?
     ): String {
         val db = dbProvider()
         db.beginTransaction()
@@ -835,6 +857,11 @@ class RoomMerchantCommandStore internal constructor(
                     db.setTransactionSuccessful()
                     return activeId
                 }
+            }
+
+            recoverCompletion(db, companyId, actorId, deviceId, formType, validateCompletion)?.let {
+                db.setTransactionSuccessful()
+                return it
             }
 
             val newOpId = java.util.UUID.randomUUID().toString()
@@ -921,6 +948,23 @@ class RoomMerchantCommandStore internal constructor(
         }
     }
 
+    private fun readRecordFromCursor(it: android.database.Cursor): MerchantCommandRecord =
+        MerchantCommandRecord(
+            companyId = it.getString(0),
+            commandId = it.getString(1),
+            actorId = it.getString(2),
+            deviceId = it.getString(3),
+            commandType = it.getString(4),
+            idempotencyKey = it.getString(5),
+            payloadDigest = it.getString(6),
+            payloadBytes = it.getBlob(7),
+            status = CommandStatus.valueOf(it.getString(8)),
+            responseSnapshot = if (it.isNull(9)) null else it.getBlob(9),
+            errorMessage = if (it.isNull(10)) null else it.getString(10),
+            createdAt = it.getLong(11),
+            updatedAt = it.getLong(12)
+        )
+
     override fun getLatestCompletedCommand(
         companyId: String,
         actorId: String,
@@ -939,24 +983,119 @@ class RoomMerchantCommandStore internal constructor(
             queryArgs
         )
         return c.use {
-            if (it.moveToFirst()) {
-                MerchantCommandRecord(
-                    companyId = it.getString(0),
-                    commandId = it.getString(1),
-                    actorId = it.getString(2),
-                    deviceId = it.getString(3),
-                    commandType = it.getString(4),
-                    idempotencyKey = it.getString(5),
-                    payloadDigest = it.getString(6),
-                    payloadBytes = it.getBlob(7),
-                    status = CommandStatus.valueOf(it.getString(8)),
-                    responseSnapshot = if (it.isNull(9)) null else it.getBlob(9),
-                    errorMessage = if (it.isNull(10)) null else it.getString(10),
-                    createdAt = it.getLong(11),
-                    updatedAt = it.getLong(12)
-                )
-            } else null
+            if (it.moveToFirst()) readRecordFromCursor(it) else null
         }
+    }
+
+    override fun peekCompletedCommandForDraft(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        formType: String
+    ): MerchantCommandRecord? = peekCompletedCommandForDraft(dbProvider(), companyId, actorId, deviceId, formType)
+
+    private fun peekCompletedCommandForDraft(
+        db: SupportSQLiteDatabase,
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        formType: String
+    ): MerchantCommandRecord? {
+        val cmdTypes = candidateCommandTypes(formType)
+        val placeholders = cmdTypes.joinToString(",") { "?" }
+        val queryArgs = arrayOf(companyId, actorId, deviceId) + cmdTypes.toTypedArray()
+        val hasActive = db.query(
+            "SELECT 1 FROM merchant_commands " +
+                "WHERE company_id = ? AND actor_id = ? AND device_id = ? AND command_type IN ($placeholders) " +
+                "AND status IN ('PENDING', 'SUBMITTED', 'UNKNOWN_ACK') LIMIT 1",
+            queryArgs
+        ).use { it.moveToFirst() }
+        if (hasActive) return null
+
+        val savedOpId = db.query(
+            "SELECT operation_id FROM merchant_form_intents " +
+                "WHERE company_id = ? AND actor_id = ? AND device_id = ? AND form_type = ? LIMIT 1",
+            arrayOf(companyId, actorId, deviceId, formType)
+        ).use { if (it.moveToFirst()) it.getString(0) else null }
+
+        if (savedOpId != null) {
+            val savedRecord = db.query(
+                "SELECT company_id, command_id, actor_id, device_id, command_type, idempotency_key, " +
+                    "payload_digest, payload_bytes, status, response_snapshot, error_message, created_at, updated_at " +
+                    "FROM merchant_commands WHERE company_id = ? AND command_id = ? AND actor_id = ? AND device_id = ? " +
+                    "AND command_type IN ($placeholders) LIMIT 1",
+                arrayOf(companyId, savedOpId, actorId, deviceId) + cmdTypes.toTypedArray()
+            ).use { if (it.moveToFirst()) readRecordFromCursor(it) else null }
+            if (savedRecord != null) {
+                return if (savedRecord.status == CommandStatus.COMPLETED) savedRecord else null
+            }
+        }
+
+        val latestRecord = db.query(
+            "SELECT company_id, command_id, actor_id, device_id, command_type, idempotency_key, " +
+                "payload_digest, payload_bytes, status, response_snapshot, error_message, created_at, updated_at " +
+                "FROM merchant_commands WHERE company_id = ? AND actor_id = ? AND device_id = ? " +
+                "AND command_type IN ($placeholders) AND status IN ('COMPLETED', 'FAILED') " +
+                "ORDER BY updated_at DESC, rowid DESC LIMIT 1",
+            queryArgs
+        ).use { if (it.moveToFirst()) readRecordFromCursor(it) else null }
+        return if (latestRecord?.status == CommandStatus.COMPLETED) latestRecord else null
+    }
+
+    override fun reopenInvalidCompletedCommand(
+        formType: String,
+        expected: MerchantCommandRecord,
+        error: String
+    ): Boolean {
+        val db = dbProvider()
+        db.beginTransaction()
+        try {
+            val current = peekCompletedCommandForDraft(
+                db, expected.companyId, expected.actorId, expected.deviceId, formType
+            ) ?: return false
+            if (current.updatedAt != expected.updatedAt || current != expected) return false
+
+            reopenCompletedCommand(db, formType, current, error)
+            db.setTransactionSuccessful()
+            return true
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    // The caller holds the same write transaction as the candidate selection.
+    private fun reopenCompletedCommand(
+        db: SupportSQLiteDatabase,
+        formType: String,
+        record: MerchantCommandRecord,
+        error: String
+    ) {
+        val now = maxOf(System.currentTimeMillis(), record.updatedAt + 1L)
+        db.execSQL(
+            "UPDATE merchant_commands SET status = 'UNKNOWN_ACK', response_snapshot = NULL, error_message = ?, " +
+                "updated_at = ? WHERE company_id = ? AND command_id = ?",
+            arrayOf<Any>(error, now, record.companyId, record.commandId)
+        )
+        db.execSQL(
+            "INSERT OR REPLACE INTO merchant_form_intents " +
+                "(company_id, actor_id, device_id, form_type, operation_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            arrayOf<Any>(record.companyId, record.actorId, record.deviceId, formType, record.commandId, now)
+        )
+    }
+
+    private fun recoverCompletion(
+        db: SupportSQLiteDatabase,
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        formType: String,
+        validateCompletion: ((MerchantCommandRecord) -> String?)?
+    ): String? {
+        if (validateCompletion == null) return null
+        val completed = peekCompletedCommandForDraft(db, companyId, actorId, deviceId, formType) ?: return null
+        val error = validateCompletion(completed) ?: return null
+        reopenCompletedCommand(db, formType, completed, error)
+        return completed.commandId
     }
 
     override fun decryptPayload(record: MerchantCommandRecord): ByteArray {
@@ -1191,7 +1330,8 @@ class InMemoryMerchantCommandStore : MerchantCommandStore {
         companyId: String,
         actorId: String,
         deviceId: String,
-        formType: String
+        formType: String,
+        validateCompletion: ((MerchantCommandRecord) -> String?)?
     ): String = synchronized(lock) {
         val cmdTypes = candidateCommandTypes(formType)
         val active = records.values.firstOrNull {
@@ -1200,6 +1340,8 @@ class InMemoryMerchantCommandStore : MerchantCommandStore {
                 (it.status == CommandStatus.PENDING || it.status == CommandStatus.SUBMITTED || it.status == CommandStatus.UNKNOWN_ACK)
         }
         if (active != null) return active.commandId
+
+        recoverCompletion(companyId, actorId, deviceId, formType, validateCompletion)?.let { return it }
 
         val key = "$companyId:$actorId:$deviceId:$formType"
         val existingOpId = draftIntents[key]
@@ -1223,7 +1365,8 @@ class InMemoryMerchantCommandStore : MerchantCommandStore {
         companyId: String,
         actorId: String,
         deviceId: String,
-        formType: String
+        formType: String,
+        validateCompletion: ((MerchantCommandRecord) -> String?)?
     ): String = synchronized(lock) {
         val cmdTypes = candidateCommandTypes(formType)
         val active = records.values.firstOrNull {
@@ -1232,6 +1375,8 @@ class InMemoryMerchantCommandStore : MerchantCommandStore {
                 (it.status == CommandStatus.PENDING || it.status == CommandStatus.SUBMITTED || it.status == CommandStatus.UNKNOWN_ACK)
         }
         if (active != null) return active.commandId
+
+        recoverCompletion(companyId, actorId, deviceId, formType, validateCompletion)?.let { return it }
 
         val key = "$companyId:$actorId:$deviceId:$formType"
         val next = java.util.UUID.randomUUID().toString()
@@ -1287,12 +1432,86 @@ class InMemoryMerchantCommandStore : MerchantCommandStore {
     ): MerchantCommandRecord? = synchronized(lock) {
         val cmdTypes = candidateCommandTypes(commandType)
         return records.values
+            .distinctBy { "${it.companyId}:${it.commandId}" }
             .filter {
                 it.companyId == companyId && it.actorId == actorId && it.deviceId == deviceId &&
                     it.commandType in cmdTypes && it.status == CommandStatus.COMPLETED &&
                     it.responseSnapshot != null
             }
             .maxByOrNull { it.updatedAt }
+    }
+
+    override fun peekCompletedCommandForDraft(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        formType: String
+    ): MerchantCommandRecord? = synchronized(lock) {
+        val cmdTypes = candidateCommandTypes(formType)
+        val distinctRecords = records.values.distinctBy { "${it.companyId}:${it.commandId}" }
+        val hasActive = distinctRecords.any {
+            it.companyId == companyId && it.actorId == actorId && it.deviceId == deviceId &&
+                it.commandType in cmdTypes &&
+                (it.status == CommandStatus.PENDING || it.status == CommandStatus.SUBMITTED || it.status == CommandStatus.UNKNOWN_ACK)
+        }
+        if (hasActive) return null
+
+        val key = "$companyId:$actorId:$deviceId:$formType"
+        val savedOpId = draftIntents[key]
+        if (savedOpId != null) {
+            val savedRecord = records["id:$companyId:$savedOpId"]
+            if (savedRecord != null &&
+                savedRecord.actorId == actorId &&
+                savedRecord.deviceId == deviceId &&
+                savedRecord.commandType in cmdTypes
+            ) {
+                return if (savedRecord.status == CommandStatus.COMPLETED) savedRecord else null
+            }
+        }
+
+        val latestRecord = distinctRecords
+            .filter {
+                it.companyId == companyId && it.actorId == actorId && it.deviceId == deviceId &&
+                    it.commandType in cmdTypes &&
+                    (it.status == CommandStatus.COMPLETED || it.status == CommandStatus.FAILED)
+            }
+            .maxByOrNull { it.updatedAt }
+        return if (latestRecord?.status == CommandStatus.COMPLETED) latestRecord else null
+    }
+
+    override fun reopenInvalidCompletedCommand(
+        formType: String,
+        expected: MerchantCommandRecord,
+        error: String
+    ): Boolean = synchronized(lock) {
+        val current = peekCompletedCommandForDraft(expected.companyId, expected.actorId, expected.deviceId, formType)
+            ?: return false
+        if (current.updatedAt != expected.updatedAt || current != expected) return false
+
+        val updated = current.copy(
+            status = CommandStatus.UNKNOWN_ACK,
+            responseSnapshot = null,
+            errorMessage = error,
+            updatedAt = maxOf(System.currentTimeMillis(), current.updatedAt + 1L)
+        )
+        records["id:${current.companyId}:${current.commandId}"] = updated
+        records["${current.companyId}:${current.idempotencyKey}"] = updated
+        draftIntents["${current.companyId}:${current.actorId}:${current.deviceId}:$formType"] = current.commandId
+        return true
+    }
+
+    private fun recoverCompletion(
+        companyId: String,
+        actorId: String,
+        deviceId: String,
+        formType: String,
+        validateCompletion: ((MerchantCommandRecord) -> String?)?
+    ): String? {
+        if (validateCompletion == null) return null
+        val completed = peekCompletedCommandForDraft(companyId, actorId, deviceId, formType) ?: return null
+        val error = validateCompletion(completed) ?: return null
+        check(reopenInvalidCompletedCommand(formType, completed, error))
+        return completed.commandId
     }
 
     override fun decryptPayload(record: MerchantCommandRecord): ByteArray = record.payloadBytes
