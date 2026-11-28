@@ -109,7 +109,11 @@ class DurableCommandConcurrencyAndAdmissionTest {
                     request.method == HttpMethod.GET && request.path.contains("/receipts/status") -> {
                         // Simulate network latency on receipt status lookup
                         Thread.sleep(60)
-                        TransportResponse(statusCode = 404, emptyMap(), """{"error":"Not Found"}""")
+                        TransportResponse(
+                            statusCode = 404,
+                            headers = mapOf("Content-Type" to "application/json"),
+                            body = """{"error":{"code":"NOT_FOUND","message":"Not found"}}"""
+                        )
                     }
                     request.method == HttpMethod.POST && request.path.contains("/customers") -> {
                         outboundPostCount.incrementAndGet()
@@ -208,7 +212,11 @@ class DurableCommandConcurrencyAndAdmissionTest {
             override fun execute(request: TransportRequest): TransportResponse {
                 return when {
                     request.method == HttpMethod.GET && request.path.contains("/receipts/status") -> {
-                        TransportResponse(statusCode = 404, emptyMap(), """{"error":"Not Found"}""")
+                        TransportResponse(
+                            statusCode = 404,
+                            headers = mapOf("Content-Type" to "application/json"),
+                            body = """{"error":{"code":"NOT_FOUND","message":"Not found"}}"""
+                        )
                     }
                     request.method == HttpMethod.POST && request.path.contains("/customers") -> {
                         if (shouldFailNetwork) {

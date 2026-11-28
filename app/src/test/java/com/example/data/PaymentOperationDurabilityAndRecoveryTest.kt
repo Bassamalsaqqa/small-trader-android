@@ -1219,6 +1219,48 @@ class PaymentOperationDurabilityAndRecoveryTest {
     // 11. Validated Authoritative Domain Rejections (422/403/404) Terminate Cleanly
     // -------------------------------------------------------------------------
     @Test
+    fun ambiguousPriorPayment_neverReleasesKeyAfterUnrelated404AndForbiddenRetry() = runBlocking {
+        val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
+        val store = RoomMerchantCommandStore(db, cryptoEngine)
+        val repo = newRepo(store)
+        var lookupBody = "{}"
+        var posts = 0
+        server!!.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                if (request.method == "GET" && request.path.orEmpty().contains("/receipts/status")) {
+                    return MockResponse().setResponseCode(404).setHeader("Content-Type", "application/json").setBody(lookupBody)
+                }
+                posts++
+                return if (posts == 1) MockResponse().setResponseCode(503).setBody("Gateway lost acknowledgement")
+                else MockResponse().setResponseCode(403).setHeader("Content-Type", "application/json")
+                    .setBody("""{"error":{"code":"FORBIDDEN","message":"Permission revoked"}}""")
+            }
+        }
+        try {
+            val op = repo.getDraftOperationId("customer_payment")
+            suspend fun submit() = repo.recordCustomerPayment(
+                customerId = customerA.value, amount = BigDecimal("40.00"), note = "Lost acknowledgement",
+                paymentId = op, cashAccountId = cashAccountA.value, paymentDate = "2026-11-27"
+            )
+            assertTrue(submit().isFailure)
+            for (body in listOf("", "{}", """{"message":"Gateway missing route"}""", """{"error":{"code":"MOBILE_MERCHANT_DISABLED","message":"Disabled"}}""")) {
+                lookupBody = body
+                assertTrue(submit().isFailure)
+                assertEquals(1, posts)
+                assertEquals(op, repo.getDraftOperationId("customer_payment"))
+            }
+            lookupBody = """{"error":{"code":"NOT_FOUND","message":"Not found"}}"""
+            assertTrue(submit().isFailure)
+            assertEquals(2, posts)
+            assertEquals(CommandStatus.UNKNOWN_ACK, store.findCommand(companyA.value, actorA.value, deviceA.value, "custpay-$op")?.status)
+            assertEquals(op, repo.getDraftOperationId("customer_payment"))
+            assertTrue(repo.isDraftRecovering("customer_payment"))
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
     fun validatedAuthoritativeDomainRejections_matchingContractAndScope_markFailedAndRotate() = runBlocking {
         val db = OutboxDatabase.buildDatabase(context, dbFile.absolutePath, allowMainThreadQueries = true)
         val store = RoomMerchantCommandStore(db, cryptoEngine)

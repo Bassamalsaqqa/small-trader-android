@@ -815,15 +815,8 @@ class MobileMerchantApiClient(
                     ReceiptStatusResult.Found(obj)
                 }
                 404 -> {
-                    val contentType = headerIgnoreCase(response.headers, "Content-Type")
-                    val isJsonBodyValid = isJsonMediaType(contentType) &&
-                        (response.body.isBlank() || try {
-                            StrictJsonParser.parseObject(response.body)
-                            true
-                        } catch (_: Exception) {
-                            false
-                        })
-                    if (isJsonBodyValid) {
+                    val rejection = parseAuthoritativeRejection(response, companyId.value, idempotencyKey)
+                    if (rejection?.code == "NOT_FOUND") {
                         ReceiptStatusResult.NotFound
                     } else {
                         ReceiptStatusResult.Error(

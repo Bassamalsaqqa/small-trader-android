@@ -72,7 +72,11 @@ class CustomerSupplierDirectoryWireTest {
                 if (receiptIdx >= 0) {
                     return responseQueue.removeAt(receiptIdx)
                 }
-                return TransportResponse(404, emptyMap(), """{"message":"Receipt not found"}""")
+                return TransportResponse(
+                    404,
+                    mapOf("Content-Type" to "application/json"),
+                    """{"error":{"code":"NOT_FOUND","message":"Receipt not found"}}"""
+                )
             }
             if (responseQueue.isNotEmpty()) {
                 return responseQueue.removeAt(0)

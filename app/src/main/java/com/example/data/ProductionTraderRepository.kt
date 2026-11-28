@@ -333,7 +333,9 @@ class ProductionTraderRepository(
             val err = postResult.exceptionOrNull()
             val errMsg = err?.message ?: "Command execution failed"
             val httpErr = err as? com.example.data.mobile.readclient.http.HttpTransportException
-            val isDefinitiveFailure = isValidatedAuthoritativeRejection(
+            // A rejection of this retry cannot disprove an earlier committed attempt.
+            val previouslySubmitted = record.status == CommandStatus.UNKNOWN_ACK || record.status == CommandStatus.SUBMITTED
+            val isDefinitiveFailure = !previouslySubmitted && isValidatedAuthoritativeRejection(
                 err = httpErr,
                 expectedCompanyId = scopeAfter.companyId.value,
                 expectedIdempotencyKey = idempotencyKey

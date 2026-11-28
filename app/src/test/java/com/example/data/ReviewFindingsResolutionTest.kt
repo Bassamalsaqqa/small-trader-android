@@ -148,7 +148,11 @@ class ReviewFindingsResolutionTest {
                 return when {
                     request.method == HttpMethod.GET && request.path.contains("/receipts/status") -> {
                         // Server does not have receipt record yet (returns 404)
-                        TransportResponse(statusCode = 404, emptyMap(), """{"error":"Not Found"}""")
+                        TransportResponse(
+                            statusCode = 404,
+                            headers = mapOf("Content-Type" to "application/json"),
+                            body = """{"error":{"code":"NOT_FOUND","message":"Not found"}}"""
+                        )
                     }
                     request.method == HttpMethod.POST && request.path.contains("/customers") -> {
                         postActionExecuted = true

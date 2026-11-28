@@ -1337,7 +1337,11 @@ class NativeMerchantWritesQualificationTest {
                         }
                         request.method == HttpMethod.GET && request.path.contains("/receipts/") -> {
                             // Status check after 500: receipt not found yet on server, allowing retry to submit
-                            TransportResponse(404, body = """{"error":"Receipt not found"}""")
+                            TransportResponse(
+                                statusCode = 404,
+                                headers = mapOf("Content-Type" to "application/json"),
+                                body = """{"error":{"code":"NOT_FOUND","message":"Receipt not found"}}"""
+                            )
                         }
                         request.method == HttpMethod.GET && request.path.contains("/expenses/categories") -> {
                             TransportResponse(200, body = """{"items":[{"id":"01JMBCAT000000000000000001","code":"TRANSPORT","name_ar":"نقل","name_en":"Transport"}]}""")
