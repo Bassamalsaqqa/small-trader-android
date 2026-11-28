@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -39,6 +40,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
@@ -903,12 +905,15 @@ fun CustomerDetailScreen(
     } else {
         null
     }
-    val creditUsagePercent = if (limitExact != null && limitExact > BigDecimal.ZERO && balExact != null) {
-        balExact.coerceAtLeast(BigDecimal.ZERO)
-            .divide(limitExact, 4, RoundingMode.HALF_UP)
-            .toFloat()
-            .coerceIn(0f, 1f)
-    } else 0f
+    val creditUsagePercent = when {
+        limitExact != null && limitExact > BigDecimal.ZERO && balExact != null ->
+            balExact.coerceAtLeast(BigDecimal.ZERO)
+                .divide(limitExact, 4, RoundingMode.HALF_UP)
+                .toFloat()
+                .coerceIn(0f, 1f)
+        limitExact != null && balExact != null && balExact > BigDecimal.ZERO -> 1f
+        else -> 0f
+    }
 
     val feedbackMessage = lang.tr(
         state.lastCustomerPaymentMessageAr ?: "",
@@ -1339,17 +1344,20 @@ fun CustomerDetailScreen(
                                         color = if (availableCreditExact != null) financial.income else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-                                // Tactile Progress Bar
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                // Tactile Progress Bar (plain Box track avoids Surface propagateMinConstraints forcing 100% fill width)
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(6.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                                        .testTag("customer_detail_credit_usage_track")
                                 ) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth(creditUsagePercent)
+                                            .fillMaxHeight()
+                                            .testTag("customer_detail_credit_usage_fill")
                                             .background(
                                                 if (creditUsagePercent > 0.85f) financial.debit
                                                 else MaterialTheme.colorScheme.primary
@@ -2705,6 +2713,7 @@ fun CustomerPaymentCollectionDialog(
                                             }
 
                                             if (isChecked) {
+                                                val targetCurrencyTag = WesternFormatters.formatReceiptCurrencyTag(target.currency, lang)
                                                 SelectAllNumericOutlinedTextField(
                                                     value = selectedAllocations[key] ?: "",
                                                     onValueChange = { newVal ->
@@ -2713,7 +2722,7 @@ fun CustomerPaymentCollectionDialog(
                                                         selectedAllocations[key] = sanitized
                                                     },
                                                     enabled = !effectiveSubmitting && !isRecovering,
-                                                    label = { Text(lang.tr("المخصص $currencySymbolOrCode", "Alloc $currencySymbolOrCode"), style = MaterialTheme.typography.labelSmall) },
+                                                    label = { Text(lang.tr("المخصص $targetCurrencyTag", "Alloc $targetCurrencyTag"), style = MaterialTheme.typography.labelSmall) },
                                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                                     singleLine = true,
                                                     shape = RoundedCornerShape(8.dp),

@@ -600,6 +600,7 @@ fun PaySupplierDialog(
                                             }
 
                                             if (isChecked) {
+                                                val targetCurrencyTag = WesternFormatters.formatReceiptCurrencyTag(target.currency, lang)
                                                 SelectAllNumericOutlinedTextField(
                                                     value = selectedAllocations[key] ?: "",
                                                     onValueChange = { newVal ->
@@ -608,7 +609,7 @@ fun PaySupplierDialog(
                                                         selectedAllocations[key] = sanitized
                                                     },
                                                     enabled = !effectiveSubmitting && !isRecovering,
-                                                    label = { Text(lang.tr("المخصص $currencySymbolOrCode", "Alloc $currencySymbolOrCode"), style = MaterialTheme.typography.labelSmall) },
+                                                    label = { Text(lang.tr("المخصص $targetCurrencyTag", "Alloc $targetCurrencyTag"), style = MaterialTheme.typography.labelSmall) },
                                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                                     singleLine = true,
                                                     shape = RoundedCornerShape(8.dp),

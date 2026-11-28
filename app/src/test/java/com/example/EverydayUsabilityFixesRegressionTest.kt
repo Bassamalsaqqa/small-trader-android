@@ -646,7 +646,7 @@ class EverydayUsabilityFixesRegressionTest {
             assertTrue("Bill denomination chips must render JOD currency tag", fetchSemanticsNodes().isNotEmpty())
         }
         // Restored Change Due footer breakdown row
-        composeTestRule.onNodeWithText("20.00 JOD - 10.00 JOD").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("\u206620.00 JOD\u2069 - \u206610.00 JOD\u2069").performScrollTo().assertIsDisplayed()
 
         // Restored localized Convert to Credit Sale button & click transitions to Credit mode
         val creditBtn = composeTestRule.onNodeWithTag("convert_to_credit_sale_button")
@@ -656,13 +656,13 @@ class EverydayUsabilityFixesRegressionTest {
         creditBtn.performClick()
 
         // Credit mode customer card & ledger note use JOD cleanly with zero ₪/ILS leak
-        composeTestRule.onNodeWithText("12.50 JOD").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithText("50.00 JOD").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithText("22.50 JOD").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithText("12.50 JOD + 10.00 JOD").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithText("Within safe credit ceiling (27.50 JOD available)").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("\u206612.50 JOD\u2069").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("\u206650.00 JOD\u2069").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("\u206622.50 JOD\u2069").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("\u206612.50 JOD\u2069 + \u206610.00 JOD\u2069").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Within safe credit ceiling (\u206627.50 JOD\u2069 available)").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText(
-            "Full amount (10.00 JOD) will be debited to customer account. Cash received: 0.00 JOD."
+            "Full amount (\u206610.00 JOD\u2069) will be debited to customer account. Cash received: \u20660.00 JOD\u2069."
         ).performScrollTo().assertIsDisplayed()
         assertEquals(0, composeTestRule.onAllNodesWithText("0.00 ₪", substring = true).fetchSemanticsNodes().size)
     }
@@ -700,7 +700,7 @@ class EverydayUsabilityFixesRegressionTest {
                 )
             }
         }
-        composeTestRule.onNodeWithText("18.75 JOD").assertIsDisplayed()
+        composeTestRule.onNodeWithText("\u206618.75 JOD\u2069").assertIsDisplayed()
         assertEquals(0, composeTestRule.onAllNodesWithText("₪", substring = true).fetchSemanticsNodes().size)
     }
 

@@ -737,7 +737,7 @@ fun CashPaymentScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "${WesternFormatters.formatHumanMoney2dp(state.cashTenderedExact, currency, lang)} - ${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)}",
+                                    text = "${StitchBidiUtils.formatHumanMoney2dp(state.cashTenderedExact, currency, lang)} - ${StitchBidiUtils.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)}",
                                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
                                     color = financial.income
                                 )
@@ -1081,7 +1081,7 @@ fun CashPaymentScreen(
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
                                         Text(
-                                            text = WesternFormatters.formatHumanMoney2dp(if (isCustBalKnown) custBalanceExact else null, currency, lang),
+                                            text = StitchBidiUtils.formatHumanMoney2dp(if (isCustBalKnown) custBalanceExact else null, currency, lang),
                                             style = MaterialTheme.typography.titleMedium.copy(
                                                 fontWeight = FontWeight.Bold,
                                                 fontFamily = MonoFontFamily
@@ -1118,7 +1118,7 @@ fun CashPaymentScreen(
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
                                         text = if (selectedCustomer.creditLimitExact != null) {
-                                            WesternFormatters.formatHumanMoney2dp(selectedCustomer.creditLimitExact, currency, lang)
+                                            StitchBidiUtils.formatHumanMoney2dp(selectedCustomer.creditLimitExact, currency, lang)
                                         } else {
                                             lang.tr("غير محدد", "Not set")
                                         },
@@ -1140,7 +1140,7 @@ fun CashPaymentScreen(
 
                             if (isCustBalKnown && projectedBalanceExact != null) {
                                 if (creditLimitExact == null) {
-                                    val projectedFormatted = WesternFormatters.formatHumanMoney2dp(projectedBalanceExact, currency, lang)
+                                    val projectedFormatted = StitchBidiUtils.formatHumanMoney2dp(projectedBalanceExact, currency, lang)
                                     Text(
                                         text = lang.tr(
                                             "سقف الائتمان غير محدد لهذا الزبون (إرشادي) — الرصيد المتوقع بعد العملية: $projectedFormatted",
@@ -1195,7 +1195,7 @@ fun CashPaymentScreen(
 
                                         if (!overLimit) {
                                             val safeRemainingExact = creditLimitExact.subtract(projectedBalanceExact).coerceAtLeast(BigDecimal.ZERO)
-                                            val safeRemainingFormatted = WesternFormatters.formatHumanMoney2dp(safeRemainingExact, currency, lang)
+                                            val safeRemainingFormatted = StitchBidiUtils.formatHumanMoney2dp(safeRemainingExact, currency, lang)
                                             Text(
                                                 text = lang.tr(
                                                     "ضمن الحد الائتماني الآمن (متبقي $safeRemainingFormatted متاح)",
@@ -1239,7 +1239,7 @@ fun CashPaymentScreen(
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
-                                            text = "${WesternFormatters.formatHumanMoney2dp(if (isCustBalKnown) custBalanceExact else null, currency, lang)} + ${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)}",
+                                            text = "${StitchBidiUtils.formatHumanMoney2dp(if (isCustBalKnown) custBalanceExact else null, currency, lang)} + ${StitchBidiUtils.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)}",
                                             style = MaterialTheme.typography.bodySmall.copy(
                                                 fontSize = 12.sp,
                                                 fontFamily = MonoFontFamily
@@ -1249,7 +1249,7 @@ fun CashPaymentScreen(
                                     }
 
                                     Text(
-                                        text = WesternFormatters.formatHumanMoney2dp(if (isCustBalKnown) projectedBalanceExact else null, currency, lang),
+                                        text = StitchBidiUtils.formatHumanMoney2dp(if (isCustBalKnown) projectedBalanceExact else null, currency, lang),
                                         style = MaterialTheme.typography.titleMedium.copy(
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = MonoFontFamily
@@ -1394,8 +1394,8 @@ fun CashPaymentScreen(
                             )
                             Text(
                                 text = lang.tr(
-                                    "سيسجل المبلغ كاملاً (${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)}) كذمة مستحقة على حساب الزبون. المقبوض نقداً: ${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}.",
-                                    "Full amount (${WesternFormatters.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)}) will be debited to customer account. Cash received: ${WesternFormatters.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}."
+                                    "سيسجل المبلغ كاملاً (${StitchBidiUtils.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)}) كذمة مستحقة على حساب الزبون. المقبوض نقداً: ${StitchBidiUtils.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}.",
+                                    "Full amount (${StitchBidiUtils.formatHumanMoney2dp(state.basketNetTotalExact, currency, lang)}) will be debited to customer account. Cash received: ${StitchBidiUtils.formatHumanMoney2dp(BigDecimal.ZERO, currency, lang)}."
                                 ),
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant

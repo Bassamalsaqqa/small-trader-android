@@ -159,6 +159,7 @@ fun InvoiceReviewScreen(
         if (state.basket.isEmpty()) {
             EmptyReviewBasketState(
                 lang = lang,
+                currency = state.businessInfo.defaultCurrency,
                 savedDrafts = state.savedDrafts,
                 onReturnToCatalog = onAddMoreItems,
                 onResumeDraft = onResumeDraft,
@@ -240,6 +241,7 @@ fun InvoiceReviewScreen(
                     DraftsAndQuotationBar(
                         savedDrafts = state.savedDrafts,
                         lang = lang,
+                        currency = state.businessInfo.defaultCurrency,
                         onSaveDraft = onSaveDraft,
                         onOpenQuotation = { isQuotationDialogOpen = true },
                         onResumeDraft = onResumeDraft,
@@ -292,6 +294,7 @@ fun InvoiceReviewScreen(
 @Composable
 private fun EmptyReviewBasketState(
     lang: AppLanguage,
+    currency: String = "ILS",
     savedDrafts: List<SaleDraft>,
     onReturnToCatalog: () -> Unit,
     onResumeDraft: ((String) -> Unit)? = null,
@@ -364,6 +367,7 @@ private fun EmptyReviewBasketState(
                 SavedSaleDraftsCard(
                     savedDrafts = savedDrafts,
                     lang = lang,
+                    currency = currency,
                     onResumeDraft = onResumeDraft,
                     onDeleteDraft = onDeleteDraft
                 )
@@ -478,7 +482,7 @@ private fun CustomerAndAccountImpactCard(
                             text = if (selectedCustomer == null) {
                                 lang.tr("بيع نقدي مباشر", "Direct cash sale")
                             } else {
-                                val balanceText = WesternFormatters.formatHumanMoney2dp(selectedCustomer.balanceExact, currency, lang)
+                                val balanceText = StitchBidiUtils.formatHumanMoney2dp(selectedCustomer.balanceExact, currency, lang)
                                 "$balanceText • ${selectedCustomer.phone ?: "--"}"
                             },
                             style = MaterialTheme.typography.bodySmall,
@@ -563,7 +567,7 @@ private fun CustomerAndAccountImpactCard(
                                     val custBalExact = selectedCustomer.balanceExact
                                     val isBalKnown = custBalExact != null
                                     Text(
-                                        text = WesternFormatters.formatHumanMoney2dp(custBalExact, currency, lang),
+                                        text = StitchBidiUtils.formatHumanMoney2dp(custBalExact, currency, lang),
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                         color = if (!isBalKnown) MaterialTheme.colorScheme.onSurfaceVariant else if (custBalExact!! > BigDecimal.ZERO) financial.debit else financial.income
                                     )
@@ -583,7 +587,7 @@ private fun CustomerAndAccountImpactCard(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         Text(
-                                            text = WesternFormatters.formatHumanMoney2dp(projectedExact, currency, lang),
+                                            text = StitchBidiUtils.formatHumanMoney2dp(projectedExact, currency, lang),
                                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                             color = if (wouldCreditExceedLimit) financial.debit else MaterialTheme.colorScheme.onSurface
                                         )
@@ -834,10 +838,12 @@ private fun EditableInvoiceLinesSection(
                                 .padding(end = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
+                            val unitPriceExact = if (product.priceExact != null) item.unitPriceExact else null
+                            val unitPriceDisplay = StitchBidiUtils.formatHumanMoney2dp(unitPriceExact, currency, lang)
                             Text(
                                 text = lang.tr(
-                                    "الكمية: ${WesternFormatters.formatInt(item.quantity)} • سعر القطعة: ${WesternFormatters.formatIls(product.priceIls)} (${product.unit(lang)})",
-                                    "Qty: ${WesternFormatters.formatInt(item.quantity)} • Unit: ${WesternFormatters.formatIls(product.priceIls)} (${product.unit(lang)})"
+                                    "الكمية: ${WesternFormatters.formatInt(item.quantity)} • سعر القطعة: $unitPriceDisplay (${product.unit(lang)})",
+                                    "Qty: ${WesternFormatters.formatInt(item.quantity)} • Unit: $unitPriceDisplay (${product.unit(lang)})"
                                 ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1038,6 +1044,9 @@ private fun DiscountAndRoundingCard(
     onUpdateCustomDiscount: (String) -> Unit
 ) {
     val financial = TraderTheme.financial
+    val currency = state.businessInfo.defaultCurrency
+    val unresolvedTax = state.hasUnresolvedSaleTax
+    val currencyTag = WesternFormatters.formatReceiptCurrencyTag(currency, lang)
     val hasDiscount = state.hasDiscount
     var isExpanded by rememberSaveable(hasDiscount) { mutableStateOf(hasDiscount) }
     val isCustomCapped = state.discountPreset == DiscountPreset.CUSTOM_ILS &&
@@ -1068,7 +1077,11 @@ private fun DiscountAndRoundingCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = WesternFormatters.formatIls(state.basketSubtotalIls),
+                    text = StitchBidiUtils.formatHumanMoney2dp(
+                        state.basketSubtotalExact.takeUnless { unresolvedTax },
+                        currency,
+                        lang
+                    ),
                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -1110,7 +1123,11 @@ private fun DiscountAndRoundingCard(
                             color = financial.incomeContainer
                         ) {
                             Text(
-                                text = "- ${WesternFormatters.formatIls(state.calculatedDiscountIls)}",
+                                text = if (unresolvedTax) {
+                                    lang.tr("غير متاح", "Unavailable")
+                                } else {
+                                    "- ${StitchBidiUtils.formatHumanMoney2dp(state.calculatedDiscountExact, currency, lang)}"
+                                },
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = financial.income,
@@ -1163,8 +1180,13 @@ private fun DiscountAndRoundingCard(
                                     selected = selected,
                                     onClick = { onSelectDiscountPreset(preset) },
                                     label = {
+                                        val presetLabel = if (preset == DiscountPreset.CUSTOM_ILS) {
+                                            lang.tr("خصم ثابت $currencyTag", "Fixed $currencyTag")
+                                        } else {
+                                            lang.tr(preset.labelAr, preset.labelEn)
+                                        }
                                         Text(
-                                            text = lang.tr(preset.labelAr, preset.labelEn),
+                                            text = presetLabel,
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                                         )
@@ -1188,7 +1210,7 @@ private fun DiscountAndRoundingCard(
                                 value = state.customDiscountText,
                                 onValueChange = onUpdateCustomDiscount,
                                 label = {
-                                    Text(lang.tr("قيمة الخصم بالشيكل (₪)", "Discount Amount (ILS ₪)"))
+                                    Text(lang.tr("قيمة الخصم ($currencyTag)", "Discount Amount ($currencyTag)"))
                                 },
                                 placeholder = { Text("5.00") },
                                 singleLine = true,
@@ -1200,10 +1222,15 @@ private fun DiscountAndRoundingCard(
                                     .testTag("custom_discount_input")
                             )
                             if (isCustomCapped) {
+                                val cappedSubtotalText = StitchBidiUtils.formatHumanMoney2dp(
+                                    state.basketSubtotalExact.takeUnless { unresolvedTax },
+                                    currency,
+                                    lang
+                                )
                                 Text(
                                     text = lang.tr(
-                                        "تم تقييد الخصم بحد أقصى يساوي المجموع الفرعي (${WesternFormatters.formatIls(state.basketSubtotalIls)})",
-                                        "Discount capped at subtotal (${WesternFormatters.formatIls(state.basketSubtotalIls)})"
+                                        "تم تقييد الخصم بحد أقصى يساوي المجموع الفرعي ($cappedSubtotalText)",
+                                        "Discount capped at subtotal ($cappedSubtotalText)"
                                     ),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = financial.warning
@@ -1237,7 +1264,11 @@ private fun DiscountAndRoundingCard(
                 }
 
                 Text(
-                    text = WesternFormatters.formatIls(state.basketNetTotalIls),
+                    text = StitchBidiUtils.formatHumanMoney2dp(
+                        state.basketNetTotalExact.takeUnless { unresolvedTax },
+                        currency,
+                        lang
+                    ),
                     style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.testTag("invoice_net_total_text")
@@ -1255,6 +1286,7 @@ private fun DiscountAndRoundingCard(
 private fun DraftsAndQuotationBar(
     savedDrafts: List<SaleDraft>,
     lang: AppLanguage,
+    currency: String = "ILS",
     onSaveDraft: (() -> Unit)?,
     onOpenQuotation: () -> Unit,
     onResumeDraft: ((String) -> Unit)?,
@@ -1372,6 +1404,7 @@ private fun DraftsAndQuotationBar(
                 SavedSaleDraftsCard(
                     savedDrafts = savedDrafts,
                     lang = lang,
+                    currency = currency,
                     onResumeDraft = onResumeDraft,
                     onDeleteDraft = onDeleteDraft
                 )
@@ -1387,6 +1420,7 @@ private fun DraftsAndQuotationBar(
 private fun SavedSaleDraftsCard(
     savedDrafts: List<SaleDraft>,
     lang: AppLanguage,
+    currency: String = "ILS",
     onResumeDraft: (String) -> Unit,
     onDeleteDraft: ((String) -> Unit)?
 ) {
@@ -1431,8 +1465,14 @@ private fun SavedSaleDraftsCard(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            val draftTotalDisplay = currency.trim().takeIf { it.isNotEmpty() }?.let { cleanCurrency ->
+                                StitchBidiUtils.formatCurrency(draft.netTotalIls, cleanCurrency)
+                            } ?: StitchBidiUtils.formatCurrency(
+                                draft.netTotalIls,
+                                "(${lang.tr("العملة غير متاحة", "Currency unavailable")})"
+                            )
                             Text(
-                                text = "${WesternFormatters.formatInt(draft.totalQuantity)} ${lang.tr("وحدات", "units")} • ${WesternFormatters.formatIls(draft.netTotalIls)} • ${draft.timestamp}",
+                                text = "${WesternFormatters.formatInt(draft.totalQuantity)} ${lang.tr("وحدات", "units")} • $draftTotalDisplay • ${draft.timestamp}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1490,7 +1530,15 @@ private fun QuotationPreviewDialog(
     val displayDoc = quotationText.ifBlank {
         buildString {
             appendLine(lang.tr("عرض سعر مرجعي (غير مرحّل)", "Price Quotation (Non-Posting)"))
-            appendLine("${lang.tr("الصافي التقديري:", "Estimated Net Total:")} ${WesternFormatters.formatIls(state.basketNetTotalIls)}")
+            appendLine(
+                "${lang.tr("الصافي التقديري:", "Estimated Net Total:")} ${
+                    StitchBidiUtils.formatHumanMoney2dp(
+                        state.basketNetTotalExact.takeUnless { state.hasUnresolvedSaleTax },
+                        state.businessInfo.defaultCurrency,
+                        lang
+                    )
+                }"
+            )
         }
     }
 
@@ -1619,6 +1667,18 @@ private fun ReviewCheckoutDock(
         ) {
             // Subtotal & Discount breakdown row when discount is applied
             if (hasDiscount) {
+                val dockCurrency = state.businessInfo.defaultCurrency
+                val dockUnresolvedTax = state.hasUnresolvedSaleTax
+                val dockSubtotalText = StitchBidiUtils.formatHumanMoney2dp(
+                    state.basketSubtotalExact.takeUnless { dockUnresolvedTax },
+                    dockCurrency,
+                    lang
+                )
+                val dockDiscountText = if (dockUnresolvedTax) {
+                    lang.tr("غير متاح", "Unavailable")
+                } else {
+                    "- ${StitchBidiUtils.formatHumanMoney2dp(state.calculatedDiscountExact, dockCurrency, lang)}"
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1626,16 +1686,16 @@ private fun ReviewCheckoutDock(
                 ) {
                     Text(
                         text = lang.tr(
-                            "المجموع الفرعي: ${WesternFormatters.formatIls(state.basketSubtotalIls)}",
-                            "Subtotal: ${WesternFormatters.formatIls(state.basketSubtotalIls)}"
+                            "المجموع الفرعي: $dockSubtotalText",
+                            "Subtotal: $dockSubtotalText"
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
                         text = lang.tr(
-                            "الخصم المعتمد: - ${WesternFormatters.formatIls(state.calculatedDiscountIls)}",
-                            "Discount: - ${WesternFormatters.formatIls(state.calculatedDiscountIls)}"
+                            "الخصم المعتمد: $dockDiscountText",
+                            "Discount: $dockDiscountText"
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Bold,
@@ -2040,7 +2100,7 @@ internal fun CustomerPickerModalSheet(
 
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
-                                    text = WesternFormatters.formatHumanMoney2dp(if (isCustBalKnown) custBalExact else null, currency, lang),
+                                    text = StitchBidiUtils.formatHumanMoney2dp(if (isCustBalKnown) custBalExact else null, currency, lang),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = if (!isCustBalKnown) MaterialTheme.colorScheme.onSurfaceVariant else if (custBalExact!! > BigDecimal.ZERO) financial.debit else financial.income
