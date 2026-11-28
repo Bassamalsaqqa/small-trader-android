@@ -604,6 +604,8 @@ class ProductionTraderRepository(
 
     private val _lastRefreshError = MutableStateFlow<String?>(null)
     private val customerRevisions = ConcurrentHashMap<String, AtomicLong>()
+    private val customerCreditLimitRevisions = ConcurrentHashMap<String, AtomicLong>()
+    private fun getCreditLimitRevision(id: String): Long = customerCreditLimitRevisions.computeIfAbsent(id) { AtomicLong(0L) }.get()
     private val customerLocks = ConcurrentHashMap<String, Any>()
     private fun getCustomerLock(customerId: String): Any = customerLocks.computeIfAbsent(customerId) { Any() }
     private val customerInFlightPayments = ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
@@ -2926,15 +2928,22 @@ class ProductionTraderRepository(
                 existing.creditLimitExact
             }
 
-            val updated = existing.copy(
-                nameAr = serverName,
-                nameEn = serverName,
-                phone = authoritativePhone,
-                addressAr = authoritativeAddressAr,
-                addressEn = authoritativeAddressAr,
-                creditLimitExact = authoritativeCreditLimit
-            )
-            _customersFlow.update { list -> list.map { if (it.id == id) updated else it } }
+            val updated = synchronized(getCustomerLock(customerId)) {
+                val current = _customersFlow.value.firstOrNull { it.id == customerId } ?: existing
+                val merged = current.copy(
+                    nameAr = serverName,
+                    nameEn = serverName,
+                    phone = authoritativePhone,
+                    addressAr = authoritativeAddressAr,
+                    addressEn = authoritativeAddressAr,
+                    creditLimitExact = if (updateCreditLimit) authoritativeCreditLimit else current.creditLimitExact
+                )
+                if (updateCreditLimit) {
+                    customerCreditLimitRevisions.computeIfAbsent(customerId) { AtomicLong(0L) }.incrementAndGet()
+                }
+                _customersFlow.update { list -> list.map { if (it.id == id) merged else it } }
+                merged
+            }
             Result.success(updated)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
@@ -2995,6 +3004,7 @@ class ProductionTraderRepository(
         } catch (e: Exception) {
             return@withContext Result.failure(IllegalArgumentException("Invalid customerId ULID: '$customerId'", e))
         }
+        val creditLimitRevisionBefore = getCreditLimitRevision(customerId)
         val revisionBefore = getCustomerRevision(customerId)
         val inFlightBefore = customerInFlightPayments[customerId]?.get() ?: 0
         try {
@@ -3038,7 +3048,7 @@ class ProductionTraderRepository(
                 } else {
                     currentCust?.balanceExact
                 }
-                val resolvedCreditLimit = if (hasCreditLimitKey) {
+                val resolvedCreditLimit = if (hasCreditLimitKey && getCreditLimitRevision(customerId) == creditLimitRevisionBefore) {
                     explicitCreditLimit
                 } else {
                     currentCust?.creditLimitExact
@@ -3067,7 +3077,7 @@ class ProductionTraderRepository(
                                 code = code ?: c.code,
                                 addressAr = address ?: c.addressAr,
                                 addressEn = address ?: c.addressEn,
-                                creditLimitExact = if (hasCreditLimitKey) explicitCreditLimit else c.creditLimitExact,
+                                creditLimitExact = resolvedCreditLimit,
                                 balanceExact = resolvedBalance,
                                 isDetailLoaded = true
                             )

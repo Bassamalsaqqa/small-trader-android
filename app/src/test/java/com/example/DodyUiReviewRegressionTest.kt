@@ -687,4 +687,27 @@ class DodyUiReviewRegressionTest {
         assertTrue("Feedback must report balance unavailable", msgEn.contains("unavailable", ignoreCase = true))
         assertFalse("Feedback must NOT report stale 120.00", msgEn.contains("120.00"))
     }
+    @Test
+    fun actualQuotationShareFormatterUsesCurrencyAndUnknownTaxState() {
+        val vm = TraderViewModel(OfflineDemoTraderRepository())
+        ShadowLooper.idleMainLooper()
+        val field = TraderViewModel::class.java.getDeclaredField("_uiState").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val flow = field.get(vm) as kotlinx.coroutines.flow.MutableStateFlow<TraderUiState>
+        val product = Product(
+            id = "quote-jod", nameAr = "قهوة", nameEn = "Coffee", category = ProductCategory.BEVERAGES,
+            barcode = "123", priceExact = BigDecimal("25.00"), unitAr = "كيس", unitEn = "Bag",
+            stockCount = 30, accentHex = 0xFF14804A, saleCurrencyMinorUnits = 3, taxRateExact = BigDecimal.ZERO
+        )
+        flow.value = flow.value.copy(language = AppLanguage.EN,
+            businessInfo = flow.value.businessInfo.copy(defaultCurrency = "JOD"), basket = listOf(BasketItem(product, 2)))
+        val resolved = vm.formatQuotationShareText()
+        assertTrue(resolved.contains("50.00 JOD"))
+        assertFalse(resolved.contains("₪"))
+        flow.value = flow.value.copy(basket = listOf(BasketItem(product.copy(taxRateId = "pending", taxRateExact = null), 2)))
+        val unresolved = vm.formatQuotationShareText()
+        assertTrue(unresolved.contains("Unavailable"))
+        assertFalse(unresolved.contains("50.00 JOD"))
+    }
+
 }

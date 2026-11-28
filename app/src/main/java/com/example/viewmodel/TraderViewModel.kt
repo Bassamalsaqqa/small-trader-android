@@ -4356,6 +4356,8 @@ class TraderViewModel(
         if (state.basket.isEmpty()) return ""
         val lang = state.language
         val b = state.businessInfo
+        fun money(value: BigDecimal?) = StitchBidiUtils.formatHumanMoney2dp(value, b.defaultCurrency, lang)
+        val totalsAvailable = !state.hasUnresolvedSaleTax
         val custName = state.selectedCustomer?.name(lang)
             ?: state.customerNote.trim().takeIf { it.isNotEmpty() }
             ?: lang.tr("زبون كريم", "Valued Customer")
@@ -4369,15 +4371,15 @@ class TraderViewModel(
         sb.appendLine("--------------------------------")
         state.basket.forEachIndexed { idx, item ->
             sb.appendLine(
-                "${idx + 1}. ${item.product.name(lang)} (${WesternFormatters.formatInt(item.quantity)} × ${WesternFormatters.formatIls(item.product.priceIls)}) = ${WesternFormatters.formatIls(item.lineTotal)}"
+                "${idx + 1}. ${item.product.name(lang)} (${WesternFormatters.formatInt(item.quantity)} × ${money(item.unitPriceExact.takeIf { item.product.priceExact != null })}) = ${money(item.lineTotalExact.takeIf { totalsAvailable })}"
             )
         }
         sb.appendLine("--------------------------------")
         if (state.hasDiscount) {
-            sb.appendLine("${lang.tr("المجموع الفرعي", "Subtotal")}: ${WesternFormatters.formatIls(state.basketSubtotalExact)}")
-            sb.appendLine("${lang.tr("الخصم المقترح", "Proposed Discount")}: -${WesternFormatters.formatIls(state.calculatedDiscountExact)}")
+            sb.appendLine("${lang.tr("المجموع الفرعي", "Subtotal")}: ${money(state.basketSubtotalExact.takeIf { totalsAvailable })}")
+            sb.appendLine("${lang.tr("الخصم المقترح", "Proposed Discount")}: -${money(state.calculatedDiscountExact.takeIf { totalsAvailable })}")
         }
-        sb.appendLine("${lang.tr("الصافي الإجمالي لعرض السعر", "Quoted Net Total")}: ${WesternFormatters.formatIls(state.basketNetTotalExact)}")
+        sb.appendLine("${lang.tr("الصافي الإجمالي لعرض السعر", "Quoted Net Total")}: ${money(state.basketNetTotalExact.takeIf { totalsAvailable })}")
         sb.appendLine(lang.tr("* ملاحظة: عرض السعر لا يخصم من المخزون ولا يقيد ذمة مالية حتى اعتماد البيع.", "* Note: This quotation does not deduct stock or post financial debt until confirmed as a sale."))
         return sb.toString().trim()
     }

@@ -9,6 +9,7 @@ import com.example.data.mobile.readclient.ReadClientTransport
 import com.example.data.mobile.readclient.TransportRequest
 import com.example.data.mobile.readclient.TransportResponse
 import java.math.BigDecimal
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -231,4 +232,39 @@ class DodyReviewRepositoryContractTest {
         assertNull(clearedIlsKey.getOrNull()!!.creditLimitExact)
         assertNull(repo.customersFlow.value.first { it.id == customerId }.creditLimitExact)
     }
+    @Test
+    fun staleNullDetailCannotClearNewerSavedCreditLimit() = runBlocking {
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val gets = java.util.concurrent.atomic.AtomicInteger()
+        val transport = object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                if (request.method.name == "GET" && gets.incrementAndGet() > 1) {
+                    entered.countDown()
+                    check(release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                    return jsonOk("""{"id":"$customerId","name":"Customer","balance":"90.00","credit_limit":null}""")
+                }
+                return jsonOk("""{"id":"$customerId","name":"Customer","balance":"90.00","credit_limit":"750.00"}""")
+            }
+        }
+        val repo = createRepository(transport)
+        try {
+            assertTrue(repo.getCustomerDetail(customerId).isSuccess)
+            val stale = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).async {
+                repo.getCustomerDetail(customerId)
+            }
+            try {
+                assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                assertTrue(repo.updateCustomer(customerId, "Customer", null, null, BigDecimal("750.00"), false, false, true).isSuccess)
+            } finally {
+                release.countDown()
+            }
+            assertEquals(BigDecimal("750.00"), stale.await().getOrThrow().creditLimitExact)
+            assertEquals(BigDecimal("750.00"), repo.customersFlow.value.single().creditLimitExact)
+        } finally {
+            release.countDown()
+            repo.close()
+        }
+    }
+
 }
