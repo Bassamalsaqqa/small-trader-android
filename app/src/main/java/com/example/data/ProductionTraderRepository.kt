@@ -2640,36 +2640,19 @@ class ProductionTraderRepository(
             val officialId = snapshot.properties["id"]?.asString()
                 ?: snapshot.properties["receipt_id"]?.asString()
                 ?: return@withContext Result.failure(IllegalStateException("Server did not return payment ID"))
-            val officialAmount = snapshot.properties["amount"].toNullableBigDecimal(currencyMinorUnits)
-                ?: snapshot.properties["amount"]?.asString()?.let { BigDecimal(it) }
-                ?: amountExact
+            val parsedFields = parseCanonicalPaymentFields(
+                snapshot = snapshot,
+                fallbackAmount = amountExact,
+                fallbackAllocated = totalAllocated,
+                defaultAdvance = allocations.isEmpty()
+            )
+            val officialAmount = parsedFields.officialAmount
             val postedAt = snapshot.properties["posted_at"]?.asString() ?: effectivePaymentDate
 
-            val isAdvance = snapshot.properties["is_advance"]?.asBoolean() ?: (allocations.isEmpty())
-            val allocatedAmount = snapshot.properties["allocated_amount"].toNullableBigDecimal(currencyMinorUnits)
-                ?: snapshot.properties["allocated_amount_exact"].toNullableBigDecimal(currencyMinorUnits)
-                ?: totalAllocated
-            val unallocatedAmount = snapshot.properties["unallocated_amount"].toNullableBigDecimal(currencyMinorUnits)
-                ?: snapshot.properties["unallocated_amount_exact"].toNullableBigDecimal(currencyMinorUnits)
-                ?: (officialAmount - allocatedAmount).coerceAtLeast(BigDecimal.ZERO)
-
-            val parsedAllocations = mutableListOf<PaymentAllocationResult>()
-            val respAllocs = snapshot.properties["allocations"]
-            if (respAllocs is StrictJsonArray) {
-                for (el in respAllocs.elements) {
-                    if (el is StrictJsonObject) {
-                        val tType = el.properties["target_type"]?.asString() ?: ""
-                        val tId = el.properties["target_id"]?.asString() ?: ""
-                        val amt = el.properties["allocated_amount"].toNullableBigDecimal(currencyMinorUnits)
-                            ?: el.properties["allocated_amount_exact"].toNullableBigDecimal(currencyMinorUnits)
-                            ?: el.properties["amount"].toNullableBigDecimal(currencyMinorUnits)
-                            ?: BigDecimal.ZERO
-                        if (tId.isNotBlank()) {
-                            parsedAllocations.add(PaymentAllocationResult(tType, tId, amt, amt))
-                        }
-                    }
-                }
-            }
+            val isAdvance = parsedFields.isAdvance
+            val allocatedAmount = parsedFields.allocatedAmount
+            val unallocatedAmount = parsedFields.unallocatedAmount
+            val parsedAllocations = parsedFields.allocations
 
             // Authoritative customer detail from server with strict session recheck
             val snapshotBalance = snapshot.properties["balance"].toNullableBigDecimal()
@@ -2696,27 +2679,13 @@ class ProductionTraderRepository(
 
                 if (isLatest) {
                     incrementCustomerRevision(customerId)
-                    if (refreshFailed) {
-                        _customersFlow.update { list ->
-                            list.map { c ->
-                                if (c.id == customerId) c.copy(balanceExact = null) else c
-                            }
+                    val publishedBalance = if (refreshFailed) null else authBalance
+                    _customersFlow.update { list ->
+                        list.map { c ->
+                            if (c.id == customerId) c.copy(balanceExact = publishedBalance) else c
                         }
-                        null
-                    } else {
-                        val existingCust = _customersFlow.value.firstOrNull { it.id == customerId }
-                        val newBalance = authBalance
-                            ?: existingCust?.balanceExact?.subtract(officialAmount)
-                            ?: existingCust?.balanceExact
-                        if (newBalance != null) {
-                            _customersFlow.update { list ->
-                                list.map { c ->
-                                    if (c.id == customerId) c.copy(balanceExact = newBalance) else c
-                                }
-                            }
-                        }
-                        newBalance
                     }
+                    publishedBalance
                 } else {
                     // Older payment cannot clear newer state! Leave existing state in _customersFlow
                     _customersFlow.value.firstOrNull { it.id == customerId }?.balanceExact
@@ -3061,52 +3030,54 @@ class ProductionTraderRepository(
             } else {
                 existing?.creditLimitExact
             }
-            val serverBalance = if (obj.properties.containsKey("balance")) {
-                obj.properties["balance"].toNullableBigDecimal()
-            } else null
+            val serverBalance = when {
+                obj.properties.containsKey("balance") -> obj.properties["balance"].toNullableBigDecimal()
+                obj.properties.containsKey("balance_ils") -> obj.properties["balance_ils"].toNullableBigDecimal()
+                else -> null
+            }
 
-            val balance = synchronized(getCustomerLock(customerId)) {
+            val detail = synchronized(getCustomerLock(customerId)) {
                 val currentRevision = getCustomerRevision(customerId)
                 val inFlightNow = customerInFlightPayments[customerId]?.get() ?: 0
                 val currentCust = _customersFlow.value.firstOrNull { it.id == customerId }
                 val canPublishBalance = (currentRevision == revisionBefore && inFlightBefore == 0 && inFlightNow == 0)
-                if (canPublishBalance) {
-                    serverBalance ?: currentCust?.balanceExact
+                val resolvedBalance = if (canPublishBalance) {
+                    serverBalance
                 } else {
                     currentCust?.balanceExact
                 }
-            }
-
-            val detail = Customer(
-                id = id,
-                nameAr = nameAr,
-                nameEn = nameEn,
-                phone = phone,
-                code = code,
-                addressAr = address ?: existing?.addressAr,
-                addressEn = address ?: existing?.addressEn,
-                creditLimitExact = creditLimit,
-                balanceExact = balance,
-                isWalkIn = existing?.isWalkIn ?: false,
-                isDetailLoaded = true
-            )
-            _customersFlow.update { list ->
-                if (list.none { it.id == id }) list + detail
-                else list.map { c ->
-                    if (c.id == id) {
-                        c.copy(
-                            nameAr = nameAr,
-                            nameEn = nameEn,
-                            phone = phone ?: c.phone,
-                            code = code ?: c.code,
-                            addressAr = address ?: c.addressAr,
-                            addressEn = address ?: c.addressEn,
-                            creditLimitExact = creditLimit ?: c.creditLimitExact,
-                            balanceExact = balance ?: c.balanceExact,
-                            isDetailLoaded = true
-                        )
-                    } else c
+                val built = Customer(
+                    id = id,
+                    nameAr = nameAr,
+                    nameEn = nameEn,
+                    phone = phone ?: currentCust?.phone,
+                    code = code ?: currentCust?.code,
+                    addressAr = address ?: currentCust?.addressAr,
+                    addressEn = address ?: currentCust?.addressEn,
+                    creditLimitExact = creditLimit,
+                    balanceExact = resolvedBalance,
+                    isWalkIn = currentCust?.isWalkIn ?: false,
+                    isDetailLoaded = true
+                )
+                _customersFlow.update { list ->
+                    if (list.none { it.id == id }) list + built
+                    else list.map { c ->
+                        if (c.id == id) {
+                            c.copy(
+                                nameAr = nameAr,
+                                nameEn = nameEn,
+                                phone = phone ?: c.phone,
+                                code = code ?: c.code,
+                                addressAr = address ?: c.addressAr,
+                                addressEn = address ?: c.addressEn,
+                                creditLimitExact = creditLimit ?: c.creditLimitExact,
+                                balanceExact = resolvedBalance,
+                                isDetailLoaded = true
+                            )
+                        } else c
+                    }
                 }
+                built
             }
             Result.success(detail)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -3148,39 +3119,38 @@ class ProductionTraderRepository(
             val company = obj.properties["company_name"].toNullableString() ?: obj.properties["company"].toNullableString()
             val phone = obj.properties["phone"].toNullableString()
             val code = obj.properties["code"].toNullableString()
-            val existing = _suppliersFlow.value.firstOrNull { it.id == supplierId }
             val balanceStr = obj.properties["balance_owed"].toNullableString()
                 ?: obj.properties["owed"].toNullableString()
                 ?: obj.properties["balance"].toNullableString()
-            val balanceExact = balanceStr?.let { try { BigDecimal(it) } catch (_: Exception) { null } } ?: existing?.balanceOwedExact
+            val serverBalanceOwed = balanceStr?.let { try { BigDecimal(it) } catch (_: Exception) { null } }
             val advancesStr = obj.properties["advances"].toNullableString()
-            val advancesExact = advancesStr?.let { try { BigDecimal(it) } catch (_: Exception) { null } } ?: existing?.advancesExact
+            val serverAdvances = advancesStr?.let { try { BigDecimal(it) } catch (_: Exception) { null } }
 
-            val (balanceOwed, advances) = synchronized(getSupplierLock(supplierId)) {
+            val detail = synchronized(getSupplierLock(supplierId)) {
                 val currentRevision = getSupplierRevision(supplierId)
                 val inFlightNow = supplierInFlightPayments[supplierId]?.get() ?: 0
                 val currentSup = _suppliersFlow.value.firstOrNull { it.id == supplierId }
                 val canPublishBalance = (currentRevision == revisionBefore && inFlightBefore == 0 && inFlightNow == 0)
-                if (canPublishBalance) {
-                    Pair(balanceExact ?: currentSup?.balanceOwedExact, advancesExact ?: currentSup?.advancesExact)
+                val (balanceOwed, advances) = if (canPublishBalance) {
+                    Pair(serverBalanceOwed, serverAdvances)
                 } else {
                     Pair(currentSup?.balanceOwedExact, currentSup?.advancesExact)
                 }
-            }
-
-            val detail = Supplier(
-                id = id,
-                code = code ?: existing?.code,
-                nameAr = nameAr,
-                nameEn = nameEn,
-                companyAr = company ?: existing?.companyAr,
-                companyEn = company ?: existing?.companyEn,
-                phone = phone ?: existing?.phone,
-                balanceOwedExact = balanceOwed,
-                advancesExact = advances
-            )
-            _suppliersFlow.update { list ->
-                if (list.none { it.id == id }) list + detail else list.map { if (it.id == id) detail else it }
+                val built = Supplier(
+                    id = id,
+                    code = code ?: currentSup?.code,
+                    nameAr = nameAr,
+                    nameEn = nameEn,
+                    companyAr = company ?: currentSup?.companyAr,
+                    companyEn = company ?: currentSup?.companyEn,
+                    phone = phone ?: currentSup?.phone,
+                    balanceOwedExact = balanceOwed,
+                    advancesExact = advances
+                )
+                _suppliersFlow.update { list ->
+                    if (list.none { it.id == id }) list + built else list.map { if (it.id == id) built else it }
+                }
+                built
             }
             Result.success(detail)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -3924,34 +3894,19 @@ class ProductionTraderRepository(
                 ?: snapshot.properties["voucher_id"].toNullableString()
                 ?: snapshot.properties["receipt_id"].toNullableString()
                 ?: return@withContext Result.failure(IllegalStateException("Server did not return payment ID"))
-            val officialAmount = snapshot.properties["amount"].toNullableBigDecimal(currencyMinorUnits) ?: amountExact
+            val parsedFields = parseCanonicalPaymentFields(
+                snapshot = snapshot,
+                fallbackAmount = amountExact,
+                fallbackAllocated = totalAllocated,
+                defaultAdvance = allocations.isEmpty()
+            )
+            val officialAmount = parsedFields.officialAmount
             val postedAt = snapshot.properties["posted_at"].toNullableString() ?: effectivePaymentDate
 
-            val isAdvance = snapshot.properties["is_advance"]?.asBoolean() ?: (allocations.isEmpty())
-            val allocatedAmount = snapshot.properties["allocated_amount"].toNullableBigDecimal(currencyMinorUnits)
-                ?: snapshot.properties["allocated_amount_exact"].toNullableBigDecimal(currencyMinorUnits)
-                ?: totalAllocated
-            val unallocatedAmount = snapshot.properties["unallocated_amount"].toNullableBigDecimal(currencyMinorUnits)
-                ?: snapshot.properties["unallocated_amount_exact"].toNullableBigDecimal(currencyMinorUnits)
-                ?: (officialAmount - allocatedAmount).coerceAtLeast(BigDecimal.ZERO)
-
-            val parsedAllocations = mutableListOf<PaymentAllocationResult>()
-            val respAllocs = snapshot.properties["allocations"]
-            if (respAllocs is StrictJsonArray) {
-                for (el in respAllocs.elements) {
-                    if (el is StrictJsonObject) {
-                        val tType = el.properties["target_type"]?.asString() ?: ""
-                        val tId = el.properties["target_id"]?.asString() ?: ""
-                        val amt = el.properties["allocated_amount"].toNullableBigDecimal(currencyMinorUnits)
-                            ?: el.properties["allocated_amount_exact"].toNullableBigDecimal(currencyMinorUnits)
-                            ?: el.properties["amount"].toNullableBigDecimal(currencyMinorUnits)
-                            ?: BigDecimal.ZERO
-                        if (tId.isNotBlank()) {
-                            parsedAllocations.add(PaymentAllocationResult(tType, tId, amt, amt))
-                        }
-                    }
-                }
-            }
+            val isAdvance = parsedFields.isAdvance
+            val allocatedAmount = parsedFields.allocatedAmount
+            val unallocatedAmount = parsedFields.unallocatedAmount
+            val parsedAllocations = parsedFields.allocations
 
             // Authoritative supplier detail from server (unknown balance remains null) with strict session recheck
             val snapshotBalanceOwed: BigDecimal? = snapshot.properties["balance_owed"].toNullableBigDecimal()
@@ -3982,22 +3937,16 @@ class ProductionTraderRepository(
                 val isLatest = (currentRevision == postPaymentRevision) || (inFlightCounter.get() == 1 && currentRevision <= postPaymentRevision)
                 if (isLatest) {
                     incrementSupplierRevision(supplierId)
-                    if (refreshFailed && authoritativeBalanceExact == null && authoritativeAdvancesExact == null) {
-                        _suppliersFlow.update { list ->
-                            list.map { s ->
-                                if (s.id == supplierId) s.copy(balanceOwedExact = null, advancesExact = null) else s
-                            }
-                        }
-                    } else if (authoritativeBalanceExact != null || authoritativeAdvancesExact != null) {
-                        _suppliersFlow.update { list ->
-                            list.map { s ->
-                                if (s.id == supplierId) {
-                                    s.copy(
-                                        balanceOwedExact = authoritativeBalanceExact,
-                                        advancesExact = authoritativeAdvancesExact
-                                    )
-                                } else s
-                            }
+                    val publishedBalanceOwed = if (refreshFailed) null else authoritativeBalanceExact
+                    val publishedAdvances = if (refreshFailed) null else authoritativeAdvancesExact
+                    _suppliersFlow.update { list ->
+                        list.map { s ->
+                            if (s.id == supplierId) {
+                                s.copy(
+                                    balanceOwedExact = publishedBalanceOwed,
+                                    advancesExact = publishedAdvances
+                                )
+                            } else s
                         }
                     }
                 }
@@ -4022,25 +3971,85 @@ class ProductionTraderRepository(
         }
     }
 
+    private data class ParsedCanonicalPaymentFields(
+        val officialAmount: BigDecimal,
+        val isAdvance: Boolean,
+        val allocatedAmount: BigDecimal,
+        val unallocatedAmount: BigDecimal,
+        val allocations: List<PaymentAllocationResult>
+    )
+
+    private fun parseCanonicalPaymentFields(
+        snapshot: StrictJsonObject,
+        fallbackAmount: BigDecimal,
+        fallbackAllocated: BigDecimal,
+        defaultAdvance: Boolean
+    ): ParsedCanonicalPaymentFields {
+        val officialAmount = snapshot.properties["amount_exact"].toNullableBigDecimal()
+            ?: snapshot.properties["amount"].toNullableBigDecimal()
+            ?: fallbackAmount
+        val isAdvance = snapshot.properties["is_advance"]?.asBoolean() ?: defaultAdvance
+        val allocatedAmount = snapshot.properties["allocated_amount_exact"].toNullableBigDecimal()
+            ?: snapshot.properties["allocated_amount"].toNullableBigDecimal()
+            ?: fallbackAllocated
+        val unallocatedAmount = snapshot.properties["unallocated_amount_exact"].toNullableBigDecimal()
+            ?: snapshot.properties["unallocated_amount"].toNullableBigDecimal()
+            ?: (officialAmount - allocatedAmount).coerceAtLeast(BigDecimal.ZERO)
+
+        val parsedAllocations = mutableListOf<PaymentAllocationResult>()
+        val respAllocs = snapshot.properties["allocations"]
+        if (respAllocs is StrictJsonArray) {
+            for (el in respAllocs.elements) {
+                if (el is StrictJsonObject) {
+                    val tType = el.properties["target_type"]?.asString() ?: ""
+                    val tId = el.properties["target_id"]?.asString() ?: ""
+                    val allocAmt = el.properties["allocated_amount_exact"].toNullableBigDecimal()
+                        ?: el.properties["amount_exact"].toNullableBigDecimal()
+                        ?: el.properties["allocated_amount"].toNullableBigDecimal()
+                        ?: el.properties["amount"].toNullableBigDecimal()
+                        ?: BigDecimal.ZERO
+                    val lineAmt = el.properties["amount_exact"].toNullableBigDecimal()
+                        ?: el.properties["allocated_amount_exact"].toNullableBigDecimal()
+                        ?: el.properties["amount"].toNullableBigDecimal()
+                        ?: el.properties["allocated_amount"].toNullableBigDecimal()
+                        ?: allocAmt
+                    if (tId.isNotBlank()) {
+                        parsedAllocations.add(PaymentAllocationResult(tType, tId, lineAmt, allocAmt))
+                    }
+                }
+            }
+        }
+        return ParsedCanonicalPaymentFields(
+            officialAmount = officialAmount,
+            isAdvance = isAdvance,
+            allocatedAmount = allocatedAmount,
+            unallocatedAmount = unallocatedAmount,
+            allocations = parsedAllocations
+        )
+    }
+
     private fun parseSettlementTargetsResponse(root: StrictJsonObject, isSupplier: Boolean): SettlementTargetsResponse {
         return SettlementTargetsResponse.fromStrictJson(root, isSupplier, currencyMinorUnits)
     }
 
     private fun updateSupplierFromServer(supObj: StrictJsonObject) {
         val id = supObj.properties["id"].toNullableString() ?: return
-        val balanceOwedExact = supObj.properties["balance"].toNullableBigDecimal()
-            ?: supObj.properties["balance_owed"].toNullableBigDecimal()
+        val balanceOwedExact = supObj.properties["balance_owed"].toNullableBigDecimal()
             ?: supObj.properties["owed"].toNullableBigDecimal()
+            ?: supObj.properties["balance"].toNullableBigDecimal()
             ?: supObj.properties["balance_owed_ils"].toNullableBigDecimal()
         val advancesExact = supObj.properties["advances"].toNullableBigDecimal()
-        _suppliersFlow.update { list ->
-            list.map { s ->
-                if (s.id == id) {
-                    s.copy(
-                        balanceOwedExact = balanceOwedExact ?: s.balanceOwedExact,
-                        advancesExact = advancesExact
-                    )
-                } else s
+        synchronized(getSupplierLock(id)) {
+            if ((supplierInFlightPayments[id]?.get() ?: 0) > 0) return
+            _suppliersFlow.update { list ->
+                list.map { s ->
+                    if (s.id == id) {
+                        s.copy(
+                            balanceOwedExact = balanceOwedExact,
+                            advancesExact = advancesExact
+                        )
+                    } else s
+                }
             }
         }
     }

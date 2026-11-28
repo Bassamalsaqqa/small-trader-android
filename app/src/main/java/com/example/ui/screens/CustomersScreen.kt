@@ -1655,6 +1655,7 @@ fun CustomerDetailScreen(
     if (isEditCustomerOpen && (onUpdateCustomerWithDetails != null || onUpdateCustomerWithResult != null || onUpdateCustomer != null)) {
         EditCustomerDialog(
             customer = customer,
+            currency = currency,
             lang = lang,
             onDismiss = { isEditCustomerOpen = false },
             onConfirmUpdate = { name, phone, address, upPhone, upAddr, upLimit, limitExact, limitIls ->
@@ -1696,6 +1697,7 @@ fun CustomerDetailScreen(
 @Composable
 private fun EditCustomerDialog(
     customer: Customer,
+    currency: String = "ILS",
     lang: AppLanguage,
     onDismiss: () -> Unit,
     onConfirmUpdate: (
@@ -1821,7 +1823,10 @@ private fun EditCustomerDialog(
                             .filter { ch -> ch.isDigit() || ch == '.' }
                         limitModified = true
                     },
-                    label = { Text(lang.tr("سقف الدين المسموح (₪)", "Credit Limit (₪)")) },
+                    label = {
+                        val currencyTag = WesternFormatters.formatReceiptCurrencyTag(currency, lang)
+                        Text(lang.tr("سقف الدين المسموح ($currencyTag)", "Credit Limit ($currencyTag)"))
+                    },
                     placeholder = {
                         if (customer.creditLimitExact == null) {
                             Text(lang.tr("غير محدد — اتركه فارغاً للإبقاء عليه", "Not set — leave blank to keep unchanged"))
@@ -2691,8 +2696,8 @@ fun CustomerPaymentCollectionDialog(
                                                     }
                                                     Text(
                                                         text = lang.tr(
-                                                            "المتبقي: ${StitchBidiUtils.formatHumanMoney2dp(target.remainingAmountExact, currency, lang)}",
-                                                            "Remaining: ${StitchBidiUtils.formatHumanMoney2dp(target.remainingAmountExact, currency, lang)}"
+                                                            "المتبقي: ${StitchBidiUtils.formatHumanMoney2dp(target.remainingAmountExact, target.currency, lang)}",
+                                                            "Remaining: ${StitchBidiUtils.formatHumanMoney2dp(target.remainingAmountExact, target.currency, lang)}"
                                                         ),
                                                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
                                                     )
@@ -2714,6 +2719,28 @@ fun CustomerPaymentCollectionDialog(
                                                     shape = RoundedCornerShape(8.dp),
                                                     textStyle = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, textDirection = TextDirection.Ltr),
                                                     modifier = Modifier.width(115.dp).testTag("target_allocation_input_${target.targetType}_${target.targetId}")
+                                                )
+                                            }
+                                        }
+                                        if (isChecked) {
+                                            val allocText = selectedAllocations[key].orEmpty()
+                                            val requiresManual2dp = PaymentDecimalConsistency.cashEntryText(target.remainingAmountExact, minorUnits) == null
+                                            val parsedAlloc = allocText.toBigDecimalOrNull()
+                                            val isAllocValid = parsedAlloc != null &&
+                                                parsedAlloc > BigDecimal.ZERO &&
+                                                PaymentDecimalConsistency.fitsCashEntry(parsedAlloc, minorUnits)
+                                            if (requiresManual2dp && !isAllocValid) {
+                                                Text(
+                                                    text = lang.tr(
+                                                        "أدخل مبلغ التخصيص بخانتين عشريتين (المتبقي الدقيق لا يُعبَّأ تلقائياً)",
+                                                        "Enter allocation at 2 decimals (exact remaining cannot auto-fill)"
+                                                    ),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = financial.warning,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(start = 12.dp)
+                                                        .testTag("target_2dp_hint_${target.targetType}_${target.targetId}")
                                                 )
                                             }
                                         }

@@ -591,8 +591,8 @@ fun PaySupplierDialog(
                                                     }
                                                     Text(
                                                         text = lang.tr(
-                                                            "المتبقي: ${StitchBidiUtils.formatHumanMoney2dp(target.remainingAmountExact, currency, lang)}",
-                                                            "Remaining: ${StitchBidiUtils.formatHumanMoney2dp(target.remainingAmountExact, currency, lang)}"
+                                                            "المتبقي: ${StitchBidiUtils.formatHumanMoney2dp(target.remainingAmountExact, target.currency, lang)}",
+                                                            "Remaining: ${StitchBidiUtils.formatHumanMoney2dp(target.remainingAmountExact, target.currency, lang)}"
                                                         ),
                                                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
                                                     )
@@ -614,6 +614,28 @@ fun PaySupplierDialog(
                                                     shape = RoundedCornerShape(8.dp),
                                                     textStyle = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, textDirection = TextDirection.Ltr),
                                                     modifier = Modifier.width(115.dp).testTag("target_allocation_input_${target.targetType}_${target.targetId}")
+                                                )
+                                            }
+                                        }
+                                        if (isChecked) {
+                                            val allocText = selectedAllocations[key].orEmpty()
+                                            val requiresManual2dp = PaymentDecimalConsistency.cashEntryText(target.remainingAmountExact, minorUnits) == null
+                                            val parsedAlloc = allocText.toBigDecimalOrNull()
+                                            val isAllocValid = parsedAlloc != null &&
+                                                parsedAlloc > BigDecimal.ZERO &&
+                                                PaymentDecimalConsistency.fitsCashEntry(parsedAlloc, minorUnits)
+                                            if (requiresManual2dp && !isAllocValid) {
+                                                Text(
+                                                    text = lang.tr(
+                                                        "أدخل مبلغ التخصيص بخانتين عشريتين (المتبقي الدقيق لا يُعبَّأ تلقائياً)",
+                                                        "Enter allocation at 2 decimals (exact remaining cannot auto-fill)"
+                                                    ),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = TraderTheme.financial.warning,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(start = 12.dp)
+                                                        .testTag("target_2dp_hint_${target.targetType}_${target.targetId}")
                                                 )
                                             }
                                         }

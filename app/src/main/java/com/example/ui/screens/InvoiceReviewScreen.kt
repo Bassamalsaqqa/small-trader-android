@@ -593,8 +593,8 @@ private fun CustomerAndAccountImpactCard(
                                 if (wouldCreditExceedLimit) {
                                     StitchBadge(
                                         text = lang.tr(
-                                            "تحذير: سيتجاوز سقف الائتمان (${WesternFormatters.formatHumanMoney2dp(selectedCustomer.creditLimitExact, currency, lang)})",
-                                            "Warning: Exceeds credit limit (${WesternFormatters.formatHumanMoney2dp(selectedCustomer.creditLimitExact, currency, lang)})"
+                                            "تحذير: سيتجاوز سقف الائتمان (${StitchBidiUtils.formatHumanMoney2dp(selectedCustomer.creditLimitExact, currency, lang)})",
+                                            "Warning: Exceeds credit limit (${StitchBidiUtils.formatHumanMoney2dp(selectedCustomer.creditLimitExact, currency, lang)})"
                                         ),
                                         tone = StitchBadgeTone.DANGER
                                     )
@@ -696,8 +696,8 @@ private fun EditableInvoiceLinesSection(
                     )
                     Text(
                         text = lang.tr(
-                            "${WesternFormatters.formatInt(basket.size)} أصناف • ${WesternFormatters.formatInt(totalUnits)} قطع • المجموع ${WesternFormatters.formatCurrency(subtotal, currency)}",
-                            "${WesternFormatters.formatInt(basket.size)} items • ${WesternFormatters.formatInt(totalUnits)} units • Total ${WesternFormatters.formatCurrency(subtotal, currency)}"
+                            "${WesternFormatters.formatInt(basket.size)} أصناف • ${WesternFormatters.formatInt(totalUnits)} قطع • المجموع ${StitchBidiUtils.formatHumanMoney2dp(subtotal, currency, lang)}",
+                            "${WesternFormatters.formatInt(basket.size)} items • ${WesternFormatters.formatInt(totalUnits)} units • Total ${StitchBidiUtils.formatHumanMoney2dp(subtotal, currency, lang)}"
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -811,9 +811,10 @@ private fun EditableInvoiceLinesSection(
                         }
 
                         Text(
-                            text = WesternFormatters.formatCurrency(
+                            text = StitchBidiUtils.formatHumanMoney2dp(
                                 item.lineTotalExact.takeIf { item.hasResolvedTax || product.saleCurrencyMinorUnits == null },
-                                currency
+                                currency,
+                                lang
                             ),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
@@ -984,7 +985,9 @@ private fun RestoredUnsupportedDiscountCard(
                 )
             }
 
-            val discountFormatted = WesternFormatters.formatExactOrPlain(state.calculatedDiscountExact)
+            val discountFormatted = StitchBidiUtils.formatHumanMoney2dp(
+                state.calculatedDiscountExact, state.businessInfo.defaultCurrency, lang
+            )
             Text(
                 text = lang.tr(
                     "أزل الخصم ($discountFormatted) للمتابعة. ستبقى الأصناف والكميات والزبون.",
@@ -1740,9 +1743,10 @@ private fun ReviewCheckoutDock(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = WesternFormatters.formatCurrency(
+                        text = StitchBidiUtils.formatHumanMoney2dp(
                             state.basketNetTotalExact.takeUnless { state.hasUnresolvedSaleTax },
-                            state.businessInfo.defaultCurrency
+                            state.businessInfo.defaultCurrency,
+                            lang
                         ),
                         style = MaterialTheme.typography.headlineMedium.copy(
                             fontWeight = FontWeight.Bold
@@ -1991,7 +1995,7 @@ internal fun CustomerPickerModalSheet(
                     val isCustBalKnown = custBalExact != null
                     val projectedExact = if (isCustBalKnown) custBalExact!!.add(netTotalExact) else null
                     val limitExact = cust.creditLimitExact
-                    val wouldExceed = if (projectedExact != null && limitExact != null && limitExact > BigDecimal.ZERO) {
+                    val wouldExceed = if (projectedExact != null && limitExact != null && limitExact >= BigDecimal.ZERO) {
                         projectedExact > limitExact
                     } else {
                         false

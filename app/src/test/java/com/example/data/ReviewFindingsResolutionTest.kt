@@ -396,14 +396,31 @@ class ReviewFindingsResolutionTest {
             isDetailLoaded = true
         )
 
+        val getStarted = CountDownLatch(1)
+        val newCommitted = CountDownLatch(1)
+
         val transport = object : ReadClientTransport {
             override fun execute(request: TransportRequest): TransportResponse {
-                return TransportResponse(
-                    statusCode = 201,
-                    headers = emptyMap(),
-                    // Payment returns amount but NO balance property in snapshot
-                    body = """{"id":"01JCV8X9M2NQW3TYZ4R5SPAY02","amount":"50.00","posted_at":"2026-11-22"}"""
-                )
+                return when {
+                    request.method == HttpMethod.POST && request.path.contains("/customers/$custId/payments") -> {
+                        getStarted.await(5, TimeUnit.SECONDS)
+                        TransportResponse(
+                            statusCode = 201,
+                            headers = mapOf("Content-Type" to "application/json"),
+                            body = """{"id":"01JCV8X9M2NQW3TYZ4R5SPAYNEW","amount":"50.00","balance":"100.00","posted_at":"2026-11-22"}"""
+                        )
+                    }
+                    request.method == HttpMethod.GET && request.path.endsWith("/customers/$custId") -> {
+                        getStarted.countDown()
+                        newCommitted.await(5, TimeUnit.SECONDS)
+                        TransportResponse(
+                            statusCode = 200,
+                            headers = mapOf("Content-Type" to "application/json"),
+                            body = """{"id":"$custId","name_ar":"سعيد المصري","phone":"0599333444","balance":null}"""
+                        )
+                    }
+                    else -> TransportResponse(200, emptyMap(), "{}")
+                }
             }
         }
 
@@ -429,17 +446,26 @@ class ReviewFindingsResolutionTest {
         val flow = customersFlowField.get(repo) as kotlinx.coroutines.flow.MutableStateFlow<List<Customer>>
         flow.value = listOf(initialCust)
 
-        val res = repo.recordCustomerPayment(
-            customerId = custId,
-            amountIls = 50.0,
-            note = "دفعة بدون رصيد جديد",
-            paymentId = "pay_002"
-        )
-        assertTrue(res.isSuccess)
+        val staleGetJob = kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+            repo.getCustomerDetail(custId)
+        }
+        try {
+            assertTrue(getStarted.await(5, TimeUnit.SECONDS))
+            val newRes = repo.recordCustomerPayment(
+                customerId = custId,
+                amountIls = 50.0,
+                note = "pay_new",
+                paymentId = "pay_002_new"
+            )
+            assertTrue(newRes.isSuccess)
+        } finally {
+            newCommitted.countDown()
+            staleGetJob.join()
+        }
 
         val finalCust = repo.customersFlow.value.first { it.id == custId }
-        // 150.00 - 50.00 = 100.00, NOT null!
-        assertNotNull("Balance must not be cleared to null", finalCust.balanceExact)
+        // Out-of-order stale refresh returning balance:null must NOT overwrite newer committed 100.00
+        assertNotNull("Balance must not be cleared by out-of-order stale refresh", finalCust.balanceExact)
         assertEquals(BigDecimal("100.00"), finalCust.balanceExact)
     }
 
