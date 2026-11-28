@@ -2633,12 +2633,18 @@ class TraderViewModel(
                         val inDirectory = state.customers.firstOrNull { it.id == customerId }
                         val fallbackCust = state.selectedCustomerForDetail?.takeIf { it.id == customerId }
                             ?: state.customerSearchResults?.firstOrNull { it.id == customerId }
-                        val updatedCust = (inDirectory ?: fallbackCust)?.let { cust ->
-                            if (tx?.runningBalanceExact != null) cust.copy(balanceExact = tx.runningBalanceExact) else cust
+                        val updatedCust = when {
+                            inDirectory != null -> if (tx?.runningBalanceExact != null) inDirectory.copy(balanceExact = tx.runningBalanceExact) else inDirectory
+                            fallbackCust != null -> if (tx != null) fallbackCust.copy(balanceExact = tx.runningBalanceExact) else fallbackCust
+                            else -> null
                         }
                         val lang = state.language
                         val paidStr = StitchBidiUtils.formatHumanMoney2dp(amountExact, currency, lang)
-                        val balExact = tx?.runningBalanceExact ?: updatedCust?.balanceExact
+                        val balExact = when {
+                            inDirectory != null -> tx?.runningBalanceExact ?: updatedCust?.balanceExact
+                            tx != null -> tx.runningBalanceExact
+                            else -> updatedCust?.balanceExact
+                        }
                         val isBalKnown = balExact != null
                         val hasAllocs = allocations.isNotEmpty()
                         val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
@@ -2692,6 +2698,9 @@ class TraderViewModel(
                             isCustomerPaymentSubmitting = false,
                             customerPaymentError = null,
                             selectedCustomerForDetail = updatedCust,
+                            customerSearchResults = state.customerSearchResults?.map { existing ->
+                                if (existing.id == customerId && updatedCust != null) updatedCust else existing
+                            },
                             lastCustomerPaymentMessageAr = msgAr,
                             lastCustomerPaymentMessageEn = msgEn
                         )
@@ -2744,12 +2753,18 @@ class TraderViewModel(
                         val inDirectory = state.customers.firstOrNull { it.id == customerId }
                         val fallbackCust = state.selectedCustomerForDetail?.takeIf { it.id == customerId }
                             ?: state.customerSearchResults?.firstOrNull { it.id == customerId }
-                        val updatedCust = (inDirectory ?: fallbackCust)?.let { cust ->
-                            if (tx?.runningBalanceExact != null) cust.copy(balanceExact = tx.runningBalanceExact) else cust
+                        val updatedCust = when {
+                            inDirectory != null -> if (tx?.runningBalanceExact != null) inDirectory.copy(balanceExact = tx.runningBalanceExact) else inDirectory
+                            fallbackCust != null -> if (tx != null) fallbackCust.copy(balanceExact = tx.runningBalanceExact) else fallbackCust
+                            else -> null
                         }
                         val lang = state.language
                         val paidStr = StitchBidiUtils.formatHumanMoney2dp(amountExact, currency, lang)
-                        val balExact = tx?.runningBalanceExact ?: updatedCust?.balanceExact
+                        val balExact = when {
+                            inDirectory != null -> tx?.runningBalanceExact ?: updatedCust?.balanceExact
+                            tx != null -> tx.runningBalanceExact
+                            else -> updatedCust?.balanceExact
+                        }
                         val isBalKnown = balExact != null
                         val hasAllocs = allocations.isNotEmpty()
                         val totalAllocExact = allocations.fold(BigDecimal.ZERO) { acc, a -> acc.add(a.amountExact) }
@@ -2805,6 +2820,9 @@ class TraderViewModel(
                             customerPaymentError = null,
                             isPaymentCollectionDialogOpen = false,
                             selectedCustomerForDetail = updatedCust,
+                            customerSearchResults = state.customerSearchResults?.map { existing ->
+                                if (existing.id == customerId && updatedCust != null) updatedCust else existing
+                            },
                             lastCustomerPaymentMessageAr = msgAr,
                             lastCustomerPaymentMessageEn = msgEn
                         )

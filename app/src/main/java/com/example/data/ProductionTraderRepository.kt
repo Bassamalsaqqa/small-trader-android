@@ -3013,15 +3013,14 @@ class ProductionTraderRepository(
             val phone = obj.properties["phone"].toNullableString()
             val code = obj.properties["code"].toNullableString()
             val address = obj.properties["address"].toNullableString() ?: obj.properties["address_ar"].toNullableString()
-            val existing = _customersFlow.value.firstOrNull { it.id == customerId }
-            val creditLimit = if (obj.properties.containsKey("credit_limit")) {
-                obj.properties["credit_limit"].toNullableBigDecimal()
-            } else if (obj.properties.containsKey("credit_limit_exact")) {
-                obj.properties["credit_limit_exact"].toNullableBigDecimal()
-            } else if (obj.properties.containsKey("credit_limit_ils")) {
-                obj.properties["credit_limit_ils"].toNullableBigDecimal()
-            } else {
-                existing?.creditLimitExact
+            val hasCreditLimitKey = obj.properties.containsKey("credit_limit") ||
+                obj.properties.containsKey("credit_limit_exact") ||
+                obj.properties.containsKey("credit_limit_ils")
+            val explicitCreditLimit = when {
+                obj.properties.containsKey("credit_limit") -> obj.properties["credit_limit"].toNullableBigDecimal()
+                obj.properties.containsKey("credit_limit_exact") -> obj.properties["credit_limit_exact"].toNullableBigDecimal()
+                obj.properties.containsKey("credit_limit_ils") -> obj.properties["credit_limit_ils"].toNullableBigDecimal()
+                else -> null
             }
             val serverBalance = when {
                 obj.properties.containsKey("balance") -> obj.properties["balance"].toNullableBigDecimal()
@@ -3039,6 +3038,11 @@ class ProductionTraderRepository(
                 } else {
                     currentCust?.balanceExact
                 }
+                val resolvedCreditLimit = if (hasCreditLimitKey) {
+                    explicitCreditLimit
+                } else {
+                    currentCust?.creditLimitExact
+                }
                 val built = Customer(
                     id = id,
                     nameAr = nameAr,
@@ -3047,7 +3051,7 @@ class ProductionTraderRepository(
                     code = code ?: currentCust?.code,
                     addressAr = address ?: currentCust?.addressAr,
                     addressEn = address ?: currentCust?.addressEn,
-                    creditLimitExact = creditLimit,
+                    creditLimitExact = resolvedCreditLimit,
                     balanceExact = resolvedBalance,
                     isWalkIn = currentCust?.isWalkIn ?: false,
                     isDetailLoaded = true
@@ -3063,7 +3067,7 @@ class ProductionTraderRepository(
                                 code = code ?: c.code,
                                 addressAr = address ?: c.addressAr,
                                 addressEn = address ?: c.addressEn,
-                                creditLimitExact = creditLimit ?: c.creditLimitExact,
+                                creditLimitExact = if (hasCreditLimitKey) explicitCreditLimit else c.creditLimitExact,
                                 balanceExact = resolvedBalance,
                                 isDetailLoaded = true
                             )
