@@ -7,6 +7,7 @@ import com.example.data.mobile.merchantread.CustomerStatementAging
 import com.example.data.mobile.merchantread.CustomerStatementCurrencySummary
 import com.example.data.mobile.merchantread.CustomerStatementEntry
 import com.example.data.mobile.merchantread.LiveCustomerStatement
+import com.example.data.mobile.outbox.CommandStatus
 import com.example.data.mobile.outbox.InMemoryMerchantCommandStore
 import com.example.data.mobile.readclient.HttpMethod
 import com.example.data.mobile.readclient.ReadClientTransport
@@ -21,6 +22,7 @@ import com.example.model.UserSession
 import com.example.viewmodel.TraderViewModel
 import java.io.IOException
 import java.math.BigDecimal
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -30,6 +32,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -153,6 +156,410 @@ class PaymentPrecisionAndRefreshContractTest {
           ]
         }
     """.trimIndent()
+
+    @Test
+    fun malformedPresentExactFields_rejectPostAndRecovery_withoutRotatingEitherPaymentDraft() = runBlocking {
+        for (supplier in listOf(false, true)) {
+            for (field in listOf("amount_exact", "allocated_amount_exact", "unallocated_amount_exact", "allocation")) {
+                val valid = exactPaymentSnapshotJson(
+                    "01JCVPAYMALFORMED00000001", if (supplier) "supplier_id" else "customer_id",
+                    if (supplier) supplierA.value else customerA.value,
+                    if (supplier) "balance_owed" else "balance", if (supplier) "purchase" else "invoice",
+                    if (supplier) targetPurA.value else targetInvA.value
+                )
+                val malformed = if (field == "allocation") valid.replace("\"amount_exact\": \"0.234567\"", "\"amount_exact\": \"invalid\"")
+                    else valid.replace(Regex("\"$field\": \"[^\"]*\""), "\"$field\": \"invalid\"")
+                val store = InMemoryMerchantCommandStore()
+                var posts = 0
+                val repo = newRepo(object : ReadClientTransport {
+                    override fun execute(request: TransportRequest): TransportResponse {
+                        val body = if (request.method == HttpMethod.POST) {
+                            posts++
+                            malformed
+                        } else {
+                            val key = request.queryParams["idempotency_key"]
+                            """{"status":"FOUND","company_id":"${companyA.value}","idempotency_key":"$key","response_snapshot":$malformed}"""
+                        }
+                        return TransportResponse(200, mapOf("Content-Type" to "application/json"), body)
+                    }
+                }, commandStore = store)
+                val form = if (supplier) "supplier_payment" else "customer_payment"
+                val op = repo.getDraftOperationId(form)
+                repeat(2) {
+                    val result = if (supplier) repo.recordSupplierPayment(
+                        supplierA.value, BigDecimal("1.23"), "Malformed exact", ownerSession, op, cashAccountA.value, "2026-11-28"
+                    ) else repo.recordCustomerPayment(
+                        customerA.value, BigDecimal("1.23"), "Malformed exact", op, cashAccountA.value, "2026-11-28"
+                    )
+                    assertTrue("$form/$field must fail before completion", result.isFailure)
+                    assertEquals(op, repo.getDraftOperationId(form))
+                    assertTrue(repo.isDraftRecovering(form))
+                }
+                assertEquals("Recovery must validate without a second POST", 1, posts)
+            }
+        }
+    }
+
+    private fun buildPaymentSnapshotWithExactRawTokens(
+        id: String,
+        supplier: Boolean,
+        amountExactToken: String = "\"1.234567\"",
+        allocatedExactToken: String = "\"0.234567\"",
+        unallocatedExactToken: String = "\"1.000000\"",
+        allocAmountExactToken: String = "\"0.234567\"",
+        allocAllocatedExactToken: String = "\"0.234567\""
+    ): String {
+        val partyField = if (supplier) "supplier_id" else "customer_id"
+        val partyId = if (supplier) supplierA.value else customerA.value
+        val balanceField = if (supplier) "balance_owed" else "balance"
+        val targetType = if (supplier) "purchase" else "invoice"
+        val targetId = if (supplier) targetPurA.value else targetInvA.value
+        return """
+            {
+              "id": "$id",
+              "$partyField": "$partyId",
+              "amount": "1.23",
+              "amount_exact": $amountExactToken,
+              "allocated_amount": "0.23",
+              "allocated_amount_exact": $allocatedExactToken,
+              "unallocated_amount": "1.00",
+              "unallocated_amount_exact": $unallocatedExactToken,
+              "is_advance": false,
+              "posted_at": "2026-11-28",
+              "currency": "USD",
+              "$balanceField": "8.765433",
+              "allocations": [
+                {
+                  "target_type": "$targetType",
+                  "target_id": "$targetId",
+                  "amount": "0.23",
+                  "amount_exact": $allocAmountExactToken,
+                  "allocated_amount": "0.23",
+                  "allocated_amount_exact": $allocAllocatedExactToken
+                }
+              ]
+            }
+        """.trimIndent()
+    }
+
+    @Test
+    fun malformedNullEmptyAndWrongTypeExactFields_rejectPostAndRecovery_thenHealSameKeyOnce() = runBlocking {
+        val malformedTokens = listOf(
+            "null" to "null",
+            "empty" to "\"\"",
+            "blank" to "\"   \"",
+            "json_number" to "1.234567",
+            "json_boolean" to "true",
+            "json_object" to "{}",
+            "json_array" to "[]"
+        )
+        val targetFields = listOf(
+            "snapshot_amount_exact",
+            "snapshot_allocated_amount_exact",
+            "snapshot_unallocated_amount_exact",
+            "alloc_amount_exact",
+            "alloc_allocated_amount_exact"
+        )
+
+        for (supplier in listOf(false, true)) {
+            for (field in targetFields) {
+                for ((label, token) in malformedTokens) {
+                    val malformed = buildPaymentSnapshotWithExactRawTokens(
+                        id = "01JCVPAYMALFORMED00000002",
+                        supplier = supplier,
+                        amountExactToken = if (field == "snapshot_amount_exact") token else "\"1.234567\"",
+                        allocatedExactToken = if (field == "snapshot_allocated_amount_exact") token else "\"0.234567\"",
+                        unallocatedExactToken = if (field == "snapshot_unallocated_amount_exact") token else "\"1.000000\"",
+                        allocAmountExactToken = if (field == "alloc_amount_exact") token else "\"0.234567\"",
+                        allocAllocatedExactToken = if (field == "alloc_allocated_amount_exact") token else "\"0.234567\""
+                    )
+                    val valid = buildPaymentSnapshotWithExactRawTokens(
+                        id = "01JCVPAYMALFORMED00000002",
+                        supplier = supplier
+                    )
+                    var healStatus = false
+                    var posts = 0
+                    var statusLookups = 0
+                    val store = InMemoryMerchantCommandStore()
+                    val repo = newRepo(object : ReadClientTransport {
+                        override fun execute(request: TransportRequest): TransportResponse {
+                            return when {
+                                request.method == HttpMethod.POST -> {
+                                    posts++
+                                    TransportResponse(201, mapOf("Content-Type" to "application/json"), malformed)
+                                }
+                                request.method == HttpMethod.GET && request.path.endsWith("/receipts/status") -> {
+                                    statusLookups++
+                                    val key = request.queryParams["idempotency_key"].orEmpty()
+                                    val snap = if (healStatus) valid else malformed
+                                    TransportResponse(
+                                        200,
+                                        mapOf("Content-Type" to "application/json"),
+                                        """{"status":"FOUND","company_id":"${companyA.value}","idempotency_key":"$key","response_snapshot":$snap}"""
+                                    )
+                                }
+                                else -> TransportResponse(404, emptyMap(), """{"error":{"code":"NOT_FOUND","message":"Not found"}}""")
+                            }
+                        }
+                    }, commandStore = store)
+
+                    if (supplier) {
+                        seedSupplier(repo, Supplier(id = supplierA.value, nameAr = "مورد أ", nameEn = "Sup A", balanceOwedExact = BigDecimal("10.00")))
+                    } else {
+                        seedCustomer(repo, Customer(id = customerA.value, nameAr = "زبون أ", nameEn = "Cust A", balanceExact = BigDecimal("10.00")))
+                    }
+
+                    val form = if (supplier) "supplier_payment" else "customer_payment"
+                    val keyPrefix = if (supplier) "suppay" else "custpay"
+                    val op = repo.getDraftOperationId(form)
+                    val allocs = listOf(
+                        PaymentAllocationInput(
+                            if (supplier) "purchase" else "invoice",
+                            if (supplier) targetPurA.value else targetInvA.value,
+                            BigDecimal("0.23")
+                        )
+                    )
+
+                    suspend fun submit(): Result<*> = if (supplier) {
+                        repo.recordSupplierPayment(
+                            supplierA.value, BigDecimal("1.23"), "Malformed $field=$label", ownerSession, op, cashAccountA.value, "2026-11-28", allocs
+                        )
+                    } else {
+                        repo.recordCustomerPayment(
+                            customerA.value, BigDecimal("1.23"), "Malformed $field=$label", op, cashAccountA.value, "2026-11-28", allocs
+                        )
+                    }
+
+                    // 1. Direct POST with malformed exact field fails before COMPLETED/rotation and retains UNKNOWN_ACK + key
+                    val postRes = submit()
+                    assertTrue("$form/$field/$label POST must fail", postRes.isFailure)
+                    assertEquals(1, posts)
+                    assertEquals(CommandStatus.UNKNOWN_ACK, store.findCommand(companyA.value, actorA.value, deviceA.value, "$keyPrefix-$op")?.status)
+                    assertEquals(op, repo.getDraftOperationId(form))
+                    assertTrue(repo.isDraftRecovering(form))
+
+                    // 2. FOUND recovery with malformed exact field still fails without a second POST or rotation
+                    val foundBadRes = submit()
+                    assertTrue("$form/$field/$label FOUND must fail", foundBadRes.isFailure)
+                    assertEquals(1, posts)
+                    assertEquals(1, statusLookups)
+                    assertEquals(CommandStatus.UNKNOWN_ACK, store.findCommand(companyA.value, actorA.value, deviceA.value, "$keyPrefix-$op")?.status)
+                    assertEquals(op, repo.getDraftOperationId(form))
+                    assertTrue(repo.isDraftRecovering(form))
+                    if (supplier) {
+                        assertTrue(repo.getSupplierPayments().isEmpty())
+                        assertEquals(BigDecimal("10.00"), repo.getSuppliers().single().balanceOwedExact)
+                    } else {
+                        assertTrue(repo.getCustomerTransactions().isEmpty())
+                        assertEquals(BigDecimal("10.00"), repo.getCustomers().single().balanceExact)
+                    }
+
+                    // 3. Once /receipts/status returns a valid canonical exact payload, the preserved key heals with still 1 POST and rotates once
+                    healStatus = true
+                    val healedRes = submit()
+                    assertTrue("$form/$field/$label healed recovery must succeed: ${healedRes.exceptionOrNull()?.message}", healedRes.isSuccess)
+                    assertEquals(1, posts)
+                    assertEquals(2, statusLookups)
+                    assertEquals(CommandStatus.COMPLETED, store.findCommand(companyA.value, actorA.value, deviceA.value, "$keyPrefix-$op")?.status)
+                    assertFalse(repo.isDraftRecovering(form))
+                    assertNotEquals(op, repo.getDraftOperationId(form))
+                    if (supplier) {
+                        val pay = repo.getSupplierPayments().single()
+                        assertEquals(BigDecimal("1.234567"), pay.amountExact)
+                        assertEquals(BigDecimal("0.234567"), pay.allocatedAmountExact)
+                        assertEquals(BigDecimal("1.000000"), pay.unallocatedAmountExact)
+                        assertEquals(BigDecimal("0.234567"), pay.allocations.single().allocatedAmountExact)
+                    } else {
+                        val tx = repo.getCustomerTransactions().single()
+                        assertEquals(BigDecimal("1.234567"), tx.creditExact)
+                        assertEquals(BigDecimal("0.234567"), tx.allocatedAmountExact)
+                        assertEquals(BigDecimal("1.000000"), tx.unallocatedAmountExact)
+                        assertEquals(BigDecimal("0.234567"), tx.allocations.single().allocatedAmountExact)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun cachedCompletedReplay_withMalformedPresentExactFields_rejectsWithZeroNetworkCalls() = runBlocking {
+        val malformedVariants = listOf(
+            buildPaymentSnapshotWithExactRawTokens("01JCVPAYCACHEBAD00000001", supplier = false, amountExactToken = "null"),
+            buildPaymentSnapshotWithExactRawTokens("01JCVPAYCACHEBAD00000002", supplier = false, allocatedExactToken = "\"\""),
+            buildPaymentSnapshotWithExactRawTokens("01JCVPAYCACHEBAD00000003", supplier = false, unallocatedExactToken = "1.000000"),
+            buildPaymentSnapshotWithExactRawTokens("01JCVPAYCACHEBAD00000004", supplier = false, allocAllocatedExactToken = "\"invalid\"")
+        )
+        for (supplier in listOf(false, true)) {
+            for ((idx, rawSnapshot) in malformedVariants.withIndex()) {
+                val malformed = if (supplier) {
+                    rawSnapshot
+                        .replace("\"customer_id\": \"${customerA.value}\"", "\"supplier_id\": \"${supplierA.value}\"")
+                        .replace("\"balance\": \"8.765433\"", "\"balance_owed\": \"8.765433\"")
+                        .replace("\"target_type\": \"invoice\"", "\"target_type\": \"purchase\"")
+                        .replace("\"target_id\": \"${targetInvA.value}\"", "\"target_id\": \"${targetPurA.value}\"")
+                } else rawSnapshot
+
+                val posts = AtomicInteger(0)
+                val statusCalls = AtomicInteger(0)
+                var failInitially = true
+                val store = InMemoryMerchantCommandStore()
+                val repo = newRepo(object : ReadClientTransport {
+                    override fun execute(request: TransportRequest): TransportResponse {
+                        return if (request.method == HttpMethod.POST) {
+                            posts.incrementAndGet()
+                            if (failInitially) TransportResponse(500, emptyMap(), """{"message":"timeout"}""")
+                            else TransportResponse(500, emptyMap(), """{"message":"unexpected replay POST"}""")
+                        } else {
+                            statusCalls.incrementAndGet()
+                            TransportResponse(503, emptyMap(), """{"message":"unavailable"}""")
+                        }
+                    }
+                }, commandStore = store)
+
+                if (supplier) {
+                    seedSupplier(repo, Supplier(id = supplierA.value, nameAr = "مورد أ", nameEn = "Sup A", balanceOwedExact = BigDecimal("10.00")))
+                } else {
+                    seedCustomer(repo, Customer(id = customerA.value, nameAr = "زبون أ", nameEn = "Cust A", balanceExact = BigDecimal("10.00")))
+                }
+
+                val form = if (supplier) "supplier_payment" else "customer_payment"
+                val op = repo.getDraftOperationId(form)
+                val allocs = listOf(
+                    PaymentAllocationInput(
+                        if (supplier) "purchase" else "invoice",
+                        if (supplier) targetPurA.value else targetInvA.value,
+                        BigDecimal("0.23")
+                    )
+                )
+
+                suspend fun invokePayment(): Result<*> = if (supplier) {
+                    repo.recordSupplierPayment(
+                        supplierA.value, BigDecimal("1.23"), "Cached replay $idx", ownerSession, op, cashAccountA.value, "2026-11-28", allocs
+                    )
+                } else {
+                    repo.recordCustomerPayment(
+                        customerA.value, BigDecimal("1.23"), "Cached replay $idx", op, cashAccountA.value, "2026-11-28", allocs
+                    )
+                }
+
+                // Record real canonical command payload via repository admission (UNKNOWN_ACK), then simulate a pre-fix cached COMPLETED snapshot
+                assertTrue(invokePayment().isFailure)
+                assertTrue(store.markCompleted(companyA.value, op, malformed.toByteArray(StandardCharsets.UTF_8)))
+                failInitially = false
+                posts.set(0)
+                statusCalls.set(0)
+
+                val replayRes = invokePayment()
+                assertTrue("Cached COMPLETED replay with malformed exact field must fail ($form #$idx)", replayRes.isFailure)
+                assertTrue(
+                    "Failure must come from canonical payment field validation, got: ${replayRes.exceptionOrNull()?.message}",
+                    replayRes.exceptionOrNull()?.message?.contains("Invalid canonical payment field") == true
+                )
+                assertEquals("Cached replay validation failure must not issue POST", 0, posts.get())
+                assertEquals("Cached replay validation failure must not issue receipt status probe", 0, statusCalls.get())
+                if (supplier) {
+                    assertTrue(repo.getSupplierPayments().isEmpty())
+                    assertEquals(BigDecimal("10.00"), repo.getSuppliers().single().balanceOwedExact)
+                } else {
+                    assertTrue(repo.getCustomerTransactions().isEmpty())
+                    assertEquals(BigDecimal("10.00"), repo.getCustomers().single().balanceExact)
+                }
+            }
+
+            // Valid cached COMPLETED replay with exact fields continues to succeed with 0 network calls
+            val validPosts = AtomicInteger(0)
+            val validStatusCalls = AtomicInteger(0)
+            val validSnapshot = buildPaymentSnapshotWithExactRawTokens("01JCVPAYCACHEOK000000001", supplier = supplier)
+            val validStore = InMemoryMerchantCommandStore()
+            val validRepo = newRepo(object : ReadClientTransport {
+                override fun execute(request: TransportRequest): TransportResponse {
+                    return if (request.method == HttpMethod.POST) {
+                        validPosts.incrementAndGet()
+                        TransportResponse(201, mapOf("Content-Type" to "application/json"), validSnapshot)
+                    } else {
+                        validStatusCalls.incrementAndGet()
+                        TransportResponse(404, emptyMap(), """{"error":{"code":"NOT_FOUND","message":"Not found"}}""")
+                    }
+                }
+            }, commandStore = validStore)
+            val validForm = if (supplier) "supplier_payment" else "customer_payment"
+            val validOp = validRepo.getDraftOperationId(validForm)
+            val validAllocs = listOf(
+                PaymentAllocationInput(
+                    if (supplier) "purchase" else "invoice",
+                    if (supplier) targetPurA.value else targetInvA.value,
+                    BigDecimal("0.23")
+                )
+            )
+            suspend fun invokeValid(): Result<*> = if (supplier) {
+                validRepo.recordSupplierPayment(
+                    supplierA.value, BigDecimal("1.23"), "Valid cached replay", ownerSession, validOp, cashAccountA.value, "2026-11-28", validAllocs
+                )
+            } else {
+                validRepo.recordCustomerPayment(
+                    customerA.value, BigDecimal("1.23"), "Valid cached replay", validOp, cashAccountA.value, "2026-11-28", validAllocs
+                )
+            }
+            assertTrue(invokeValid().isSuccess)
+            assertEquals(1, validPosts.get())
+            assertTrue(invokeValid().isSuccess)
+            assertEquals("Valid cached COMPLETED replay must execute 0 extra POSTs", 1, validPosts.get())
+            assertEquals(0, validStatusCalls.get())
+        }
+    }
+
+    @Test
+    fun supplierPayment_omittedExactCompatFallback_acceptsDisplayFieldsBothDirectAndRecovery() = runBlocking {
+        val compatPayload = """{"id":"01JCVSUPCOMPAT001","supplier_id":"${supplierA.value}","amount":"1.23","allocated_amount":"0.23","unallocated_amount":"1.00","balance_owed":"8.77","is_advance":false,"allocations":[{"target_type":"purchase","target_id":"${targetPurA.value}","allocated_amount":"0.23"}]}"""
+        var directPosts = 0
+        val directRepo = newRepo(object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                return if (request.method == HttpMethod.POST) {
+                    directPosts++
+                    TransportResponse(201, mapOf("Content-Type" to "application/json"), compatPayload)
+                } else {
+                    TransportResponse(404, emptyMap(), """{"error":{"code":"NOT_FOUND","message":"Not found"}}""")
+                }
+            }
+        })
+        val allocs = listOf(PaymentAllocationInput("purchase", targetPurA.value, BigDecimal("0.23")))
+        val directPay = directRepo.recordSupplierPayment(
+            supplierA.value, BigDecimal("1.23"), "sup compat direct", ownerSession, directRepo.getDraftOperationId("supplier_payment"), cashAccountA.value, "2026-11-28", allocs
+        ).getOrThrow()
+        assertEquals(1, directPosts)
+        assertEquals(BigDecimal("1.23"), directPay.amountExact)
+        assertEquals(BigDecimal("0.23"), directPay.allocatedAmountExact)
+        assertEquals(BigDecimal("1.00"), directPay.unallocatedAmountExact)
+        assertEquals(BigDecimal("0.23"), directPay.allocations.single().allocatedAmountExact)
+
+        var recPosts = 0
+        var recStatusCalls = 0
+        val recRepo = newRepo(object : ReadClientTransport {
+            override fun execute(request: TransportRequest): TransportResponse {
+                return if (request.method == HttpMethod.POST) {
+                    recPosts++
+                    TransportResponse(500, emptyMap(), """{"message":"timeout"}""")
+                } else {
+                    recStatusCalls++
+                    if (recStatusCalls == 1) {
+                        TransportResponse(503, emptyMap(), """{"message":"unavailable"}""")
+                    } else {
+                        val key = request.queryParams["idempotency_key"].orEmpty()
+                        TransportResponse(200, mapOf("Content-Type" to "application/json"), """{"status":"FOUND","company_id":"${companyA.value}","idempotency_key":"$key","response_snapshot":$compatPayload}""")
+                    }
+                }
+            }
+        })
+        val op = recRepo.getDraftOperationId("supplier_payment")
+        assertTrue(recRepo.recordSupplierPayment(supplierA.value, BigDecimal("1.23"), "sup compat rec", ownerSession, op, cashAccountA.value, "2026-11-28", allocs).isFailure)
+        val recPay = recRepo.recordSupplierPayment(supplierA.value, BigDecimal("1.23"), "sup compat rec", ownerSession, op, cashAccountA.value, "2026-11-28", allocs).getOrThrow()
+        assertEquals(1, recPosts)
+        assertEquals(2, recStatusCalls)
+        assertEquals(BigDecimal("1.23"), recPay.amountExact)
+        assertEquals(BigDecimal("0.23"), recPay.allocatedAmountExact)
+        assertEquals(BigDecimal("1.00"), recPay.unallocatedAmountExact)
+        assertEquals(BigDecimal("0.23"), recPay.allocations.single().allocatedAmountExact)
+    }
 
     @Test
     fun customerAndSupplierPayment_preferExactFieldsUnscaled_overDisplayFields_bothDirectAndDurableReplay_withCompatFallback() = runBlocking {

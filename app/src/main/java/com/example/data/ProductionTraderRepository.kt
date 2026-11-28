@@ -2612,7 +2612,10 @@ class ProductionTraderRepository(
                 if (respCustId != null && respCustId != customerId) {
                     Result.failure(IllegalStateException("Server returned payment for customer $respCustId, expected $customerId"))
                 } else {
-                    Result.success(snap)
+                    runCatching {
+                        parseCanonicalPaymentFields(snap, amountExact, totalAllocated, allocations.isEmpty())
+                        snap
+                    }
                 }
             }
         }
@@ -3865,7 +3868,10 @@ class ProductionTraderRepository(
                 if (respSupId != null && respSupId != supplierId) {
                     Result.failure(IllegalStateException("Server returned payment for supplier $respSupId, expected $supplierId"))
                 } else {
-                    Result.success(snap)
+                    runCatching {
+                        parseCanonicalPaymentFields(snap, amountExact, totalAllocated, allocations.isEmpty())
+                        snap
+                    }
                 }
             }
         }
@@ -3985,6 +3991,14 @@ class ProductionTraderRepository(
         fallbackAllocated: BigDecimal,
         defaultAdvance: Boolean
     ): ParsedCanonicalPaymentFields {
+        fun validateExactFields(value: StrictJsonObject, keys: List<String>) {
+            for (key in keys) {
+                if (value.properties.containsKey(key) && value.properties[key].toNullableBigDecimal() == null) {
+                    throw IllegalStateException("Invalid canonical payment field: $key")
+                }
+            }
+        }
+        validateExactFields(snapshot, listOf("amount_exact", "allocated_amount_exact", "unallocated_amount_exact"))
         val officialAmount = snapshot.properties["amount_exact"].toNullableBigDecimal()
             ?: snapshot.properties["amount"].toNullableBigDecimal()
             ?: fallbackAmount
@@ -4001,6 +4015,7 @@ class ProductionTraderRepository(
         if (respAllocs is StrictJsonArray) {
             for (el in respAllocs.elements) {
                 if (el is StrictJsonObject) {
+                    validateExactFields(el, listOf("allocated_amount_exact", "amount_exact"))
                     val tType = el.properties["target_type"]?.asString() ?: ""
                     val tId = el.properties["target_id"]?.asString() ?: ""
                     val allocAmt = el.properties["allocated_amount_exact"].toNullableBigDecimal()
